@@ -229,22 +229,48 @@ function renderDependencies() {
   const root = $('dep-list');
   root.innerHTML = '';
   const report = state.dependency_report || {};
-  for (const [key, item] of Object.entries(report.manifest || {})) {
+  const entries = Object.entries(report.manifest || {});
+  // 「本管理器」置顶（后端已放第一个，这里再兜一层，避免别处合并时被挤下去）
+  entries.sort((a, b) => (b[1].is_app ? 1 : 0) - (a[1].is_app ? 1 : 0));
+  for (const [key, item] of entries) {
     const node = document.createElement('div');
-    node.className = 'dep-item';
+    node.className = 'dep-item' + (item.is_app ? ' dep-app' : '');
     const status = item.status || (item.present ? '已安装' : '缺失');
     const statusClass = item.present ? 'ok' : ((item.needed || item.required) ? 'missing' : 'skip');
+    const updateBtn = (item.is_app && item.update_available)
+      ? `<button class="primary" data-app-update>更新到 v${item.latest || ''}</button>` : '';
     node.innerHTML = `
       <div>
         <div>${item.display || key}</div>
-        <div class="meta hint">${item.source || ''} · ${item.install_dir || ''}</div>
+        <div class="meta hint">${(item.source || '')}${item.install_dir ? ' · ' + item.install_dir : ''}</div>
       </div>
-      <div class="${statusClass}">${status}</div>
+      <div class="dep-right">
+        <div class="${statusClass}">${status}</div>
+        ${updateBtn}
+      </div>
     `;
+    const button = node.querySelector('[data-app-update]');
+    if (button) button.onclick = (event) => { event.preventDefault(); startAppUpdateFromDep(); };
     root.appendChild(node);
   }
-  if (!Object.keys(report.manifest || {}).length) root.innerHTML = '<div class="hint">未加载依赖清单</div>';
+  if (!entries.length) root.innerHTML = '<div class="hint">未加载依赖清单</div>';
   $('dep-status').textContent = `已识别依赖：${(report.required || []).join(', ') || '无'}`;
+}
+
+// 用户要求：点自更新之后切到依赖页，并在那条依赖上显示进度条
+async function startAppUpdateFromDep() {
+  showTab('dependencies');
+  $('dep-progress').value = 0;
+  $('dep-progress-text').textContent = '正在更新管理器…';
+  $('dep-results').textContent = '';
+  setStatus('正在更新程序…');
+  try {
+    await call('start_app_update');
+  } catch (err) {
+    setStatus(`更新请求失败: ${err.message || err}`);
+    return;
+  }
+  await pollDependencyProgress($('dep-results'));
 }
 
 async function scan() {
@@ -869,6 +895,34 @@ function bind() {
   }
 
   // 右上角：版本号 + 更新检测（对比 GitHub release 的 tag）
+  // 项目链接（仓库 / issue / 发布页）只在这里解析一次，界面各处共用
+  const appLinks = {};
+
+  function fillRepoLinks(repo) {
+    if (!repo) return;
+    const base = String(repo).replace(/\/+$/, '');
+    appLinks.repo = base;
+    appLinks.issues = `${base}/issues/new/choose`;
+    appLinks.releases = `${base}/releases`;
+    const pairs = [
+      ['about-repo-link', appLinks.repo],
+      ['about-issues-link', appLinks.issues],
+      ['about-releases-link', appLinks.releases],
+      ['crash-issue-link', appLinks.issues],
+    ];
+    for (const [id, url] of pairs) {
+      const el = $(id);
+      if (el) { el.href = url; el.textContent = url; }
+    }
+  }
+
+  document.querySelectorAll('[data-open-url]').forEach((el) => {
+    el.onclick = () => {
+      const url = appLinks[el.dataset.openUrl];
+      if (url) call('open_external', url).catch(() => {});
+    };
+  });
+
   async function initAppUpdate() {
     const btn = $('app-update-btn');
     if (!btn) return;
@@ -876,6 +930,7 @@ function bind() {
       const info = await call('get_app_info');
       btn.textContent = `v${info.version}`;
       btn.dataset.version = info.version;
+      fillRepoLinks(info.repo);
     } catch (err) {
       btn.textContent = 'v?';
     }
@@ -915,28 +970,23 @@ function bind() {
       if (!checkOnly) alert(`已是最新版本 v${r.current}`);
       return r;
     }
-    if (!confirm(`发现新版本 v${r.latest}（当前 v${r.current}）\n\n现在下载并自动更新吗？\n· 更新时程序会自动重启\n· config.json 与 Mod 库不受影响\n· 失败会自动回滚旧版本`)) return r;
+    if (!confirm(`发现新版本 v${r.latest}（当前 v${r.current}）\n\n现在下载并自动更新吗？\n· 更新时程序会自动重启\n· config.json 与 Mod 库不受影响\n· 失败会自动回滚旧版本\n\n进度会显示在「依赖」页`)) return r;
 
-    setStatus('正在下载更新包…');
-    const dl = await call('download_app_update');
-    if (!dl.ok) {
-      alert(`下载失败：${dl.message || '未知错误'}`);
-      setStatus('下载失败');
-      return r;
-    }
     if (!r.frozen) {
+      // 源码运行模式没法替换自己：只下载更新包，然后提示手动 git pull
+      setStatus('正在下载更新包…');
+      const dl = await call('download_app_update');
+      if (!dl.ok) {
+        alert(`下载失败：${dl.message || '未知错误'}`);
+        setStatus('下载失败');
+        return r;
+      }
       alert(`更新包已下载到：\n${dl.path}\n\n源码运行模式不会自动替换，请手动更新（git pull）。`);
       setStatus('已下载（源码模式）');
       return r;
     }
-    setStatus('正在替换并重启…');
-    const ap = await call('apply_app_update');
-    if (!ap.ok) {
-      alert(`更新失败：${ap.message || '未知错误'}`);
-      setStatus('更新失败');
-      return r;
-    }
-    alert(ap.message || '正在更新，程序会自动重启为新版。');
+    // 交给依赖页那条链路：切页 + 进度条 + 自动重启
+    await startAppUpdateFromDep();
     return r;
   }
 

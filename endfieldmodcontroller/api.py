@@ -194,7 +194,47 @@ class EndfieldModControllerApi:
             }
         except Exception:  # noqa: BLE001
             pass
+        # 「本管理器」也作为一项依赖并列显示，而且**排在最上面**（用户要求）
+        try:
+            manifest = {"endfieldmodcontroller": self._app_dependency_entry()}
+            manifest.update(report.get("manifest") or {})
+            report["manifest"] = manifest
+        except Exception:  # noqa: BLE001
+            pass
         return report
+
+    def _app_dependency_entry(self) -> dict[str, Any]:
+        """把 EndfieldModController 自己也当成一项可更新的依赖（置顶显示）。"""
+        from .version import REPO_URL, __version__
+
+        exe = selfupdate.executable_path()
+        entry: dict[str, Any] = {
+            "display": "EndfieldModController（本管理器）",
+            "source": REPO_URL,
+            "install_dir": str(exe or "源码运行模式"),
+            "present": True,
+            "required": True,
+            "needed": False,
+            "enabled": True,
+            "version": __version__,
+            "status": f"v{__version__}",
+            "is_app": True,
+        }
+        try:
+            info = selfupdate.check_update(self.config, use_cache=True)
+            latest = str(info.get("latest") or "")
+            entry["latest"] = latest
+            entry["update_available"] = bool(info.get("update_available"))
+            if info.get("error"):
+                entry["status"] = f"v{__version__}（检查失败：{info['error'][:40]}）"
+            elif info.get("update_available"):
+                entry["status"] = f"v{__version__} → v{latest} 可更新"
+                entry["needed"] = True
+            elif latest:
+                entry["status"] = f"v{__version__} 已是最新"
+        except Exception as exc:  # noqa: BLE001
+            entry["status"] = f"v{__version__}（检查失败：{exc}）"
+        return entry
 
     def _json(self, data: Any) -> Any:
         return data
@@ -989,6 +1029,19 @@ class EndfieldModControllerApi:
     # ------------------------------------------------------------------
     # 下载加速 / 线路（按需临时启用，用完即放；见 fastnet）
     # ------------------------------------------------------------------
+    def open_external(self, url: str) -> dict[str, Any]:
+        """用系统默认浏览器打开链接（只允许 http/https，避免被塞本地路径）。"""
+        import webbrowser
+
+        if not isinstance(url, str) or not url.lower().startswith(("http://", "https://")):
+            return {"ok": False, "message": "只支持 http/https 链接"}
+        try:
+            webbrowser.open(url)
+            launcher._append_log(self.config, f"打开链接: {url}")
+            return {"ok": True, "url": url}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "message": str(exc)}
+
     def get_download_settings(self) -> dict[str, Any]:
         from . import fastnet
 
@@ -1047,6 +1100,77 @@ class EndfieldModControllerApi:
             # 留一点时间让前端把提示画出来，然后退出，交给 VBS 换文件并重启
             threading.Timer(1.8, lambda: os._exit(0)).start()
         return result
+
+    def start_app_update(self) -> dict[str, Any]:
+        """在依赖页里跑自更新：复用依赖任务的进度条与轮询接口（用户要求）。
+
+        前端调它之后切到依赖页并轮询 get_dependency_progress，就能看到进度条与日志。
+        """
+        if self._dep_task and self._dep_task.get("running"):
+            return self.get_dependency_progress()
+        self._dep_task = {
+            "running": True,
+            "current": 0,
+            "total": 1,
+            "percent": 0.0,
+            "message": "正在检查程序更新…",
+            "log": [],
+            "results": [],
+            "app_update": True,
+        }
+        task = self._dep_task
+
+        def log(message: str) -> None:
+            task["log"].append(message)
+            launcher._append_log(self.config, message)
+
+        def finish(status: str, message: str) -> None:
+            task["results"] = [{"key": "endfieldmodcontroller", "status": status, "message": message}]
+            task["message"] = message
+            task["percent"] = 100.0
+
+        def worker() -> None:
+            try:
+                info = selfupdate.check_update(self.config, use_cache=False)
+                if info.get("error"):
+                    finish("失败", f"检查更新失败：{info['error']}")
+                    return
+                current, latest = info.get("current"), info.get("latest")
+                if not info.get("update_available"):
+                    finish("已是最新", f"v{current} 已是最新")
+                    return
+                task["message"] = f"正在下载 v{latest}…"
+
+                def on_progress(done: int, total: int) -> None:
+                    if not total:
+                        return
+                    task["percent"] = min(99.0, done * 100.0 / total)
+                    task["message"] = (f"下载 v{latest}：{done // 1048576}/"
+                                       f"{max(total // 1048576, 1)} MB")
+
+                result = selfupdate.download_update(
+                    self.config, url=info.get("download_url", ""),
+                    digest=info.get("digest", ""), log=log, progress=on_progress,
+                )
+                if not result.get("ok"):
+                    finish("失败", f"下载失败：{result.get('message')}")
+                    return
+                task["message"] = "下载完成，正在替换并重启…"
+                applied = selfupdate.apply_update(
+                    self.config, archive=result.get("path", ""), log=log)
+                if applied.get("ok"):
+                    finish("已更新", applied.get("message") or "正在重启为新版")
+                    if applied.get("restart"):
+                        threading.Timer(1.8, lambda: os._exit(0)).start()
+                else:
+                    finish("失败", applied.get("message") or "替换失败")
+            except Exception as exc:  # noqa: BLE001
+                finish("失败", f"{exc}")
+            finally:
+                task["running"] = False
+
+        threading.Thread(target=worker, name="mc-app-update", daemon=True).start()
+        return self.get_dependency_progress()
 
     def check_component_updates(self) -> dict[str, Any]:
         from . import updates

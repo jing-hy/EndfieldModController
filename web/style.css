@@ -317,6 +317,11 @@ pre.code-block { max-height: 330px; }
 .theme-toggle { min-width: 72px; border-radius: 999px; }
 
 /* 右上角：版本号 + 更新检测（检出有新版时高亮闪烁） */
+/* 依赖页：本管理器那一项要显眼并置顶 */
+.dep-app { border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.dep-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.dep-right button { padding: 4px 10px; font-size: 12px; }
+
 .update-badge {
   min-width: 76px;
   border-radius: 999px;

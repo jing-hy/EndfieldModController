@@ -260,13 +260,20 @@
         <li>路线参考 B 站教程 <code>BV1XMh76UEA5</code>《以防你不知道，你也可以终末地+XXMI+DLSS5+第一人称视角》。</li>
         <li>其余第三方组件（XXMI / EFMI / ReShade / RenoDX / DLSS5-Feeder / iMMERSE / ShakingBreastManager）见 README 第九节，均为各自作者所有。</li>
       </ul>
+      <h3>反馈与源码</h3>
+      <ul>
+        <li>项目地址：<a id="about-repo-link" href="#" target="_blank" rel="noopener">加载中…</a><button data-open-url="repo">打开</button></li>
+        <li><b>问题反馈</b>（报错、游戏崩溃、Mod 不生效都发这里，崩溃时请附上程序生成的 zip）：<a id="about-issues-link" href="#" target="_blank" rel="noopener">加载中…</a><button data-open-url="issues">打开</button></li>
+        <li>版本发布（下载新版 exe / 便携包）：<a id="about-releases-link" href="#" target="_blank" rel="noopener">加载中…</a><button data-open-url="releases">打开</button></li>
+      </ul>
     </section>
   </main>
 
   <div id="crash-modal" class="modal hidden">
     <div class="modal-content" style="width:min(720px,92vw)">
       <div class="modal-header"><h3>检测到终末地异常退出</h3></div>
-      <div class="hint">已自动把「控制器日志 + 终末地自己的日志 + 崩溃转储」收集并打包。把这个 zip 发给作者（或上传到 GitHub issue）能最快定位问题。</div>
+      <div class="hint">已自动把「控制器日志 + 终末地自己的日志 + 崩溃转储」收集并打包。把这个 zip 发到本项目的 issue 即可，里面已经包含定位所需的一切。</div>
+      <div class="path-row"><span>反馈地址：</span><a id="crash-issue-link" href="#" target="_blank" rel="noopener">加载中…</a><button id="crash-open-issue">打开 issue 页</button></div>
       <div class="path-row"><span>日志文件夹：</span><code id="crash-dir"></code><button id="crash-open-dir">打开</button></div>
       <div class="path-row"><span>崩溃包 zip：</span><code id="crash-zip"></code><button id="crash-open-zip">打开</button><button id="crash-copy-zip">复制路径</button></div>
       <pre id="crash-summary" class="code-block" style="max-height:200px"></pre>

@@ -112,6 +112,12 @@ def check_update(
         cached = _read_cache(config)
         if cached and (time.time() - float(cached.get("checked_at") or 0)) < CHECK_CACHE_SECONDS:
             cached["cached"] = True
+            # 缓存里的 update_available 是**按当时的版本**算出来的；本机版本可能已经变了
+            # （典型：刚自更新完），所以一律用当前版本重新判定，否则会出现
+            # "v0.2.0 → v0.2.0 可更新"这种自相矛盾的状态。
+            latest = str(cached.get("latest") or "")
+            cached["current"] = current
+            cached["update_available"] = bool(latest) and _version_tuple(latest) > _version_tuple(current)
             return cached
 
     result: dict[str, Any] = {
@@ -173,8 +179,12 @@ def download_update(
     digest: str = "",
     log: Callable[[str], None] | None = None,
     timeout: int = 900,
+    progress: Callable[[int, int], None] | None = None,
 ) -> dict[str, Any]:
-    """下载新版本到 runtime\\_update\\，校验后返回路径。"""
+    """下载新版本到 runtime\\_update\\，校验后返回路径。
+
+    progress(done, total) 会一路透传给 fastnet，界面据此画进度条。
+    """
     if not url:
         report = check_update(config, log=log, use_cache=False)
         url = report.get("download_url", "")
@@ -193,6 +203,7 @@ def download_update(
     report = fastnet.download(
         url, target, log=log, timeout=min(timeout, 60),
         expected_sha256=digest.replace("sha256:", "").strip(),
+        progress=progress,
     )
     if not report.ok:
         return {"ok": False, "message": f"下载失败：{report.message}"}
