@@ -166,7 +166,9 @@ def check_updates(config: AppConfig, log: Callable[[str], None] | None = None) -
     ):
         try:
             if key == "dlss5_feed":
-                release = dependencies._fetch_json(f"https://api.github.com/repos/{repo}/releases/latest")
+                from . import github
+
+                release = github.releases_latest(repo)
                 tag = str(release.get("tag_name") or "")
                 asset = _pick_asset(release, pattern, ".zip")
                 report[key] = {
@@ -178,8 +180,9 @@ def check_updates(config: AppConfig, log: Callable[[str], None] | None = None) -
                     "download_url": str((asset or {}).get("browser_download_url") or ""),
                 }
             else:
-                release = dependencies._fetch_json(f"https://api.github.com/repos/{repo}/commits/{IMMERSE_BRANCH}")
-                sha = str((release.get("sha") or ""))[:12]
+                from . import github
+
+                sha = github.latest_commit(repo, IMMERSE_BRANCH)[:12]
                 current = str((read_marker(config).get(key) or {}).get("version") or "")
                 report[key] = {
                     "current": current,
@@ -285,8 +288,10 @@ def install_dlss5_feed(
     log: Callable[[str], None] | None = None,
     force: bool = False,
 ) -> dict[str, Any]:
+    from . import github
+
     try:
-        release = dependencies._fetch_json(f"https://api.github.com/repos/{FEEDER_REPO}/releases/latest")
+        release = github.releases_latest(FEEDER_REPO)
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "changed": False, "message": f"查询 DLSS5-Feeder release 失败: {exc}"}
     tag = str(release.get("tag_name") or "")
@@ -329,11 +334,14 @@ def install_immersse(
     log: Callable[[str], None] | None = None,
     force: bool = False,
 ) -> dict[str, Any]:
+    from . import github
+
     try:
-        info = dependencies._fetch_json(f"https://api.github.com/repos/{IMMERSE_REPO}/commits/{IMMERSE_BRANCH}")
-        revision = str(info.get("sha") or "")[:12]
+        revision = github.latest_commit(IMMERSE_REPO, IMMERSE_BRANCH)[:12]
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "changed": False, "message": f"查询 iMMERSE 仓库失败: {exc}"}
+    if not revision:
+        return {"ok": False, "changed": False, "message": "查不到 iMMERSE 的最新提交"}
 
     component = _BY_KEY["immersse"]
     state = _component_state(config, component)

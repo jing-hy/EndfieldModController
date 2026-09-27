@@ -190,6 +190,37 @@ def probe(url: str, *, timeout: int = 30) -> tuple[int, bool, str]:
         return 0, False, url
 
 
+def fetch(
+    url: str,
+    *,
+    timeout: int = 25,
+    headers: dict[str, str] | None = None,
+    line_mode: str = "",
+) -> tuple[str, bytes]:
+    """按线路取一小段内容（HTML/JSON 这类小请求），返回 ``(最终 URL, 内容)``。
+
+    直连不通时会自动换镜像线路 —— 这是"**不消耗 GitHub API 额度**地读 release 页面"
+    的关键：普通用户没有 token，API 只有 60 次/小时，靠网页路线才稳。
+    """
+    mode = (line_mode or get_line_mode() or "auto").lower()
+    if mode not in LINE_MODES:
+        mode = "auto"
+    lines = resolve_lines(url, mode)
+    last_error: Exception | None = None
+    for line in lines:
+        try:
+            with _open(line.apply(url), headers=headers, timeout=timeout) as response:
+                body = response.read()
+                final = response.geturl()
+            _remember_line(line.name, True, 0.0)   # 成功只清失败标记，不覆盖速度成绩
+            return final, body
+        except (urllib.error.URLError, OSError, TimeoutError) as exc:
+            last_error = exc
+            _remember_line(line.name, False, 0.0)
+            continue
+    raise OSError(f"所有线路都取不到 {url}：{last_error}")
+
+
 def _download_sequential(
     url: str,
     dest: Path,
@@ -305,7 +336,8 @@ def _remember_line(name: str, ok: bool, mbps: float) -> None:
     """记一条线路的成绩（几 KB 的 JSON，不常驻、可随时删）。"""
     cache = _load_lines_cache()
     entry = cache.get(name) if isinstance(cache.get(name), dict) else {}
-    entry["mbps"] = round(float(mbps), 3)
+    if mbps > 0:
+        entry["mbps"] = round(float(mbps), 3)
     entry["at"] = int(time.time())
     if ok:
         entry["ok"] = True

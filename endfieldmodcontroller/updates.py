@@ -83,9 +83,10 @@ def file_version(path: Path) -> str:
 
 
 def _fetch_json(url: str, timeout: int = 25) -> Any:
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/vnd.github+json"})
-    with urllib.request.urlopen(req, timeout=timeout) as response:
-        return json.loads(response.read().decode("utf-8", errors="replace"))
+    """GitHub 查询统一走 github 模块（token + 缓存 + 把 403 翻成人话）。"""
+    from . import github
+
+    return github.api_get(url, timeout=timeout)
 
 
 def download_file(
@@ -243,7 +244,14 @@ def check_updates(config: AppConfig, log: Callable[[str], None] | None = None) -
 
     # 乳摇插件 GitHub release
     try:
-        releases = _fetch_json(f"{GITHUB_API}/repos/{SBM_REPO}/releases?per_page=5")
+        from . import github
+
+        # 优先走网页路线（不吃 API 额度、能借镜像线路）——没有 token 的用户也能用；
+        # 万一网页不通再退回老的多版本列表接口。
+        try:
+            releases = [github.releases_latest(SBM_REPO)]
+        except Exception:  # noqa: BLE001
+            releases = _fetch_json(f"{GITHUB_API}/repos/{SBM_REPO}/releases?per_page=5") or []
         local = _sbm_local_version(config)
         best: dict[str, Any] | None = None
         for release in releases or []:

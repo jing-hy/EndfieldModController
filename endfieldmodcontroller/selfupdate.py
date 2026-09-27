@@ -63,12 +63,10 @@ def _version_tuple(value: str) -> tuple[int, ...]:
 
 
 def _fetch_json(url: str, timeout: int = 25) -> dict[str, Any]:
-    request = urllib.request.Request(url, headers={
-        "User-Agent": USER_AGENT,
-        "Accept": "application/vnd.github+json",
-    })
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        return json.loads(response.read().decode("utf-8", errors="replace"))
+    """GitHub 查询统一走 github 模块（token + 缓存 + 把 403 翻成人话）。"""
+    from . import github
+
+    return github.api_get(url, timeout=timeout)
 
 
 def _cache_path(config: AppConfig) -> Path:
@@ -125,11 +123,13 @@ def check_update(
         "frozen": is_frozen(),
         "exe": str(executable_path() or ""),
     }
+    from . import github
+
     try:
         release = _fetch_json(LATEST_API, timeout=timeout)
-    except urllib.error.HTTPError as exc:
-        result["error"] = ("还没有发布 Release" if exc.code == 404
-                           else f"查询失败：HTTP {exc.code}")
+    except github.GitHubError as exc:
+        # 限流 / 404 都已经翻译成人话，原样带给界面
+        result["error"] = str(exc)
         result["checked_at"] = int(time.time())
         _write_cache(config, result)
         return result

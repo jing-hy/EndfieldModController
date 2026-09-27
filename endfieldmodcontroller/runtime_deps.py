@@ -70,13 +70,16 @@ def _write_marker(root: Path, data: dict) -> None:
 
 
 def _latest_release_asset(repo: str, pattern: str) -> tuple[str, str, str]:
-    release = dependencies._fetch_json(f"https://api.github.com/repos/{repo}/releases/latest")
+    from . import github
+
+    # 先走网页路线（不消耗 API 额度、能借镜像），普通用户没有 token 也能用
+    release = github.releases_latest(repo)
     assets = release.get("assets") or []
     lowered = pattern.lower()
     matches = [asset for asset in assets if lowered in str(asset.get("name", "")).lower()]
     if not matches:
         raise RuntimeError(f"{repo}: no release asset matched {pattern!r}")
-    asset = sorted(matches, key=lambda item: int(item.get("size") or 0), reverse=True)[0]
+    asset = max(matches, key=github.asset_sort_key)
     url = str(asset.get("browser_download_url") or "")
     if not url:
         raise RuntimeError(f"{repo}: release asset has no download URL")
@@ -84,7 +87,9 @@ def _latest_release_asset(repo: str, pattern: str) -> tuple[str, str, str]:
 
 
 def _release_info(repo: str) -> dict:
-    return dependencies._fetch_json(f"https://api.github.com/repos/{repo}/releases/latest")
+    from . import github
+
+    return github.releases_latest(repo)
 
 
 def _asset_url(release: dict, name: str) -> str:

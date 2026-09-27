@@ -152,10 +152,29 @@ def _http_get(
 
 
 def _fetch_json(url: str) -> dict[str, Any]:
-    raw = _http_get(url)
-    if not isinstance(raw, bytes):
-        raise RuntimeError("unexpected response type")
-    return json.loads(raw.decode("utf-8", errors="replace"))
+    """所有 GitHub（以及 GameBanana）的 JSON 查询都走这里。
+
+    走 :mod:`github` 的好处：带上 `GH_TOKEN`/`GITHUB_TOKEN`（额度 60 → 5000 次/小时）、
+    30 分钟磁盘缓存（同一地址不重复消耗额度）、以及把 403 限流翻成人话
+    （否则用户只看到一个光秃秃的 403，不知道要等多久）。
+    """
+    from . import github
+
+    return github.api_get(url)
+
+
+def _download(url: str, dest: Path, chunk_callback: Callable[[int, int], None] | None = None) -> Path:
+    """下载依赖包：走 fastnet（慢/抖时临时并发，直连不通时临时换镜像线路）。"""
+    from . import fastnet
+
+    def on_progress(done: int, total: int) -> None:
+        if chunk_callback:
+            chunk_callback(done, total)
+
+    report = fastnet.download(url, dest, progress=on_progress, timeout=60)
+    if not report.ok:
+        raise RuntimeError(report.message)
+    return dest
 
 
 def _latest_gamebanana_file(profile: dict[str, Any], name_contains: str) -> dict[str, Any] | None:
@@ -187,22 +206,24 @@ def _download_for_spec(
             raise RuntimeError("GameBanana file has no download URL")
         file_name = str(file_info.get("_sFile") or "dependency.bin")
         version = str(file_info.get("_tsDateAdded") or "")
-        return _http_get(url, work_dir / file_name, chunk_callback=chunk_callback), version  # type: ignore[return-value]
+        return _download(url, work_dir / file_name, chunk_callback), version  # type: ignore[return-value]
 
     if spec.source == "github_release" and spec.repo:
-        release = _fetch_json(f"https://api.github.com/repos/{spec.repo}/releases/latest")
+        from . import github
+
+        release = github.releases_latest(spec.repo)
         assets = release.get("assets") or []
         pattern = spec.asset_pattern.lower()
         candidates = [a for a in assets if pattern in str(a.get("name", "")).lower()] if pattern else assets
         if not candidates:
             raise RuntimeError(f"no GitHub release asset matched {spec.asset_pattern!r}")
-        asset = sorted(candidates, key=lambda a: int(a.get("size") or 0), reverse=True)[0]
+        asset = max(candidates, key=github.asset_sort_key)
         url = str(asset.get("browser_download_url") or "")
-        return _http_get(url, work_dir / str(asset.get("name") or "dependency.bin"), chunk_callback=chunk_callback), str(release.get("tag_name") or "")  # type: ignore[return-value]
+        return _download(url, work_dir / str(asset.get("name") or "dependency.bin"), chunk_callback), str(release.get("tag_name") or "")  # type: ignore[return-value]
 
     if spec.source == "url" and spec.url:
         target = work_dir / Path(spec.url).name
-        downloaded = _http_get(spec.url, target, chunk_callback=chunk_callback)
+        downloaded = _download(spec.url, target, chunk_callback)
         assert isinstance(downloaded, Path)
         return downloaded, spec.version or _sha256_file(downloaded)  # type: ignore[return-value]
 

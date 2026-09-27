@@ -178,7 +178,8 @@ class EndfieldModControllerApi:
             local = updates_mod._sbm_local_version(self.config)
             report["manifest"]["secondary_motion"] = {
                 "display": "ShakingBreastManager（次级运动插件）",
-                "status": (f"v{local} 已安装" if state["manager_exists"] else "未找到工具目录"),
+                "status": (f"v{local} 已安装" if state["manager_exists"]
+                           else "未安装（点上方「自动安装/更新」会从官方仓库拉取并装好）"),
                 "present": bool(state["manager_exists"]),
                 "required": False,
                 "source": "GitHub Sp1cHless/Arknights-Endfield-Plugin-Secondary-bodyphysics",
@@ -530,21 +531,31 @@ class EndfieldModControllerApi:
 
                     ureport = updates_mod.check_updates(self.config, log=progress and None)
                     sm = ureport.get("secondary_motion") or {}
-                    current = sm.get("current") or "?"
-                    if sm.get("update_available") and sm.get("download_url"):
+                    current = sm.get("current") or ""
+                    latest = sm.get("latest") or ""
+                    download_url = sm.get("download_url") or ""
+                    # 「没装就装上」+「有新版就更新」。之前只判断 update_available，
+                    # 于是本机**根本没装**时反被判成"已是最新"，用户看到的却是"未找到工具目录"。
+                    need_install = not current
+                    need_update = bool(current and latest and sm.get("update_available"))
+                    if (need_install or need_update) and download_url:
                         if dry_run:
-                            results.append(SimpleNamespace(key="secondary_motion", status="可更新",
-                                                           message=f"{current} → {sm.get('latest')}"))
-                        else:
-                            outcome = updates_mod.update_secondary_motion(self.config, url=sm["download_url"])
                             results.append(SimpleNamespace(
                                 key="secondary_motion",
-                                status="已更新" if outcome.get("ok") else "失败",
+                                status="待安装" if need_install else "可更新",
+                                message=(f"未安装 → {latest}" if need_install else f"{current} → {latest}"),
+                            ))
+                        else:
+                            outcome = updates_mod.update_secondary_motion(self.config, url=download_url)
+                            results.append(SimpleNamespace(
+                                key="secondary_motion",
+                                status=(("已安装" if need_install else "已更新")
+                                        if outcome.get("ok") else "失败"),
                                 message=outcome.get("message") or outcome.get("note", ""),
                             ))
                     else:
                         results.append(SimpleNamespace(key="secondary_motion", status="已是最新",
-                                                       message=f"v{current}"))
+                                                       message=f"v{current or '?'}"))
                 except Exception as exc:  # noqa: BLE001
                     from types import SimpleNamespace as _NS
 

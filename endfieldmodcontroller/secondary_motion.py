@@ -270,7 +270,23 @@ def import_pack(config: AppConfig, archive: Path, log: Callable[[str], None] | N
         return {"ok": False, "message": f"压缩包不存在: {archive}"}
     tool = _tool_dir(config)
     if tool is None:
-        return {"ok": False, "message": "请先在设置页配置 SecondaryMotion 工具目录"}
+        # 「没装过」也必须能装上：用默认位置 runtime\secondary_motion\SecondaryMotion 就地建出来。
+        # （原来这里直接报「请先在设置页配置工具目录」——于是从零安装永远走不通，
+        #   用户看到的正是"只显示未找到工具目录"。）
+        root = config.secondary_motion_root or (Path(config.runtime_path) / "secondary_motion")
+        tool = Path(root) / "SecondaryMotion"
+        try:
+            tool.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            return {"ok": False, "message": f"无法创建工具目录 {tool}: {exc}"}
+        # 记进配置，下次直接能找到
+        try:
+            if not config.secondary_motion_dir:
+                config.secondary_motion_dir = str(tool.parent)
+                config.save()
+        except OSError:
+            pass
+        _log(log, f"未装过，将安装到 {tool}")
 
     keep = ("logs", "presets", "data", "runtime")
     keep_files = ("settings.json", "default_lang.txt")
@@ -295,7 +311,8 @@ def import_pack(config: AppConfig, archive: Path, log: Callable[[str], None] | N
             if not (root / "SecondaryMotion.Manager.exe").is_file():
                 return {"ok": False, "message": "压缩包里没找到 SecondaryMotion.Manager.exe"}
 
-            shutil.copytree(tool, backup)  # 先整体备份旧版
+            if any(tool.iterdir()):
+                shutil.copytree(tool, backup)  # 先整体备份旧版（首次安装是空目录，不用备）
             for child in list(tool.iterdir()):
                 if child.name in keep or child.name in keep_files:
                     continue
