@@ -225,6 +225,13 @@ async function loadCovers() {
   }
 }
 
+// 这些行属于"自动换线路的中间过程"，不是失败 —— 不要当错误显示给用户
+function isNoisyLine(line) {
+  return /^尝试线路：/.test(line)
+    || /^线路 .*? 失败：/.test(line)
+    || /^直连不通，/.test(line);
+}
+
 function renderDependencies() {
   const root = $('dep-list');
   root.innerHTML = '';
@@ -488,9 +495,12 @@ async function pollDependencyProgress(statusEl) {
     $('dep-progress').value = Math.max(0, Math.min(100, percent));
     $('dep-progress-text').textContent = `${current}/${total} ${progress.message || ''}`;
     if (!isDepPanel) {
-      // 在别处触发时（设置页的一键安装/更新），把实时进度写到那块面板里
+      // 在别处触发时（设置页的一键安装/更新），把实时进度写到那块面板里。
+      // 「尝试线路：X」「线路 X 失败：…」这些是**自动换线路的中间过程**，不是下载失败 ——
+      // 直接铺在界面上会让人以为出错了（用户就因此反馈过"怎么下载又失败了"），所以滤掉。
+      const innerLogs = (progress.log || []).filter(line => !isNoisyLine(line));
       out.textContent = `${percent.toFixed(0)}%  ${current}/${total}\n${progress.message || ''}`
-        + ((progress.log || []).length ? '\n\n' + progress.log.slice(-12).join('\n') : '');
+        + (innerLogs.length ? '\n\n' + innerLogs.slice(-12).join('\n') : '');
     }
     if (!progress.running) {
       out.textContent = JSON.stringify(progress.results || [], null, 2);

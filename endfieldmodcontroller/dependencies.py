@@ -130,6 +130,32 @@ def _http_get(
     chunk_callback: Callable[[int, int], None] | None = None,
 ) -> bytes | Path:
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    # **一律走 fastnet**：它是唯一会在直连不通时自动换镜像线路的通道。
+    # 这里以前是裸 urllib，于是 XXMI Libraries 的 `Manifest.json`（走本函数下载）
+    # 在直连被掐的网络下直接超时，害得「自动安装/更新」三个组件全部失败、只报
+    # `<urlopen error [WinError 10060]>`（2026-09-27 实测定位）。
+    from . import fastnet
+
+    if dest is None:
+        _final, body = fastnet.fetch(url, timeout=timeout)
+        return body
+
+    dest = Path(dest)
+    report = fastnet.download(url, dest, timeout=min(timeout, 60), progress=chunk_callback)
+    if not report.ok:
+        raise urllib.error.URLError(report.message)
+    return dest
+
+
+def _http_get_legacy(
+    url: str,
+    dest: Path | None = None,
+    *,
+    timeout: int = DEFAULT_TIMEOUT,
+    chunk_callback: Callable[[int, int], None] | None = None,
+) -> bytes | Path:
+    """（保留作对照，不再使用）裸 urllib 版本。"""
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         if dest is None:
             return resp.read()
