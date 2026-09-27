@@ -1,0 +1,58 @@
+# ============================================================
+# 注意：.gitignore 不支持行内注释！
+# 「模式  # 注释」会被当成一整个模式，导致该模式失效。
+# 所以注释一律单独成行。
+# ============================================================
+
+# ── 用户数据 / 个人内容 —— 绝不提交 ──────────────────────────
+library/
+runtime/
+config.json
+config.json.*
+*.mc.bak
+*.mc.tmp
+*.ini.bak*
+*.bak-before-*
+_tmp/
+dist/
+build/
+*.spec
+
+# ── 第三方二进制（体积大，请从各原仓库获取）──────────────────
+reshade-shaders/
+*.addon64
+*.addon32
+*.dll
+*.exe
+
+# ── 凭据 / 密钥 —— 绝不提交 ──────────────────────────────────
+.env
+.env.*
+*.pem
+*.key
+*.der
+*secret*
+*token*
+credentials.json
+
+# ── Python ───────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+
+# ── 构建输出 ─────────────────────────────────────────────────
+reshade_addon/build/
+reshade_addon/cmake-build/
+*.o
+*.obj
+*.zip
+
+# ── 本机遗留物 ───────────────────────────────────────────────
+.dsh-meow/
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini

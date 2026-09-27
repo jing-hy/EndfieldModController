@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EndfieldModController</title>
+  <link rel="stylesheet" href="style.css">
+  <script>
+    // 尽早应用主题：必须在加载页绘制之前，否则会先闪一下默认深色。
+    // 主题缓存在 localStorage（app.js 每次切换时同步写入）。
+    (function () {
+      try {
+        var t = localStorage.getItem('mc-theme');
+        if (t === 'light' || t === 'dark' || t === 'amber' || t === 'cyan' || t === 'violet' || t === 'emerald') {
+          document.documentElement.dataset.theme = t;
+        }
+      } catch (e) { /* ignore */ }
+    })();
+  </script>
+</head>
+<body>
+  <div id="splash" class="splash">
+    <div class="splash-inner">
+      <div class="splash-title">EndfieldModController</div>
+      <div class="splash-msg" id="splash-msg">正在启动界面…</div>
+      <div class="splash-bar"><span></span></div>
+      <div class="splash-hint">首次启动要扫描 Mod 库，约几秒，请稍候</div>
+    </div>
+  </div>
+  <div class="top-shell">
+  <header>
+    <div>
+      <h1>EndfieldModController</h1>
+      <p>外部选择 · 同角色互斥 · ReShade 游戏内统一 UI · 不改游戏目录</p>
+    </div>
+    <div class="header-actions">
+      <button id="theme-toggle" class="theme-toggle" title="切换深色/浅色">深色</button>
+      <div class="status" id="global-status">就绪</div>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="library">Mod 库</button>
+    <button class="tab" data-tab="dependencies">依赖</button>
+    <button class="tab" data-tab="launch">启动</button>
+    <button class="tab" data-tab="settings">设置</button>
+    <button class="tab" data-tab="about">说明</button>
+  </nav>
+  </div>
+
+  <main>
+    <section class="panel active" id="tab-library">
+      <div class="switch-item" id="mods-master-card">
+        <div class="switch-row">
+          <span class="switch-name">开启第三方服装 Mod</span>
+          <label class="switch"><input type="checkbox" id="cfg-third-party-mods" checked><span class="slider"></span></label>
+        </div>
+        <div class="switch-desc">总开关：关闭后 EFMI 引擎不再注入，<b>所有</b>服装 Mod 都不生效（Mods 文件保持原样，随时可开回来）。</div>
+      </div>
+      <div class="toolbar">
+        <button id="scan-btn">重新扫描</button>
+        <button id="prepare-btn" class="primary">生成控制器</button>
+        <span class="hint">同角色自动互斥，选择自动保存。</span>
+      </div>
+      <div id="library-status" class="hint"></div>
+      <div id="mod-list" class="mod-groups"></div>
+    </section>
+
+    <section class="panel" id="tab-dependencies">
+      <div class="toolbar">
+        <button id="dep-scan-btn">刷新依赖状态</button>
+        <button id="dep-check-btn">检查状态</button>
+        <button id="dep-update-all-btn" class="primary">自动安装/更新</button>
+        <span class="hint">自动处理内置 XXMI/EFMI、当前缺失依赖和已启用依赖。</span>
+      </div>
+      <div id="dep-status" class="hint"></div>
+      <div class="progress-row"><progress id="dep-progress" max="100" value="0"></progress><span id="dep-progress-text" class="hint">0/0</span></div>
+      <div id="dep-list" class="dep-list"></div>
+      <div id="dep-results" class="dep-results"></div>
+    </section>
+
+    <section class="panel" id="tab-launch">
+      <button id="oneclick-launch-btn" class="primary oneclick">一键启动</button>
+
+      <div class="switch-list">
+        <div class="switch-item">
+          <div class="switch-row">
+            <span class="switch-name">DLSS5 神经渲染</span>
+            <label class="switch"><input type="checkbox" id="cfg-dlss5-addon" checked><span class="slider"></span></label>
+          </div>
+          <div class="switch-desc">RenoDX-DLSS5：把游戏自身的 DLSS 输出替换成 DLSS5 神经渲染</div>
+        </div>
+        <div class="switch-item">
+          <div class="switch-row">
+            <span class="switch-name">第一人称视角</span>
+            <label class="switch"><input type="checkbox" id="cfg-firstperson-addon" checked><span class="slider"></span></label>
+          </div>
+          <div class="switch-desc">Endfield Enhancer：第一人称相机 ＋ 隐藏头部（与 DLSS5 共用同一个 ReShade 底座，可各自开关）</div>
+        </div>
+        <div class="switch-item">
+          <div class="switch-row">
+            <span class="switch-name">服装 Mod（EFMI）</span>
+            <label class="switch"><input type="checkbox" id="cfg-efmi-injection" checked><span class="slider"></span></label>
+          </div>
+          <div class="switch-desc">注入 EFMI 的 <code>d3d11.dll</code>，加载 Mods 目录里生效的 Mod</div>
+        </div>
+        <div class="switch-item">
+          <div class="switch-row">
+            <span class="switch-name">ShakingBreastManager</span>
+            <label class="switch"><input type="checkbox" id="cfg-secondary_motion_injection"><span class="slider"></span></label>
+          </div>
+          <div class="switch-desc">次级运动（乳摇）插件：注入 <code>d3dcompiler_47</code> / <code>vulkan-1</code> proxy ＋ <code>plugin\sbm.dll</code>，需另开它自己的管理器界面调参</div>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <button id="sbm-launch-btn">启动插件界面（乳摇管理器）</button>
+        <button id="prepare-launch-btn">生成控制器</button>
+        <button id="integrity-btn">检查/修复完整性</button>
+        <button id="game-inject-audit-btn">检查游戏目录注入</button>
+        <span class="hint" id="render-api-status"></span>
+      </div>
+
+      <pre id="console-log" class="code-block">就绪。点「一键启动」：先跑初始化自检（缺什么补什么），再拉起 XXMI Launcher。</pre>
+    </section>
+
+    <section class="panel" id="tab-settings">
+      <div class="grid-2">
+        <label>Mod 库目录<input id="cfg-library_dir" type="text"></label>
+        <label>Staging Mods 目录<input id="cfg-staging_mods_dir" type="text"></label>
+        <label>运行目录<input id="cfg-runtime_dir" type="text"></label>
+        <label>XXMI Launcher 路径<input id="cfg-xxmi_launcher" type="text" placeholder="C:\...\XXMI Launcher.exe"></label>
+        <label>3DMigoto Loader 路径<input id="cfg-migoto_loader" type="text" placeholder="D:\...\loader.exe"></label>
+        <label>官方启动器路径<input id="cfg-official_launcher" type="text" placeholder="D:\Hypergryph Launcher\Launcher.exe"></label>
+        <label>Endfield.exe 路径<input id="cfg-game_exe" type="text" placeholder="D:\...\Endfield.exe"></label>
+        <label>ReShade 底座 d3d12.dll 路径<input id="cfg-reshade_dll" type="text" placeholder="runtime\dlss5\d3d12.dll"></label>
+        <label>DLSS5 / 第一人称目录<input id="cfg-dlss5_dir" type="text" placeholder="runtime\dlss5"></label>
+        <label>乳摇工具目录<input id="cfg-secondary_motion_dir" type="text" placeholder="例如 D:\ShakingBreastManager"></label>
+        <label>主题色
+          <select id="cfg-theme">
+            <option value="dark">深色</option>
+            <option value="light">浅色</option>
+          </select>
+        </label>
+        <label>ReShade 注入方式
+          <select id="cfg-reshade_injection">
+            <option value="xxmi_extra">经 XXMI 注入库注入（本方案，推荐）</option>
+            <option value="none">不注入（只跑服装 Mod）</option>
+            <option value="external">外部注入（旧方案，已废弃）</option>
+          </select>
+        </label>
+        <label>依赖清单<input id="cfg-dependency_manifest" type="text"></label>
+        <label class="checkbox-row"><input id="cfg-use_builtin_runtime" type="checkbox"> 使用内置 XXMI/EFMI</label>
+        <label class="checkbox-row"><input id="cfg-auto_update_dependencies" type="checkbox"> 启动前自动更新依赖</label>
+        <label class="checkbox-row"><input id="cfg-require_admin" type="checkbox"> 启动时请求管理员权限</label>
+      </div>
+      <div class="toolbar">
+        <button id="browse-library">选择 Mod 库目录</button>
+        <button id="browse-staging">选择 staging 目录</button>
+        <button id="browse-xxmi">选择 XXMI Launcher</button>
+        <button id="browse-game">选择 Endfield.exe</button>
+        <button id="browse-reshade">选择 ReShade64.dll</button>
+        <button id="browse-manifest">选择依赖清单</button>
+      </div>
+      <div class="toolbar">
+        <button id="autodetect-btn">自动检测 XXMI</button>
+        <button id="download-reshade-btn">下载 ReShade Addon</button>
+        <button id="save-config-btn" class="primary">保存设置</button>
+        <button id="open-root-btn">打开程序目录</button>
+        <button id="rollback-btn">回滚/清理</button>
+      </div>
+      <h3>启动与诊断</h3>
+      <div class="toolbar">
+        <button id="migoto-launch-btn" class="primary">启动官方 XXMI / EFMI 界面</button>
+        <button id="open-log-btn">查看启动日志</button>
+        <button id="export-diagnostics-btn">导出诊断包</button>
+        <button id="force-close-game-btn">强制结束残留游戏</button>
+      </div>
+      <div class="toolbar">
+        <button id="init-check-btn">一键初始化自检</button>
+        <button id="game-inject-clean-btn">清理残留注入</button>
+        <button id="game-inject-restore-btn">撤销清理</button>
+        <button id="update-check-btn">检查组件更新</button>
+        <button id="update-reshade-btn">更新 ReShade 底座</button>
+      </div>
+      <div class="grid-2">
+        <div>
+          <h3>启动状态</h3>
+          <pre id="launch-status" class="code-block">尚未准备</pre>
+        </div>
+        <div>
+          <h3>运行目录</h3>
+          <div class="path-row"><span>Controller：</span><code id="path-controller"></code><button data-open="controller">打开</button></div>
+          <div class="path-row"><span>ReShade：</span><code id="path-reshade"></code><button data-open="reshade">打开</button></div>
+          <div class="path-row"><span>Staging：</span><code id="path-staging"></code><button data-open="staging">打开</button></div>
+        </div>
+      </div>
+      <pre id="dlss5-status" class="code-block">未检查注入状态</pre>
+      <pre id="init-status" class="code-block">未运行初始化自检</pre>
+      <pre id="game-inject-status" class="code-block">未检查游戏目录注入</pre>
+      <pre id="update-status" class="code-block">未检查更新</pre>
+      <div id="settings-status" class="hint"></div>
+    </section>
+
+    <section class="panel" id="tab-about">
+      <h3>当前路线：三件套（DLSS5 + 第一人称 + 服装 Mod）</h3>
+      <ul>
+        <li>唯一 ReShade 底座 = 内置 <code>runtime\dlss5\d3d12.dll</code>（ReShade 6.8.0），里面同时挂着 <b>RenoDX-DLSS5</b> 与 <b>Endfield Enhancer（第一人称）</b> 两个插件。</li>
+        <li>由 XXMI 在启动游戏时注入两个 DLL：<code>runtime\dlss5\d3d12.dll</code> + <code>runtime\builtin\XXMI\EFMI\d3d11.dll</code>（服装 Mod 引擎）。</li>
+        <li>同一进程只能有一个 ReShade，所以两个 <code>d3d12.dll</code> 不要同时注入 —— 本程序只注入一个。</li>
+        <li>启动页的「三件套注入」开关直接改写 XXMI 的注入库：开 = 三件套齐活，关 = 只跑服装 Mod。</li>
+        <li>外部选择 Mod 库里的 Mod，程序把选中项 staging 到 <code>EFMI\Mods\MC_*</code>（同角色互斥、原始快捷键屏蔽），原库只读。</li>
+        <li>游戏目录保持干净：不写任何 ReShade/addon，注入全部由 XXMI 完成。</li>
+      </ul>
+      <h3>进游戏后</h3>
+      <ul>
+        <li>按 <code>Home</code> 打开 ReShade：插件页应同时有 <b>RenoDX-DLSS5</b> 与 <b>Endfield Enhancer</b>。</li>
+        <li>DLSS5 页勾「启用DLSS神经渲染」+「启用超分；风格选电影，总体/结构强度拉满，角色皮肤结构 ≥ 0。</li>
+        <li>Enhancer 的 Camera 页：先开 Camera Controls → First Person = On → Third Person During Combat = <b>Off</b>（打 boss 才不会被踢出第一人称）→ EFMI/XXMI Compatibility = On。</li>
+        <li>快捷键：<code>F6</code> 神经渲染开关、<code>F11</code> Mod 显示、<code>,</code> 第一人称、<code>F12</code> EFMI 帮助。</li>
+      </ul>
+      <h3>注意</h3>
+      <ul>
+        <li>Mod 有 ToS / 账号风险；显卡压力也比单开大（UP 主建议 40 系以上）。</li>
+        <li>游戏目录里的第三方 proxy（<code>d3dcompiler_47.dll</code> / <code>vulkan-1.dll</code>）属于别的工具（如 SecondaryMotion 摇乳管理器），与本方案无关，但会出现在「检查游戏目录注入」列表里。</li>
+      </ul>
+    </section>
+  </main>
+
+  <div id="crash-modal" class="modal hidden">
+    <div class="modal-content" style="width:min(720px,92vw)">
+      <div class="modal-header"><h3>检测到终末地异常退出</h3></div>
+      <div class="hint">已自动把「控制器日志 + 终末地自己的日志 + 崩溃转储」收集并打包。把这个 zip 发给作者（或上传到 GitHub issue）能最快定位问题。</div>
+      <div class="path-row"><span>日志文件夹：</span><code id="crash-dir"></code><button id="crash-open-dir">打开</button></div>
+      <div class="path-row"><span>崩溃包 zip：</span><code id="crash-zip"></code><button id="crash-open-zip">打开</button><button id="crash-copy-zip">复制路径</button></div>
+      <pre id="crash-summary" class="code-block" style="max-height:200px"></pre>
+      <div class="modal-actions"><button id="crash-modal-close" class="primary">知道了</button></div>
+    </div>
+  </div>
+  <div id="char-modal" class="modal hidden">
+    <div class="modal-content" style="width:min(700px,92vw)">
+      <div class="modal-header"><h3>有 Mod 的角色没能确定</h3></div>
+      <div class="hint">
+        下面这些 Mod 从名字里看不出属于哪个角色（或者同时出现了好几个角色名）。
+        角色识别错会让「同角色互斥」失效 —— 两个同角色 Mod 同时生效会导致游戏崩溃，
+        所以麻烦你确认一下。选完会记进该 Mod 的 <code>mod.meta.json</code>，以后就不会再问。
+      </div>
+      <div id="char-pending-list" style="max-height:46vh;overflow:auto;margin:10px 0"></div>
+      <div class="modal-actions">
+        <button id="char-modal-skip">稍后再说</button>
+        <button id="char-modal-save" class="primary">保存</button>
+      </div>
+    </div>
+  </div>
+  <div id="log-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>启动日志</h3>
+        <button id="log-close-btn">关闭</button>
+      </div>
+      <pre id="log-text" class="log-text"></pre>
+      <div class="modal-actions">
+        <button id="log-refresh-btn">刷新</button>
+        <button id="log-export-btn">导出诊断包</button>
+        <button id="log-clear-btn">清空</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

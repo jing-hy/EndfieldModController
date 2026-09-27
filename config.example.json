@@ -1,0 +1,13 @@
+{
+  "library_dir": "D:/EndfieldModController/library",
+  "runtime_dir": "D:/EndfieldModController/runtime",
+  "staging_mods_dir": "D:/EndfieldModController/runtime/EFMI/Mods",
+  "xxmi_launcher": "C:/Users/you/AppData/Roaming/XXMI Launcher/Resources/Bin/XXMI Launcher.exe",
+  "game_exe": "D:/Gryphline/games/EndField Game/Endfield.exe",
+  "reshade_dll": "D:/ReShade/ReShade64.dll",
+  "reshade_injection": "external",
+  "dependency_manifest": "dependencies.json",
+  "auto_update_dependencies": false,
+  "require_admin": false,
+  "selected_mods": []
+}

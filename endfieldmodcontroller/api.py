@@ -1,0 +1,997 @@
+"""Backend API exposed to the PyWebview frontend."""
+from __future__ import annotations
+
+import base64
+import io
+import json
+import os
+import subprocess
+import sys
+import threading
+from pathlib import Path
+from typing import Any
+
+from . import activation, core, dependencies, diagnostics, integrity, launcher, reshade, reshade_integration, runtime_deps
+from .config import AppConfig, auto_detect_migoto_loader, auto_detect_official_launcher, auto_detect_xxmi
+
+
+class EndfieldModControllerApi:
+    def __init__(self, config_path: Path | None = None) -> None:
+        self.config = AppConfig.load(config_path)
+        self.config.ensure_dirs()
+        self._mods_cache = None
+        self._dep_task: dict[str, Any] | None = None
+
+    # ------------------------------------------------------------------
+    # helpers
+    # ------------------------------------------------------------------
+    def _mods(self):
+        if self._mods_cache is None:
+            self._mods_cache = core.scan_library(self.config.library_path, self.config.staging_mods_path)
+        return self._mods_cache
+
+    def _invalidate_mods(self) -> None:
+        self._mods_cache = None
+        self._dep_task: dict[str, Any] | None = None
+
+    def log_frontend_error(self, message: str) -> dict[str, Any]:
+        """接收前端 JS 错误，写进控制器日志（前端崩了也能在后端看到原因）。"""
+        from . import diagnostics
+
+        diagnostics.log_event(self.config, f"前端错误: {message}"[:2000], category="ui")
+        return {"ok": True}
+
+    def component_addon_status(self) -> dict[str, Any]:
+        """两个插件（DLSS5 / 第一人称）的 addon 启停状态。"""
+        from . import launcher
+
+        return {
+            "status": launcher.component_addon_status(self.config),
+            "config": {
+                "dlss5_addon_enabled": bool(getattr(self.config, "dlss5_addon_enabled", True)),
+                "firstperson_addon_enabled": bool(getattr(self.config, "firstperson_addon_enabled", True)),
+            },
+        }
+
+    def set_component_addon(self, component: str, enabled: bool) -> dict[str, Any]:
+        """单独启停 DLSS5 / 第一人称插件，并同步 XXMI 注入库。"""
+        from . import launcher
+
+        if component not in ("dlss5", "firstperson"):
+            return {"ok": False, "message": f"未知组件: {component}"}
+        key = "dlss5_addon_enabled" if component == "dlss5" else "firstperson_addon_enabled"
+        setattr(self.config, key, bool(enabled))
+        self.config.save()
+        result = launcher.set_component_addons(self.config, component, bool(enabled))
+        # 两个都关 → 注入库里的底座会被移除；至少一个开 → 保持注入
+        try:
+            launcher.configure_dlss5_injection(self.config, enabled=True)
+        except Exception as exc:  # noqa: BLE001
+            result["warning"] = f"重写注入库失败: {exc}"
+        launcher._append_log(
+            self.config,
+            f"{'DLSS5' if component == 'dlss5' else '第一人称'} 插件{'启用' if enabled else '停用'}"
+            f"（移动 {len(result.get('moved') or [])} 个文件）",
+        )
+        return result
+
+    def crash_bundle_status(self) -> dict[str, Any]:
+        """前端轮询用：取走刚生成的崩溃包（含终末地日志的 zip），只提示一次。"""
+        from . import crashwatch
+
+        fresh = crashwatch.take_bundle()
+        return {
+            "watch": crashwatch.watch_state(),
+            "fresh": fresh or None,
+            "latest": crashwatch.latest_bundle(self.config),
+        }
+
+    def open_path_in_explorer(self, target: str) -> dict[str, Any]:
+        """打开文件/文件夹（崩溃包用）。"""
+        from . import diagnostics
+
+        return diagnostics.open_path(self.config, Path(target))
+
+    def crash_watch_state(self) -> dict[str, Any]:
+        """崩溃监控线程状态。"""
+        from . import crashwatch
+
+        return crashwatch.watch_state()
+
+    def collect_crash_report(self) -> dict[str, Any]:
+        """立刻收集一次崩溃现场并写成报告（不等游戏退出）。"""
+        from . import crashwatch
+
+        evidence = crashwatch.collect_evidence(self.config)
+        path = crashwatch.write_report(self.config, evidence)
+        return {
+            "ok": True,
+            "path": str(path),
+            "crashed": bool(evidence.get("crash_sight")),
+            "crash_dirs": [c.get("report_dir") for c in (evidence.get("crashes") or [])],
+        }
+
+    def open_logs_dir(self) -> dict[str, Any]:
+        from . import diagnostics
+
+        return diagnostics.open_path(self.config, self.config.runtime_path / "logs")
+
+    def shutdown(self) -> dict[str, Any]:
+        """窗口关闭时收尾：停掉后台任务并释放引用，确保进程能干净退出。"""
+        try:
+            if self._dep_task:
+                self._dep_task["running"] = False
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            from . import diagnostics
+
+            stop = getattr(diagnostics, "stop_process_monitor", None)
+            if callable(stop):
+                stop(self.config)
+        except Exception:  # noqa: BLE001
+            pass
+        return {"ok": True}
+
+    def _dependency_report(self):
+        mods = self._mods()
+        selected = set(self.config.selected_mods or [])
+        if selected:
+            mods = [mod for mod in mods if mod.id in selected or mod.is_dependency]
+        report = dependencies.dependency_report(
+            self.config.library_path,
+            mods,
+            self.config.dependency_manifest_path,
+        )
+        report.setdefault("manifest", {}).update(runtime_deps.builtin_report(self.config))
+        # 乳摇插件也作为一个依赖项出现在列表里（与其他依赖同构，不单列按钮）
+        try:
+            from . import secondary_motion as sbm_mod
+            from . import updates as updates_mod
+
+            state = sbm_mod.status(self.config)
+            local = updates_mod._sbm_local_version(self.config)
+            report["manifest"]["secondary_motion"] = {
+                "display": "ShakingBreastManager（次级运动插件）",
+                "status": (f"v{local} 已安装" if state["manager_exists"] else "未找到工具目录"),
+                "present": bool(state["manager_exists"]),
+                "required": False,
+                "source": "GitHub Sp1cHless/Arknights-Endfield-Plugin-Secondary-bodyphysics",
+                "install_dir": state.get("tool_dir") or "",
+            }
+        except Exception:  # noqa: BLE001
+            pass
+        return report
+
+    def _json(self, data: Any) -> Any:
+        return data
+
+    # ------------------------------------------------------------------
+    # state and config
+    # ------------------------------------------------------------------
+    def get_config(self) -> dict[str, Any]:
+        return self.config.to_dict()
+
+    def get_state(self) -> dict[str, Any]:
+        from . import diagnostics, secondary_motion
+
+        # 留痕：用来判断前端是否真的完成了初始化（界面空白时先看这几行有没有）
+        diagnostics.log_event(self.config, "UI 调用 get_state()", category="ui")
+        mods = self._mods()
+        game_dir = reshade_integration.detect_game_dir(self.config)
+        render_api = reshade_integration.detect_render_api(game_dir) if game_dir is not None else "unknown"
+        return {
+            "config": self.config.to_dict(),
+            "mods": [m.to_dict(include_actions=False) for m in mods],
+            "dependency_report": self._dependency_report(),
+            "render_api": render_api,
+            "controller_ready": (self.config.controller_dir / "controller.ini").is_file(),
+            "reshade_addon_ready": (self.config.reshade_runtime_path / "Addons" / "endfieldmodcontroller.addon").is_file(),
+            "detected_xxmi": auto_detect_xxmi(),
+            "detected_migoto_loader": auto_detect_migoto_loader(),
+            "detected_official_launcher": auto_detect_official_launcher(),
+            "dlss5_status": launcher.dlss5_injection_status(self.config),
+            "component_addon_status": {
+                "status": launcher.component_addon_status(self.config),
+                "config": {
+                    "dlss5_addon_enabled": bool(getattr(self.config, "dlss5_addon_enabled", True)),
+                    "firstperson_addon_enabled": bool(getattr(self.config, "firstperson_addon_enabled", True)),
+                },
+            },
+            "secondary_motion_status": secondary_motion.status(self.config),
+        }
+    def save_config(self, data: dict[str, Any]) -> dict[str, Any]:
+        self._invalidate_mods()
+        known = set(self.config.to_dict().keys())
+        for key, value in data.items():
+            if key in known:
+                setattr(self.config, key, value)
+        self.config.ensure_dirs()
+        self.config.save()
+        return {"ok": True, "config": self.config.to_dict()}
+
+    # ------------------------------------------------------------------
+    # library / activation
+    # ------------------------------------------------------------------
+    def scan(self) -> dict[str, Any]:
+        from . import diagnostics
+
+        self._invalidate_mods()
+        mods = self._mods()
+        diagnostics.log_event(self.config, f"UI 调用 scan() -> {len(mods)} 个 Mod", category="ui")
+        return {
+            "mods": [m.to_dict(include_actions=False) for m in mods],
+            "dependency_report": self._dependency_report(),
+        }
+
+    def get_mod_cover(self, mod_id: str) -> dict[str, Any]:
+        for mod in self._mods():
+            if mod.id != mod_id:
+                continue
+            if not mod.cover_path or not mod.cover_path.is_file():
+                return {"ok": False, "message": "no cover"}
+            suffix = mod.cover_path.suffix.lower()
+            mime = {
+                ".png": "image/png",
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".webp": "image/webp",
+                ".bmp": "image/bmp",
+                ".gif": "image/gif",
+            }.get(suffix, "application/octet-stream")
+            raw = b""
+            try:
+                from PIL import Image  # type: ignore
+                with Image.open(mod.cover_path) as image:
+                    image = image.convert("RGB")
+                    image.thumbnail((480, 300))
+                    buffer = io.BytesIO()
+                    image.save(buffer, format="JPEG", quality=82, optimize=True)
+                    raw = buffer.getvalue()
+                    mime = "image/jpeg"
+            except Exception:
+                try:
+                    raw = mod.cover_path.read_bytes()
+                except OSError as exc:
+                    return {"ok": False, "message": str(exc)}
+            if len(raw) > 6 * 1024 * 1024:
+                return {"ok": False, "message": "cover is too large"}
+            return {
+                "ok": True,
+                "name": mod.cover_path.name,
+                "data_uri": f"data:{mime};base64," + base64.b64encode(raw).decode("ascii"),
+            }
+        return {"ok": False, "message": "mod not found"}
+
+    def prepare(self, active_ids: list[str] | None = None) -> dict[str, Any]:
+        # active_ids 为 None 时沿用当前选择，避免无参调用（CLI / 自检）把选择清空。
+        # 但**空列表不能直接传给 stage_and_prepare**：activation 里空列表语义是
+        # 「全部激活」，会把 library 里所有 Mod 都 stage 成 MC_*（同角色重复 → 崩游戏）。
+        if active_ids is None:
+            active_ids = list(self.config.selected_mods or [])
+        if not active_ids:
+            launcher._append_log(self.config, "未选择任何 Mod，跳过 staging")
+            return {
+                "activation": {"active": [], "report": "skipped"},
+                "patch_count": 0,
+                "action_count": 0,
+                "controller_dir": str(self.config.controller_dir),
+                "reshade_dir": "",
+                "user_ini_path": str(self.config.user_ini_path),
+                "reshade_addon": "",
+            }
+        result = activation.stage_and_prepare(
+            self.config.library_path,
+            self.config.staging_mods_path,
+            self.config.runtime_path,
+            selected_ids=active_ids,
+        )
+        self.config.selected_mods = list(active_ids)
+        self.config.save()
+        reshade_info = launcher.prepare_reshade_runtime(self.config, Path(result["controller_dir"]))
+        launcher._append_log(self.config, f"prepare complete: actions={len(result['actions_manifest']['actions'])} patches={result['patch_count']}")
+        return {
+            "activation": result["activation"],
+            "patch_count": result["patch_count"],
+            "action_count": len(result["actions_manifest"]["actions"]),
+            "controller_dir": result["controller_dir"],
+            "reshade_dir": result["reshade_dir"],
+            "user_ini_path": result["user_ini_path"],
+            "reshade_addon": reshade_info.get("addon", ""),
+            "reshade_dir": reshade_info.get("reshade_dir", ""),
+        }
+
+    # ------------------------------------------------------------------
+    # dependencies
+    # ------------------------------------------------------------------
+    def dependency_status(self) -> dict[str, Any]:
+        return self._dependency_report()
+
+    def update_dependencies(self, dry_run: bool = True) -> dict[str, Any]:
+        manifest = dependencies.load_manifest(self.config.dependency_manifest_path)
+        results = dependencies.update_all(manifest, self.config.library_path, dry_run=dry_run)
+        return {"dry_run": dry_run, "results": [r.__dict__ for r in results]}
+
+    def start_dependency_update(self, dry_run: bool = False, only_missing: bool = False, include_builtin: bool = False) -> dict[str, Any]:
+        if self._dep_task and self._dep_task.get("running"):
+            return self.get_dependency_progress()
+        self._dep_task = {
+            "running": True,
+            "dry_run": dry_run,
+            "only_missing": only_missing,
+            "include_builtin": include_builtin,
+            "current": 0,
+            "total": 0,
+            "percent": 0.0,
+            "message": "准备安装缺失依赖..." if only_missing else "准备中...",
+            "log": [],
+            "results": [],
+        }
+
+        def progress(current: int, total: int, key: str, status: str) -> None:
+            if self._dep_task is None:
+                return
+            self._dep_task["current"] = current
+            self._dep_task["total"] = total
+            self._dep_task["percent"] = (current / total * 100.0) if total else 0.0
+            self._dep_task["message"] = f"{key}: {status}"
+            self._dep_task["log"].append(f"{key}: {status}")
+
+        def byte_progress(index: int, total: int, key: str, received: int, expected: int) -> None:
+            if self._dep_task is None:
+                return
+            if total:
+                base = (index - 1) / total
+                inner = (received / expected) if expected else 0.0
+                self._dep_task["percent"] = min(99.9, (base + inner / total) * 100.0)
+            self._dep_task["current"] = index - 1
+            self._dep_task["total"] = total
+            if expected:
+                self._dep_task["message"] = f"{key}: {received // 1024}/{expected // 1024} KiB"
+            else:
+                self._dep_task["message"] = f"{key}: 下载中 {received // 1024} KiB"
+
+        def worker() -> None:
+            assert self._dep_task is not None
+            try:
+                if include_builtin:
+                    results = runtime_deps.ensure_all(self.config, progress)
+                    self._dep_task["results"] = [result.__dict__ for result in results]
+                    self._dep_task["message"] = "内置运行环境已处理"
+                    return
+                manifest = dependencies.load_manifest(self.config.dependency_manifest_path)
+                if only_missing:
+                    mods = self._mods()
+                    selected = set(self.config.selected_mods or [])
+                    if selected:
+                        mods = [mod for mod in mods if mod.id in selected or mod.is_dependency]
+                    required = core.collect_required_dependency_names(mods)
+                    manifest = dependencies.select_missing_dependencies(manifest, self.config.library_path, required)
+                results = dependencies.update_all(
+                    manifest,
+                    self.config.library_path,
+                    dry_run=dry_run,
+                    progress=progress,
+                    byte_progress=byte_progress,
+                )
+                self._dep_task["results"] = [r.__dict__ for r in results]
+                self._dep_task["percent"] = 100.0
+                self._dep_task["current"] = self._dep_task.get("total", 0)
+                self._dep_task["message"] = "完成"
+            except Exception as exc:  # noqa: BLE001
+                self._dep_task["message"] = f"失败: {exc}"
+                self._dep_task["log"].append(f"失败: {exc}")
+            finally:
+                self._dep_task["running"] = False
+
+        threading.Thread(target=worker, name="mc-dependency-update", daemon=True).start()
+        return self.get_dependency_progress()
+
+    def start_full_update(self, dry_run: bool = False) -> dict[str, Any]:
+        if self._dep_task and self._dep_task.get("running"):
+            return self.get_dependency_progress()
+        self._dep_task = {
+            "running": True,
+            "dry_run": dry_run,
+            "only_missing": False,
+            "include_builtin": True,
+            "full": True,
+            "current": 0,
+            "total": 0,
+            "percent": 0.0,
+            "message": "准备自动安装/更新...",
+            "log": [],
+            "results": [],
+        }
+
+        def progress(current: int, total: int, key: str, status: str) -> None:
+            if self._dep_task is None:
+                return
+            self._dep_task["current"] = current
+            self._dep_task["total"] = total
+            self._dep_task["percent"] = (current / total * 100.0) if total else 0.0
+            self._dep_task["message"] = f"{key}: {status}"
+            self._dep_task["log"].append(f"{key}: {status}")
+
+        def byte_progress(index: int, total: int, key: str, received: int, expected: int) -> None:
+            if self._dep_task is None:
+                return
+            if total:
+                base = (index - 1) / total
+                inner = (received / expected) if expected else 0.0
+                self._dep_task["percent"] = min(99.9, (base + inner / total) * 100.0)
+            self._dep_task["current"] = index - 1
+            self._dep_task["total"] = total
+            if expected:
+                self._dep_task["message"] = f"{key}: {received // 1024}/{expected // 1024} KiB"
+            else:
+                self._dep_task["message"] = f"{key}: 下载中 {received // 1024} KiB"
+
+        def worker() -> None:
+            assert self._dep_task is not None
+            try:
+                results = []
+                if self.config.use_builtin_runtime:
+                    if dry_run:
+                        results.extend(runtime_deps.dry_run_results(self.config))
+                    else:
+                        results.extend(runtime_deps.ensure_all(self.config, progress, byte_progress))
+                manifest = dependencies.load_manifest(self.config.dependency_manifest_path)
+                mods = self._mods()
+                selected = set(self.config.selected_mods or [])
+                if selected:
+                    mods = [mod for mod in mods if mod.id in selected or mod.is_dependency]
+                required = core.collect_required_dependency_names(mods)
+                missing = dependencies.select_missing_dependencies(manifest, self.config.library_path, required)
+                combined = {key: spec for key, spec in manifest.items() if spec.enabled}
+                combined.update(missing)
+                results.extend(dependencies.update_all(
+                    combined,
+                    self.config.library_path,
+                    dry_run=dry_run,
+                    enabled_only=False,
+                    progress=progress,
+                    byte_progress=byte_progress,
+                ))
+                # 乳摇插件（第三方工具）也走同一个更新流程，不再单列按钮
+                try:
+                    from types import SimpleNamespace
+
+                    from . import updates as updates_mod
+
+                    ureport = updates_mod.check_updates(self.config, log=progress and None)
+                    sm = ureport.get("secondary_motion") or {}
+                    current = sm.get("current") or "?"
+                    if sm.get("update_available") and sm.get("download_url"):
+                        if dry_run:
+                            results.append(SimpleNamespace(key="secondary_motion", status="可更新",
+                                                           message=f"{current} → {sm.get('latest')}"))
+                        else:
+                            outcome = updates_mod.update_secondary_motion(self.config, url=sm["download_url"])
+                            results.append(SimpleNamespace(
+                                key="secondary_motion",
+                                status="已更新" if outcome.get("ok") else "失败",
+                                message=outcome.get("message") or outcome.get("note", ""),
+                            ))
+                    else:
+                        results.append(SimpleNamespace(key="secondary_motion", status="已是最新",
+                                                       message=f"v{current}"))
+                except Exception as exc:  # noqa: BLE001
+                    from types import SimpleNamespace as _NS
+
+                    results.append(_NS(key="secondary_motion", status="跳过", message=str(exc)))
+                self._dep_task["results"] = [result.__dict__ for result in results]
+                self._dep_task["percent"] = 100.0
+                self._dep_task["current"] = self._dep_task.get("total", 0)
+                self._dep_task["message"] = "完成"
+            except Exception as exc:  # noqa: BLE001
+                self._dep_task["message"] = f"失败: {exc}"
+                self._dep_task["log"].append(f"失败: {exc}")
+            finally:
+                self._dep_task["running"] = False
+
+        threading.Thread(target=worker, name="mc-full-update", daemon=True).start()
+        return self.get_dependency_progress()
+
+    def get_dependency_progress(self) -> dict[str, Any]:
+        if self._dep_task is None:
+            return {"running": False, "current": 0, "total": 0, "percent": 0.0, "message": "未开始", "log": [], "results": []}
+        return dict(self._dep_task)
+
+    def read_launch_log(self, tail: int = 300) -> dict[str, Any]:
+        paths = [self.config.runtime_path / "launch.log"]
+        loader = self.config.migoto_loader_path
+        if loader is not None:
+            paths.append(Path(loader).parent / "endfieldmodcontroller.addon.log")
+        game_dir = reshade_integration.detect_game_dir(self.config)
+        if game_dir is not None:
+            paths.append(game_dir / "endfieldmodcontroller.addon.log")
+        lines: list[str] = []
+        for path in paths:
+            if not path.is_file():
+                continue
+            try:
+                content = path.read_text(encoding="utf-8", errors="replace").splitlines()
+            except OSError:
+                continue
+            if path.name != "launch.log":
+                lines.append(f"===== {path} =====")
+            lines.extend(content)
+        return {"ok": True, "text": "\n".join(lines[-max(1, int(tail)):])}
+
+    def clear_launch_log(self) -> dict[str, Any]:
+        removed = diagnostics.clear_logs(self.config)
+        loader = self.config.migoto_loader_path
+        if loader is not None:
+            addon_log = Path(loader).parent / "endfieldmodcontroller.addon.log"
+            try:
+                if addon_log.is_file():
+                    addon_log.unlink()
+                    removed.append(str(addon_log))
+            except OSError:
+                pass
+        game_dir = reshade_integration.detect_game_dir(self.config)
+        if game_dir is not None:
+            addon_log = game_dir / "endfieldmodcontroller.addon.log"
+            try:
+                if addon_log.is_file():
+                    addon_log.unlink()
+                    removed.append(str(addon_log))
+            except OSError:
+                pass
+        return {"ok": True, "removed": removed}
+
+    def read_diagnostic_log(self, tail: int = 800) -> dict[str, Any]:
+        return {"ok": True, "text": diagnostics.read_diagnostic_log(self.config, tail)}
+
+    def export_diagnostics(self) -> dict[str, Any]:
+        try:
+            path = diagnostics.create_diagnostic_bundle(self.config, game_dir=reshade_integration.detect_game_dir(self.config))
+            launcher._append_log(self.config, f"诊断包已导出: {path}")
+            return {"ok": True, "path": str(path)}
+        except Exception as exc:  # noqa: BLE001
+            diagnostics.log_exception(self.config, "导出诊断包失败", exc, category="diag")
+            return {"ok": False, "message": str(exc)}
+
+    def clear_all_logs(self) -> dict[str, Any]:
+        removed = diagnostics.clear_logs(self.config)
+        return {"ok": True, "removed": removed}
+
+    # ------------------------------------------------------------------
+    # launch
+    # ------------------------------------------------------------------
+    def download_reshade(self, version: str = reshade.DEFAULT_VERSION) -> dict[str, Any]:
+        result = reshade.download_reshade(self.config.reshade_runtime_path, version)
+        if not self.config.reshade_dll:
+            self.config.reshade_dll = result["dll"]
+            self.config.save()
+        return result
+
+    def check_integrity(self) -> dict[str, Any]:
+        return integrity.check_integrity(self.config)
+
+    def repair_integrity(self) -> dict[str, Any]:
+        result = integrity.repair_integrity(
+            self.config,
+            log=lambda message: launcher._append_log(self.config, f"repair: {message}"),
+        )
+        launcher.prepare_reshade_runtime(self.config, self.config.controller_dir)
+        result["integrity"] = integrity.check_integrity(self.config)
+        return result
+
+    def launch_preview(self, start_game: bool = False) -> dict[str, Any]:
+        return launcher.launch(self.config, dry_run=True, start_game=start_game)
+
+    def launch(self, start_game: bool = False) -> dict[str, Any]:
+        launcher._append_log(self.config, f"launch requested from UI (start_game={start_game})")
+        try:
+            return launcher.launch(self.config, dry_run=False, start_game=start_game)
+        except Exception as exc:  # noqa: BLE001
+            launcher._append_log(self.config, f"launch failed: {exc}")
+            raise
+
+    def launch_game(self) -> dict[str, Any]:
+        """Explicitly start the game through XXMI/EFMI (`--nogui --xxmi EFMI`)."""
+        launcher._append_log(self.config, "launch_game requested from UI")
+        try:
+            return launcher.launch(self.config, dry_run=False, start_game=True)
+        except Exception as exc:  # noqa: BLE001
+            launcher._append_log(self.config, f"launch_game failed: {exc}")
+            raise
+
+    # ------------------------------------------------------------------
+    # small utilities
+    # ------------------------------------------------------------------
+    def choose_path(self, directory: bool = False, title: str = "选择路径") -> dict[str, Any]:
+        try:
+            import tkinter as tk
+            from tkinter import filedialog
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "message": f"tkinter unavailable: {exc}"}
+        try:
+            root = tk.Tk()
+            root.withdraw()
+            root.attributes("-topmost", True)
+            if directory:
+                selected = filedialog.askdirectory(title=title)
+            else:
+                selected = filedialog.askopenfilename(title=title)
+            root.destroy()
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "message": str(exc)}
+        if not selected:
+            return {"ok": False, "message": "cancelled"}
+        return {"ok": True, "path": selected}
+
+    def enable_anti_cheat_safe_mode(self) -> dict[str, Any]:
+        launcher._append_log(self.config, "anti-cheat safe mode requested from UI")
+        try:
+            return launcher.enable_anti_cheat_safe_mode(self.config)
+        except Exception as exc:  # noqa: BLE001
+            launcher._append_log(self.config, f"anti-cheat safe mode failed: {exc}")
+            raise
+
+    def restore_anti_cheat_safe_mode(self) -> dict[str, Any]:
+        launcher._append_log(self.config, "restore anti-cheat safe mode requested from UI")
+        try:
+            return launcher.restore_anti_cheat_safe_mode(self.config)
+        except Exception as exc:  # noqa: BLE001
+            launcher._append_log(self.config, f"restore anti-cheat safe mode failed: {exc}")
+            raise
+
+    def force_close_game(self) -> dict[str, Any]:
+        """Force-kill a hung Endfield/loader process left behind after closing."""
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+        killed: list[str] = []
+        errors: list[str] = []
+        for image in ("Endfield.exe", "migoto_loader2.exe", "loader.exe"):
+            try:
+                result = subprocess.run(
+                    ["taskkill", "/F", "/IM", image, "/T"],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    creationflags=creationflags,
+                )
+                if result.returncode == 0:
+                    killed.append(image)
+                elif not any(marker in (result.stdout or "") for marker in ("not found", "No tasks", "没有运行", "没有找到", "找不到")):
+                    errors.append(f"{image}: {result.stdout.strip() or result.stderr.strip()}")
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"{image}: {exc}")
+        launcher._append_log(self.config, f"force_close_game: killed={killed} errors={errors}")
+        return {"ok": not errors, "killed": killed, "errors": errors}
+
+    def launch_migoto_loader(self) -> dict[str, Any]:
+        """Compatibility entry point: always use the official XXMI GUI now."""
+        launcher._append_log(self.config, "custom 3DMigoto loader is disabled; opening official XXMI GUI")
+        try:
+            return launcher.launch_official_gui(self.config)
+        except Exception as exc:  # noqa: BLE001
+            launcher._append_log(self.config, f"official XXMI GUI launch failed: {exc}")
+            raise
+
+    def launch_official_gui(self) -> dict[str, Any]:
+        """Open the official XXMI Launcher EFMI GUI without custom injection."""
+        launcher._append_log(self.config, "official XXMI GUI launch requested from UI")
+        try:
+            return launcher.launch_official_gui(self.config)
+        except Exception as exc:  # noqa: BLE001
+            launcher._append_log(self.config, f"official XXMI GUI launch failed: {exc}")
+            raise
+
+    # ------------------------------------------------------------------
+    # DLSS5 / 第一人称注入（本方案唯一注入路径）
+    # ------------------------------------------------------------------
+    def dlss5_status(self) -> dict[str, Any]:
+        """当前 XXMI 注入库状态：是否已开、内容是什么、底座文件在不在。"""
+        return launcher.dlss5_injection_status(self.config)
+
+    def set_dlss5_injection(self, enabled: bool = True) -> dict[str, Any]:
+        """快捷切换：开=注入 d3d12.dll（DLSS5+第一人称+Mod），关=只跑服装 Mod。"""
+        launcher._append_log(self.config, f"set_dlss5_injection(enabled={enabled}) requested from UI")
+        try:
+            return launcher.configure_dlss5_injection(self.config, enabled=bool(enabled))
+        except Exception as exc:  # noqa: BLE001
+            launcher._append_log(self.config, f"DLSS5 注入开关失败: {exc}")
+            raise
+
+    # ------------------------------------------------------------------
+    # 乳摇插件（SecondaryMotion，第三方工具，本程序只做集成与启动）
+    # ------------------------------------------------------------------
+    def secondary_motion_status(self) -> dict[str, Any]:
+        from . import secondary_motion
+
+        return secondary_motion.status(self.config)
+
+    def secondary_motion_install(self) -> dict[str, Any]:
+        from . import secondary_motion
+
+        launcher._append_log(self.config, "补齐乳摇注入 requested from UI")
+        return secondary_motion.ensure_injection(
+            self.config, log=lambda message: launcher._append_log(self.config, message)
+        )
+
+    def secondary_motion_uninstall(self) -> dict[str, Any]:
+        from . import secondary_motion
+
+        launcher._append_log(self.config, "卸载乳摇注入 requested from UI")
+        return secondary_motion.remove_injection(
+            self.config, log=lambda message: launcher._append_log(self.config, message)
+        )
+
+    def launch_secondary_motion(self) -> dict[str, Any]:
+        from . import secondary_motion
+
+        launcher._append_log(self.config, "启动乳摇管理器 requested from UI")
+        return secondary_motion.launch_manager(self.config)
+
+    # ------------------------------------------------------------------
+    # 初始化自检（一键启动时自动跑，也可手动触发）
+    # ------------------------------------------------------------------
+    def prepare_launch(self) -> dict[str, Any]:
+        """一键启动前真正要跑的东西：收编手动 Mod + 同步 XXMI 注入库 + 完整初始化自检。
+
+        必须用 launcher.ensure_injections（它内部会调 configure_dlss5_injection 写注入库
+        并同步签名），而不是 initialize.ensure_all —— 后者只管文件层，**不写注入库**。
+        """
+        launcher._append_log(self.config, "prepare_launch requested from UI")
+        synced = self.import_manual_mods()
+        report = launcher.ensure_injections(self.config)
+        return {
+            "ok": report.get("ok", True),
+            "actions": report.get("actions", []),
+            "warnings": report.get("warnings", []),
+            "initialize": report.get("initialize", {}),
+            "injection": launcher.dlss5_injection_status(self.config),
+            "manual_mods": synced,
+        }
+
+    def import_manual_mods(self) -> dict[str, Any]:
+        """把手动放进 Mods 目录的 Mod 收编进库，并在界面里标记为已开启。
+
+        用户需求（原话）：「手动放进去的和库里的进行比对，如果库里已有，就在 UI 中
+        显示那个开启，库里没有就把它放到库里，然后显示开启」。
+
+        实现见 ``activation.import_manual_mods``：比对时先按目录名、再按 ini 里的
+        namespace 特征（容忍改过名）；收编成功后会把手动目录从 Mods 移除，避免与随后
+        stage 出的 ``MC_<角色>_<名字>`` 构成同角色成对（那会让游戏直接崩）。
+        """
+        from . import activation
+
+        synced = activation.import_manual_mods(
+            self.config, log=lambda message: launcher._append_log(self.config, message)
+        )
+        if synced.get("found"):
+            # 库内容变了，必须让扫描缓存失效，否则界面仍显示旧状态
+            self._invalidate_mods()
+        return synced
+
+    # ------------------------------------------------------------------
+    # 角色归属确认（匹配不确定时弹窗让用户选择）
+    # ------------------------------------------------------------------
+    def known_characters(self) -> list[str]:
+        """可选角色名单，供弹窗下拉使用。"""
+        names = [name for name, _aliases in core.load_character_aliases()]
+        for mod in self._mods():
+            group = (mod.group or "").strip()
+            if group and group not in names and group != "未分类" and not mod.is_dependency:
+                names.append(group)
+        return names
+
+    def pending_characters(self) -> dict[str, Any]:
+        """列出**角色归属不确定**的 Mod，供界面弹窗让用户选择。
+
+        用户需求（原话）：「如果不确定就弹窗让用户选择」。
+
+        `confidence` 的语义见 `core.match_character_detail`：
+        ``low`` = 匹配到了但无法确定谁才是主体（例如名字写在括号说明里、或出现多个
+        角色名分不清主次）；``none`` = 一个都没匹配到。两者都交给用户定夺 ——
+        猜错的代价是同角色互斥失效，两个同角色 Mod 会同时生效并崩游戏。
+        """
+        pending: list[dict[str, Any]] = []
+        for mod in self._mods():
+            if mod.is_dependency:
+                continue
+            if mod.char_confidence in ("low", "none"):
+                pending.append({
+                    "id": mod.id,
+                    "name": mod.name,
+                    "path": str(mod.path),
+                    "group": mod.group,
+                    "confidence": mod.char_confidence,
+                    "candidates": list(mod.char_candidates),
+                })
+        return {"pending": pending, "total": len(pending), "known": self.known_characters()}
+
+    def set_mod_character(self, mod_id: str, character: str) -> dict[str, Any]:
+        """把用户选定的角色写进该 Mod 的 `mod.meta.json`，此后扫描即为高置信。"""
+        character = (character or "").strip()
+        if not character:
+            return {"ok": False, "message": "角色名不能为空"}
+        target = next((m for m in self._mods() if m.id == mod_id), None)
+        if target is None:
+            return {"ok": False, "message": f"找不到 Mod: {mod_id}"}
+
+        meta_path = target.path / "mod.meta.json"
+        payload: dict[str, Any] = {}
+        if meta_path.is_file():
+            try:
+                loaded = json.loads(meta_path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    payload = loaded
+            except (OSError, json.JSONDecodeError):
+                payload = {}
+        payload["group"] = character
+        payload["character"] = character
+        payload.setdefault("id", target.id)
+        payload.setdefault("name", target.name)
+        try:
+            meta_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError as exc:
+            return {"ok": False, "message": f"写入失败: {exc}"}
+
+        self._invalidate_mods()
+        launcher._append_log(self.config, f"角色归属已确认: {target.name} -> {character}")
+        return {"ok": True, "id": mod_id, "character": character, "meta_path": str(meta_path)}
+
+    def ensure_initialized(self) -> dict[str, Any]:
+        """手动跑一次文件层初始化自检（不含注入库；一键启动请用 prepare_launch）。"""
+        from . import initialize
+
+        launcher._append_log(self.config, "初始化自检 requested from UI")
+        report = initialize.ensure_all(
+            self.config, log=lambda message: launcher._append_log(self.config, message)
+        )
+        return report
+
+    # ------------------------------------------------------------------
+    # 组件版本 / 更新
+    # ------------------------------------------------------------------
+    def component_versions(self) -> dict[str, Any]:
+        from . import updates
+
+        return updates.component_versions(self.config)
+
+    def check_component_updates(self) -> dict[str, Any]:
+        from . import updates
+
+        launcher._append_log(self.config, "检查组件更新 requested from UI")
+        return updates.check_updates(
+            self.config, log=lambda message: launcher._append_log(self.config, message)
+        )
+
+    def update_component(self, name: str, url: str = "") -> dict[str, Any]:
+        from . import updates
+
+        launcher._append_log(self.config, f"更新组件 {name} requested from UI")
+        try:
+            if name == "reshade":
+                return updates.update_reshade_base(
+                    self.config, log=lambda message: launcher._append_log(self.config, message)
+                )
+            if name == "secondary_motion":
+                return updates.update_secondary_motion(
+                    self.config, url=url, log=lambda message: launcher._append_log(self.config, message)
+                )
+        except Exception as exc:  # noqa: BLE001
+            launcher._append_log(self.config, f"更新 {name} 失败: {exc}")
+            return {"ok": False, "message": str(exc)}
+        return {"ok": False, "message": f"未知组件: {name}"}
+
+    def enable_d3d12_proxy_mode(self) -> dict[str, Any]:
+        launcher._append_log(self.config, "d3d12 proxy mode requested from UI")
+        try:
+            return launcher.enable_d3d12_proxy_mode(self.config)
+        except Exception as exc:  # noqa: BLE001
+            launcher._append_log(self.config, f"d3d12 proxy mode failed: {exc}")
+            raise
+
+    def restore_d3d12_proxy_mode(self) -> dict[str, Any]:
+        launcher._append_log(self.config, "restore d3d12 proxy mode requested from UI")
+        try:
+            return launcher.restore_d3d12_proxy_mode(self.config)
+        except Exception as exc:  # noqa: BLE001
+            launcher._append_log(self.config, f"restore d3d12 proxy mode failed: {exc}")
+            raise
+
+    # ------------------------------------------------------------------
+    # game directory injection audit
+    # ------------------------------------------------------------------
+    def audit_game_injections(self) -> dict[str, Any]:
+        """Report third-party loader DLLs / plugin payloads in the game folder.
+
+        A proxy named ``d3dcompiler_47.dll``/``vulkan-1.dll``/... both replaces
+        the genuine system module and injects ``plugin/*.dll`` into the game.
+        Such leftovers invalidate every crash report, so the UI surfaces them.
+        """
+        try:
+            return reshade_integration.audit_game_dir_injections(self.config)
+        except Exception as exc:  # noqa: BLE001
+            launcher._append_log(self.config, f"audit game injections failed: {exc}")
+            return {"ok": False, "message": str(exc), "suspicious": [], "disabled": []}
+
+    def clean_game_injections(self) -> dict[str, Any]:
+        """Park loader proxies next to the game and restore the original module."""
+        launcher._append_log(self.config, "clean game dir injections requested from UI")
+        try:
+            result = reshade_integration.disable_game_dir_injections(self.config)
+        except Exception as exc:  # noqa: BLE001
+            launcher._append_log(self.config, f"clean game injections failed: {exc}")
+            raise
+        for item in result.get("disabled", []):
+            launcher._append_log(self.config, f"game injection disabled: {item}")
+        for item in result.get("restored", []):
+            launcher._append_log(self.config, f"game module restored: {item}")
+        for item in result.get("plugins", []):
+            launcher._append_log(self.config, f"plugin payload disabled: {item}")
+        return result
+
+    def restore_game_injections(self) -> dict[str, Any]:
+        """Undo :meth:`clean_game_injections` from its manifest."""
+        launcher._append_log(self.config, "restore game dir injections requested from UI")
+        try:
+            return reshade_integration.restore_game_dir_injections(self.config)
+        except Exception as exc:  # noqa: BLE001
+            launcher._append_log(self.config, f"restore game injections failed: {exc}")
+            raise
+
+
+    def rollback(self) -> dict[str, Any]:
+        import shutil
+
+        actions = []
+        errors = []
+        warnings = []
+        managed = self.config.managed_mods_path
+        try:
+            actions.extend(f"removed {item}" for item in activation.cleanup_staging(self.config.staging_mods_path))
+        except OSError as exc:
+            errors.append(f"remove managed staging failed: {exc}")
+        if managed.exists():
+            try:
+                shutil.rmtree(managed)
+                actions.append(f"removed {managed}")
+            except OSError as exc:
+                errors.append(f"remove managed staging failed: {exc}")
+        backup = self.config.user_ini_path.with_suffix(self.config.user_ini_path.suffix + ".mc.bak")
+        if backup.is_file():
+            try:
+                shutil.copy2(backup, self.config.user_ini_path)
+                actions.append(f"restored {self.config.user_ini_path}")
+            except OSError as exc:
+                errors.append(f"restore d3dx_user.ini failed: {exc}")
+        xxmi = launcher.restore_xxmi_extra_libraries(self.config)
+        if xxmi.get("ok"):
+            actions.append(f"restored {xxmi.get('config_path')}")
+        else:
+            warnings.append(str(xxmi.get("message")))
+        integration = reshade_integration.remove_existing_reshade(self.config)
+        actions.extend(f"removed {path}" for path in integration.get("removed", []))
+        actions.extend(f"restored {path}" for path in integration.get("restored", []))
+        safe = launcher.restore_anti_cheat_safe_mode(self.config)
+        actions.extend(safe.get("actions", []))
+        warnings.extend(safe.get("warnings", []))
+        return {"ok": not errors, "actions": actions, "warnings": warnings, "errors": errors}
+
+    def open_path(self, path: str) -> dict[str, Any]:
+        target = Path(path).expanduser().resolve()
+        if not target.exists():
+            return {"ok": False, "message": f"path does not exist: {target}"}
+        if sys.platform.startswith("win"):
+            os.startfile(str(target))  # type: ignore[attr-defined]
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(target)])
+        else:
+            subprocess.Popen(["xdg-open", str(target)])
+        return {"ok": True, "path": str(target)}
+
+    def log(self) -> dict[str, Any]:
+        return {
+            "library": str(self.config.library_path),
+            "staging": str(self.config.staging_mods_path),
+            "runtime": str(self.config.runtime_path),
+            "controller": str(self.config.controller_dir),
+            "reshade": str(self.config.reshade_runtime_path),
+        }
