@@ -600,10 +600,24 @@ def _check_mod_conflicts(config: AppConfig, report: Report, log: Callable[[str],
 
 
 def _check_secondary_motion(config: AppConfig, report: Report, log: Callable[[str], None] | None) -> None:
+    from . import secondary_motion
+
     if not config.secondary_motion_injection:
+        # 开关关着 = 「乳摇不生效」。若游戏目录里还留着上次装进去的注入，顺手卸干净：
+        # 否则会出现"界面关了、游戏里其实还在生效"，做干净本体对照测试时也会一直被它干扰。
+        try:
+            state = secondary_motion.status(config)
+            if state.get("injected") or state.get("plugin_exists"):
+                result = secondary_motion.remove_injection(config, log=log)
+                count = len(result.get("actions") or [])
+                report.add("sbm", True, f"已按开关关闭乳摇注入（移走 {count} 项）", fixed=True)
+                report.action("卸掉乳摇注入（开关已关闭）")
+                return
+        except Exception as exc:  # noqa: BLE001
+            report.add("sbm", False, f"卸掉乳摇注入失败: {exc}", manual=True)
+            return
         report.add("sbm", True, "已在设置里关闭乳摇注入自检")
         return
-    from . import secondary_motion
 
     if config.secondary_motion_exe is None:
         report.add("sbm", False, "未找到乳摇工具目录（可在设置页配置）", manual=True)

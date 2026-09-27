@@ -221,14 +221,19 @@ def remove_injection(config: AppConfig, log: Callable[[str], None] | None = None
         except OSError as exc:
             warnings.append(f"处理 {name} 失败: {exc}")
 
-    plugin_target = game / "plugin" / PLUGIN_NAME
-    if plugin_target.is_file():
-        try:
-            disabled = plugin_target.with_suffix(".dll.mc_disabled")
-            shutil.move(str(plugin_target), str(disabled))
-            actions.append(f"停用 plugin\\{PLUGIN_NAME}")
-        except OSError as exc:
-            warnings.append(f"停用插件失败: {exc}")
+    # 直接删掉 plugin\sbm.dll（以及历史遗留的 .mc_disabled 残渣），不留在游戏目录：
+    # 工具目录里本来就有 sbm.dll 源文件，ensure_injection 随时能装回来，
+    # 而在游戏目录留一份"已停用副本"会让「本体是否干净」永远判定不通过。
+    plugin_dir = game / "plugin"
+    if plugin_dir.is_dir():
+        for candidate in sorted(plugin_dir.glob(f"{PLUGIN_NAME}*")):
+            if not candidate.is_file():
+                continue
+            try:
+                candidate.unlink()
+                actions.append(f"移除 plugin\\{candidate.name}")
+            except OSError as exc:
+                warnings.append(f"移除 {candidate.name} 失败: {exc}")
 
     for action in actions:
         _log(log, action)
