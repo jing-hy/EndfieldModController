@@ -25,6 +25,16 @@ reshade-shaders/
 *.dll
 *.exe
 
+# ── 例外：随包分发的 DLSS 运行库资产（**必须进仓库**）──────────
+# nvngx_dlss*.dll 一百多 MB，超过 GitHub 单文件 100 MiB 上限，
+# 所以压缩 + 分卷放在 assets/nvngx/，首次启动自动展开到 runtime\dlss5\，
+# 用户不必自己去找运行库。重新打包：python scripts/pack_nvngx_assets.py
+!assets/
+!assets/nvngx/
+!assets/nvngx/*.xz
+!assets/nvngx/*.part*
+!assets/nvngx/manifest.json
+
 # ── 凭据 / 密钥 —— 绝不提交 ──────────────────────────────────
 .env
 .env.*

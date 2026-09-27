@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "notes": "NVIDIA DLSS 运行库（nvngx_dlss*.dll）。为了绕开 GitHub 单文件 100 MiB 上限，压缩后按需分卷；首次启动由 EndfieldModController 自动拼接解压到 runtime/dlss5/。重新打包：python scripts/pack_nvngx_assets.py",
+  "compression": "xz (BCJ x86 + LZMA2 preset 9e)",
+  "files": {
+    "nvngx_dlss.dll": {
+      "size": 58977904,
+      "sha256": "be6e434a94ca32499515eb62ca0e6c274526055d568d0426e4c652dcdfb6ee6e",
+      "packed_bytes": 22340984,
+      "packed_sha256": "858b8d0c756bba0f1a212efe906240ba19255e015df41c8d6096521bc234b2e0",
+      "parts": [
+        "nvngx_dlss.dll.xz"
+      ],
+      "origin": "NVIDIA DLSS runtime library (nvngx_dlss*.dll)"
+    },
+    "nvngx_dlssnr.dll": {
+      "size": 165840496,
+      "sha256": "e16bcf15e16e13f527491cdf7845b2fe6521a738d8f7c9c721866a8496e1fc8e",
+      "packed_bytes": 108400188,
+      "packed_sha256": "3959d9302a4176f7c969da59037eab579ced4e86d482e889cc81096f26013492",
+      "parts": [
+        "nvngx_dlssnr.dll.xz.part1",
+        "nvngx_dlssnr.dll.xz.part2"
+      ],
+      "origin": "NVIDIA DLSS runtime library (nvngx_dlss*.dll)"
+    }
+  }
+}

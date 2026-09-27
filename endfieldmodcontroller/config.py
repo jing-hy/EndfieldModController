@@ -54,6 +54,10 @@ class AppConfig:
     efmi_injection: bool = True
     # DLSS5 素材目录（缺文件时从这里补齐），留空则自动探测
     dlss5_source_dir: str = ""
+    # 随包分发的运行库资产目录（assets/nvngx，内含 manifest.json 与压缩分卷）。
+    # **一般不用改**：留空即自动探测（工作区 / exe 旁边 / PyInstaller 解包目录）。
+    # 首次启动会把缺失的 nvngx_dlss*.dll 从这里展开到 dlss5_dir。
+    nvngx_assets_dir: str = ""
     # 是否把内置的新版 DLSS 运行库（nvngx_dlss / nvngx_dlssnr）部署进游戏目录。
     # 默认 False —— 实测新版 nvngx 会让游戏起不来，只在缺失时才补齐。
     deploy_new_nvngx: bool = False

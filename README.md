@@ -52,17 +52,39 @@ XXMI Launcher 启动游戏时注入上表中的 DLL，「注入库」由本程�
 
 ---
 
-## 三、本仓库**不包含**什么
+## 三、本仓库包含 / 不包含什么
 
-为避免误传个人数据与超限文件，仓库里**没有**：
+### 已内置：NVIDIA DLSS 运行库（开箱即用）
+
+`nvngx_dlss.dll`（56 MB）+ `nvngx_dlssnr.dll`（158 MB）**已随仓库分发**，放在
+`assets\nvngx\`，**压缩分卷**存放（合计约 125 MB）。首次「一键启动」时程序会自动
+拼接解压回 `runtime\dlss5\` —— **你不需要自己去游戏目录或 NVIDIA 官网找运行库**。
+
+```text
+assets\nvngx\
+├─ manifest.json                     原始大小 / sha256 / 分卷清单
+├─ nvngx_dlss.dll.xz                 22 MB（单文件即可）
+├─ nvngx_dlssnr.dll.xz.part1         52 MB ┐ 压缩后仍有 103 MB，
+└─ nvngx_dlssnr.dll.xz.part2         52 MB ┘ 超过 GitHub 上限，故切成两卷
+```
+
+> 为什么要这么麻烦：GitHub 对**单个文件**有 100 MiB 硬上限，超了 push 会被直接拒绝。
+> 压缩后 `nvngx_dlssnr.dll` 还有 108,400,188 B，所以必须分卷。分卷只是存储形式，
+> 用户侧无感 —— 启动时按序拼接 + 流式解压，解压完比对 sha256 通过才落盘（原子改名，
+> 断电/磁盘满不会留下半截的 DLL）。
+>
+> 重新打包（换了运行库版本时）：`python scripts\pack_nvngx_assets.py`，
+> 校验产物：`python scripts\pack_nvngx_assets.py --check`。
+
+### 不包含（避免误传个人数据与体积失控）
 
 - `library/` —— 你自备的服装 Mod（体积大且各有作者授权）
 - `runtime/` —— 第三方组件、日志、崩溃包、备份（体积可达数十 GB）
 - `config.json` —— 你的本机路径配置（仓库里给的是 `config.example.json`）
 - `_tmp/`、`dist/` —— 临时产物与构建输出
-- NVIDIA 运行库（`nvngx_dlss*.dll`，百余 MB）—— 请从游戏目录或 NVIDIA 官方获取，**不随本仓库分发**
 
-第三方组件请按第九节各原仓库自行下载，或使用 Release 里的 exe。
+其余第三方组件（XXMI Launcher / EFMI / ReShade 底座与各 addon）**不用手动下载**：
+界面的「依赖」页可以一键自动安装（见第九节）。
 
 ---
 
@@ -116,10 +138,11 @@ Windows 下也可以直接 `run.bat` / `run.vbs`。
 
 ## 五、启动时会自动做什么
 
-点「一键启动」会依次执行初始化自检（`initialize.ensure_all`），当前共 **14 项**：
+点「一键启动」会依次执行初始化自检（`initialize.ensure_all`），当前共 **16 项**：
 
 | 检查 | 内容 |
 | --- | --- |
+| **`nvngx_assets`** | 随包分发的 DLSS 运行库（`assets\nvngx\` 压缩分卷）是否已在 `runtime\dlss5\` 展开；缺失或损坏时自动拼接解压，**解压后比对 sha256 通过才落盘** |
 | `dlss5_dir` | 底座必需的 `d3d12.dll`、各 addon、plugin、shader 是否在位，缺则从素材目录/备份/内置副本补齐 |
 | `reshade_ini` | `ReShade.ini` 是否含 `[endfield-enhancer]` 段、路径是否指向当前目录，缺则用模板重建（旧文件留 `.bak`） |
 | **`dlss5_preset`** | `PresetPath` 指向的 preset 是否存在**且启用了 `DLSS5_Feed`** —— 缺了它 DLSS5 **静默不工作**（见第六节） |
@@ -217,16 +240,45 @@ tests/              # 单元测试
 | DLSS5-Feeder | `dlss5-feed.addon64` 与 `DLSS5_Feed.fx` | [jlrouzies-fr/DLSS5-Feeder](https://github.com/jlrouzies-fr/DLSS5-Feeder) |
 | iMMERSE / MartysMods | `MartysMods_LAUNCHPAD` 等效果 | [clayne/iMMERSE](https://github.com/clayne/iMMERSE) / [martymcmodding](https://github.com/martymcmodding/martymcmodding) |
 | DLSS5 素材整合 | 底座与 addon 的打包来源 | [faisalkindi/DLSS5oneclick](https://github.com/faisalkindi/DLSS5oneclick) |
+| **Endfield Enhancer（第一人称 / 相机）** | 第一人称视角插件 | **B 站 UP 主 Hirahido** 制作，感谢授权与分享 |
 | **ShakingBreastManager** | **次级运动 / 身体物理插件（乳摇）** | [Sp1cHless/Arknights-Endfield-Plugin-Secondary-bodyphysics](https://github.com/Sp1cHless/Arknights-Endfield-Plugin-Secondary-bodyphysics) |
 | 3DMigoto | EFMI 所基于的框架 | [bo3b/3Dmigoto](https://github.com/bo3b/3Dmigoto) |
 
-NVIDIA 运行库（`nvngx_dlss.dll` / `nvngx_dlssnr.dll`）**不随本仓库或便携包分发**，请从游戏目录或 NVIDIA 官方渠道获取。
+NVIDIA 运行库（`nvngx_dlss.dll` / `nvngx_dlssnr.dll`）**已随本仓库内置**
+（`assets\nvngx\`，压缩分卷约 125 MB），首次启动自动展开到 `runtime\dlss5\`，
+**无需手动获取**。重新打包见第三节。
 
 本项目的路线参考了 B 站教程 `BV1XMh76UEA5`《以防你不知道，你也可以终末地+XXMI+DLSS5+第一人称视角》，感谢原作者的探索。
+**第一人称插件（Endfield Enhancer）由 B 站 UP 主 Hirahido 制作**，特此致谢。
 
 ---
 
-## 十、测试
+## 十、版本与更新
+
+- **版本号出现在窗口标题与界面右上角**（如 `EndfieldModController v0.2.0`）。右上角徽标会自动
+  对比本仓库 Release 的 tag：**有新版会高亮闪烁**，点一下即可查看更新说明、下载并自动更新
+  （替换 exe 后自动重启；任何一步失败都会自动回滚旧版本，全程不弹命令行黑窗）。
+- **「一键启动」自带组件自愈**（用户要求）：随包资产缺失就地展开；在线组件
+  （ReShade 底座 / DLSS5-Feeder / iMMERSE shader）**只补缺失的**，已就位就完全跳过 ——
+  不联网、不拖慢启动。想每次启动都顺带升级到最新，打开设置里的「启动前自动更新依赖」。
+- 需要一次装齐时：依赖页「自动安装/更新」、设置页「一键安装/更新全部组件」。
+- 源码运行模式下不会自动替换自己，只提示 `git pull`。
+
+### 发布新版本要做什么
+
+1. 改 `endfieldmodcontroller/version.py` 里的 `__version__`（窗口标题、更新检测都用它）；
+2. `python scripts\build_exe.py` 重新构建 `dist\EndfieldModController.exe`；
+3. 把 **exe** 和 **`assets` 资产包**都传上去，Release 的 tag 必须是 `v<版本号>`；
+4. 组件有更新时重新打包随包资产：`python scripts\pack_nvngx_assets.py`。
+
+> **Release 需要两个附件**：`EndfieldModController.exe`（约 29 MB，单文件）与
+> `assets-bundle.zip`（把仓库的 `assets\` 目录压进去，约 125 MB）。
+> 单文件 exe 装不下 125 MB 的运行库，所以程序启动时若发现本地没有 `assets\`，
+> 会自动从本仓库 Release 下载这个资产包再展开 —— 用户只下 exe 也能开箱即用。
+
+---
+
+## 十一、测试
 
 ```bash
 python -m pytest tests -q          # 单元测试
@@ -235,7 +287,7 @@ python scripts/self_check.py       # 测试 + 构建产物检查
 
 ---
 
-## 十一、免责声明
+## 十二、免责声明
 
 - 使用 Mod 与第三方注入**可能违反游戏 ToS**，存在账号风险，请自行判断。
 - 本程序**默认不写游戏目录**：仅在你确认的注入路径上操作，所有覆盖都会留下可回滚备份。

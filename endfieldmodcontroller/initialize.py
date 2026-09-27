@@ -20,6 +20,7 @@ import zipfile
 from pathlib import Path
 from typing import Any, Callable
 
+from . import runtime_assets
 from .config import AppConfig
 
 # DLSS5 目录里必须具备的最小文件集（缺一不可，否则三件套跑不起来）
@@ -124,6 +125,51 @@ class Report:
 # ---------------------------------------------------------------------------
 # 各项检查
 # ---------------------------------------------------------------------------
+def _check_bundled_assets(config: AppConfig, report: Report, log: Callable[[str], None] | None) -> None:
+    """随包分发的二进制资产：缺失时从 `assets\\` 下的压缩分卷展开。
+
+    两组：
+
+    * `assets\\nvngx\\` —— DLSS 运行库（`nvngx_dlss.dll` / `nvngx_dlssnr.dll`）。
+      NVIDIA 官方 SDK 只给 `nvngx_dlss.dll`，`nvngx_dlssnr.dll` 没有官方直链；
+      压缩后 103 MB 又超过 GitHub 单文件 100 MiB 上限，所以只能压缩 + 分卷随包。
+    * `assets\\dlss5\\` —— DLSS5 底座里**没有公开上游**的三个 addon
+      （第一人称 Enhancer、ReShade 面板汉化、RenoDX-DLSS5 汉化版）。
+
+    展开是一次性慢操作（合计约 6 秒），所以只补缺失的，并且必须给进度。
+    """
+    found = runtime_assets.manifest_entries(config)
+    if not found:
+        report.add(
+            "bundled_assets", False,
+            "找不到随包资产（assets\\nvngx\\manifest.json / assets\\dlss5\\manifest.json）"
+            "—— 请确认源码/便携包完整",
+            manual=True,
+        )
+        return
+
+    state: dict[str, int] = {}
+
+    def on_progress(name: str, done: int, total: int) -> None:
+        if not total:
+            return
+        step = done * 4 // total
+        if state.get(name) != step:
+            state[name] = step
+            _log(log, f"  展开 {name}: {step * 25}% ({done // 1048576}/{total // 1048576} MB)")
+
+    results = runtime_assets.ensure_all(config, progress=on_progress, log=log)
+    for result in results:
+        key = f"{result.group}:{result.name}" if result.group and result.name != "*" else "bundled_assets"
+        if result.status == "present":
+            report.add(key, True, result.message)
+        elif result.status == "extracted":
+            report.add(key, True, result.message, fixed=True)
+            report.action(f"展开内置资产 {result.name}")
+        else:
+            report.add(key, False, result.message, manual=True)
+
+
 def _check_dlss5_dir(config: AppConfig, report: Report, log: Callable[[str], None] | None) -> None:
     dlss5 = config.dlss5_path
     if not dlss5.is_dir():
@@ -638,6 +684,8 @@ def _check_staging(config: AppConfig, report: Report, log: Callable[[str], None]
 def ensure_all(config: AppConfig, log: Callable[[str], None] | None = None) -> dict[str, Any]:
     """逐项校验 + 补齐，返回完整报告。"""
     report = Report()
+    # 先把随包资产展开（DLSS5 底座与游戏目录补齐都要用到它们）
+    _check_bundled_assets(config, report, log)
     _check_dlss5_dir(config, report, log)
     _check_reshade_ini(config, report, log)
     _check_dlss5_preset(config, report, log)

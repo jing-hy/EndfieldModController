@@ -410,16 +410,19 @@ async function refreshFromState() {
   renderDependencies();
 }
 
-async function startFullUpdate(dryRun) {
-  $('dep-results').textContent = '';
+async function startFullUpdate(dryRun, statusEl) {
+  const out = statusEl || $('dep-results');
+  out.textContent = dryRun ? '检查中...' : '自动安装/更新中...';
   $('dep-progress').value = 0;
   $('dep-progress').max = 100;
   $('dep-progress-text').textContent = dryRun ? '检查中...' : '自动安装/更新中...';
   await call('start_full_update', dryRun);
-  await pollDependencyProgress();
+  await pollDependencyProgress(out);
 }
 
-async function pollDependencyProgress() {
+async function pollDependencyProgress(statusEl) {
+  const out = statusEl || $('dep-results');
+  const isDepPanel = out === $('dep-results');
   while (true) {
     const progress = await call('get_dependency_progress');
     const total = progress.total || 0;
@@ -428,9 +431,19 @@ async function pollDependencyProgress() {
     $('dep-progress').max = 100;
     $('dep-progress').value = Math.max(0, Math.min(100, percent));
     $('dep-progress-text').textContent = `${current}/${total} ${progress.message || ''}`;
+    if (!isDepPanel) {
+      // 在别处触发时（设置页的一键安装/更新），把实时进度写到那块面板里
+      out.textContent = `${percent.toFixed(0)}%  ${current}/${total}\n${progress.message || ''}`
+        + ((progress.log || []).length ? '\n\n' + progress.log.slice(-12).join('\n') : '');
+    }
     if (!progress.running) {
-      $('dep-results').textContent = JSON.stringify(progress.results || [], null, 2);
+      out.textContent = JSON.stringify(progress.results || [], null, 2);
       setStatus('依赖任务完成');
+      try {
+        await refreshFromState();
+      } catch (err) {
+        /* 刷新失败不影响任务结果展示 */
+      }
       break;
     }
     await new Promise(resolve => setTimeout(resolve, 400));
@@ -826,6 +839,86 @@ function bind() {
     };
   }
 
+  // 右上角：版本号 + 更新检测（对比 GitHub release 的 tag）
+  async function initAppUpdate() {
+    const btn = $('app-update-btn');
+    if (!btn) return;
+    try {
+      const info = await call('get_app_info');
+      btn.textContent = `v${info.version}`;
+      btn.dataset.version = info.version;
+    } catch (err) {
+      btn.textContent = 'v?';
+    }
+    // 静默检查一次（有缓存，不会每次都打网络）
+    try {
+      const r = await call('check_app_update', true);
+      if (r.update_available) {
+        btn.classList.add('has-update');
+        btn.textContent = `v${r.current} → v${r.latest}`;
+        btn.title = `发现新版本 v${r.latest}，点这里更新`;
+        setStatus(`发现新版本 v${r.latest}`);
+      } else {
+        btn.title = r.error ? `更新检查：${r.error}` : `已是最新（v${r.current}）`;
+      }
+    } catch (err) {
+      /* 离线时保持安静 */
+    }
+  }
+
+  async function runAppUpdate(checkOnly) {
+    setStatus('正在检查程序更新…');
+    const r = await call('check_app_update', false);
+    const lines = [
+      `当前版本：v${r.current}`,
+      `最新版本：v${r.latest || '未知'}${r.update_available ? '  【有新版】' : ''}`,
+      r.frozen ? `程序路径：${r.exe}` : '运行模式：源码（自动替换不可用，请 git pull）',
+    ];
+    if (r.published) lines.push(`发布时间：${r.published}`);
+    if (r.asset) lines.push(`更新包：${r.asset}  ${((r.asset_size || 0) / 1048576).toFixed(1)} MB`);
+    if (r.notes) lines.push('', '更新说明：', r.notes.slice(0, 800));
+    if (r.error) lines.push('', `错误：${r.error}`);
+    if ($('update-status')) $('update-status').textContent = lines.join('\n');
+
+    if (r.error) { setStatus('检查更新失败'); return r; }
+    if (checkOnly || !r.update_available) {
+      setStatus(r.update_available ? `有新版 v${r.latest}` : '已是最新');
+      if (!checkOnly) alert(`已是最新版本 v${r.current}`);
+      return r;
+    }
+    if (!confirm(`发现新版本 v${r.latest}（当前 v${r.current}）\n\n现在下载并自动更新吗？\n· 更新时程序会自动重启\n· config.json 与 Mod 库不受影响\n· 失败会自动回滚旧版本`)) return r;
+
+    setStatus('正在下载更新包…');
+    const dl = await call('download_app_update');
+    if (!dl.ok) {
+      alert(`下载失败：${dl.message || '未知错误'}`);
+      setStatus('下载失败');
+      return r;
+    }
+    if (!r.frozen) {
+      alert(`更新包已下载到：\n${dl.path}\n\n源码运行模式不会自动替换，请手动更新（git pull）。`);
+      setStatus('已下载（源码模式）');
+      return r;
+    }
+    setStatus('正在替换并重启…');
+    const ap = await call('apply_app_update');
+    if (!ap.ok) {
+      alert(`更新失败：${ap.message || '未知错误'}`);
+      setStatus('更新失败');
+      return r;
+    }
+    alert(ap.message || '正在更新，程序会自动重启为新版。');
+    return r;
+  }
+
+  if ($('app-update-btn')) {
+    $('app-update-btn').onclick = () => runAppUpdate(false);
+  }
+  if ($('update-app-check-btn')) {
+    $('update-app-check-btn').onclick = () => runAppUpdate(true);
+  }
+  initAppUpdate();
+
   // 组件更新
   if ($('update-check-btn')) {
     $('update-check-btn').onclick = async () => {
@@ -833,16 +926,34 @@ function bind() {
       const r = await call('check_component_updates');
       const rs = r.reshade || {};
       const sm = r.secondary_motion || {};
+      const d5 = r.dlss5 || {};
       const lines = [
         `ReShade 底座 : 当前 ${rs.current || '?'}  →  最新 ${rs.latest || '?'}  ${rs.update_available ? '【有新版】' : ''}`,
       ];
       if (rs.note) lines.push(`   ${rs.note}`);
       lines.push(`乳摇插件     : 当前 ${sm.current || '?'}  →  最新 ${sm.latest || '?'}  ${sm.update_available ? '【有新版】' : ''}`);
       if (sm.asset) lines.push(`   ${sm.asset}  ${((sm.size || 0) / 1048576).toFixed(1)} MB  ${sm.published || ''}`);
+      const fd = d5.dlss5_feed || {};
+      if (fd.latest) {
+        lines.push(`DLSS5-Feeder : 当前 ${fd.current || '未安装'}  →  最新 ${fd.latest}  ${fd.update_available ? '【可更新】' : ''}`);
+      }
+      const im = d5.immersse || {};
+      if (im.latest) {
+        lines.push(`iMMERSE      : 当前 ${im.current || '未安装'}  →  最新 ${im.latest}  ${im.update_available ? '【可更新】' : ''}`);
+      }
       if ((r.errors || []).length) lines.push('错误: ' + r.errors.join(' | '));
       $('update-status').textContent = lines.join('\n');
       setStatus('更新检查完成');
     };
+    // 一键装齐所有"不随包分发"的组件（含随包资产展开 + XXMI/EFMI + DLSS5 组件 + 乳摇）
+    if ($('update-all-btn')) {
+      $('update-all-btn').onclick = async () => {
+        if (!confirm('将自动安装/更新所有组件：\n\n· 随包资产展开（DLSS 运行库、DLSS5 组件包）\n· XXMI Launcher / XXMI 库 / EFMI\n· ReShade 底座、DLSS5-Feeder、iMMERSE shader\n· 乳摇插件\n\n需要联网，继续？')) return;
+        setStatus('正在一键安装/更新全部组件…');
+        await startFullUpdate(false, $('update-status'));
+        setStatus('全部组件处理完成');
+      };
+    }
     $('update-reshade-btn').onclick = async () => {
       if (!confirm('将从 reshade.me 下载官方 ReShade Addon，替换 runtime\\dlss5\\d3d12.dll（旧版自动备份）。\n官方新版可能与 DLSS5 插件不兼容，出问题可用备份回退。继续？')) return;
       setStatus('正在更新 ReShade 底座…');

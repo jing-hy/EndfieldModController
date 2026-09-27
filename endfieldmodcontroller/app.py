@@ -15,6 +15,7 @@ except Exception:  # pragma: no cover
     webview = None
 
 from .api import EndfieldModControllerApi
+from .version import WINDOW_TITLE
 
 def _resource_root() -> Path:
     """**只读资源**（web/ 等）的根目录。
@@ -43,7 +44,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     webview.create_window(
-        "EndfieldModController",
+        WINDOW_TITLE,
         str(WEB_DIR / "index.html"),
         js_api=api,
         width=1180,

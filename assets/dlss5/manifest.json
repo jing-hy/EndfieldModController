@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "group": "dlss5",
+  "notes": "DLSS5 底座里没有公开下载源的三个 addon：第一人称/相机插件（Endfield Enhancer）、ReShade 面板汉化、RenoDX-DLSS5 汉化版。上游仓库均未发布 release（已逐一核查），所以只能随包分发，首次启动自动展开到 dlss5_dir。其余组件（ReShade 底座、DLSS5-Feeder、iMMERSE shader、XXMI/EFMI）走在线自动安装，不在本资产内。",
+  "compression": "xz (BCJ x86 + LZMA2 preset 9e)",
+  "files": {
+    "renodx-dlss5-4.7_汉化.addon64": {
+      "size": 1732608,
+      "sha256": "897f082dbdfbda460ea4ca7ca9b224b3684f391dfae87e2b28b1bdde93c2dbba",
+      "packed_bytes": 457116,
+      "packed_sha256": "4c34056c5c9887406753765c8597d1b160622a6eba97a161d5becb5987f950f5",
+      "parts": [
+        "renodx-dlss5-4.7_汉化.addon64.xz"
+      ],
+      "origin": "DLSS5 addon bundle (community build; no public upstream found)"
+    },
+    "renodx-endfield-enhancer.addon64": {
+      "size": 3760128,
+      "sha256": "041cfbf0def50eef5e122c4c1c1b9f697a9faf469a2bf1149ef5faf8ac8268ed",
+      "packed_bytes": 954664,
+      "packed_sha256": "b39f8fe0817af9cffe4bc3d401b52b956bb7d06766fad5bb316a25602e29cc8e",
+      "parts": [
+        "renodx-endfield-enhancer.addon64.xz"
+      ],
+      "origin": "DLSS5 addon bundle (community build; no public upstream found)"
+    },
+    "trans-zh.addon64": {
+      "size": 684855,
+      "sha256": "cb1bd025a5630b9b429b55fb080b9eca2205b210f82ba508b2ceecd8b919ad11",
+      "packed_bytes": 145304,
+      "packed_sha256": "aadb235d4f00f66f100087c486741f346bef4d9037bbc2e51bbe0628e0e6a4a2",
+      "parts": [
+        "trans-zh.addon64.xz"
+      ],
+      "origin": "DLSS5 addon bundle (community build; no public upstream found)"
+    }
+  }
+}

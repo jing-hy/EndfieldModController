@@ -11,7 +11,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from . import activation, core, dependencies, diagnostics, integrity, launcher, reshade, reshade_integration, runtime_deps
+from . import activation, core, dependencies, diagnostics, dlss5_fetcher, integrity, launcher, reshade, reshade_integration, runtime_assets, runtime_deps, selfupdate
 from .config import AppConfig, auto_detect_migoto_loader, auto_detect_official_launcher, auto_detect_xxmi
 
 
@@ -21,6 +21,13 @@ class EndfieldModControllerApi:
         self.config.ensure_dirs()
         self._mods_cache = None
         self._dep_task: dict[str, Any] | None = None
+        # 上次自我更新留下的 .old/.new/vbs 残留，启动时清掉
+        try:
+            removed = selfupdate.cleanup_stale(self.config)
+            if removed:
+                launcher._append_log(self.config, f"清理上次更新残留: {', '.join(removed)}")
+        except Exception:  # noqa: BLE001
+            pass
 
     # ------------------------------------------------------------------
     # helpers
@@ -144,6 +151,16 @@ class EndfieldModControllerApi:
             self.config.dependency_manifest_path,
         )
         report.setdefault("manifest", {}).update(runtime_deps.builtin_report(self.config))
+        # 随包分发的 DLSS 运行库 / DLSS5 组件（压缩分卷，缺失时首次启动自动展开）
+        try:
+            report["manifest"].update(runtime_assets.asset_report(self.config))
+        except Exception:  # noqa: BLE001
+            pass
+        # 有公开上游的 DLSS5 组件（可在依赖页一键在线安装）
+        try:
+            report["manifest"].update(dlss5_fetcher.component_report(self.config))
+        except Exception:  # noqa: BLE001
+            pass
         # 乳摇插件也作为一个依赖项出现在列表里（与其他依赖同构，不单列按钮）
         try:
             from . import secondary_motion as sbm_mod
@@ -429,13 +446,57 @@ class EndfieldModControllerApi:
 
         def worker() -> None:
             assert self._dep_task is not None
+            from types import SimpleNamespace as _NS
             try:
                 results = []
+                # ① 随包分发的 DLSS 运行库（压缩分卷）：离线可用，缺失/损坏才展开。
+                #    放在最前 —— 后面的 DLSS5 组件与游戏目录补齐都可能用到它。
+                try:
+                    if dry_run:
+                        for name, item in runtime_assets.asset_report(self.config).items():
+                            results.append(_NS(
+                                key=f"nvngx:{name}",
+                                status=str(item.get("status") or ""),
+                                message=f"内置 {item.get('packed') or ''}".strip(),
+                            ))
+                    else:
+                        for asset in runtime_assets.ensure_all(
+                            self.config,
+                            log=lambda line: self._dep_task["log"].append(line),
+                        ):
+                            results.append(_NS(
+                                key=f"nvngx:{asset.name}",
+                                status={"present": "已就位", "extracted": "已展开"}.get(asset.status, "失败"),
+                                message=asset.message,
+                            ))
+                except Exception as exc:  # noqa: BLE001
+                    results.append(_NS(key="nvngx", status="失败", message=str(exc)))
                 if self.config.use_builtin_runtime:
                     if dry_run:
                         results.extend(runtime_deps.dry_run_results(self.config))
                     else:
                         results.extend(runtime_deps.ensure_all(self.config, progress, byte_progress))
+                # ② DLSS5 组件：有公开上游的那几个（ReShade 底座 / DLSS5-Feeder / iMMERSE shader）
+                try:
+                    if dry_run:
+                        for key, item in dlss5_fetcher.component_report(self.config).items():
+                            results.append(_NS(
+                                key=key,
+                                status=str(item.get("status") or ""),
+                                message=str(item.get("source") or ""),
+                            ))
+                    else:
+                        for item in dlss5_fetcher.ensure_all(
+                            self.config,
+                            log=lambda line: self._dep_task["log"].append(line),
+                        ):
+                            results.append(_NS(
+                                key=str(item.get("key") or "dlss5"),
+                                status=str(item.get("status") or "完成"),
+                                message=str(item.get("message") or ""),
+                            ))
+                except Exception as exc:  # noqa: BLE001
+                    results.append(_NS(key="dlss5", status="失败", message=str(exc)))
                 manifest = dependencies.load_manifest(self.config.dependency_manifest_path)
                 mods = self._mods()
                 selected = set(self.config.selected_mods or [])
@@ -738,6 +799,11 @@ class EndfieldModControllerApi:
         """
         launcher._append_log(self.config, "prepare_launch requested from UI")
         synced = self.import_manual_mods()
+        # 一键启动里**顺带一键更新**（用户要求）：
+        #   ① 随包资产缺失 → 就地展开（离线、秒级）
+        #   ② 在线组件只补**缺失**的，已就位就完全跳过（不联网、不拖慢启动）
+        #   ③ 只有显式打开 auto_update_dependencies 才在启动前一并升级到最新
+        component_update = self._ensure_components_for_launch()
         report = launcher.ensure_injections(self.config)
         return {
             "ok": report.get("ok", True),
@@ -746,7 +812,34 @@ class EndfieldModControllerApi:
             "initialize": report.get("initialize", {}),
             "injection": launcher.dlss5_injection_status(self.config),
             "manual_mods": synced,
+            "component_update": component_update,
         }
+
+    def _ensure_components_for_launch(self) -> dict[str, Any]:
+        """启动前的组件自愈：先补随包资产，再补缺失的在线组件。"""
+        def log(message: str) -> None:
+            launcher._append_log(self.config, message)
+
+        result: dict[str, Any] = {"assets": [], "components": [], "errors": []}
+        try:
+            for item in runtime_assets.ensure_all(self.config, log=log):
+                result["assets"].append({
+                    "name": item.name, "group": item.group,
+                    "status": item.status, "message": item.message,
+                })
+        except Exception as exc:  # noqa: BLE001
+            result["errors"].append(f"随包资产: {exc}")
+        try:
+            upgrade = bool(getattr(self.config, "auto_update_dependencies", False))
+            for item in dlss5_fetcher.ensure_all(self.config, log=log, only_missing=not upgrade):
+                result["components"].append({
+                    "key": item.get("key", ""),
+                    "status": item.get("status", ""),
+                    "message": item.get("message", ""),
+                })
+        except Exception as exc:  # noqa: BLE001
+            result["errors"].append(f"在线组件: {exc}")
+        return result
 
     def import_manual_mods(self) -> dict[str, Any]:
         """把手动放进 Mods 目录的 Mod 收编进库，并在界面里标记为已开启。
@@ -854,13 +947,88 @@ class EndfieldModControllerApi:
 
         return updates.component_versions(self.config)
 
+    # ------------------------------------------------------------------
+    # 程序自身版本 / 自我更新（右上角的更新检测）
+    # ------------------------------------------------------------------
+    def get_app_info(self) -> dict[str, Any]:
+        from .version import REPO_URL
+
+        return {
+            "version": selfupdate.current_version(),
+            "repo": REPO_URL,
+            "frozen": selfupdate.is_frozen(),
+            "exe": str(selfupdate.executable_path() or ""),
+        }
+
+    def check_app_update(self, use_cache: bool = True) -> dict[str, Any]:
+        """对比 GitHub release 的 tag 与本机版本号。"""
+        return selfupdate.check_update(
+            self.config,
+            log=lambda message: launcher._append_log(self.config, message),
+            use_cache=use_cache,
+        )
+
+    def download_app_update(self) -> dict[str, Any]:
+        return selfupdate.download_update(
+            self.config, log=lambda message: launcher._append_log(self.config, message)
+        )
+
+    def apply_app_update(self) -> dict[str, Any]:
+        """替换 exe 并自动重启（源码运行模式只提示 git pull）。"""
+        result = selfupdate.apply_update(
+            self.config, log=lambda message: launcher._append_log(self.config, message)
+        )
+        if result.get("ok") and result.get("restart"):
+            # 留一点时间让前端把提示画出来，然后退出，交给 VBS 换文件并重启
+            threading.Timer(1.8, lambda: os._exit(0)).start()
+        return result
+
     def check_component_updates(self) -> dict[str, Any]:
         from . import updates
 
         launcher._append_log(self.config, "检查组件更新 requested from UI")
-        return updates.check_updates(
+        report = updates.check_updates(
             self.config, log=lambda message: launcher._append_log(self.config, message)
         )
+        # DLSS5 组件（ReShade 底座 / DLSS5-Feeder / iMMERSE）也一并检查
+        try:
+            report["dlss5"] = dlss5_fetcher.check_updates(
+                self.config, log=lambda message: launcher._append_log(self.config, message)
+            )
+        except Exception as exc:  # noqa: BLE001
+            report.setdefault("errors", []).append(f"DLSS5 组件检查失败: {exc}")
+        return report
+
+    def install_dlss5_component(self, key: str, force: bool = False) -> dict[str, Any]:
+        """单项安装/更新一个 DLSS5 组件（依赖页与更新页共用）。"""
+        launcher._append_log(self.config, f"安装 DLSS5 组件 {key} requested from UI")
+        try:
+            result = dlss5_fetcher.install(
+                self.config, key,
+                log=lambda message: launcher._append_log(self.config, message),
+                force=force,
+            )
+        except Exception as exc:  # noqa: BLE001
+            launcher._append_log(self.config, f"安装 {key} 失败: {exc}")
+            return {"ok": False, "changed": False, "key": key, "message": str(exc)}
+        launcher._append_log(self.config, f"安装 {key}: {result.get('message', '')}")
+        return result
+
+    def install_all_new_components(self) -> list[dict[str, Any]]:
+        """把"不随包分发"的在线组件一次装齐（缺什么装什么）。"""
+        launcher._append_log(self.config, "一键安装全部在线组件 requested from UI")
+        results = dlss5_fetcher.ensure_all(
+            self.config,
+            log=lambda message: launcher._append_log(self.config, message),
+            only_missing=False,
+        )
+        if self.config.use_builtin_runtime:
+            try:
+                for item in runtime_deps.ensure_all(self.config):
+                    results.append({"key": item.key, "status": item.status, "message": item.message})
+            except Exception as exc:  # noqa: BLE001
+                results.append({"key": "builtin", "status": "失败", "message": str(exc)})
+        return results
 
     def update_component(self, name: str, url: str = "") -> dict[str, Any]:
         from . import updates
@@ -868,9 +1036,19 @@ class EndfieldModControllerApi:
         launcher._append_log(self.config, f"更新组件 {name} requested from UI")
         try:
             if name == "reshade":
-                return updates.update_reshade_base(
-                    self.config, log=lambda message: launcher._append_log(self.config, message)
+                # 走 dlss5_fetcher（纯标准库解包，不再依赖系统 7z.exe；
+                # 旧的 updates.update_reshade_base 在没有 7z 的机器上直接失败）
+                result = dlss5_fetcher.install(
+                    self.config, "reshade_base",
+                    log=lambda message: launcher._append_log(self.config, message),
                 )
+                return {
+                    "ok": bool(result.get("ok")),
+                    "version": result.get("version", ""),
+                    "message": result.get("message", ""),
+                    "note": result.get("note", ""),
+                    "changed": bool(result.get("changed")),
+                }
             if name == "secondary_motion":
                 return updates.update_secondary_motion(
                     self.config, url=url, log=lambda message: launcher._append_log(self.config, message)

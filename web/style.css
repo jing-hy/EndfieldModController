@@ -315,6 +315,31 @@ pre.code-block { max-height: 330px; }
 }
 
 .theme-toggle { min-width: 72px; border-radius: 999px; }
+
+/* 右上角：版本号 + 更新检测（检出有新版时高亮闪烁） */
+.update-badge {
+  min-width: 76px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  color: var(--muted);
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color .18s, border-color .18s, background .18s;
+}
+.update-badge:hover { color: var(--text); border-color: var(--accent); }
+.update-badge.has-update {
+  color: var(--accent-contrast);
+  background: var(--accent);
+  border-color: var(--accent);
+  animation: updatePulse 1.8s ease-in-out infinite;
+}
+@keyframes updatePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .6; }
+}
 .mod-card .switch { display: inline-flex; align-items: center; margin-top: 10px; width: 46px; height: 24px; position: relative; flex: none; }
 .mod-card .switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
 .mod-card .switch .slider { position: absolute; inset: 0; border: 1px solid var(--line); background: color-mix(in srgb, var(--panel-2) 80%, transparent); border-radius: 999px; cursor: pointer; transition: background .18s ease, border-color .18s ease; }
