@@ -245,27 +245,41 @@ For i = 1 To 120
   If procs.Count = 0 Then Exit For
   WScript.Sleep 500
 Next
-' Give the OS a moment to release the file lock (and let antivirus finish scanning)
-' before touching the exe -- replacing it too early is what produced
-' "Failed to load Python DLL" on the freshly started process (2026-09-27).
-WScript.Sleep 2500
+' Give the OS a short moment to release the file lock before touching the exe.
+' (Kept short on purpose: the longer this window, the more likely the user starts
+'  the old exe while it is being swapped -- see the note in step 2.)
+WScript.Sleep 1000
 
-' 2) back up the old file, then copy the new one into place
+' 2) swap in the new file
+'    Write the new build to "<target>.new" FIRST, then rename it into place.
+'    Reason: a plain CopyFile over the running exe leaves a half-written file for a
+'    moment, and anyone starting the exe in that window reads a broken file
+'    (seen as "Failed to load Python DLL" / "Error -3 while decompressing data",
+'    2026-09-27). With a rename, the target is either the complete old file or the
+'    complete new file -- never a partial one.
 On Error Resume Next
 If fso.FileExists(backup) Then fso.DeleteFile backup, True
+If fso.FileExists(target & ".new") Then fso.DeleteFile target & ".new", True
 Err.Clear
-fso.MoveFile target, backup
-If Err.Number <> 0 Then
-  Err.Clear
-  fso.CopyFile target, backup, True
-End If
-Err.Clear
-fso.CopyFile newFile, target, True
+fso.CopyFile newFile, target & ".new", True
 If Err.Number <> 0 Then failed = True
+Err.Clear
+If Not failed Then
+  fso.MoveFile target, backup
+  If Err.Number <> 0 Then
+    Err.Clear
+    fso.CopyFile target, backup, True
+  End If
+  Err.Clear
+  If fso.FileExists(target) Then fso.DeleteFile target, True
+  fso.MoveFile target & ".new", target
+  If Err.Number <> 0 Then failed = True
+End If
 
 ' 3) on failure, roll back to the previous version
 If failed Then
   Err.Clear
+  If fso.FileExists(target & ".new") Then fso.DeleteFile target & ".new", True
   If fso.FileExists(target) Then fso.DeleteFile target, True
   If fso.FileExists(backup) Then fso.MoveFile backup, target
   On Error Resume Next
@@ -281,13 +295,14 @@ If failed Then
 End If
 
 ' 4) start the new version and clean up
-' Let the freshly written exe settle (file cache / antivirus) before launching it.
-WScript.Sleep 2500
+' The exe was renamed into place (not half-written), so a short settle is enough.
+WScript.Sleep 1000
 sh.Run """" & target & """", 1, False
 WScript.Sleep 3000
 On Error Resume Next
 fso.DeleteFile backup, True
 fso.DeleteFile newFile, True
+fso.DeleteFile target & ".new", True
 fso.DeleteFile WScript.ScriptFullName, True
 '''
 

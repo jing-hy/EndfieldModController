@@ -270,10 +270,10 @@ def _download_sequential(
                         return written, False, "probe"
                     if deadline_seconds and (time.time() - started) > deadline_seconds:
                         return written, False, (
-                            f"探测超时（{deadline_seconds:.0f}s 内只下到 {written // 1024} KB）")
+                            f"探测超时（{deadline_seconds:.0f}s 内只下到 {written / 1048576:.1f} MB）")
     except (TimeoutError, urllib.error.URLError, OSError) as exc:
         if written:
-            return written, True, f"读取中断（已下 {written // 1024} KB）: {exc}"
+            return written, True, f"读取中断（已下 {written / 1048576:.1f} MB）: {exc}"
         raise
     return written, False, ""
 

@@ -103,13 +103,54 @@ def download_file(
     """
     from . import fastnet
 
-    dest.parent.mkdir(parents=True, exist_ok=True)
+    # 命中缓存就跳过：同一 URL 下过一次就不再重下（用户网慢，重复下几百 MB 很痛）
+    target, meta = _cache_target(dest)
+    if target is not None and meta is not None and target.is_file() and meta.is_file():
+        try:
+            if meta.read_text(encoding="utf-8").strip() == url and target.stat().st_size > 0:
+                if log:
+                    log(f"命中下载缓存，跳过下载：{target.name}"
+                        f"（{target.stat().st_size / 1048576:.1f} MB）")
+                return target
+        except OSError:
+            pass
+
+    final = target if target is not None else dest
+    final.parent.mkdir(parents=True, exist_ok=True)
     report = fastnet.download(
-        url, dest, log=log, timeout=min(timeout, 60), expected_sha256=expected_sha256,
+        url, final, log=log, timeout=min(timeout, 60), expected_sha256=expected_sha256,
     )
     if not report.ok:
         raise urllib.error.URLError(report.message)
-    return dest
+    if meta is not None:
+        try:
+            meta.write_text(url, encoding="utf-8")
+        except OSError:
+            pass
+    return final
+
+
+def _cache_dir() -> Path:
+    """组件安装包的下载缓存目录（`<runtime>/_downloads`）。"""
+    from .config import AppConfig
+
+    try:
+        return AppConfig.load().runtime_path / "_downloads"
+    except Exception:  # noqa: BLE001
+        return Path.cwd() / "runtime" / "_downloads"
+
+
+def _cache_target(dest: Path) -> tuple[Path | None, Path | None]:
+    """把「临时下载目标」换成稳定缓存路径。
+
+    返回 (目标文件, 记录来源 URL 的元数据文件)。**只有 URL 与上次完全一致才复用** ——
+    这样"文件名不带版本"的包（如 `iMMERSE-main.zip`）在版本变化时 URL 也变了，
+    会正常重新下载，不会误用旧包。
+    """
+    if not dest.name:
+        return None, None
+    target = _cache_dir() / dest.name
+    return target, target.with_name(target.name + ".url")
 
 
 def _find_7z() -> str | None:

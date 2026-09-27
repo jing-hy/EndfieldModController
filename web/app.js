@@ -261,9 +261,10 @@ function renderDependencies() {
 async function startAppUpdateFromDep() {
   showTab('dependencies');
   $('dep-progress').value = 0;
-  $('dep-progress-text').textContent = '正在更新管理器…';
+  $('dep-progress-text').textContent =
+    '正在更新管理器…（更新期间请不要手动打开程序，替换完成后会自动重启）';
   $('dep-results').textContent = '';
-  setStatus('正在更新程序…');
+  setStatus('正在更新程序…（请勿手动打开程序）');
   try {
     await call('start_app_update');
   } catch (err) {
@@ -970,7 +971,7 @@ function bind() {
       if (!checkOnly) alert(`已是最新版本 v${r.current}`);
       return r;
     }
-    if (!confirm(`发现新版本 v${r.latest}（当前 v${r.current}）\n\n现在下载并自动更新吗？\n· 更新时程序会自动重启\n· config.json 与 Mod 库不受影响\n· 失败会自动回滚旧版本\n\n进度会显示在「依赖」页`)) return r;
+    if (!confirm(`发现新版本 v${r.latest}（当前 v${r.current}）\n\n现在下载并自动更新吗？\n· 更新时程序会自动退出并重启为新版\n· 更新期间请不要手动打开程序（替换过程中会被打断）\n· config.json 与 Mod 库不受影响\n· 失败会自动回滚旧版本\n\n进度会显示在「依赖」页`)) return r;
 
     if (!r.frozen) {
       // 源码运行模式没法替换自己：只下载更新包，然后提示手动 git pull

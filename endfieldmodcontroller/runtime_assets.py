@@ -423,7 +423,7 @@ def asset_report(config: AppConfig) -> dict[str, dict[str, Any]]:
             "needed": not present,
             "status": "已就位" if present else ("待展开" if parts_ok else "内置资产缺失"),
             "enabled": True,
-            "version": f"{expected_size // 1024} KB" if expected_size < 1048576 else f"{expected_size // 1048576} MB",
+            "version": f"{expected_size / 1048576:.1f} MB",
             "packed": f"{packed_bytes / 1048576:.2f} MB / {len(parts)} 卷" if packed_bytes else "",
             "asset_dir": str(root),
         }

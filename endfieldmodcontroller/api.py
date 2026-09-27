@@ -420,9 +420,9 @@ class EndfieldModControllerApi:
             self._dep_task["current"] = index - 1
             self._dep_task["total"] = total
             if expected:
-                self._dep_task["message"] = f"{key}: {received // 1024}/{expected // 1024} KiB"
+                self._dep_task["message"] = f"{key}: {received / 1048576:.1f}/{expected / 1048576:.1f} MB"
             else:
-                self._dep_task["message"] = f"{key}: 下载中 {received // 1024} KiB"
+                self._dep_task["message"] = f"{key}: 下载中 {received / 1048576:.1f} MB"
 
         def worker() -> None:
             assert self._dep_task is not None
@@ -496,9 +496,9 @@ class EndfieldModControllerApi:
             self._dep_task["current"] = index - 1
             self._dep_task["total"] = total
             if expected:
-                self._dep_task["message"] = f"{key}: {received // 1024}/{expected // 1024} KiB"
+                self._dep_task["message"] = f"{key}: {received / 1048576:.1f}/{expected / 1048576:.1f} MB"
             else:
-                self._dep_task["message"] = f"{key}: 下载中 {received // 1024} KiB"
+                self._dep_task["message"] = f"{key}: 下载中 {received / 1048576:.1f} MB"
 
         def worker() -> None:
             assert self._dep_task is not None
