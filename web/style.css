@@ -322,6 +322,31 @@ pre.code-block { max-height: 330px; }
 .dep-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .dep-right button { padding: 4px 10px; font-size: 12px; }
 
+/* 设置页：分类竖排；能自动推导的项做成淡色只读 */
+.settings-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.settings-group { margin-bottom: 18px; }
+.settings-group > h3 {
+  margin: 0 0 6px; font-size: 14px;
+  display: flex; align-items: baseline; gap: 8px;
+}
+.settings-group > h3 em { font-style: normal; font-size: 12px; font-weight: 400; color: var(--muted); }
+.setting-row {
+  display: grid; grid-template-columns: 250px minmax(0, 1fr);
+  align-items: center; gap: 12px;
+  padding: 7px 0; border-bottom: 1px dashed var(--line);
+}
+.setting-row:last-child { border-bottom: none; }
+.setting-row.switch-row { grid-template-columns: minmax(0, 1fr) auto; }
+.setting-label { font-size: 13px; display: flex; flex-direction: column; gap: 1px; }
+.setting-label em { font-style: normal; font-size: 11px; color: var(--muted); }
+.setting-row input.auto-input {
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  color: var(--muted); cursor: default;
+}
+@media (max-width: 720px) {
+  .setting-row { grid-template-columns: 1fr; }
+}
+
 .update-badge {
   min-width: 76px;
   border-radius: 999px;

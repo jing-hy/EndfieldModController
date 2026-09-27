@@ -1153,20 +1153,8 @@ function bind() {
     const info = await call('log');
     await call('open_path', info.runtime);
   };
-  const browseMap = {
-    'browse-library': ['cfg-library_dir', true],
-    'browse-staging': ['cfg-staging_mods_dir', true],
-    'browse-xxmi': ['cfg-xxmi_launcher', false],
-    'browse-game': ['cfg-game_exe', false],
-    'browse-reshade': ['cfg-reshade_dll', false],
-    'browse-manifest': ['cfg-dependency_manifest', false],
-  };
-  for (const [buttonId, [inputId, isDir]] of Object.entries(browseMap)) {
-    $(buttonId).onclick = async () => {
-      const result = await call('choose_path', isDir, '选择路径');
-      if (result.ok) $(inputId).value = result.path;
-    };
-  }
+  // 「选择…」按钮已按用户要求全部移除（设置页改成直接输入 + 一个「一键检测全部」），
+  // 所以这里不再绑定它们；需要弹选择框时用设置页上保留的「自动检测 XXMI」。
   $('rollback-btn').onclick = async () => {
     if (!confirm('将删除 EndfieldModControllerManaged staging，并恢复可用的 d3dx_user.ini / XXMI 配置备份。继续？')) return;
     const result = await call('rollback');

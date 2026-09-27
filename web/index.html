@@ -131,63 +131,131 @@
     </section>
 
     <section class="panel" id="tab-settings">
-      <div class="grid-2">
-        <label>Mod 库目录<input id="cfg-library_dir" type="text"></label>
-        <label>Staging Mods 目录<input id="cfg-staging_mods_dir" type="text"></label>
-        <label>运行目录<input id="cfg-runtime_dir" type="text"></label>
-        <label>XXMI Launcher 路径<input id="cfg-xxmi_launcher" type="text" placeholder="C:\...\XXMI Launcher.exe"></label>
-        <label>3DMigoto Loader 路径<input id="cfg-migoto_loader" type="text" placeholder="D:\...\loader.exe"></label>
-        <label>官方启动器路径<input id="cfg-official_launcher" type="text" placeholder="D:\Hypergryph Launcher\Launcher.exe"></label>
-        <label>Endfield.exe 路径<input id="cfg-game_exe" type="text" placeholder="D:\...\Endfield.exe"></label>
-        <label>ReShade 底座 d3d12.dll 路径<input id="cfg-reshade_dll" type="text" placeholder="runtime\dlss5\d3d12.dll"></label>
-        <label>DLSS5 / 第一人称目录<input id="cfg-dlss5_dir" type="text" placeholder="runtime\dlss5"></label>
-        <label>乳摇工具目录<input id="cfg-secondary_motion_dir" type="text" placeholder="例如 D:\ShakingBreastManager"></label>
-        <label>主题色
-          <select id="cfg-theme">
-            <option value="dark">深色</option>
-            <option value="light">浅色</option>
-          </select>
-        </label>
-        <label>ReShade 注入方式
+      <div class="settings-head">
+        <button id="init-check-btn" class="primary">一键检测全部</button>
+        <span class="hint">淡色只读项是按「主路径」自动推导的，不用填；其余项可直接输入，留空即自动。</span>
+      </div>
+
+      <div class="settings-group">
+        <h3>① 工作区与 Mod 库<em>相对主路径</em></h3>
+        <div class="setting-row">
+          <span class="setting-label">主路径<em>runtime 等相对路径的基准</em></span>
+          <input id="cfg-runtime_dir" type="text" placeholder="runtime">
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Mod 库目录</span>
+          <input id="cfg-library_dir" type="text" placeholder="library">
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Staging Mods 目录<em>EFMI 实际加载的位置</em></span>
+          <input id="cfg-staging_mods_dir" type="text" readonly class="auto-input" placeholder="自动：&lt;主路径&gt;/builtin/XXMI/EFMI/Mods">
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">依赖清单</span>
+          <input id="cfg-dependency_manifest" type="text" placeholder="dependencies.json">
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <h3>② 游戏与启动器<em>留空即自动搜索</em></h3>
+        <div class="setting-row">
+          <span class="setting-label">官方启动器</span>
+          <input id="cfg-official_launcher" type="text" placeholder="留空 = 自动搜索 Hypergryph Launcher">
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Endfield.exe</span>
+          <input id="cfg-game_exe" type="text" placeholder="留空 = 自动搜索游戏目录">
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">XXMI Launcher</span>
+          <input id="cfg-xxmi_launcher" type="text" placeholder="留空 = 自动搜索">
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">3DMigoto Loader<em>可选</em></span>
+          <input id="cfg-migoto_loader" type="text" placeholder="留空 = 用内置 migoto_loader.exe">
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <h3>③ 组件与注入<em>前三项按主路径自动推导</em></h3>
+        <div class="setting-row">
+          <span class="setting-label">DLSS5 / 第一人称目录</span>
+          <input id="cfg-dlss5_dir" type="text" readonly class="auto-input" placeholder="自动：&lt;主路径&gt;/dlss5">
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">ReShade 底座 d3d12.dll</span>
+          <input id="cfg-reshade_dll" type="text" readonly class="auto-input" placeholder="自动：&lt;主路径&gt;/dlss5/d3d12.dll">
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">乳摇工具目录</span>
+          <input id="cfg-secondary_motion_dir" type="text" readonly class="auto-input" placeholder="自动：&lt;主路径&gt;/secondary_motion">
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">ReShade 注入方式</span>
           <select id="cfg-reshade_injection">
             <option value="xxmi_extra">经 XXMI 注入库注入（本方案，推荐）</option>
             <option value="none">不注入（只跑服装 Mod）</option>
             <option value="external">外部注入（旧方案，已废弃）</option>
           </select>
-        </label>
-        <label>依赖清单<input id="cfg-dependency_manifest" type="text"></label>
-        <label class="checkbox-row"><input id="cfg-use_builtin_runtime" type="checkbox"> 使用内置 XXMI/EFMI</label>
-        <label class="checkbox-row"><input id="cfg-auto_update_dependencies" type="checkbox"> 启动前自动更新依赖</label>
-        <label>下载加速
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <h3>④ 下载与网络</h3>
+        <div class="setting-row">
+          <span class="setting-label">下载加速</span>
           <select id="cfg-download_boost">
             <option value="auto">自动（只在慢/抖动时临时并发）</option>
             <option value="always">强制并发（连接很差时用）</option>
             <option value="never">关闭（只用单连接）</option>
           </select>
-        </label>
-        <label>下载线路
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">下载线路</span>
           <select id="cfg-download_line">
             <option value="auto">自动（直连优先，不通才临时换镜像）</option>
             <option value="direct">仅直连</option>
             <option value="mirror">只用镜像（直连被墙时）</option>
           </select>
-        </label>
-        <div id="download-status" class="hint"></div>
-        <label class="checkbox-row"><input id="cfg-require_admin" type="checkbox"> 启动时请求管理员权限</label>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">线路状况</span>
+          <div id="download-status" class="hint"></div>
+        </div>
       </div>
-      <div class="toolbar">
-        <button id="browse-library">选择 Mod 库目录</button>
-        <button id="browse-staging">选择 staging 目录</button>
-        <button id="browse-xxmi">选择 XXMI Launcher</button>
-        <button id="browse-game">选择 Endfield.exe</button>
-        <button id="browse-reshade">选择 ReShade64.dll</button>
-        <button id="browse-manifest">选择依赖清单</button>
-        <button id="clear-download-lines-btn">清除线路记录</button>
+
+      <div class="settings-group">
+        <h3>⑤ 开关</h3>
+        <div class="setting-row switch-row">
+          <span class="setting-label">使用内置 XXMI/EFMI</span>
+          <label class="switch"><input type="checkbox" id="cfg-use_builtin_runtime"><span class="slider"></span></label>
+        </div>
+        <div class="setting-row switch-row">
+          <span class="setting-label">启动前自动更新依赖</span>
+          <label class="switch"><input type="checkbox" id="cfg-auto_update_dependencies"><span class="slider"></span></label>
+        </div>
+        <div class="setting-row switch-row">
+          <span class="setting-label">启动时请求管理员权限</span>
+          <label class="switch"><input type="checkbox" id="cfg-require_admin"><span class="slider"></span></label>
+        </div>
       </div>
+
+      <div class="settings-group">
+        <h3>⑥ 外观</h3>
+        <div class="setting-row">
+          <span class="setting-label">主题色</span>
+          <select id="cfg-theme">
+            <option value="dark">深色</option>
+            <option value="light">浅色</option>
+          </select>
+        </div>
+      </div>
+
       <div class="toolbar">
-        <button id="autodetect-btn">自动检测 XXMI</button>
-        <button id="download-reshade-btn">下载 ReShade Addon</button>
         <button id="save-config-btn" class="primary">保存设置</button>
+        <button id="autodetect-btn">自动检测 XXMI</button>
+        <button id="clear-download-lines-btn">清除线路记录</button>
+        <button id="download-reshade-btn">下载 ReShade Addon</button>
         <button id="open-root-btn">打开程序目录</button>
         <button id="rollback-btn">回滚/清理</button>
       </div>
@@ -199,7 +267,6 @@
         <button id="force-close-game-btn">强制结束残留游戏</button>
       </div>
       <div class="toolbar">
-        <button id="init-check-btn">一键初始化自检</button>
         <button id="game-inject-clean-btn">清理残留注入</button>
         <button id="game-inject-restore-btn">撤销清理</button>
         <button id="update-check-btn">检查组件更新</button>
