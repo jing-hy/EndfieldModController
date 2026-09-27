@@ -91,6 +91,13 @@ def status(config: AppConfig) -> dict[str, Any]:
     result["plugin_exists"] = plugin.is_file()
 
     data_dir = game / "SecondaryMotion"
+    # 插件是在**游戏目录**里读自己的配置的。少了 data\characters.default.json 它会直接
+    # `FAIL: initial config invalid -> DISABLED_SAFE` 自我禁用 —— 表现就是"管理器显示
+    # 游戏未启动、游戏里也没效果"，而 proxy 与 plugin\sbm.dll 其实都装好了
+    # （2026-09-27 实测踩到：只装那两个文件是不够的）。
+    result["data_ready"] = (data_dir / "data" / "characters.default.json").is_file()
+
+    data_dir = game / "SecondaryMotion"
     status_file = data_dir / "runtime" / "runtime_status.json"
     if status_file.is_file():
         try:
@@ -185,6 +192,30 @@ def ensure_injection(config: AppConfig, log: Callable[[str], None] | None = None
         plugin_target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(plugin_source, plugin_target)
         actions.append(f"安装插件 plugin\\{PLUGIN_NAME}")
+
+    # 插件的数据目录也必须保证在位，否则插件启动即自我禁用（见 status() 的注释）。
+    # 只补"缺失的关键文件"，不覆盖用户已有的 presets / 调参结果。
+    data_dir = game / "SecondaryMotion"
+    default_chars = data_dir / "data" / "characters.default.json"
+    if not default_chars.is_file():
+        source_default = tool / "data" / "characters.default.json"
+        if source_default.is_file():
+            default_chars.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_default, default_chars)
+            actions.append("安装插件数据 SecondaryMotion\\data\\characters.default.json")
+        else:
+            warnings.append("工具包缺少 data\\characters.default.json，插件会因配置无效自我禁用")
+    runtime_cfg = data_dir / "runtime" / "config.json"
+    if not runtime_cfg.is_file():
+        try:
+            runtime_cfg.parent.mkdir(parents=True, exist_ok=True)
+            runtime_cfg.write_text(
+                json.dumps({"revision": 1, "enabled": True, "active_preset": "Default"},
+                           ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8", newline="\n")
+            actions.append("写入插件配置 SecondaryMotion\\runtime\\config.json（enabled）")
+        except OSError as exc:
+            warnings.append(f"写入插件配置失败: {exc}")
 
     for action in actions:
         _log(log, action)

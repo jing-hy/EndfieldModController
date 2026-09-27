@@ -629,11 +629,13 @@ def _check_secondary_motion(config: AppConfig, report: Report, log: Callable[[st
         return
     for action in result.get("actions", []):
         report.action(f"乳摇：{action}")
-    ok = state.get("injected") and state.get("plugin_exists")
+    ok = state.get("injected") and state.get("plugin_exists") and state.get("data_ready", True)
     report.add(
         "sbm",
         bool(ok),
-        "proxy 与 plugin\\sbm.dll 已就位" if ok else "注入不完整",
+        ("proxy、plugin\\sbm.dll 与插件数据均已就位" if ok else
+         "注入不完整（proxy / plugin\\sbm.dll / SecondaryMotion 数据三者缺一，"
+         "插件会自我禁用，表现为管理器显示游戏未启动、游戏里也没效果）"),
         fixed=bool(result.get("actions")),
         manual=not ok,
     )
