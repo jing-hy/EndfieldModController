@@ -45,14 +45,20 @@ PROBE_BYTES = 1 << 20
 MIN_PARALLEL_BYTES = 4 << 20
 # 每块大小 / 最大线程数
 CHUNK_BYTES = 2 << 20
-MAX_THREADS = 16
+MAX_THREADS = 20
 READ_CHUNK = 262144
 # 单次读多久没数据算"抖动/卡死"，切并发续传
 STALL_SECONDS = 20
-# 探测连接的超时（要短，坏线路要快速跳过）
-PROBE_TIMEOUT = 15
+# 探测连接的超时（要短，坏线路要快速跳过；实测直连会直接超时 15s，白等太久）
+PROBE_TIMEOUT = 8
+# 多线路时单条线路的等待上限
+LINE_TIMEOUT_MULTI = 15
 # 某条线路失败后多久再试
-LINE_FAIL_TTL = 30 * 60
+# （别设太长：一次偶发失败——比如网络抖动导致 DNS 解析失败——就把最快的线路
+#   封掉半小时，反而会让用户只能退到慢线路，这正是"感觉还是很慢"的原因之一）
+LINE_FAIL_TTL = 5 * 60
+# 连续失败几次才把线路临时封掉
+LINE_FAIL_THRESHOLD = 2
 # 线路成绩缓存（下次优先用快的），只放几 KB，不常驻
 LINE_CACHE = "_net/lines.json"
 BASE_HEADERS = {"User-Agent": USER_AGENT, "Accept-Encoding": "identity"}
@@ -376,8 +382,15 @@ def _download_parallel(
 
 
 def recommended_threads(size: int) -> int:
-    by_size = max(1, size // (4 << 20))
-    return int(max(4, min(MAX_THREADS, by_size if by_size > 4 else 8)))
+    """按体积给并发数。
+
+    2026-09-27 实测（27.6 MB、镜像线路 gh.xmly.dev）：
+        单连接 0.71 MB/s → 8 连接 3.21 MB/s → 16 连接 3.96 MB/s
+    即并发是主要提速手段（5.6 倍），所以这里给得比以前大方；
+    同时实测"多线路混合"反而更慢（被慢线路拖累），所以只加连接、不铺线路。
+    """
+    by_size = max(1, size // (1536 * 1024))          # 每 1.5 MB 一个连接
+    return int(max(8, min(MAX_THREADS, by_size)))
 
 
 # ---------------------------------------------------------------------------
@@ -407,6 +420,7 @@ def _remember_line(name: str, ok: bool, mbps: float) -> None:
     if ok:
         entry["ok"] = True
         entry.pop("fail_at", None)
+        entry["fails"] = 0        # 成功一次就把失败计数清零，避免历史失败累积成"永久封禁"
     else:
         entry["ok"] = False
         entry["fail_at"] = int(time.time())
@@ -444,7 +458,13 @@ def line_status() -> list[dict[str, Any]]:
 
 
 def _line_blocked(name: str, cache: dict[str, Any]) -> bool:
+    """某条线路是否要临时跳过。
+
+    **只在连续失败达到阈值时才跳** —— 一次 DNS 抖动/超时不该把最快的那条线路封掉。
+    """
     entry = cache.get(name) or {}
+    if int(entry.get("fails") or 0) < LINE_FAIL_THRESHOLD:
+        return False
     fail_at = int(entry.get("fail_at") or 0)
     return bool(fail_at) and (time.time() - fail_at) < LINE_FAIL_TTL
 
@@ -469,7 +489,9 @@ def resolve_lines(url: str, mode: str) -> list[Line]:
     # 有成绩的按速度排前面；失败的临时跳过；全被跳过时退回全部（不能因此不下）
     mirrors.sort(key=lambda line: -float((cache.get(line.name) or {}).get("mbps") or 0))
     fresh = [line for line in mirrors if not _line_blocked(line.name, cache)]
-    return [DIRECT, *(fresh or mirrors)]
+    # 直连连续失败过就跳过它 —— 否则每次都要白等一个探测超时（实测直连超时是 8 秒）
+    head = [] if _line_blocked(DIRECT.name, cache) else [DIRECT]
+    return [*head, *(fresh or mirrors)]
 
 
 # ---------------------------------------------------------------------------
@@ -515,7 +537,7 @@ def download(
         if len(lines) > 1:
             _log(log, f"尝试线路：{line.name}")
         # 多线路时单条线路的等待要短，坏线路要快速跳过
-        line_timeout = timeout if len(lines) == 1 else min(timeout, 25)
+        line_timeout = timeout if len(lines) == 1 else min(timeout, LINE_TIMEOUT_MULTI)
         report = _attempt_line(
             line.apply(url), dest, line=line,
             log=log, progress=progress, timeout=line_timeout, policy=policy,
@@ -530,7 +552,16 @@ def download(
             report.line = line.name
             _set_speed(report, started)
             return report
-        _remember_line(line.name, False, 0.0)
+        # 只有"这条线路自己的问题"才算它的账：DNS 解析失败 / 网络不可达属于**全网故障**
+        # （所有线路都会一样），记进去只会把最快的好线路冤枉地封掉 —— 实测踩过：
+        # gh.xmly.dev 因一次 DNS 抖动被跳过，结果只能退到最慢的那条（0.26 MB/s）。
+        message = str(report.message)
+        network_wide = ("getaddrinfo" in message or "Name or service not known" in message
+                        or "No address associated" in message)
+        if network_wide:
+            _log(log, f"（{line.name} 这次是网络/DNS 故障，不计入该线路的失败记录）")
+        else:
+            _remember_line(line.name, False, 0.0)
         errors.append(f"{line.name}: {report.message}")
         _log(log, f"线路 {line.name} 失败：{report.message}")
         try:
