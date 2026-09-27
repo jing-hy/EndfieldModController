@@ -245,7 +245,10 @@ For i = 1 To 120
   If procs.Count = 0 Then Exit For
   WScript.Sleep 500
 Next
-WScript.Sleep 800
+' Give the OS a moment to release the file lock (and let antivirus finish scanning)
+' before touching the exe -- replacing it too early is what produced
+' "Failed to load Python DLL" on the freshly started process (2026-09-27).
+WScript.Sleep 2500
 
 ' 2) back up the old file, then copy the new one into place
 On Error Resume Next
@@ -271,12 +274,15 @@ If failed Then
     ts.WriteLine "Update failed (" & Now & "). Rolled back to the previous version."
     ts.Close
   End If
+  WScript.Sleep 1500
   sh.Run """" & target & """", 1, False
   fso.DeleteFile WScript.ScriptFullName, True
   WScript.Quit 1
 End If
 
 ' 4) start the new version and clean up
+' Let the freshly written exe settle (file cache / antivirus) before launching it.
+WScript.Sleep 2500
 sh.Run """" & target & """", 1, False
 WScript.Sleep 3000
 On Error Resume Next

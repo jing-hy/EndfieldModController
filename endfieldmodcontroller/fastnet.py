@@ -51,6 +51,10 @@ READ_CHUNK = 262144
 STALL_SECONDS = 20
 # 探测连接的超时（要短，坏线路要快速跳过；实测直连会直接超时 15s，白等太久）
 PROBE_TIMEOUT = 8
+# 探测阶段的时间上限：慢线路不能把探测拖成几十秒
+PROBE_SECONDS = 12
+# 探测速度低于此值就直接放弃这条线路（连并发都不值得起）
+DEAD_MBPS = 0.3
 # 多线路时单条线路的等待上限
 LINE_TIMEOUT_MULTI = 15
 # 某条线路失败后多久再试
@@ -238,15 +242,19 @@ def _download_sequential(
     progress: Progress = None,
     log: Log = None,
     stop_after: int = 0,
+    deadline_seconds: float = 0,
 ) -> tuple[int, bool, str]:
     """单连接下载（offset 起）。
 
     返回 (本次写入字节数, 是否被"卡住"打断, 说明)。
-    stop_after > 0 时下够这么多字节就主动停下（用于测速探测）。
+    stop_after > 0 时下够这么多字节就主动停下（用于测速探测）；
+    deadline_seconds > 0 时超过该秒数也停下 —— 慢线路（实测直连 0.05 MB/s
+    下 1 MB 要 20 秒）不能让它把探测拖成几十秒。
     """
     headers = {"Range": f"bytes={offset}-"} if offset else {}
     written = 0
     mode = "ab" if offset else "wb"
+    started = time.time()
     try:
         with _open(url, headers=headers, timeout=timeout) as response:
             with open(dest, mode) as fh:
@@ -260,6 +268,9 @@ def _download_sequential(
                         progress(offset + written, total)
                     if stop_after and written >= stop_after:
                         return written, False, "probe"
+                    if deadline_seconds and (time.time() - started) > deadline_seconds:
+                        return written, False, (
+                            f"探测超时（{deadline_seconds:.0f}s 内只下到 {written // 1024} KB）")
     except (TimeoutError, urllib.error.URLError, OSError) as exc:
         if written:
             return written, True, f"读取中断（已下 {written // 1024} KB）: {exc}"
@@ -461,9 +472,12 @@ def _line_blocked(name: str, cache: dict[str, Any]) -> bool:
     """某条线路是否要临时跳过。
 
     **只在连续失败达到阈值时才跳** —— 一次 DNS 抖动/超时不该把最快的那条线路封掉。
+    例外：**直连**的阈值是 1 —— 它失败通常是"这台机器根本连不上 GitHub"这种稳定事实，
+    再试一次只会白等一个探测超时（实测每次约 8 秒）。
     """
     entry = cache.get(name) or {}
-    if int(entry.get("fails") or 0) < LINE_FAIL_THRESHOLD:
+    threshold = 1 if name == DIRECT.name else LINE_FAIL_THRESHOLD
+    if int(entry.get("fails") or 0) < threshold:
         return False
     fail_at = int(entry.get("fail_at") or 0)
     return bool(fail_at) and (time.time() - fail_at) < LINE_FAIL_TTL
@@ -695,12 +709,18 @@ def _attempt_line(
             _set_speed(report, started)
             return report
 
-        # ① 单连接探测：先下 PROBE_BYTES 看看这条链路到底行不行
+        # ① 单连接探测：先下 PROBE_BYTES / PROBE_SECONDS 看看这条链路到底行不行
         probe_target = PROBE_BYTES if size > MIN_PARALLEL_BYTES else size
         written, stalled, note = _download_sequential(
-            url, work, total=size, timeout=timeout, progress=progress, log=log, stop_after=probe_target)
+            url, work, total=size, timeout=timeout, progress=progress, log=log,
+            stop_after=probe_target, deadline_seconds=PROBE_SECONDS)
         probe_seconds = max(time.time() - started, 1e-6)
         report.probe_mbps = _mbps(written, probe_seconds)
+        # 探测**极慢**就放弃这条线路，别硬起并发死磕：实测直连 0.05 MB/s 时上了 17 个连接，
+        # 每块重试 4 次全失败，白耗 83 秒；换到 gh.xmly.dev 后 3.5 秒就下完了剩下的 26 MB。
+        if report.probe_mbps < DEAD_MBPS and policy != "always":
+            raise OSError(f"探测速度仅 {report.probe_mbps:.2f} MB/s（低于 {DEAD_MBPS} MB/s 可用线），"
+                          f"放弃这条线路")
         slow = report.probe_mbps < SLOW_MBPS
         need_boost = policy == "always" or slow or stalled
 
