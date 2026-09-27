@@ -1124,6 +1124,54 @@ class EndfieldModControllerApi:
     # ------------------------------------------------------------------
     # game directory injection audit
     # ------------------------------------------------------------------
+    def game_multi_instance_status(self) -> dict[str, Any]:
+        """防多开：当前是否有终末地在跑。"""
+        try:
+            return launcher.check_game_multi_instance(self.config)
+        except Exception as exc:  # noqa: BLE001
+            return {"running": False, "processes": [], "blocked": False, "message": str(exc)}
+
+    # ------------------------------------------------------------------
+    # 游戏目录体检 / 备份净化 / 还原（game_clean）
+    # ------------------------------------------------------------------
+    def game_clean_audit(self) -> dict[str, Any]:
+        """列出游戏目录里所有**原版不会有**的东西（proxy、plugin payload、插件日志…）。"""
+        from . import game_clean
+
+        try:
+            return game_clean.audit(self.config)
+        except Exception as exc:  # noqa: BLE001
+            launcher._append_log(self.config, f"game clean audit failed: {exc}")
+            return {"ok": False, "message": str(exc), "findings": []}
+
+    def game_clean_backup_and_clean(self, include_plugin_data: bool = True) -> dict[str, Any]:
+        """先整体备份，再把游戏目录净化成原版（只移动不删除，可一键还原）。"""
+        from . import game_clean
+
+        launcher._append_log(self.config, "backup & clean game dir requested from UI")
+        result = game_clean.backup_and_clean(
+            self.config,
+            log=lambda message: launcher._append_log(self.config, message),
+            include_plugin_data=bool(include_plugin_data),
+        )
+        launcher._append_log(self.config, result.get("message", ""))
+        return result
+
+    def game_clean_restore(self, stamp: str = "") -> dict[str, Any]:
+        """从备份还原游戏目录（回到净化前）。"""
+        from . import game_clean
+
+        launcher._append_log(self.config, "restore game dir from backup requested from UI")
+        return game_clean.restore(
+            self.config, stamp=stamp,
+            log=lambda message: launcher._append_log(self.config, message),
+        )
+
+    def game_clean_backups(self) -> dict[str, Any]:
+        from . import game_clean
+
+        return {"backups": game_clean.list_backups(self.config)}
+
     def audit_game_injections(self) -> dict[str, Any]:
         """Report third-party loader DLLs / plugin payloads in the game folder.
 

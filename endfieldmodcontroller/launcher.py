@@ -1040,6 +1040,35 @@ def _spawn_elevated(config: AppConfig, exe: str, cwd: str, show_window: int = 0)
         raise LaunchError(f"请求管理员权限失败，ShellExecuteW 返回 {result}")
 
 
+GAME_PROCESS_NAMES = ("Endfield.exe",)
+
+
+def running_game_processes() -> list[str]:
+    """当前正在运行的终末地进程。"""
+    return _running_process_names(GAME_PROCESS_NAMES)
+
+
+def check_game_multi_instance(config: AppConfig) -> dict[str, Any]:
+    """防多开：终末地已经在跑时给出明确结论（不抛异常，交给调用方决定要不要拦）。
+
+    为什么要拦：两个游戏实例同时被注入，ReShade/Mod 会互相抢 D3D 设备与 Mods 目录，
+    表现为随机崩溃或"Mod 莫名其妙不生效"，而且崩溃日志会互相污染，没法排查。
+    """
+    running = running_game_processes()
+    prevent = bool(getattr(config, "prevent_game_multi_instance", True))
+    return {
+        "running": bool(running),
+        "processes": running,
+        "prevent": prevent,
+        "blocked": bool(running) and prevent,
+        "message": (
+            f"检测到终末地已在运行（{', '.join(running)}）：同时开两个实例会让 Mod 与 ReShade "
+            f"互相干扰，请先关闭正在运行的那个再启动。"
+            if running else "没有检测到正在运行的终末地"
+        ),
+    }
+
+
 def launch(
     config: AppConfig,
     *,
@@ -1048,6 +1077,13 @@ def launch(
     inject_timeout: float = 60.0,
 ) -> dict[str, Any]:
     config.ensure_dirs()
+    # 防多开：真的要启动游戏时，先确认没有别的事例在跑
+    if not dry_run and start_game:
+        state = check_game_multi_instance(config)
+        if state["blocked"]:
+            raise LaunchError(state["message"])
+        if state["running"]:
+            _append_log(config, f"⚠ {state['message']}")
     game_dir = reshade_integration.detect_game_dir(config)
     if not dry_run:
         diagnostics.begin_launch(config, "xxmi", game_dir=game_dir)

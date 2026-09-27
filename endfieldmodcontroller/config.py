@@ -63,6 +63,12 @@ class AppConfig:
     # 两者都是"按需临时启用、用完即放"，不常驻、不改系统（见 fastnet）。
     download_boost: str = "auto"
     download_line: str = "auto"
+    # 防多开：检测到终末地已在运行时**阻止**再启动一个实例。
+    # 两个游戏实例同时被注入，Mod/ReShade 会互相抢资源，表现为随机崩溃或 Mod 不生效。
+    prevent_game_multi_instance: bool = True
+    # 工具自身单实例：已有控制器在跑时，第二个实例直接提示并退出（避免两个进程同时改
+    # 注入库/staging 造成互相踩踏）。关掉它就能开多个窗口。
+    single_instance: bool = True
     # 是否把内置的新版 DLSS 运行库（nvngx_dlss / nvngx_dlssnr）部署进游戏目录。
     # 默认 False —— 实测新版 nvngx 会让游戏起不来，只在缺失时才补齐。
     deploy_new_nvngx: bool = False

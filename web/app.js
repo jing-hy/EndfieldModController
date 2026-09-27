@@ -1011,6 +1011,55 @@ function bind() {
     };
   }
 
+  // 游戏目录体检 / 备份净化 / 还原（净化前一律先整体备份，只移动不删除）
+  if ($('game-audit-btn')) {
+    $('game-audit-btn').onclick = async () => {
+      setStatus('正在体检游戏目录…');
+      const r = await call('game_clean_audit');
+      const mi = await call('game_multi_instance_status');
+      const lines = [
+        `游戏目录：${r.game_dir || '未定位'}`,
+        `结论：${r.clean ? '干净（原版状态）' : `发现 ${(r.findings || []).length} 项非原版文件`}`,
+      ];
+      for (const f of (r.findings || [])) {
+        lines.push(`  · [${f.label}] ${f.relative}${f.size ? '  ' + (f.size / 1024).toFixed(1) + ' KB' : ''}`);
+        if (f.detail) lines.push(`      ${f.detail}`);
+      }
+      lines.push(`多开状态：${mi.running ? '终末地正在运行（' + (mi.processes || []).join(', ') + '）' : '没有检测到终末地在运行'}`);
+      $('game-clean-status').textContent = lines.join('\n');
+      setStatus('体检完成');
+    };
+  }
+  if ($('game-clean-btn')) {
+    $('game-clean-btn').onclick = async () => {
+      if (!confirm('将先**完整备份**游戏目录里所有非原版文件，再把它们移走（proxy 会用系统原版补回）。\n\n· 只移动不删除，随时可「从备份还原」\n· 净化后终末地本体 = 原版状态，适合做对照测试\n\n继续？')) return;
+      setStatus('正在备份并净化游戏目录…');
+      const r = await call('game_clean_backup_and_clean', true);
+      const lines = [r.message || ''];
+      for (const m of (r.moved || [])) lines.push(`  移走 [${m.label}] ${m.relative}`);
+      for (const m of (r.restored_modules || [])) lines.push(`  补回系统模块 ${m.name}（来源 ${m.source}）`);
+      for (const e of (r.errors || [])) lines.push(`  ⚠ ${e}`);
+      $('game-clean-status').textContent = lines.join('\n');
+      setStatus(r.ok ? '游戏目录已净化' : '净化完成但有警告');
+    };
+  }
+  if ($('game-clean-restore-btn')) {
+    $('game-clean-restore-btn').onclick = async () => {
+      const list = await call('game_clean_backups');
+      const backups = list.backups || [];
+      if (!backups.length) { alert('还没有任何游戏目录备份'); return; }
+      const latest = backups[0];
+      if (!confirm(`从最近的备份还原游戏目录？\n\n备份时间：${latest.stamp}\n包含 ${latest.entries} 项\n\n会把之前移走的文件搬回游戏目录。`)) return;
+      setStatus('正在还原…');
+      const r = await call('game_clean_restore', '');
+      const lines = [r.message || ''];
+      for (const x of (r.restored || [])) lines.push(`  还原 ${x}`);
+      for (const e of (r.errors || [])) lines.push(`  ⚠ ${e}`);
+      $('game-clean-status').textContent = lines.join('\n');
+      setStatus(r.ok ? '已从备份还原' : '还原完成但有警告');
+    };
+  }
+
   $('cfg-theme').onchange = async () => {
     applyTheme($('cfg-theme').value);
     await call('save_config', { theme: $('cfg-theme').value });
