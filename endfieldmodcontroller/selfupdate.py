@@ -224,9 +224,13 @@ def download_update(
 
 
 VBS_TEMPLATE = r'''Option Explicit
-' EndfieldModController 自我更新脚本（由程序生成，运行完自删）
-' 全程隐藏执行：等进程退出用 WMI 查询，不调用 tasklist，不弹任何黑窗。
-Dim fso, sh, wmi, procs, target, newFile, backup, i, failed
+' EndfieldModController self-update script (generated; deletes itself when done).
+' Runs fully hidden: waits for the main process via WMI, never calls tasklist, no console window.
+'
+' NOTE: keep this file ASCII-only. Windows Script Host reads .vbs as ANSI and does NOT
+' accept a UTF-8 BOM -- a BOM makes it fail with "Invalid character" (0x800A0408) on
+' line 1, char 1, which is exactly what happened before (2026-09-27).
+Dim fso, sh, wmi, procs, target, newFile, backup, i, failed, ts
 Set fso = CreateObject("Scripting.FileSystemObject")
 Set sh = CreateObject("WScript.Shell")
 target  = "{target}"
@@ -234,7 +238,7 @@ newFile = "{newfile}"
 backup  = target & ".old"
 failed  = False
 
-' 1) 等主程序退出（最多 60 秒）
+' 1) wait until the running program exits (up to 60 seconds)
 Set wmi = GetObject("winmgmts:\\.\root\cimv2")
 For i = 1 To 120
   Set procs = wmi.ExecQuery("SELECT ProcessId FROM Win32_Process WHERE Name='{procname}'")
@@ -243,7 +247,7 @@ For i = 1 To 120
 Next
 WScript.Sleep 800
 
-' 2) 备份旧文件 → 替换成新文件
+' 2) back up the old file, then copy the new one into place
 On Error Resume Next
 If fso.FileExists(backup) Then fso.DeleteFile backup, True
 Err.Clear
@@ -256,16 +260,15 @@ Err.Clear
 fso.CopyFile newFile, target, True
 If Err.Number <> 0 Then failed = True
 
-' 3) 失败则回滚
+' 3) on failure, roll back to the previous version
 If failed Then
   Err.Clear
   If fso.FileExists(target) Then fso.DeleteFile target, True
   If fso.FileExists(backup) Then fso.MoveFile backup, target
-  Dim ts
   On Error Resume Next
   Set ts = fso.CreateTextFile(fso.GetParentFolderName(target) & "\update-failed.txt", True)
   If Err.Number = 0 Then
-    ts.WriteLine "更新失败（" & Now & "），已自动回滚为原版本。"
+    ts.WriteLine "Update failed (" & Now & "). Rolled back to the previous version."
     ts.Close
   End If
   sh.Run """" & target & """", 1, False
@@ -273,7 +276,7 @@ If failed Then
   WScript.Quit 1
 End If
 
-' 4) 启动新版并清理
+' 4) start the new version and clean up
 sh.Run """" & target & """", 1, False
 WScript.Sleep 3000
 On Error Resume Next
@@ -336,11 +339,13 @@ def apply_update(
 
     script = new_exe.with_suffix(".vbs")
     try:
+        # **必须 ASCII + 无 BOM**：Windows Script Host 按 ANSI 读 .vbs，遇到 UTF-8 BOM
+        # 会在第 1 行第 1 个字符报「无效字符 800A0408」（2026-09-27 实测踩到）。
         script.write_text(
             VBS_TEMPLATE.format(target=str(target), newfile=str(new_exe), procname=target.name),
-            encoding="utf-8-sig", newline="\r\n",
+            encoding="ascii", newline="\r\n",
         )
-    except OSError as exc:
+    except (OSError, UnicodeEncodeError) as exc:
         return {"ok": False, "message": f"生成更新脚本失败：{exc}"}
 
     try:
