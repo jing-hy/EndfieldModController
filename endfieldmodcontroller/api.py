@@ -21,6 +21,14 @@ class EndfieldModControllerApi:
         self.config.ensure_dirs()
         self._mods_cache = None
         self._dep_task: dict[str, Any] | None = None
+        # 把用户的下载加速/线路偏好装进 fastnet（只在下载时生效，用完即放）
+        try:
+            from . import fastnet
+
+            fastnet.set_policy(getattr(self.config, "download_boost", "auto"))
+            fastnet.set_line_mode(getattr(self.config, "download_line", "auto"))
+        except Exception:  # noqa: BLE001
+            pass
         # 上次自我更新留下的 .old/.new/vbs 残留，启动时清掉
         try:
             removed = selfupdate.cleanup_stale(self.config)
@@ -959,6 +967,45 @@ class EndfieldModControllerApi:
             "frozen": selfupdate.is_frozen(),
             "exe": str(selfupdate.executable_path() or ""),
         }
+
+    # ------------------------------------------------------------------
+    # 下载加速 / 线路（按需临时启用，用完即放；见 fastnet）
+    # ------------------------------------------------------------------
+    def get_download_settings(self) -> dict[str, Any]:
+        from . import fastnet
+
+        return {
+            "policy": fastnet.get_policy(),
+            "line_mode": fastnet.get_line_mode(),
+            "lines": fastnet.line_status(),
+            "status": fastnet.status(),
+        }
+
+    def set_download_settings(self, policy: str = "", line_mode: str = "") -> dict[str, Any]:
+        from . import fastnet
+
+        if policy:
+            fastnet.set_policy(policy)
+            self.config.download_boost = fastnet.get_policy()
+        if line_mode:
+            fastnet.set_line_mode(line_mode)
+            self.config.download_line = fastnet.get_line_mode()
+        try:
+            self.config.save()
+        except OSError:
+            pass
+        launcher._append_log(
+            self.config,
+            f"下载设置: 加速={fastnet.get_policy()} 线路={fastnet.get_line_mode()}",
+        )
+        return self.get_download_settings()
+
+    def clear_download_lines(self) -> dict[str, Any]:
+        from . import fastnet
+
+        fastnet.clear_line_cache()
+        launcher._append_log(self.config, "已清除下载线路记录")
+        return self.get_download_settings()
 
     def check_app_update(self, use_cache: bool = True) -> dict[str, Any]:
         """对比 GitHub release 的 tag 与本机版本号。"""

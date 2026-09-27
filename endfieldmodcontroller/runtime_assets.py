@@ -295,31 +295,6 @@ BUNDLE_PATTERN = "assets-bundle"
 BUNDLE_STALE_SECONDS = 24 * 3600
 
 
-def _http_download(config: AppConfig, url: str, dest: Path,
-                   log: Callable[[str], None] | None = None, timeout: int = 1800) -> Path:
-    import urllib.request
-
-    from .version import USER_AGENT
-
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(request, timeout=timeout) as response, open(dest, "wb") as fh:
-        total = int(response.headers.get("Content-Length") or 0)
-        done = 0
-        step = -1
-        while True:
-            chunk = response.read(262144)
-            if not chunk:
-                break
-            fh.write(chunk)
-            done += len(chunk)
-            percent = (done * 100 // total) if total else 0
-            if percent // 10 > step:
-                step = percent // 10
-                _log(log, f"  下载资产包 {percent}%（{done // 1048576}/{max(total // 1048576, 1)} MB）")
-    return dest
-
-
 def _extract_bundle(archive: Path, dest_root: Path) -> int:
     """只接受压缩包里 `assets/...` 下的条目（防目录穿越 / 防乱写）。"""
     import zipfile
@@ -401,11 +376,21 @@ def fetch_bundle(
     size_mb = int(asset.get("size") or 0) / 1048576
     _log(log, f"本地没有 assets\\，从 Release 下载资产包 {asset.get('name')}（{size_mb:.0f} MB）")
     target = PROJECT_ROOT / "runtime" / "_update" / str(asset.get("name") or "assets-bundle.zip")
+    # 资产包走 fastnet（慢/抖时临时并发、直连不通时临时换镜像）：
+    # digest 由 GitHub API 给出，用来防止第三方镜像中转时被替换。
+    from . import fastnet
+
+    report = fastnet.download(
+        url, target, log=log, expected_sha256=str(asset.get("digest") or ""),
+    )
+    if not report.ok:
+        message = f"下载资产包失败：{report.message}"
+        remember(message)
+        return {"ok": False, "changed": False, "message": message}
     try:
-        _http_download(config, url, target, log=log)
         written = _extract_bundle(target, PROJECT_ROOT)
     except Exception as exc:  # noqa: BLE001
-        message = f"下载/解包资产包失败：{exc}"
+        message = f"解包资产包失败：{exc}"
         remember(message)
         return {"ok": False, "changed": False, "message": message}
 

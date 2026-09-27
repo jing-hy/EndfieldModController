@@ -187,39 +187,29 @@ def download_update(
     name = Path(urlparse(url).path).name or "update.bin"
     target = target_dir / name
     _log(log, f"开始下载更新包 {name}")
-    try:
-        request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-        with urllib.request.urlopen(request, timeout=timeout) as response, open(target, "wb") as fh:
-            total = int(response.headers.get("Content-Length") or 0)
-            done = 0
-            step = -1
-            while True:
-                chunk = response.read(262144)
-                if not chunk:
-                    break
-                fh.write(chunk)
-                done += len(chunk)
-                percent = (done * 100 // total) if total else 0
-                if percent // 20 > step:
-                    step = percent // 20
-                    _log(log, f"  下载 {percent}%（{done // 1048576}/{max(total // 1048576, 1)} MB）")
-    except (urllib.error.URLError, OSError) as exc:
-        return {"ok": False, "message": f"下载失败：{exc}"}
+    # 走 fastnet：慢/抖时临时并发，直连不通时临时换镜像线路；digest 直接交给它校验
+    from . import fastnet
 
-    expected = digest.replace("sha256:", "").strip().lower()
+    report = fastnet.download(
+        url, target, log=log, timeout=min(timeout, 60),
+        expected_sha256=digest.replace("sha256:", "").strip(),
+    )
+    if not report.ok:
+        return {"ok": False, "message": f"下载失败：{report.message}"}
+    if report.line and report.line != "直连":
+        _log(log, f"（本次经镜像线路 {report.line} 下载，已用 Release 提供的 sha256 校验通过）")
+
     actual = _sha256(target)
-    if expected and expected != actual:
-        try:
-            target.unlink()
-        except OSError:
-            pass
-        return {"ok": False, "message": "更新包校验失败（sha256 不符），已删除，请重试"}
-
     size = target.stat().st_size
     if size < 1024 * 1024:
         return {"ok": False, "message": f"更新包异常小（{size} 字节），已放弃", "path": str(target)}
-    _log(log, f"下载完成：{target}（{size // 1048576} MB）")
-    return {"ok": True, "path": str(target), "size": size, "sha256": actual, "name": name}
+    _log(log, f"下载完成：{target}（{size // 1048576} MB，"
+              f"{report.seconds:.1f}s / {report.mbps:.2f} MB/s"
+              + (f"，并发 {report.threads}" if report.boosted else "") + "）")
+    return {
+        "ok": True, "path": str(target), "size": size, "sha256": actual, "name": name,
+        "line": report.line, "mbps": round(report.mbps, 2), "boosted": report.boosted,
+    }
 
 
 VBS_TEMPLATE = r'''Option Explicit

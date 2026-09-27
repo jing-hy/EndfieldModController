@@ -58,6 +58,11 @@ class AppConfig:
     # **一般不用改**：留空即自动探测（工作区 / exe 旁边 / PyInstaller 解包目录）。
     # 首次启动会把缺失的 nvngx_dlss*.dll 从这里展开到 dlss5_dir。
     nvngx_assets_dir: str = ""
+    # 下载加速：auto=平时单连接，慢/抖时才临时上并发；always=强制并发；never=只用单连接。
+    # 下载线路：auto=直连优先，不通才临时换镜像；direct=只直连；mirror=只用镜像。
+    # 两者都是"按需临时启用、用完即放"，不常驻、不改系统（见 fastnet）。
+    download_boost: str = "auto"
+    download_line: str = "auto"
     # 是否把内置的新版 DLSS 运行库（nvngx_dlss / nvngx_dlssnr）部署进游戏目录。
     # 默认 False —— 实测新版 nvngx 会让游戏起不来，只在缺失时才补齐。
     deploy_new_nvngx: bool = False

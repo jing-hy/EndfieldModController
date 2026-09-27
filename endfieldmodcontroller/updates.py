@@ -88,23 +88,26 @@ def _fetch_json(url: str, timeout: int = 25) -> Any:
         return json.loads(response.read().decode("utf-8", errors="replace"))
 
 
-def download_file(url: str, dest: Path, log: Callable[[str], None] | None = None, timeout: int = 300) -> Path:
+def download_file(
+    url: str,
+    dest: Path,
+    log: Callable[[str], None] | None = None,
+    timeout: int = 300,
+    *,
+    expected_sha256: str = "",
+) -> Path:
+    """下载一个文件（走 fastnet：慢/抖时临时并发、直连不通时临时换镜像线路）。
+
+    失败仍然抛 urllib.error.URLError，保持既有调用方的 except 兼容。
+    """
+    from . import fastnet
+
     dest.parent.mkdir(parents=True, exist_ok=True)
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(req, timeout=timeout) as response, open(dest, "wb") as fh:
-        total = int(response.headers.get("Content-Length") or 0)
-        done = 0
-        step = 0
-        while True:
-            chunk = response.read(262144)
-            if not chunk:
-                break
-            fh.write(chunk)
-            done += len(chunk)
-            if total and done * 100 // total >= step + 25:
-                step = done * 100 // total
-                _log(log, f"下载中 {step}% ({done // 1048576}/{total // 1048576} MB)")
-    _log(log, f"下载完成: {dest.name} ({dest.stat().st_size // 1048576} MB)")
+    report = fastnet.download(
+        url, dest, log=log, timeout=min(timeout, 60), expected_sha256=expected_sha256,
+    )
+    if not report.ok:
+        raise urllib.error.URLError(report.message)
     return dest
 
 

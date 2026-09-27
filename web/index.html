@@ -153,6 +153,21 @@
         <label>依赖清单<input id="cfg-dependency_manifest" type="text"></label>
         <label class="checkbox-row"><input id="cfg-use_builtin_runtime" type="checkbox"> 使用内置 XXMI/EFMI</label>
         <label class="checkbox-row"><input id="cfg-auto_update_dependencies" type="checkbox"> 启动前自动更新依赖</label>
+        <label>下载加速
+          <select id="cfg-download_boost">
+            <option value="auto">自动（只在慢/抖动时临时并发）</option>
+            <option value="always">强制并发（连接很差时用）</option>
+            <option value="never">关闭（只用单连接）</option>
+          </select>
+        </label>
+        <label>下载线路
+          <select id="cfg-download_line">
+            <option value="auto">自动（直连优先，不通才临时换镜像）</option>
+            <option value="direct">仅直连</option>
+            <option value="mirror">只用镜像（直连被墙时）</option>
+          </select>
+        </label>
+        <div id="download-status" class="hint"></div>
         <label class="checkbox-row"><input id="cfg-require_admin" type="checkbox"> 启动时请求管理员权限</label>
       </div>
       <div class="toolbar">
@@ -162,6 +177,7 @@
         <button id="browse-game">选择 Endfield.exe</button>
         <button id="browse-reshade">选择 ReShade64.dll</button>
         <button id="browse-manifest">选择依赖清单</button>
+        <button id="clear-download-lines-btn">清除线路记录</button>
       </div>
       <div class="toolbar">
         <button id="autodetect-btn">自动检测 XXMI</button>

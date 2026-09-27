@@ -291,6 +291,33 @@ async function refreshPaths(config) {
   $('cfg-use_builtin_runtime').checked = config.use_builtin_runtime !== false;
   $('cfg-auto_update_dependencies').checked = !!config.auto_update_dependencies;
   $('cfg-require_admin').checked = !!config.require_admin;
+  if ($('cfg-download_boost')) $('cfg-download_boost').value = config.download_boost || 'auto';
+  if ($('cfg-download_line')) $('cfg-download_line').value = config.download_line || 'auto';
+  refreshDownloadStatus();
+}
+
+// 下载加速状态：平时是关的，只在下载慢/抖动时临时开，下完立刻放掉
+async function refreshDownloadStatus() {
+  const el = $('download-status');
+  if (!el) return;
+  try {
+    const s = await call('get_download_settings');
+    const last = (s.status || {}).last;
+    const parts = [];
+    if (last) {
+      parts.push(`上次下载：${last.line || '?'}  ${(last.mbps || 0).toFixed(2)} MB/s`
+        + (last.boosted ? `（临时并发 ${last.threads} 连接，已关闭）` : '（单连接，未启用加速）'));
+      if (last.bytes) parts.push(`${(last.bytes / 1048576).toFixed(1)} MB / ${(last.seconds || 0).toFixed(0)}s`);
+    } else {
+      parts.push('还没下载过（加速平时是关的，慢的时候才临时打开）');
+    }
+    const known = (s.lines || []).filter((l) => l.ok !== null)
+      .map((l) => `${l.line}=${(l.mbps || 0).toFixed(2)}`).join('  ');
+    if (known) parts.push(`线路记录(MB/s)：${known}`);
+    el.textContent = parts.join('　｜　');
+  } catch (err) {
+    el.textContent = '下载状态读取失败';
+  }
 }
 
 async function saveConfig() {
@@ -311,6 +338,8 @@ async function saveConfig() {
     use_builtin_runtime: $('cfg-use_builtin_runtime').checked,
     auto_update_dependencies: $('cfg-auto_update_dependencies').checked,
     require_admin: $('cfg-require_admin').checked,
+    download_boost: $('cfg-download_boost') ? $('cfg-download_boost').value : 'auto',
+    download_line: $('cfg-download_line') ? $('cfg-download_line').value : 'auto',
   };
   await call('save_config', data);
   await refreshFromState();
@@ -963,6 +992,25 @@ function bind() {
     };
     // 乳摇插件的更新已并入「自动安装/更新」（依赖列表里的 secondary_motion 项）
   }
+  // 下载加速 / 线路：按需临时启用，用完即放（不常驻、不改系统）
+  ['cfg-download_boost', 'cfg-download_line'].forEach((id) => {
+    const el = $(id);
+    if (!el) return;
+    el.onchange = async () => {
+      await call('set_download_settings',
+        $('cfg-download_boost').value, $('cfg-download_line').value);
+      await refreshDownloadStatus();
+      setStatus('下载设置已更新');
+    };
+  });
+  if ($('clear-download-lines-btn')) {
+    $('clear-download-lines-btn').onclick = async () => {
+      await call('clear_download_lines');
+      await refreshDownloadStatus();
+      setStatus('线路记录已清除');
+    };
+  }
+
   $('cfg-theme').onchange = async () => {
     applyTheme($('cfg-theme').value);
     await call('save_config', { theme: $('cfg-theme').value });
