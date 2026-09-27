@@ -31,6 +31,10 @@ APP_NAME = "EndfieldModController"
 # 只读资源：web 前端整目录打进去
 ADD_DATA = [("web", "web")]
 
+# 应用图标（多尺寸 ico，含 16/24/32/48/64/128/256）。放进 exe 后，
+# 资源管理器、任务栏、窗口标题栏都会用它。
+ICON = ROOT / "assets" / "app.ico"
+
 
 def main() -> int:
     args = list(sys.argv[1:])
@@ -46,6 +50,10 @@ def main() -> int:
     ]
     for src, dest in ADD_DATA:
         cmd += ["--add-data", f"{src}{';' if sys.platform == 'win32' else ':'}{dest}"]
+    if ICON.is_file():
+        cmd += ["--icon", str(ICON)]
+    else:
+        print(f"!! 没找到图标 {ICON}，将使用 PyInstaller 默认图标")
     # pywebview 在 Windows 上走 WebView2，经 pythonnet/clr 调用，必须显式带上
     cmd += ["--collect-all", "webview"]
     for hidden in ("clr", "pythonnet", "PIL", "cryptography", "webview.platforms.edgechromium"):
