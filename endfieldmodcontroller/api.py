@@ -46,8 +46,15 @@ class EndfieldModControllerApi:
         return self._mods_cache
 
     def _invalidate_mods(self) -> None:
+        """只让 Mod 列表缓存失效。
+
+        **绝不能在这里清 `self._dep_task`** —— 那是下载任务的进度状态，跟 Mod 列表
+        没有关系。而本方法会在重新扫描 / 收编手动 Mod / 确认角色归属时被调用，
+        用户「切到别的页面」就会触发扫描 → 任务状态被清成 None → 正在跑的下载线程
+        下一句访问 `self._dep_task[...]` 直接崩掉，界面上看起来就是"切个页面下载就
+        从头再来"。下载任务的清理交给它自己（worker 的 finally）。
+        """
         self._mods_cache = None
-        self._dep_task: dict[str, Any] | None = None
 
     def log_frontend_error(self, message: str) -> dict[str, Any]:
         """接收前端 JS 错误，写进控制器日志（前端崩了也能在后端看到原因）。"""

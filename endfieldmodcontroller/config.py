@@ -80,7 +80,7 @@ class AppConfig:
     # 留空 = 用 proxy 替换方式（老路子，会和 ReShade/EFMI 抢 D3D 链路）；
     # 填了短路径（如 D:\\zmdmod\\SBM\\sbm.dll）= 由 XXMI 注入，游戏目录不换任何系统 DLL。
     secondary_motion_dll: str = ""
-    theme: str = "dark"
+    theme: str = "light"
     last_tab: str = "library"
     inject_reshade_ui: bool = True
     dependency_manifest: str = "dependencies.json"
@@ -115,7 +115,7 @@ class AppConfig:
         cfg = cls(**filtered)
         cfg._config_path = str(path)
         if cfg.theme not in {"dark", "light"}:
-            cfg.theme = "dark"
+            cfg.theme = "light"
         # 关键路径留空时按工作区内的内嵌组件补齐并落盘：
         # 这样把 config.json 整个删掉，一键启动依然能自建出完整可用配置。
         if cfg.autofill():

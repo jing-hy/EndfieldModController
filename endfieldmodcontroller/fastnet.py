@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import threading
 import time
 import urllib.error
@@ -260,6 +261,51 @@ def _download_sequential(
     return written, False, ""
 
 
+def _parts_path(dest: Path) -> Path:
+    """分块下载的"已完成块"记录（**存在这个文件 = 还没下完**）。
+
+    为什么需要它：文件本体是"边下边 seek 写"的，预分配或空洞都会让文件大小看着
+    正好等于总量 —— 所以**文件大小不能代表完整性**，完整性一律以这个 sidecar
+    是否还在为准。
+    """
+    return dest.with_name(dest.name + ".mcparts.json")
+
+
+def has_partial_parts(dest: Path) -> bool:
+    return _parts_path(dest).is_file()
+
+
+def _load_parts(dest: Path, size: int) -> set[tuple[int, int]]:
+    try:
+        data = json.loads(_parts_path(dest).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return set()
+    if not isinstance(data, dict) or int(data.get("total") or 0) != size:
+        return set()
+    spans: set[tuple[int, int]] = set()
+    for item in data.get("done") or []:
+        try:
+            spans.add((int(item[0]), int(item[1])))
+        except (TypeError, ValueError, IndexError):
+            continue
+    return spans
+
+
+def _save_parts(dest: Path, size: int, spans: set[tuple[int, int]]) -> None:
+    try:
+        _parts_path(dest).write_text(
+            json.dumps({"total": size, "done": sorted(spans)}), encoding="utf-8", newline="\n")
+    except OSError:
+        pass
+
+
+def _clear_parts(dest: Path) -> None:
+    try:
+        _parts_path(dest).unlink()
+    except OSError:
+        pass
+
+
 def _download_parallel(
     url: str,
     dest: Path,
@@ -272,12 +318,26 @@ def _download_parallel(
     progress: Progress = None,
     log: Log = None,
 ) -> int:
-    """从 start 位置起并发分块下载剩余部分，每块独立重试。返回重试次数。"""
-    spans = [(pos, min(pos + chunk - 1, size - 1)) for pos in range(start, size, chunk)]
+    """并发分块下载，**块级断点续传**：已完成的块记在 sidecar 里，中断后不重下。
+
+    start：没有块记录时（单连接顺序下载的残留）把前 start 字节视为已完成。
+    """
+    spans = [(pos, min(pos + chunk - 1, size - 1)) for pos in range(0, size, chunk)]
+    done_spans = _load_parts(dest, size)
+    if not done_spans and start > 0:
+        done_spans = {(a, b) for a, b in spans if b < start}
+    todo = [span for span in spans if span not in done_spans]
+
     lock = threading.Lock()
-    done = {"n": start, "retries": 0}
+    state = {"n": sum(b - a + 1 for a, b in done_spans), "retries": 0}
+    if not dest.exists():
+        dest.touch()
+    _save_parts(dest, size, done_spans)
     if progress:
-        progress(start, size)
+        progress(min(state["n"], size), size)
+    if done_spans:
+        _log(log, f"续传：已完成 {state['n'] // 1048576} MB / {size // 1048576} MB，"
+                  f"还需下 {len(todo)} 块")
 
     def fetch(span: tuple[int, int]) -> None:
         begin, end = span
@@ -294,20 +354,25 @@ def _download_parallel(
                     fh.seek(begin)
                     fh.write(data)
                 with lock:
-                    done["n"] += len(data)
+                    done_spans.add(span)
+                    state["n"] += len(data)
+                    _save_parts(dest, size, done_spans)   # 每块都落盘，断电也不白下
                     if progress:
-                        progress(min(done["n"], size), size)
+                        progress(min(state["n"], size), size)
                 return
             except (urllib.error.URLError, OSError, TimeoutError) as exc:
                 last_error = exc
                 with lock:
-                    done["retries"] += 1
+                    state["retries"] += 1
                 time.sleep(0.4 * (attempt + 1))
         raise OSError(f"分块 {begin}-{end} 重试 4 次仍失败：{last_error}")
 
-    with ThreadPoolExecutor(max_workers=max(1, min(threads, len(spans)))) as pool:
-        list(pool.map(fetch, spans))
-    return done["retries"]
+    if todo:
+        with ThreadPoolExecutor(max_workers=max(1, min(threads, len(todo)))) as pool:
+            list(pool.map(fetch, todo))
+    if len(done_spans) >= len(spans):
+        _clear_parts(dest)      # 块齐了才算下完
+    return state["retries"]
 
 
 def recommended_threads(size: int) -> int:
@@ -508,7 +573,8 @@ def _attempt_line(
              + (f"（{size / 1048576:.1f} MB）" if size else ""))
 
     # 已经下完且大小一致 → 直接跳过
-    if dest.is_file() and size and dest.stat().st_size == size:
+    # 已经下完（大小一致 **且没有未完成的分块记录**）→ 直接跳过
+    if dest.is_file() and size and dest.stat().st_size == size and not has_partial_parts(dest):
         report.bytes = size
         report.seconds = 0.0
         report.reason = "文件已存在且大小一致"
@@ -516,26 +582,92 @@ def _attempt_line(
         _log(log, "已存在且大小一致，跳过下载")
         return report
 
+    # 一切下载都写"工作文件"，**成功后才落位到目标路径**。
+    # 这样任何一条线路失败、任何一次中断都不会破坏已经下到的数据，
+    # 换线路 / 重试时还能继续用（之前的写法是直接写目标文件，直连失败那次
+    # 就把续传数据截断了，等于白下）。
+    work = dest.with_name(dest.name + ".mcdownload")
+    if not work.exists() and dest.is_file():
+        try:
+            dest.replace(work)
+        except OSError:
+            pass
+    # 分块记录要**跟着工作文件一起搬家**，否则续传信息会"跟不上"目标路径
+    dest_parts = _parts_path(dest)
+    if dest_parts.is_file() and not _parts_path(work).is_file():
+        try:
+            dest_parts.replace(_parts_path(work))
+        except OSError:
+            pass
+
+    partial = work.stat().st_size if work.is_file() else 0
+    # sidecar 还在 = 上次分块下载没完成。**此时不能只看大小**：块是 seek 写的，
+    # 文件大小可能已经等于总量、里面却是空洞。
+    incomplete = has_partial_parts(work)
+
+    # 断点续传：支持 Range 且已有部分数据（或上次的分块记录还在）
+    resume_from = partial if (supports_range and size and 0 < partial < size) else 0
+    if incomplete and supports_range and size:
+        resume_from = partial
+    if resume_from and size:
+        _log(log, f"发现未下载完的数据（{partial // 1048576} MB / {size // 1048576} MB），"
+                  f"{'按上次的分块记录' if incomplete else '从断点'}继续")
+        report.resumed_from = partial
+
+    def finish(work_path: Path) -> None:
+        """校验通过后把工作文件落位到目标路径。"""
+        _clear_parts(work_path)
+        os.replace(work_path, dest)
+
     try:
+        # 断点续传优先：直接用分块把缺的补齐（哪怕设置里关了加速也续，否则前面的白下）
+        if (incomplete or resume_from) and supports_range and size:
+            threads = recommended_threads(size)
+            report.boosted = True
+            report.threads = threads
+            report.reason = (f"断点续传：{size // 1048576} MB 中已下 {partial // 1048576} MB，"
+                             f"用 {threads} 连接补齐剩余")
+            _log(log, report.reason)
+            with _STATE_LOCK:
+                _STATE["active"] = int(_STATE.get("active") or 0) + 1
+            try:
+                report.retries = _download_parallel(
+                    url, work, size=size, start=resume_from, threads=threads,
+                    timeout=timeout, progress=progress, log=log)
+            finally:
+                with _STATE_LOCK:
+                    _STATE["active"] = max(0, int(_STATE.get("active") or 0) - 1)
+            report.bytes = work.stat().st_size if work.is_file() else 0
+            if report.bytes != size:
+                raise OSError(f"下载不完整：{report.bytes:,} / {size:,} 字节")
+            finish(work)
+            report.message = "完成（断点续传）"
+            _set_speed(report, started)
+            return report
+
         # 小文件 / 不支持 Range / 明确不要加速 → 老老实实单连接
         if not supports_range or (size and size < MIN_PARALLEL_BYTES) or policy == "never":
             reason = ("服务器不支持 Range" if not supports_range else
                       "文件较小，不值得并发" if size and size < MIN_PARALLEL_BYTES else "已按设置关闭加速")
             report.reason = reason
+            # 已有部分数据时按追加写（不截断），否则从头写
             written, stalled, note = _download_sequential(
-                url, dest, total=size, timeout=timeout, progress=progress, log=log)
-            report.bytes = written
-            if size and written != size:
-                raise OSError(f"下载不完整：{written:,} / {size:,} 字节")
+                url, work, offset=partial if (supports_range and partial) else 0,
+                total=size, timeout=timeout, progress=progress, log=log)
+            total_written = (partial if (supports_range and partial) else 0) + written
+            report.bytes = total_written
+            if size and total_written != size:
+                raise OSError(f"下载不完整：{total_written:,} / {size:,} 字节")
             report.ok = True
             report.message = note or "完成"
+            finish(work)
             _set_speed(report, started)
             return report
 
         # ① 单连接探测：先下 PROBE_BYTES 看看这条链路到底行不行
         probe_target = PROBE_BYTES if size > MIN_PARALLEL_BYTES else size
         written, stalled, note = _download_sequential(
-            url, dest, total=size, timeout=timeout, progress=progress, log=log, stop_after=probe_target)
+            url, work, total=size, timeout=timeout, progress=progress, log=log, stop_after=probe_target)
         probe_seconds = max(time.time() - started, 1e-6)
         report.probe_mbps = _mbps(written, probe_seconds)
         slow = report.probe_mbps < SLOW_MBPS
@@ -546,11 +678,12 @@ def _attempt_line(
             report.reason = f"单连接 {report.probe_mbps:.2f} MB/s（够快，不启用加速）"
             _log(log, report.reason)
             rest, stalled2, note2 = _download_sequential(
-                url, dest, offset=written, total=size, timeout=timeout, progress=progress, log=log)
+                url, work, offset=written, total=size, timeout=timeout, progress=progress, log=log)
             report.bytes = written + rest
             if size and report.bytes != size:
                 raise OSError(f"下载不完整：{report.bytes:,} / {size:,} 字节")
             report.message = note2 or "完成"
+            finish(work)
             _set_speed(report, started)
             return report
 
@@ -570,19 +703,21 @@ def _attempt_line(
             _STATE["active"] = int(_STATE.get("active") or 0) + 1
         try:
             report.retries = _download_parallel(
-                url, dest, size=size, start=written, threads=threads,
+                url, work, size=size, start=written, threads=threads,
                 timeout=timeout, progress=progress, log=log)
         finally:
             with _STATE_LOCK:
                 _STATE["active"] = max(0, int(_STATE.get("active") or 0) - 1)
-        report.bytes = dest.stat().st_size if dest.is_file() else 0
+        report.bytes = work.stat().st_size if work.is_file() else 0
         if size and report.bytes != size:
             raise OSError(f"下载不完整：{report.bytes:,} / {size:,} 字节")
+        finish(work)
         report.message = "完成（并发加速）"
     except (urllib.error.URLError, OSError, TimeoutError) as exc:
         report.ok = False
         report.message = str(exc)
-        report.bytes = dest.stat().st_size if dest.is_file() else 0
+        # 失败时**保留工作文件**：下次同一条线路（或换线路）还能接着下
+        report.bytes = work.stat().st_size if work.is_file() else 0
         _set_speed(report, started)
         return report
 

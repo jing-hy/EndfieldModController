@@ -10,7 +10,7 @@ function applyTheme(theme) {
   if (select) select.value = value;
 }
 
-try { applyTheme(localStorage.getItem('mc-theme') || 'dark'); } catch (err) { /* ignore */ }
+try { applyTheme(localStorage.getItem('mc-theme') || 'light'); } catch (err) { /* ignore */ }
 
 // 前端错误上报：任何未捕获异常/未处理 rejection 都写进后端日志，
 // 这样"界面空白 / 点不动"这类问题也能在 runtime\logs 里看到原因。

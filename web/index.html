@@ -6,15 +6,19 @@
   <title>EndfieldModController</title>
   <link rel="stylesheet" href="style.css">
   <script>
-    // 尽早应用主题：必须在加载页绘制之前，否则会先闪一下默认深色。
-    // 主题缓存在 localStorage（app.js 每次切换时同步写入）。
+    // 尽早应用主题：必须在加载页绘制之前，否则会先闪一下别的颜色。
+    // 默认（从未切换过时）用浅色/白色；主题缓存在 localStorage（app.js 每次切换时同步写入）。
     (function () {
       try {
-        var t = localStorage.getItem('mc-theme');
+        var t = localStorage.getItem('mc-theme') || 'light';
         if (t === 'light' || t === 'dark' || t === 'amber' || t === 'cyan' || t === 'violet' || t === 'emerald') {
           document.documentElement.dataset.theme = t;
+        } else {
+          document.documentElement.dataset.theme = 'light';
         }
-      } catch (e) { /* ignore */ }
+      } catch (e) {
+        document.documentElement.dataset.theme = 'light';
+      }
     })();
   </script>
 </head>
@@ -35,7 +39,7 @@
     </div>
     <div class="header-actions">
       <button id="app-update-btn" class="update-badge" title="检查程序更新">v…</button>
-      <button id="theme-toggle" class="theme-toggle" title="切换深色/浅色">深色</button>
+      <button id="theme-toggle" class="theme-toggle" title="切换深色/浅色">浅色</button>
       <div class="status" id="global-status">就绪</div>
     </div>
   </header>
