@@ -1458,6 +1458,9 @@ DEFAULT_DEPENDENCIES = {
     "slotfix": {"display": "Slotfix", "kind": "dependency"},
 }
 
+# ini 内部的命令引用：CommandList\<列表名>\<命令名>（不是外部依赖）
+_COMMANDLIST_REF = re.compile(r"commandlist\\[^\s\"']*", re.IGNORECASE)
+
 
 def collect_required_dependency_names(mods: Sequence[ModInfo]) -> list[str]:
     required: set[str] = set()
@@ -1471,7 +1474,11 @@ def collect_required_dependency_names(mods: Sequence[ModInfo]) -> list[str]:
                 texts.append(read_text(ini_path))
             except OSError:
                 continue
-        haystack = "\n".join(texts).lower()
+        haystack = "\n".join(texts)
+        # 3DMigoto 的 `CommandList\<列表名>\<命令名>` 是 **ini 内部的命令引用**，不是外部依赖。
+        # 不先剔掉它，像 `pre run = CommandList\SlotFix\SaveDefault` 这样的行会让
+        # "SlotFix" 被误判成缺失依赖（2026-09-27 实测的误报来源）。
+        haystack = _COMMANDLIST_REF.sub(" ", haystack).lower()
         for dep_id in DEFAULT_DEPENDENCIES:
             if dep_id.lower() in haystack:
                 required.add(known[dep_id.lower()])
