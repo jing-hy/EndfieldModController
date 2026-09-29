@@ -66,3 +66,6 @@ reshade_addon/cmake-build/
 .idea/
 Thumbs.db
 desktop.ini
+
+# 运行期备份文件（不要让它们进仓库）
+*.bak-*
