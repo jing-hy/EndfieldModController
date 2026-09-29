@@ -443,6 +443,17 @@ progress { border-radius: 999px; overflow: hidden; }
 progress::-webkit-progress-bar { border-radius: 999px; }
 progress::-webkit-progress-value { border-radius: 999px; }
 
+/* 弹窗正文（统一弹窗用的 <pre>，要覆盖 pre 的等宽/底色，保留换行） */
+.modal-body {
+  margin: 10px 0 0;
+  padding: 0 22px;
+  max-height: 58vh; overflow-y: auto;
+  font-family: inherit; font-size: 13px; line-height: 1.65;
+  color: var(--text);
+  background: none; border: none; box-shadow: none;
+  white-space: pre-wrap; word-break: break-word;
+}
+
 .update-badge {
   min-width: 76px;
   border-radius: 999px;

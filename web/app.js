@@ -55,6 +55,58 @@ function setStatus(text) {
   if (text) showToast(text);
 }
 
+// ── 统一弹窗 ────────────────────────────────────────────────────────────────
+// 与「检测到终末地异常退出」那个模态（#crash-modal）**完全同一套结构与样式**：
+// .modal / .modal-content / .modal-header / .modal-actions。
+// 用户要求把所有弹窗都改成它那个样式，因此这里提供 Promise 版的 showAlert /
+// showConfirm 取代原生 alert/confirm（原生弹窗由系统渲染、改不了样式），
+// 全项目 27 处调用已批量替换过来。
+function showModalDialog({ title, message, okText = '确定', cancelText = '取消', showCancel = true }) {
+  return new Promise((resolve) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'modal';
+    wrap.innerHTML = '<div class="modal-content" style="width:min(560px,92vw)">'
+      + '<div class="modal-header"><h3></h3></div>'
+      + '<pre class="modal-body"></pre>'
+      + '<div class="modal-actions"></div></div>';
+    wrap.querySelector('h3').textContent = title;
+    wrap.querySelector('.modal-body').textContent = message;
+    const actions = wrap.querySelector('.modal-actions');
+    let settled = false;
+    const onKey = (event) => {
+      if (event.key === 'Escape') finish(false);
+      if (event.key === 'Enter') finish(true);
+    };
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      document.removeEventListener('keydown', onKey);
+      wrap.remove();
+      resolve(value);
+    };
+    if (showCancel) {
+      const cancel = document.createElement('button');
+      cancel.textContent = cancelText;
+      cancel.onclick = () => finish(false);
+      actions.appendChild(cancel);
+    }
+    const ok = document.createElement('button');
+    ok.className = 'primary';
+    ok.textContent = okText;
+    ok.onclick = () => finish(true);
+    actions.appendChild(ok);
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(wrap);
+    ok.focus();
+  });
+}
+
+const showAlert = (message, title = '提示') =>
+  showModalDialog({ title, message, okText: '知道了', showCancel: false });
+
+const showConfirm = (message, title = '确认操作') =>
+  showModalDialog({ title, message, okText: '继续', showCancel: true });
+
 // ── 日志分级（英文等级 + 分色）──────────────────────────────
 // 注意：这三个必须是**顶层函数** —— boot() 会调用它们，而 boot 在 bind() 之外。
 function detectLogLevel(text) {
@@ -111,7 +163,7 @@ async function call(method, ...args) {
     return await window.pywebview.api[method](...args);
   } catch (err) {
     const message = err && err.message ? err.message : String(err);
-    alert(`${method} failed:
+    await showAlert(`${method} failed:
 ${message}`);
     throw err;
   }
@@ -570,7 +622,7 @@ async function clearLog() {
 }
 
 async function forceCloseGame() {
-  if (!confirm('将强制结束 Endfield.exe / migoto_loader2.exe / loader.exe 残留进程。\n\n如果只是窗口关闭后进程没退出，可以继续。是否继续？')) return;
+  if (!await showConfirm('将强制结束 Endfield.exe / migoto_loader2.exe / loader.exe 残留进程。\n\n如果只是窗口关闭后进程没退出，可以继续。是否继续？')) return;
   setStatus('正在强制结束残留进程...');
   const result = await call('force_close_game');
   setStatus(result.ok ? `已结束: ${(result.killed || []).join(', ') || '无运行进程'}` : `结束失败: ${(result.errors || []).join('; ')}`);
@@ -600,12 +652,12 @@ async function previewLaunch() {
 
 async function launch() {
   if (!state.config.xxmi_launcher) {
-    alert(`还没有配置 XXMI Launcher 路径。
+    await showAlert(`还没有配置 XXMI Launcher 路径。
 请到“设置”页选择 XXMI Launcher.exe，或点击“自动检测 XXMI”。`);
     showTab('settings');
     return;
   }
-  if (!confirm('确定要完成准备并打开 XXMI Launcher 吗？（不会自动启动游戏；请在 XXMI 里点 Start）')) return;
+  if (!await showConfirm('确定要完成准备并打开 XXMI Launcher 吗？（不会自动启动游戏；请在 XXMI 里点 Start）')) return;
   openLog();
   setStatus('准备并启动中...');
   const result = await call('launch');
@@ -615,12 +667,12 @@ async function launch() {
 
 async function launchGame() {
   if (!state.config.xxmi_launcher) {
-    alert(`还没有配置 XXMI Launcher 路径。
+    await showAlert(`还没有配置 XXMI Launcher 路径。
 请到“设置”页选择 XXMI Launcher.exe，或点击“自动检测 XXMI”。`);
     showTab('settings');
     return;
   }
-  if (!confirm('确定要完成准备并通过 XXMI/EFMI 启动游戏吗？\nXXMI 会自动加上 -force-d3d11。')) return;
+  if (!await showConfirm('确定要完成准备并通过 XXMI/EFMI 启动游戏吗？\nXXMI 会自动加上 -force-d3d11。')) return;
   openLog();
   setStatus('准备并通过 XXMI 启动游戏...');
   const result = await call('launch_game');
@@ -629,7 +681,7 @@ async function launchGame() {
 }
 
 async function enableSafeMode() {
-  if (!confirm('反作弊兼容模式会：移除 EndfieldModController 写入游戏目录的 3 个集成文件，把 dxgi.dll / d3d12.dll 重命名为 *.endfieldmodcontroller.disabled，并改用 XXMI extra_libraries 注入 ReShade。\n\n这是可回滚操作，是否继续？')) return;
+  if (!await showConfirm('反作弊兼容模式会：移除 EndfieldModController 写入游戏目录的 3 个集成文件，把 dxgi.dll / d3d12.dll 重命名为 *.endfieldmodcontroller.disabled，并改用 XXMI extra_libraries 注入 ReShade。\n\n这是可回滚操作，是否继续？')) return;
   openLog();
   setStatus('正在切换反作弊兼容模式...');
   const result = await call('enable_anti_cheat_safe_mode');
@@ -639,7 +691,7 @@ async function enableSafeMode() {
 }
 
 async function restoreSafeMode() {
-  if (!confirm('是否恢复游戏目录 ReShade：把 *.endfieldmodcontroller.disabled 改回 dxgi.dll / d3d12.dll，并恢复 XXMI extra_libraries 备份？')) return;
+  if (!await showConfirm('是否恢复游戏目录 ReShade：把 *.endfieldmodcontroller.disabled 改回 dxgi.dll / d3d12.dll，并恢复 XXMI extra_libraries 备份？')) return;
   setStatus('正在恢复游戏目录 ReShade...');
   const result = await call('restore_anti_cheat_safe_mode');
   $('launch-status').textContent = JSON.stringify(result, null, 2);
@@ -648,7 +700,7 @@ async function restoreSafeMode() {
 }
 
 async function enableD3D12Mode() {
-  if (!confirm('dxgi改名d3d12模式会把游戏目录的 dxgi.dll 重命名为 *.endfieldmodcontroller.disabled，保留 d3d12.dll 作为 ReShade 代理，并把 EndfieldModController 集成文件写回游戏目录。是否继续？')) return;
+  if (!await showConfirm('dxgi改名d3d12模式会把游戏目录的 dxgi.dll 重命名为 *.endfieldmodcontroller.disabled，保留 d3d12.dll 作为 ReShade 代理，并把 EndfieldModController 集成文件写回游戏目录。是否继续？')) return;
   openLog();
   setStatus('正在切换 dxgi→d3d12 模式...');
   const result = await call('enable_d3d12_proxy_mode');
@@ -658,7 +710,7 @@ async function enableD3D12Mode() {
 }
 
 async function restoreD3D12Mode() {
-  if (!confirm('恢复 dxgi 代理：把 dxgi.dll.endfieldmodcontroller.disabled 改回 dxgi.dll，并移除 EndfieldModController 集成文件？')) return;
+  if (!await showConfirm('恢复 dxgi 代理：把 dxgi.dll.endfieldmodcontroller.disabled 改回 dxgi.dll，并移除 EndfieldModController 集成文件？')) return;
   setStatus('正在恢复 dxgi 代理...');
   const result = await call('restore_d3d12_proxy_mode');
   $('launch-status').textContent = JSON.stringify(result, null, 2);
@@ -670,11 +722,11 @@ async function launchMigotoLoader() {
   // Official XXMI Launcher GUI mode.  Do not use the custom 3DMigoto loader,
   // do not auto-start the game, and do not write proxy DLLs into the game dir.
   if (!state.config.xxmi_launcher) {
-    alert('还没有配置 XXMI Launcher 路径。请到设置页选择 XXMI Launcher.exe，或点击“自动检测 XXMI”。');
+    await showAlert('还没有配置 XXMI Launcher 路径。请到设置页选择 XXMI Launcher.exe，或点击“自动检测 XXMI”。');
     showTab('settings');
     return;
   }
-  if (!confirm('打开官方 XXMI Launcher（EFMI 图形界面）？\n不会自动启动游戏，也不会使用自定义 Loader。')) return;
+  if (!await showConfirm('打开官方 XXMI Launcher（EFMI 图形界面）？\n不会自动启动游戏，也不会使用自定义 Loader。')) return;
   openLog();
   setStatus('正在打开官方 XXMI Launcher...');
   const result = await call('launch_official_gui');
@@ -697,7 +749,7 @@ async function checkAndRepairIntegrity() {
     return;
   }
   const missing = (report.failures || []).map(item => item.message).join('\n');
-  if (!confirm(`发现缺失文件：
+  if (!await showConfirm(`发现缺失文件：
 ${missing}
 
 是否自动修复？`)) return;
@@ -730,7 +782,7 @@ async function cleanGameInjections() {
   const message = ['发现以下第三方注入文件：', names, '',
     '将把它们改名停放（有 .bak 的会恢复原版系统 DLL），并注入的游戏插件一并停用。',
     '这是可撤销操作，是否继续？'].join(String.fromCharCode(10));
-  if (!confirm(message)) return;
+  if (!await showConfirm(message)) return;
   openLog();
   setStatus('正在清理游戏目录注入...');
   const result = await call('clean_game_injections');
@@ -740,7 +792,7 @@ async function cleanGameInjections() {
 }
 
 async function restoreGameInjections() {
-  if (!confirm('撤销上一次的注入清理，把停放的文件改回去？')) return;
+  if (!await showConfirm('撤销上一次的注入清理，把停放的文件改回去？')) return;
   const result = await call('restore_game_injections');
   $('game-inject-status').textContent = JSON.stringify(result, null, 2);
   setStatus(result.ok ? '已撤销注入清理' : (result.message || '撤销失败'));
@@ -1003,21 +1055,21 @@ function bind() {
     if (r.error) { setStatus('检查更新失败'); return r; }
     if (checkOnly || !r.update_available) {
       setStatus(r.update_available ? `有新版 v${r.latest}` : '已是最新');
-      if (!checkOnly) alert(`已是最新版本 v${r.current}`);
+      if (!checkOnly) await showAlert(`已是最新版本 v${r.current}`);
       return r;
     }
-    if (!confirm(`发现新版本 v${r.latest}（当前 v${r.current}）\n\n现在下载并自动更新吗？\n· 更新时程序会自动退出并重启为新版\n· 更新期间请不要手动打开程序（替换过程中会被打断）\n· config.json 与 Mod 库不受影响\n· 失败会自动回滚旧版本\n\n进度会显示在「依赖」页`)) return r;
+    if (!await showConfirm(`发现新版本 v${r.latest}（当前 v${r.current}）\n\n现在下载并自动更新吗？\n· 更新时程序会自动退出并重启为新版\n· 更新期间请不要手动打开程序（替换过程中会被打断）\n· config.json 与 Mod 库不受影响\n· 失败会自动回滚旧版本\n\n进度会显示在「依赖」页`)) return r;
 
     if (!r.frozen) {
       // 源码运行模式没法替换自己：只下载更新包，然后提示手动 git pull
       setStatus('正在下载更新包…');
       const dl = await call('download_app_update');
       if (!dl.ok) {
-        alert(`下载失败：${dl.message || '未知错误'}`);
+        await showAlert(`下载失败：${dl.message || '未知错误'}`);
         setStatus('下载失败');
         return r;
       }
-      alert(`更新包已下载到：\n${dl.path}\n\n源码运行模式不会自动替换，请手动更新（git pull）。`);
+      await showAlert(`更新包已下载到：\n${dl.path}\n\n源码运行模式不会自动替换，请手动更新（git pull）。`);
       setStatus('已下载（源码模式）');
       return r;
     }
@@ -1063,14 +1115,14 @@ function bind() {
     // 一键装齐所有"不随包分发"的组件（含随包资产展开 + XXMI/EFMI + DLSS5 组件 + 乳摇）
     if ($('update-all-btn')) {
       $('update-all-btn').onclick = async () => {
-        if (!confirm('将自动安装/更新所有组件：\n\n· 随包资产展开（DLSS 运行库、DLSS5 组件包）\n· XXMI Launcher / XXMI 库 / EFMI\n· ReShade 底座、DLSS5-Feeder、iMMERSE shader\n· 乳摇插件\n\n需要联网，继续？')) return;
+        if (!await showConfirm('将自动安装/更新所有组件：\n\n· 随包资产展开（DLSS 运行库、DLSS5 组件包）\n· XXMI Launcher / XXMI 库 / EFMI\n· ReShade 底座、DLSS5-Feeder、iMMERSE shader\n· 乳摇插件\n\n需要联网，继续？')) return;
         setStatus('正在一键安装/更新全部组件…');
         await startFullUpdate(false, $('update-status'));
         setStatus('全部组件处理完成');
       };
     }
     $('update-reshade-btn').onclick = async () => {
-      if (!confirm('将从 reshade.me 下载官方 ReShade Addon，替换 runtime\\dlss5\\d3d12.dll（旧版自动备份）。\n官方新版可能与 DLSS5 插件不兼容，出问题可用备份回退。继续？')) return;
+      if (!await showConfirm('将从 reshade.me 下载官方 ReShade Addon，替换 runtime\\dlss5\\d3d12.dll（旧版自动备份）。\n官方新版可能与 DLSS5 插件不兼容，出问题可用备份回退。继续？')) return;
       setStatus('正在更新 ReShade 底座…');
       const r = await call('update_component', 'reshade');
       $('update-status').textContent = r.ok ? `ReShade 已更新到 ${r.version}\n${r.note || ''}` : (r.message || '更新失败');
@@ -1118,7 +1170,7 @@ function bind() {
   }
   if ($('game-clean-btn')) {
     $('game-clean-btn').onclick = async () => {
-      if (!confirm('将先**完整备份**游戏目录里所有非原版文件，再把它们移走（proxy 会用系统原版补回）。\n\n· 只移动不删除，随时可「从备份还原」\n· 净化后终末地本体 = 原版状态，适合做对照测试\n\n继续？')) return;
+      if (!await showConfirm('将先**完整备份**游戏目录里所有非原版文件，再把它们移走（proxy 会用系统原版补回）。\n\n· 只移动不删除，随时可「从备份还原」\n· 净化后终末地本体 = 原版状态，适合做对照测试\n\n继续？')) return;
       setStatus('正在备份并净化游戏目录…');
       const r = await call('game_clean_backup_and_clean', true);
       const lines = [r.message || ''];
@@ -1133,9 +1185,9 @@ function bind() {
     $('game-clean-restore-btn').onclick = async () => {
       const list = await call('game_clean_backups');
       const backups = list.backups || [];
-      if (!backups.length) { alert('还没有任何游戏目录备份'); return; }
+      if (!backups.length) { await showAlert('还没有任何游戏目录备份'); return; }
       const latest = backups[0];
-      if (!confirm(`从最近的备份还原游戏目录？\n\n备份时间：${latest.stamp}\n包含 ${latest.entries} 项\n\n会把之前移走的文件搬回游戏目录。`)) return;
+      if (!await showConfirm(`从最近的备份还原游戏目录？\n\n备份时间：${latest.stamp}\n包含 ${latest.entries} 项\n\n会把之前移走的文件搬回游戏目录。`)) return;
       setStatus('正在还原…');
       const r = await call('game_clean_restore', '');
       const lines = [r.message || ''];
@@ -1163,11 +1215,11 @@ function bind() {
       await saveConfig();
       $('settings-status').textContent = '已自动检测并保存 XXMI 路径';
     } else {
-      alert('没有自动找到 XXMI Launcher，请点击“选择 XXMI Launcher”手动指定。');
+      await showAlert('没有自动找到 XXMI Launcher，请点击“选择 XXMI Launcher”手动指定。');
     }
   };
   $('download-reshade-btn').onclick = async () => {
-    if (!confirm('从 reshade.me 下载官方 ReShade Addon 并放到 runtime/reshade/？')) return;
+    if (!await showConfirm('从 reshade.me 下载官方 ReShade Addon 并放到 runtime/reshade/？')) return;
     $('settings-status').textContent = '下载并解压 ReShade...';
     const result = await call('download_reshade');
     $('cfg-reshade_dll').value = result.dll;
@@ -1181,7 +1233,7 @@ function bind() {
   // 「选择…」按钮已按用户要求全部移除（设置页改成直接输入 + 一个「一键检测全部」），
   // 所以这里不再绑定它们；需要弹选择框时用设置页上保留的「自动检测 XXMI」。
   $('rollback-btn').onclick = async () => {
-    if (!confirm('将删除 EndfieldModControllerManaged staging，并恢复可用的 d3dx_user.ini / XXMI 配置备份。继续？')) return;
+    if (!await showConfirm('将删除 EndfieldModControllerManaged staging，并恢复可用的 d3dx_user.ini / XXMI 配置备份。继续？')) return;
     const result = await call('rollback');
     $('settings-status').textContent = JSON.stringify(result);
   };
