@@ -746,6 +746,17 @@ def ensure_xxmi_game_folder(config: AppConfig) -> dict[str, Any]:
     if launcher_block.get("active_importer") != "EFMI":
         launcher_block["active_importer"] = "EFMI"
         changed.append("Launcher.active_importer")
+    # **最关键的一项**：XXMI 界面只显示「已启用」的 importer —— 这个列表为空时，
+    # 界面上根本不会出现终末地的启动按钮（2026-09-29 对照两份配置才发现：能用的那份是
+    # `["EFMI"]`，失败的那份是 `[]`）。而且它为空时 XXMI 启动后还会把 active_importer
+    # 重置回 `"XXMI"`，连我们写进去的值都保不住 —— 前两轮修了 dll 路径和 game_folder
+    # 却仍然"没有启动按钮"，原因就在这里。
+    enabled = launcher_block.get("enabled_importers")
+    if not isinstance(enabled, list):
+        enabled = []
+    if "EFMI" not in enabled:
+        launcher_block["enabled_importers"] = sorted({*enabled, "EFMI"})
+        changed.append("Launcher.enabled_importers")
     if not changed:
         return {"ok": True, "changed": False, "game_dir": str(game_dir),
                 "message": f"XXMI 已指向游戏目录（{game_dir.name}）"}
