@@ -619,10 +619,13 @@ def _check_secondary_motion(config: AppConfig, report: Report, log: Callable[[st
         report.add("sbm", True, "已在设置里关闭乳摇注入自检")
         return
 
-    if config.secondary_motion_exe is None:
-        report.add("sbm", False, "未找到乳摇工具目录（可在设置页配置）", manual=True)
-        return
+    # 注入源现在是「随包 assets 优先、乳摇工具目录可选」（见 secondary_motion._source_dir），
+    # 所以**不再要求用户先配好工具目录** —— 直接尝试补齐即可（2026-09-29 用户反馈
+    # 「bsm 不会自动跟随自动寻找的终末地目录，让 Mod 启动器先帮它配好」）。
     result = secondary_motion.ensure_injection(config, log=log)
+    if not result.get("ok") and not result.get("actions"):
+        report.add("sbm", False, str(result.get("message") or "sbm 注入准备失败"), manual=True)
+        return
     state = secondary_motion.status(config)
     if result.get("warnings"):
         report.add("sbm", False, "; ".join(result["warnings"]), manual=True)

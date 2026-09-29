@@ -152,23 +152,56 @@ def _pack_version(tool_dir: Path | None) -> str:
     return ""
 
 
+def _assets_root() -> Path:
+    """随包分发的资产根目录（`<项目根>/assets`）。"""
+    return Path(__file__).resolve().parents[1] / "assets"
+
+
+def _source_candidates(config: AppConfig) -> list[Path]:
+    """sbm 部署源的候选列表（按优先级）：**随包 assets 优先**，其次乳摇工具目录。
+
+    为什么改成"逐文件挑选"（2026-09-29 端到端实测）：一开始写的是"选一个源"，
+    结果测试环境里**工具目录存在但内容不全**（只有插件本体、没有 data/presets）→
+    整个源被判成工具目录、assets 反而没被用上 → `characters.default.json` 补不进去。
+    所以改为：每个文件各自在候选列表里找**第一个存在的**，两个源互补。
+    """
+    candidates: list[Path] = [_assets_root() / "secondary_motion"]
+    tool = _tool_dir(config)
+    if tool is not None:
+        candidates.append(tool)
+    return [candidate for candidate in candidates if candidate.is_dir()]
+
+
+def _pick(candidates: list[Path], *relative: str) -> Path | None:
+    """在候选源里找第一个存在的文件，例如 `_pick(cands, "plugin", "sbm.dll")`。"""
+    for base in candidates:
+        path = base.joinpath(*relative)
+        if path.is_file():
+            return path
+    return None
+
+
 def ensure_injection(config: AppConfig, log: Callable[[str], None] | None = None) -> dict[str, Any]:
-    """补齐乳摇注入：两个 proxy + plugin\\sbm.dll。已装的不动，缺失才补。"""
+    """补齐乳摇注入：两个 proxy + plugin\\sbm.dll + 插件数据。已装的不动，缺失才补。"""
     actions: list[str] = []
     warnings: list[str] = []
-    tool = _tool_dir(config)
+    candidates = _source_candidates(config)
     game = game_dir(config)
-    if tool is None:
-        return {"ok": False, "message": "未找到 SecondaryMotion 工具目录", "actions": [], "warnings": []}
     if game is None:
         return {"ok": False, "message": "未定位到游戏目录", "actions": [], "warnings": []}
+    if not candidates:
+        return {
+            "ok": False,
+            "message": "找不到 sbm 注入源（assets/secondary_motion 与乳摇工具目录都不存在）",
+            "actions": [],
+            "warnings": [],
+        }
 
-    source_dir = tool / "plugin"
     for name in PROXY_NAMES:
         target = game / name
-        source = source_dir / name
-        if not source.is_file():
-            warnings.append(f"工具包缺少 {name}，跳过")
+        source = _pick(candidates, "plugin", name)
+        if source is None:
+            warnings.append(f"注入源缺少 {name}，跳过")
             continue
         if _is_proxy(target):
             continue
@@ -187,8 +220,8 @@ def ensure_injection(config: AppConfig, log: Callable[[str], None] | None = None
             warnings.append(f"写入 {name} 失败: {exc}")
 
     plugin_target = game / "plugin" / PLUGIN_NAME
-    plugin_source = source_dir / PLUGIN_NAME
-    if not plugin_target.is_file() and plugin_source.is_file():
+    plugin_source = _pick(candidates, "plugin", PLUGIN_NAME)
+    if not plugin_target.is_file() and plugin_source is not None:
         plugin_target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(plugin_source, plugin_target)
         actions.append(f"安装插件 plugin\\{PLUGIN_NAME}")
@@ -198,13 +231,22 @@ def ensure_injection(config: AppConfig, log: Callable[[str], None] | None = None
     data_dir = game / "SecondaryMotion"
     default_chars = data_dir / "data" / "characters.default.json"
     if not default_chars.is_file():
-        source_default = tool / "data" / "characters.default.json"
-        if source_default.is_file():
+        source_default = _pick(candidates, "data", "characters.default.json")
+        if source_default is not None:
             default_chars.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source_default, default_chars)
             actions.append("安装插件数据 SecondaryMotion\\data\\characters.default.json")
         else:
-            warnings.append("工具包缺少 data\\characters.default.json，插件会因配置无效自我禁用")
+            warnings.append("注入源缺少 data\\characters.default.json，插件会因配置无效自我禁用")
+    # 预设也要在位：sbm 按 runtime\\config.json 里的 active_preset 去读 presets\\<名字>.json，
+    # 缺了同样是"配置无效 → DISABLED_SAFE"（2026-09-29 补齐）。
+    preset = data_dir / "presets" / "Default.json"
+    if not preset.is_file():
+        source_preset = _pick(candidates, "presets", "Default.json")
+        if source_preset is not None:
+            preset.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_preset, preset)
+            actions.append("安装插件预设 SecondaryMotion\\presets\\Default.json")
     runtime_cfg = data_dir / "runtime" / "config.json"
     if not runtime_cfg.is_file():
         try:

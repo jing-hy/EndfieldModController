@@ -775,7 +775,8 @@ def bootstrap_xxmi_config(config: AppConfig, *, wait_seconds: int = 40,
         pass
     if created_path is not None and created_path.is_file():
         return {"ok": True, "created": True,
-                "message": "已启动一次 XXMI 生成配置文件，随后把它关掉了"}
+                "message": ("第一次启动：已临时拉起 XXMI 生成它的配置文件，随后已关闭。"
+                            "**请再点一次「一键启动」**，这一次才会真正进入游戏。")}
     return {"ok": False, "created": False,
             "message": f"等了 {wait_seconds}s 仍没等到 XXMI 写出配置"}
 
