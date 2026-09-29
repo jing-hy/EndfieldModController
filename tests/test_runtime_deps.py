@@ -39,11 +39,13 @@ class RuntimeDepsTests(unittest.TestCase):
 
     def test_ensure_builtin_runtime(self) -> None:
         def fake_latest(repo, pattern):
+            # 签名与 runtime_deps._latest_release_asset 一致：第 4 项是 Release 资产的 sha256 digest
             if repo == runtime_deps.XXMI_REPO:
-                return self.xxmi_zip.as_uri(), "v-test", "xxmi.zip"
-            return self.efmi_zip.as_uri(), "v-test", "efmi.zip"
+                return self.xxmi_zip.as_uri(), "v-test", "xxmi.zip", ""
+            return self.efmi_zip.as_uri(), "v-test", "efmi.zip", ""
 
-        def fake_extract(url, asset_name, target, byte_progress=None, index=1, total=1, key="builtin"):
+        def fake_extract(url, asset_name, target, byte_progress=None, index=1, total=1,
+                         key="builtin", expected_sha256=""):
             mapping = {
                 "xxmi.zip": self.xxmi_zip,
                 "XXMI-PACKAGE-v-test.zip": self.xxmi_libs_zip,

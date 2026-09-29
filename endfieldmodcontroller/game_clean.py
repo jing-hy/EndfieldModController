@@ -19,8 +19,8 @@
 """
 from __future__ import annotations
 
-import hashlib
 import json
+import os
 import shutil
 import time
 from dataclasses import dataclass, field
@@ -60,14 +60,35 @@ def _log(log: Log, message: str) -> None:
 
 
 def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
+    """失败返回空串（调用方用它判断"读不到"）；实现复用 fsutil，不再维护第三份。"""
+    from . import fsutil
+
     try:
-        with open(path, "rb") as handle:
-            for chunk in iter(lambda: handle.read(1 << 20), b""):
-                digest.update(chunk)
+        return fsutil.sha256_file(path)
     except OSError:
         return ""
-    return digest.hexdigest()
+
+
+def _looks_like_reshade_payload(path: Path) -> bool:
+    """内容级判定：这个 dll 是否真的是 ReShade / 我们的注入载荷。
+
+    2026-10-01 修（⑤a）：`d3d12.dll` 这类文件**只凭文件名**判定太宽 —— 终末地
+    是 DX12 游戏，游戏自带或他方放的正版 d3d12.dll 会被当成"ReShade 痕迹"移走，
+    而它不在补回名单里。这里复用 `reshade_integration` 已有的一套判定
+    （proxy 名单 + 内容特征），判定不了时保守保持原行为（当作载荷）。
+    """
+    from . import reshade_integration
+
+    try:
+        checker = getattr(reshade_integration, "looks_like_loader_proxy", None)
+        if callable(checker) and checker(path):
+            return True
+        inner = getattr(reshade_integration, "_looks_like_reshade_dll", None)
+        if callable(inner):
+            return bool(inner(path))
+    except (OSError, ValueError):
+        return True
+    return True
 
 
 def _stamp() -> str:
@@ -102,7 +123,7 @@ class Finding:
         }
 
 
-def audit(config: AppConfig) -> dict[str, Any]:
+def audit(config: AppConfig, *, log: Log = None) -> dict[str, Any]:
     """列出游戏目录里所有**原版不会有**的东西。"""
     game_dir = reshade_integration.detect_game_dir(config)
     if game_dir is None:
@@ -155,6 +176,11 @@ def audit(config: AppConfig) -> dict[str, Any]:
     for name in RESHADE_MARKERS:
         path = game_dir / name
         if path.is_file():
+            # dll 走内容级判定（见 _looks_like_reshade_payload）：只有真的像
+            # ReShade 载荷才移走，避免误伤游戏自带/他方的 d3d12.dll。
+            if name.lower().endswith(".dll") and not _looks_like_reshade_payload(path):
+                _log(log, f"跳过 {name}：内容不像 ReShade 载荷（可能是游戏自带或他方注入）")
+                continue
             findings.append(Finding(
                 "reshade", name, str(path), size=path.stat().st_size, sha256=_sha256(path),
                 detail="ReShade 痕迹：本方案的承诺是不往游戏目录写这些东西",
@@ -213,7 +239,10 @@ def _restore_system_module(game_dir: Path, name: str, log: Log) -> dict[str, Any
         except OSError as exc:
             _log(log, f"恢复 {name} 失败: {exc}")
             return None
-    source = Path(r"C:\Windows\System32") / name
+    # 2026-10-01 修（⑤c）：不再硬编码 C:\Windows —— 系统装在 D 盘时这里必然失败，
+    # 而失败的后果是"游戏目录缺 d3dcompiler_47/vulkan-1 + 界面仍报成功"。
+    system_root = os.environ.get("SystemRoot") or r"C:\Windows"
+    source = Path(system_root) / "System32" / name
     if source.is_file():
         try:
             shutil.copy2(source, target)
@@ -234,7 +263,7 @@ def backup_and_clean(
     include_plugin_data: bool = True,
 ) -> dict[str, Any]:
     """先整体备份，再把游戏目录净化成原版状态（只移动，不删除）。"""
-    report = audit(config)
+    report = audit(config, log=log)
     if not report.get("game_dir"):
         return {"ok": False, "message": report.get("message", "没有找到游戏目录"), "moved": [], "backup_dir": ""}
     game_dir = Path(report["game_dir"])
@@ -293,6 +322,10 @@ def backup_and_clean(
         module = _restore_system_module(game_dir, name, log)
         if module:
             restored_modules.append(module)
+        elif not dry_run:
+            # 2026-10-01 修（⑤c）：proxy 已移走却补不回系统模块 → 游戏目录会缺
+            # d3dcompiler_47/vulkan-1（游戏可能起不来），不能只写一行日志还报 ok=True。
+            errors.append(f"{name}: 已移走但无法补回系统原版，游戏可能启动失败（请用「还原」）")
 
     manifest = {
         "stamp": stamp,
@@ -376,6 +409,18 @@ def restore(config: AppConfig, *, stamp: str = "", log: Log = None) -> dict[str,
             continue
         source = root / "files" / relative
         dest = game_dir / relative
+        # 2026-10-01 修（⑤b）：`relative` 来自 manifest（外部可改的数据），拼出来的
+        # 目标必须落在游戏目录之内 —— 否则清单被改坏/从别处拷来时，这里会
+        # "先 rmtree 现位置、再复制"，把游戏目录之外的目录删掉且不可逆。
+        try:
+            resolved = dest.resolve()
+        except OSError:
+            errors.append(f"{relative}: 路径无法解析，已跳过")
+            continue
+        if not resolved.is_relative_to(game_dir.resolve()):
+            errors.append(f"{relative}: 目标不在游戏目录内，已跳过（{resolved}）")
+            continue
+        dest = resolved
         if not source.exists():
             errors.append(f"备份里缺少 {relative}")
             continue

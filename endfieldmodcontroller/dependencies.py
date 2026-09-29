@@ -115,11 +115,10 @@ def load_manifest(path: Path) -> dict[str, DependencySpec]:
 
 
 def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with open(path, "rb") as fh:
-        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+    """复用 fsutil 的实现（原先这里是第 6 份手写 sha256）。"""
+    from . import fsutil
+
+    return fsutil.sha256_file(path)
 
 
 def _http_get(
@@ -128,20 +127,32 @@ def _http_get(
     *,
     timeout: int = DEFAULT_TIMEOUT,
     chunk_callback: Callable[[int, int], None] | None = None,
+    expected_sha256: str = "",
 ) -> bytes | Path:
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     # **一律走 fastnet**：它是唯一会在直连不通时自动换镜像线路的通道。
     # 这里以前是裸 urllib，于是 XXMI Libraries 的 `Manifest.json`（走本函数下载）
     # 在直连被掐的网络下直接超时，害得「自动安装/更新」三个组件全部失败、只报
     # `<urlopen error [WinError 10060]>`（2026-09-27 实测定位）。
+    #
+    # 2026-10-01：新增 expected_sha256 —— Release 的 asset 自带 `digest`，
+    # 而经**第三方镜像线路**下载的内容必须校验（镜像不在我们的信任边界内）。
     from . import fastnet
 
     if dest is None:
         _final, body = fastnet.fetch(url, timeout=timeout)
+        if expected_sha256:
+            actual = hashlib.sha256(body).hexdigest()
+            expected = fastnet.norm_sha256(expected_sha256)
+            if actual != expected:
+                raise urllib.error.URLError(
+                    f"sha256 校验失败（内存下载）：期望 {expected[:12]}…，实际 {actual[:12]}…")
         return body
 
     dest = Path(dest)
-    report = fastnet.download(url, dest, timeout=min(timeout, 60), progress=chunk_callback)
+    report = fastnet.download(
+        url, dest, timeout=min(timeout, 60), progress=chunk_callback,
+        expected_sha256=expected_sha256,
+    )
     if not report.ok:
         raise urllib.error.URLError(report.message)
     return dest
@@ -290,15 +301,26 @@ def _download_for_spec(
 
 
 def _find_7z() -> str | None:
-    candidates = [
+    """找 7z。**优先项目内 `tools/7zip`**，PATH 命中只作兜底。
+
+    2026-10-01 修（⑩）：PATH 上的同名 exe 可以被替换/劫持，而它解压的正是刚下载
+    的不可信包 —— 等于把"任意代码执行"交给 PATH。项目内那份是我们自己分发的，
+    所以优先使用；只有确实找不到时才退回 PATH（并保持功能可用）。
+    """
+    from .config import PROJECT_ROOT
+
+    bundled = [
+        PROJECT_ROOT / "tools" / "7zip" / "7z.exe",
+        PROJECT_ROOT / "tools" / "7zip" / "7za.exe",
         Path(__file__).resolve().parents[1] / "tools" / "7zip" / "7z.exe",
-        Path(__file__).resolve().parents[1] / "tools" / "7zip" / "7za.exe",
-        shutil.which("7z"),
-        shutil.which("7za"),
     ]
-    for candidate in candidates:
-        if candidate and Path(candidate).is_file():
+    for candidate in bundled:
+        if candidate.is_file():
             return str(candidate)
+    for name in ("7z", "7za", "7zr"):
+        found = shutil.which(name)
+        if found:
+            return found
     return None
 
 
@@ -317,11 +339,23 @@ def extract_archive(archive: Path, target: Path, *, strip_root: bool = True) -> 
             seven = _find_7z()
             if not seven:
                 raise RuntimeError(f"{archive.name}: rar/7z needs 7z.exe in tools/7zip or on PATH")
-            subprocess.run(
-                [seven, "x", "-y", f"-o{tmp_path}", str(archive)],
-                check=True,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
+            # 2026-10-01 修（⑩）：加超时与输出捕获 —— 原先没有 timeout，7z 卡住会让
+            # 整个"更新依赖"永久挂起（界面假死），而且失败只有 "exit status 2"，
+            # 拿不到任何原因（stderr 被丢掉了）。
+            try:
+                subprocess.run(
+                    [seven, "x", "-y", f"-o{tmp_path}", str(archive)],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=600,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+            except subprocess.CalledProcessError as exc:
+                detail = ((exc.stderr or "") + (exc.stdout or "")).strip()[:300]
+                raise RuntimeError(f"{archive.name}: 7z 解压失败（exit {exc.returncode}）：{detail}") from exc
+            except subprocess.TimeoutExpired as exc:
+                raise RuntimeError(f"{archive.name}: 7z 解压超时（600 秒）") from exc
         else:
             raise RuntimeError(f"unsupported archive format: {archive.name}")
 
@@ -333,6 +367,27 @@ def extract_archive(archive: Path, target: Path, *, strip_root: bool = True) -> 
                 shutil.copytree(item, dest, dirs_exist_ok=True)
             else:
                 shutil.copy2(item, dest)
+
+
+def _safe_install_dir(library_root: Path, raw: object) -> Path:
+    """把清单里的 install_dir 限制在 Mod 库之内。
+
+    2026-10-01 修：`library_root / spec.install_dir` 遇到绝对路径会**整体替换**左值
+    （pathlib 语义，实测 `Path("D:/library") / "C:/Users/x"` → `C:\\Users\\x`），
+    遇到 `..` 也会越界 —— 而下游紧接着就是 `shutil.rmtree(install_dir)`：
+    等于"清单里写一行绝对路径，点一次更新就递归删掉那个目录"。
+    """
+    name = str(raw or "").strip()
+    if not name:
+        raise ValueError("install_dir 为空")
+    candidate = Path(name)
+    if candidate.is_absolute() or candidate.drive or ".." in candidate.parts:
+        raise ValueError(f"install_dir 不允许绝对路径或 ..：{name!r}")
+    root = library_root.resolve()
+    resolved = (root / candidate).resolve()
+    if resolved == root or not resolved.is_relative_to(root):
+        raise ValueError(f"install_dir 必须位于 Mod 库之内：{name!r}")
+    return resolved
 
 
 def _install_dir_looks_valid(install_dir: Path, spec: DependencySpec) -> bool:
@@ -366,7 +421,10 @@ def update_dependency(
     if spec.source not in {"gamebanana_mod", "github_release", "url"}:
         return UpdateResult(key=spec.key, status="skipped", message=f"unsupported source {spec.source!r}")
 
-    install_dir = library_root / spec.install_dir
+    try:
+        install_dir = _safe_install_dir(library_root, spec.install_dir)
+    except ValueError as exc:
+        return UpdateResult(key=spec.key, status="error", message=str(exc), path=str(spec.install_dir))
     marker = install_dir / ".endfieldmodcontroller_source.json"
     previous_version = ""
     if marker.is_file():

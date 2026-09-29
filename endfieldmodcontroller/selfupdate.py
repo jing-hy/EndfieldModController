@@ -16,14 +16,12 @@ Windows 下**正在运行的 exe 无法覆盖自己**，所以流程是：
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -89,13 +87,28 @@ def _write_cache(config: AppConfig, data: dict[str, Any]) -> None:
         pass
 
 
+def _asset_rank(name: str) -> int:
+    """0 = 主程序包，1 = 其它/特殊包（例如 `…-0.1.9-from-0.2.8.exe` 这种伪旧版）。"""
+    return 0 if Path(str(name)).stem.lower() == "endfieldmodcontroller" else 1
+
+
 def _pick_asset(release: dict[str, Any]) -> dict[str, Any] | None:
-    """优先取 Windows 用的 exe；没有就退回包含 exe 的 zip。"""
+    """优先取 Windows 用的 exe；没有就退回包含 exe 的 zip。
+
+    **不能只按体积挑**：Release 里可能同时挂着主程序与"伪旧版"测试包
+    （`EndfieldModController-0.1.9-from-0.2.8.exe`），体积最大的未必是主程序 ——
+    一旦自更新装错包，版本号会倒着走。顺序是：先精确匹配主程序名 →
+    再按名字里的版本号（复用 github.asset_sort_key）→ 最后才比体积。
+    """
+    from . import github
+
     assets = [a for a in (release.get("assets") or []) if a.get("browser_download_url")]
     for suffix in (".exe", ".zip"):
         matches = [a for a in assets if str(a.get("name", "")).lower().endswith(suffix)]
-        if matches:
-            return sorted(matches, key=lambda a: int(a.get("size") or 0), reverse=True)[0]
+        if not matches:
+            continue
+        preferred = [a for a in matches if _asset_rank(str(a.get("name") or "")) == 0]
+        return max(preferred or matches, key=github.asset_sort_key)
     return None
 
 
@@ -165,11 +178,19 @@ def check_update(
 
 
 def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with open(path, "rb") as fh:
-        for chunk in iter(lambda: fh.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+    """文件哈希 —— 复用 fastnet 里那份实现，不再维护第二份。"""
+    from . import fastnet
+
+    return fastnet.sha256_file(path)
+
+
+def _looks_like_exe(path: Path) -> bool:
+    """没有 digest 可用时的最低限度检查：必须是带 PE 头的 Windows 可执行文件。"""
+    try:
+        with open(path, "rb") as fh:
+            return fh.read(2) == b"MZ"
+    except OSError:
+        return False
 
 
 def download_update(
@@ -214,6 +235,26 @@ def download_update(
     size = target.stat().st_size
     if size < 1024 * 1024:
         return {"ok": False, "message": f"更新包异常小（{size} 字节），已放弃", "path": str(target)}
+    # 独立复核一次，不依赖下游：Release 带 digest 就必须对上；没带 digest
+    # 时至少要求它是真正的 PE 可执行文件（2026-10-01 修：原先算了 actual
+    # 却只往界面显示，等于"没有哈希就完全没校验"）。
+    expected = digest.replace("sha256:", "").strip().lower()
+    if expected and actual.lower() != expected:
+        try:
+            target.unlink()
+        except OSError:
+            pass
+        return {
+            "ok": False,
+            "message": f"更新包 sha256 校验失败（期望 {expected[:12]}…，实际 {actual[:12]}…），已删除",
+            "path": str(target),
+        }
+    if not expected and not _looks_like_exe(target):
+        try:
+            target.unlink()
+        except OSError:
+            pass
+        return {"ok": False, "message": "更新包不是有效的 Windows 可执行文件，已删除", "path": str(target)}
     _log(log, f"下载完成：{target}（{size // 1048576} MB，"
               f"{report.seconds:.1f}s / {report.mbps:.2f} MB/s"
               + (f"，并发 {report.threads}" if report.boosted else "") + "）")
@@ -230,18 +271,24 @@ VBS_TEMPLATE = r'''Option Explicit
 ' NOTE: keep this file ASCII-only. Windows Script Host reads .vbs as ANSI and does NOT
 ' accept a UTF-8 BOM -- a BOM makes it fail with "Invalid character" (0x800A0408) on
 ' line 1, char 1, which is exactly what happened before (2026-09-27).
-Dim fso, sh, wmi, procs, target, newFile, backup, i, failed, ts
+Dim fso, sh, wmi, procs, target, newFile, backup, i, failed, ts, procname
 Set fso = CreateObject("Scripting.FileSystemObject")
 Set sh = CreateObject("WScript.Shell")
-target  = "{target}"
-newFile = "{newfile}"
-backup  = target & ".old"
+' Paths come from the COMMAND LINE, never inlined: this script has to stay pure
+' ASCII (WSH reads .vbs as ANSI), while the exe may well live under a non-ASCII
+' path (C:\Users\<CJK>\...). Inlining them made write_text(encoding="ascii")
+' raise UnicodeEncodeError -> self-update was completely unusable on such paths.
+If WScript.Arguments.Count < 3 Then WScript.Quit 2
+target   = WScript.Arguments(0)
+newFile  = WScript.Arguments(1)
+procname = WScript.Arguments(2)
+backup   = target & ".old"
 failed  = False
 
 ' 1) wait until the running program exits (up to 60 seconds)
 Set wmi = GetObject("winmgmts:\\.\root\cimv2")
 For i = 1 To 120
-  Set procs = wmi.ExecQuery("SELECT ProcessId FROM Win32_Process WHERE Name='{procname}'")
+  Set procs = wmi.ExecQuery("SELECT ProcessId FROM Win32_Process WHERE Name='" & procname & "'")
   If procs.Count = 0 Then Exit For
   WScript.Sleep 500
 Next
@@ -294,7 +341,7 @@ If failed Then
   ' right away, which makes the new instance report
   ' "invalid originating onefile parent process (PID not found)".
   For i = 1 To 40
-    Set procs = wmi.ExecQuery("SELECT ProcessId FROM Win32_Process WHERE Name='{procname}'")
+    Set procs = wmi.ExecQuery("SELECT ProcessId FROM Win32_Process WHERE Name='" & procname & "'")
     If procs.Count > 0 Then Exit For
     WScript.Sleep 1000
   Next
@@ -318,7 +365,7 @@ sh.Run """" & target & """", 1, False
 ' keep this script alive a while longer so the parent is definitely still there.
 ' (This template must stay pure ASCII: WSH reads .vbs as ANSI.)
 For i = 1 To 40
-  Set procs = wmi.ExecQuery("SELECT ProcessId FROM Win32_Process WHERE Name='{procname}'")
+  Set procs = wmi.ExecQuery("SELECT ProcessId FROM Win32_Process WHERE Name='" & procname & "'")
   If procs.Count > 0 Then Exit For
   WScript.Sleep 1000
 Next
@@ -386,17 +433,20 @@ def apply_update(
     try:
         # **必须 ASCII + 无 BOM**：Windows Script Host 按 ANSI 读 .vbs，遇到 UTF-8 BOM
         # 会在第 1 行第 1 个字符报「无效字符 800A0408」（2026-09-27 实测踩到）。
-        script.write_text(
-            VBS_TEMPLATE.format(target=str(target), newfile=str(new_exe), procname=target.name),
-            encoding="ascii", newline="\r\n",
-        )
+        # 三个路径改为命令行参数传给脚本（见模板头部注释），所以这里不再 .format()：
+        # 既不会因路径含中文抛 UnicodeEncodeError，也不会因路径含 {} 被 format 解析。
+        script.write_text(VBS_TEMPLATE, encoding="ascii", newline="\r\n")
     except (OSError, UnicodeEncodeError) as exc:
         return {"ok": False, "message": f"生成更新脚本失败：{exc}"}
 
     try:
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        # wscript 跑 VBS，全程隐藏（不出现 cmd 黑窗）
-        subprocess.Popen(["wscript.exe", "//nologo", str(script)], creationflags=creationflags, close_fds=True)
+        # wscript 跑 VBS，全程隐藏（不出现 cmd 黑窗）；路径走参数，中文路径同样可用
+        subprocess.Popen(
+            ["wscript.exe", "//nologo", str(script), str(target), str(new_exe), target.name],
+            creationflags=creationflags,
+            close_fds=True,
+        )
     except OSError as exc:
         return {"ok": False, "message": f"启动更新脚本失败：{exc}"}
 

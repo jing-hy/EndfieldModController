@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import tempfile
@@ -77,7 +78,19 @@ def _log(log: Callable[[str], None] | None, message: str) -> None:
 
 
 def _stamp() -> str:
-    return time.strftime("%Y%m%d-%H%M%S")
+    """备份用的时间戳，**精确到毫秒**：只到秒时同一秒内的两次写入会互相覆盖。"""
+    return time.strftime("%Y%m%d-%H%M%S") + f"-{int(time.time() * 1000) % 1000:03d}"
+
+
+def _unique_sibling(path: Path) -> Path:
+    """目标已存在时换一个名字（备份只增不删）。"""
+    if not path.exists():
+        return path
+    for index in range(1, 100):
+        candidate = path.with_name(f"{path.name}-{index}")
+        if not candidate.exists():
+            return candidate
+    return path.with_name(f"{path.name}-{os.getpid()}")
 
 
 def _version_tuple(value: str) -> tuple[int, ...]:
@@ -229,9 +242,15 @@ def _members_by_basename(zf: zipfile.ZipFile, basename: str) -> list[str]:
 
 def _write_atomic(target: Path, data: bytes, *, log: Callable[[str], None] | None = None, backup: bool = True) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
+    if target.is_file():
+        try:
+            if target.read_bytes() == data:
+                return          # 内容一致：既不写也不备份，免得每次安装堆一堆 .bak
+        except OSError:
+            pass
     if backup and target.is_file():
-        shutil.copy2(target, target.with_name(target.name + f".bak-{_stamp()}"))
-    tmp = target.with_name(target.name + ".mc-tmp")
+        shutil.copy2(target, _unique_sibling(target.with_name(target.name + f".bak-{_stamp()}")))
+    tmp = target.with_name(target.name + f".mc-tmp-{os.getpid()}")
     tmp.write_bytes(data)
     tmp.replace(target)
     _log(log, f"写入 {target}")
@@ -364,13 +383,13 @@ def install_immersse(
                     basename = parts[-1]
                     lowered = name.lower()
                     if basename.lower().startswith("martysmods_") and lowered.endswith(".fx") and "shaders/" in lowered:
-                        _write_atomic(shaders_dir / basename, zf.read(name), log=None, backup=force)
+                        _write_atomic(shaders_dir / basename, zf.read(name), log=None, backup=True)
                         written.append(f"Shaders/iMMERSE/{basename}")
                     elif lowered.endswith(".fxh") and "/shaders/martysmods/" in lowered:
-                        _write_atomic(shaders_dir / "MartysMods" / basename, zf.read(name), log=None, backup=force)
+                        _write_atomic(shaders_dir / "MartysMods" / basename, zf.read(name), log=None, backup=True)
                         written.append(f"Shaders/iMMERSE/MartysMods/{basename}")
                     elif "/textures/immersse/" in lowered:
-                        _write_atomic(textures_dir / basename, zf.read(name), log=None, backup=force)
+                        _write_atomic(textures_dir / basename, zf.read(name), log=None, backup=True)
                         written.append(f"Textures/iMMERSE/{basename}")
     except (urllib.error.URLError, OSError, zipfile.BadZipFile) as exc:
         return {"ok": False, "changed": False, "message": f"下载/解包失败: {exc}"}

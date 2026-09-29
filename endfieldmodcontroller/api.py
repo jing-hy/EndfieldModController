@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from . import activation, core, dependencies, diagnostics, dlss5_fetcher, integrity, launcher, reshade, reshade_integration, runtime_assets, runtime_deps, selfupdate
-from .config import AppConfig, auto_detect_migoto_loader, auto_detect_official_launcher, auto_detect_xxmi
+from .config import AppConfig, auto_detect_migoto_loader, auto_detect_official_launcher, auto_detect_xxmi, cached_detect
 
 
 class EndfieldModControllerApi:
@@ -29,6 +29,26 @@ class EndfieldModControllerApi:
             fastnet.set_line_mode(getattr(self.config, "download_line", "auto"))
         except Exception:  # noqa: BLE001
             pass
+        # **构造函数必须快**：窗口是在它返回之后才创建的，这里做任何全盘扫描都会让
+        # "加载页"迟迟不出现（用户要求"所有情况都要尽早展示加载页面"）。于是所有
+        # 重活（深探测、清理上次更新残留）挪到后台预热线程：前端先看到加载页，
+        # 预热完成后再刷新一次即可（2026-10-01 改）。
+        self._warm_done = False
+        threading.Thread(target=self._warm_up, name="mc-warm-up", daemon=True).start()
+
+    def _warm_up(self) -> None:
+        """后台预热：全盘探测 + 清理上次自更新残留。**别把重活挪回 __init__。**"""
+        try:
+            if self.config.autofill(deep=True):
+                try:
+                    self.config.save()
+                except OSError:
+                    pass
+        except Exception as exc:  # noqa: BLE001
+            try:
+                launcher._append_log(self.config, f"后台探测失败: {exc}")
+            except Exception:  # noqa: BLE001
+                pass
         # 上次自我更新留下的 .old/.new/vbs 残留，启动时清掉
         try:
             removed = selfupdate.cleanup_stale(self.config)
@@ -36,6 +56,7 @@ class EndfieldModControllerApi:
                 launcher._append_log(self.config, f"清理上次更新残留: {', '.join(removed)}")
         except Exception:  # noqa: BLE001
             pass
+        self._warm_done = True
 
     # ------------------------------------------------------------------
     # helpers
@@ -260,9 +281,12 @@ class EndfieldModControllerApi:
             "render_api": render_api,
             "controller_ready": (self.config.controller_dir / "controller.ini").is_file(),
             "reshade_addon_ready": (self.config.reshade_runtime_path / "Addons" / "endfieldmodcontroller.addon").is_file(),
-            "detected_xxmi": auto_detect_xxmi(),
-            "detected_migoto_loader": auto_detect_migoto_loader(),
-            "detected_official_launcher": auto_detect_official_launcher(),
+            # 这三个探测**读缓存**，不在这里触发全盘扫描（否则加载页会被卡住十几秒）；
+            # 缓存由后台预热线程填好，前端看到 warming=True 时会再刷新一次。
+            "warming": not self._warm_done,
+            "detected_xxmi": cached_detect("xxmi"),
+            "detected_migoto_loader": cached_detect("migoto"),
+            "detected_official_launcher": cached_detect("launcher"),
             "dlss5_status": launcher.dlss5_injection_status(self.config),
             "component_addon_status": {
                 "status": launcher.component_addon_status(self.config),
@@ -368,9 +392,11 @@ class EndfieldModControllerApi:
             "patch_count": result["patch_count"],
             "action_count": len(result["actions_manifest"]["actions"]),
             "controller_dir": result["controller_dir"],
-            "reshade_dir": result["reshade_dir"],
+            "activation_reshade_dir": result["reshade_dir"],
             "user_ini_path": result["user_ini_path"],
             "reshade_addon": reshade_info.get("addon", ""),
+            # 注意：这个键原先在同一个 dict 字面量里出现两次（371 行被 374 行静默覆盖），
+            # staging 的结果永远看不到 —— 2026-10-01 拆成 activation_reshade_dir + reshade_dir。
             "reshade_dir": reshade_info.get("reshade_dir", ""),
         }
 
@@ -644,7 +670,12 @@ class EndfieldModControllerApi:
             if path.name != "launch.log":
                 lines.append(f"===== {path} =====")
             lines.extend(content)
-        return {"ok": True, "text": "\n".join(lines[-max(1, int(tail)):])}
+        # tail 直接来自前端：传 None/字符串会让 int() 抛异常、日志页整个打不开。
+        try:
+            count = max(1, min(int(tail or 300), 5000))
+        except (TypeError, ValueError):
+            count = 300
+        return {"ok": True, "text": "\n".join(lines[-count:])}
 
     def clear_launch_log(self) -> dict[str, Any]:
         removed = diagnostics.clear_logs(self.config)
@@ -1497,12 +1528,37 @@ class EndfieldModControllerApi:
         target = Path(path).expanduser().resolve()
         if not target.exists():
             return {"ok": False, "message": f"path does not exist: {target}"}
+        # 2026-10-01 修（⑪）：前端传什么就打开什么，而 Windows 上 `os.startfile`
+        # 对 exe/bat/lnk 是**执行** —— 一旦页面里被注入脚本，就是"任意代码执行"。
+        # 现在只允许打开本程序自己的目录（runtime / 配置目录 / Mod 库）与游戏目录，
+        # 并且**不直接运行**可执行文件（要跑什么请用对应功能按钮）。
+        exec_suffixes = (".exe", ".bat", ".cmd", ".com", ".ps1", ".vbs", ".msi", ".lnk", ".scr")
+
+        def _under(candidate: Path, root: Path) -> bool:
+            try:
+                candidate.relative_to(root.resolve())
+                return True
+            except (ValueError, OSError):
+                return False
+
+        allowed = [self.config.runtime_path, self.config.base_dir, self.config.library_path]
+        game_dir = reshade_integration.detect_game_dir(self.config)
+        if game_dir is not None:
+            allowed.append(game_dir)
+        if not any(_under(target, root) for root in allowed):
+            return {"ok": False, "message": f"出于安全考虑，只允许打开本程序自己的目录：{target}"}
+        if target.is_file() and target.suffix.lower() in exec_suffixes:
+            return {"ok": False,
+                    "message": f"出于安全考虑，不直接运行可执行文件：{target.name}（请用对应功能按钮）"}
         if sys.platform.startswith("win"):
-            os.startfile(str(target))  # type: ignore[attr-defined]
+            if target.is_dir():
+                os.startfile(str(target))  # type: ignore[attr-defined]
+            else:
+                subprocess.Popen(["explorer", "/select,", str(target)])  # noqa: S603,S607
         elif sys.platform == "darwin":
-            subprocess.Popen(["open", str(target)])
+            subprocess.Popen(["open", str(target)])  # noqa: S603,S607
         else:
-            subprocess.Popen(["xdg-open", str(target)])
+            subprocess.Popen(["xdg-open", str(target)])  # noqa: S603,S607
         return {"ok": True, "path": str(target)}
 
     def log(self) -> dict[str, Any]:

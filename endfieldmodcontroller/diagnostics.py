@@ -330,36 +330,64 @@ def _process_command_line(pid: int) -> str:
     return ""
 
 
+_KERNEL32 = None
+
+
+def _kernel32():
+    """带正确 argtypes/restype 的 kernel32。
+
+    2026-10-01 修：原先直接用 `ctypes.windll.kernel32` 且不声明签名，ctypes 会按
+    `c_int` 解释返回值 —— 64 位下进程句柄往往远大于 2³¹，被截断成负数/0 之后
+    `WaitForSingleObject` 永远判不出"进程已退出"，进程监视只能空转到超时，
+    崩溃取证整条链静默失效（界面只留一行"进程监视异常"）。
+    """
+    global _KERNEL32
+    if _KERNEL32 is not None:
+        return _KERNEL32
+    import ctypes
+    from ctypes import wintypes
+
+    lib = ctypes.WinDLL("kernel32", use_last_error=True)
+    lib.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    lib.OpenProcess.restype = wintypes.HANDLE
+    lib.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    lib.WaitForSingleObject.restype = wintypes.DWORD
+    lib.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    lib.GetExitCodeProcess.restype = wintypes.BOOL
+    lib.CloseHandle.argtypes = [wintypes.HANDLE]
+    lib.CloseHandle.restype = wintypes.BOOL
+    _KERNEL32 = lib
+    return lib
+
+
 def _open_process_handle(pid: int) -> int | None:
     if os.name != "nt":
         return None
-    import ctypes
-    kernel32 = ctypes.windll.kernel32
-    handle = kernel32.OpenProcess(0x1000 | 0x00100000, False, int(pid))
+    handle = _kernel32().OpenProcess(0x1000 | 0x00100000, False, int(pid))
     return int(handle) if handle else None
 
 
 def _process_exited(handle: int) -> bool:
     if os.name != "nt":
         return True
-    import ctypes
-    return ctypes.windll.kernel32.WaitForSingleObject(ctypes.c_void_p(handle), 0) == 0
+    return _kernel32().WaitForSingleObject(handle, 0) == 0
 
 
 def _process_exit_code(handle: int) -> int | None:
     if os.name != "nt":
         return None
     import ctypes
-    code = ctypes.c_ulong(0)
-    if ctypes.windll.kernel32.GetExitCodeProcess(ctypes.c_void_p(handle), ctypes.byref(code)):
+    from ctypes import wintypes
+
+    code = wintypes.DWORD(0)
+    if _kernel32().GetExitCodeProcess(handle, ctypes.byref(code)):
         return int(code.value)
     return None
 
 
 def _close_handle(handle: int | None) -> None:
     if handle and os.name == "nt":
-        import ctypes
-        ctypes.windll.kernel32.CloseHandle(ctypes.c_void_p(handle))
+        _kernel32().CloseHandle(handle)
 
 
 def _capture_tail(source: Path, target: Path, *, lines: int = 300) -> None:
@@ -400,6 +428,9 @@ def _monitor_process(config: Any, game_dir: Path | None, image_name: str, timeou
             if ids:
                 pid = ids[0]
                 if found_pid != pid:
+                    # 换了 PID（游戏退出后又被启动器拉起）：先把上一个进程句柄关掉再开新的，
+                    # 否则每次重启都泄漏一个句柄（2026-10-01 修）。
+                    _close_handle(handle)
                     found_pid = pid
                     handle = _open_process_handle(pid)
                     command_line = _process_command_line(pid)

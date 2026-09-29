@@ -160,7 +160,7 @@ def _running_process_names(names: list[str]) -> list[str]:
     return running
 
 
-def _stop_locked_files_processes(config: AppConfig) -> list[str]:
+def _stop_locked_files_processes(config: AppConfig, *, include_game: bool = False) -> list[str]:
     """Kill stale loader/game processes before touching runtime files.
 
     Windows keeps loaded DLLs/EXEs locked, so replacing runtime/migoto files or
@@ -176,8 +176,13 @@ def _stop_locked_files_processes(config: AppConfig) -> list[str]:
         "3dmloader.exe",
         "3DMigoto Loader.exe",
         "3DMigotoLoader.exe",
-        "Endfield.exe",
     ]
+    # 2026-10-01 修（④）：`Endfield.exe` 默认**不再**放进这张清理表 ——
+    # 原先"打开官方 XXMI"和"3DMigoto 启动"两条路径都会无条件 `taskkill /F`
+    # 掉正在运行的终末地（无确认、无提示，未保存的进度可能丢）。
+    # 只有显式要求"腾出被占用的文件"时才把游戏一起收掉。
+    if include_game:
+        names.append("Endfield.exe")
     running = _running_process_names(names)
     if not running:
         return []
@@ -213,9 +218,10 @@ def _stop_locked_files_processes(config: AppConfig) -> list[str]:
         "taskkill /F /IM migoto_loader.exe >nul 2>&1",
         "taskkill /F /IM loader.exe >nul 2>&1",
         "taskkill /F /IM loader_new.exe >nul 2>&1",
-        "taskkill /F /IM Endfield.exe >nul 2>&1",
-        f'> "{marker}" echo done',
     ]
+    if include_game:
+        lines.append("taskkill /F /IM Endfield.exe >nul 2>&1")
+    lines.append(f'> "{marker}" echo done')
     script.write_text(chr(10).join(lines) + chr(10), encoding="utf-8", newline=chr(10))
     _spawn_elevated(config, str(script), str(script.parent), show_window=0)
 
@@ -441,6 +447,86 @@ def sign_xxmi_setting(config_path: Path, value: str) -> str:
 DLSS5_ADDON_GLOBS = ("renodx-dlss5*.addon64", "dlss5-feed.addon64", "trans-zh.addon64", "translations.txt")
 FIRSTPERSON_ADDON_GLOBS = ("renodx-endfield-enhancer.addon64",)
 ADDON_DISABLED_DIR = "_disabled"
+
+
+def _unique_backup_path(path: Path) -> Path:
+    """返回一个**不会覆盖已有文件**的备份名（目标被占就加时间戳/序号）。
+
+    2026-10-01 修：原先两处都是 `if backup.exists(): backup.unlink()` 再改名 ——
+    等于每次启动都先删掉上一份备份。游戏目录里的 `.endfieldmodcontroller.disabled`
+    很可能正是**游戏自带的原始 dll**（不是我们放的），一旦被删，用户就再也回不到
+    原始状态了。备份只增不删。
+    """
+    if not path.exists():
+        return path
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    for index in range(1, 100):
+        suffix = "" if index == 1 else f"-{index}"
+        candidate = path.with_name(f"{path.name}.{stamp}{suffix}")
+        if not candidate.exists():
+            return candidate
+    return path.with_name(f"{path.name}.{stamp}-{os.getpid()}")
+
+
+def _write_ini_atomic(path: Path, text: str) -> None:
+    """原子改写 ini，并在**首次**改动前留一份 `.mc.bak`。
+
+    2026-10-01 修（用户批准的边界外项 ②③）：这些 ini 是整棵注入链的配置源
+    （EFMI 的 `d3dx.ini`、游戏目录的 `ReShade.ini`），原先一律 `write_text` 直接
+    覆盖 —— 写到一半被杀软拦截 / 断电 / 进程被杀，就留下半截文件（注入全废），
+    而且一个备份都没有，用户回不去。现在统一"临时文件 + os.replace"，
+    备份只在第一次留，不会被后续轮次覆盖冲掉。
+    """
+    from . import fsutil
+
+    path = Path(path)
+    backup = path.with_name(path.name + ".mc.bak")
+    if path.is_file() and not backup.is_file():
+        try:
+            shutil.copy2(path, backup)
+        except OSError:
+            pass
+    fsutil.write_text_atomic(path, text, newline=chr(10))
+
+
+def _image_pids(image_name: str) -> set[int]:
+    """当前正在运行的某映像名的 PID 集合。
+
+    用于"只收掉自己拉起的那一个进程"：`taskkill /IM <名>` 会连带杀掉用户
+    自己刚打开的实例（2026-10-01 修 ⑨）。
+    """
+    pids: set[int] = set()
+    try:
+        result = subprocess.run(
+            ["tasklist", "/FI", f"IMAGENAME eq {image_name}", "/FO", "CSV", "/NH"],
+            capture_output=True, text=True, timeout=10,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return pids
+    for line in (result.stdout or "").splitlines():
+        parts = [cell.strip('"') for cell in line.split('","')]
+        if len(parts) >= 2 and parts[0].lower() == image_name.lower():
+            try:
+                pids.add(int(parts[1]))
+            except ValueError:
+                continue
+    return pids
+
+
+def _copy_file_atomic(source: Path, target: Path) -> None:
+    """把文件**原子地**复制到目标位置（先写同目录临时文件，再 os.replace）。
+
+    2026-10-01 修（②）：往游戏目录放代理 DLL / `actions.tsv` 时直接 `copy2`
+    覆盖，任何人在"写了一半"的那个窗口里启动游戏都会读到半截文件；
+    改成原子替换后，目标要么是旧文件完整、要么是新文件完整。
+    """
+    from . import fsutil
+
+    source = Path(source)
+    target = Path(target)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fsutil.write_bytes_atomic(target, source.read_bytes())
 
 
 def set_component_addons(config: AppConfig, component: str, enabled: bool) -> dict[str, Any]:
@@ -746,6 +832,8 @@ def bootstrap_xxmi_config(config: AppConfig, *, wait_seconds: int = 40,
         return {"ok": True, "created": False, "message": "XXMI 配置已存在"}
     if log:
         log("XXMI 还没有配置文件（它首次运行才会生成），先启动一次让它生成…")
+    image_name = Path(str(launcher_path)).name
+    pids_before = _image_pids(image_name)
     try:
         _spawn_elevated(config, str(launcher_path), str(Path(launcher_path).parent), show_window=0)
     except Exception as exc:  # noqa: BLE001
@@ -762,14 +850,24 @@ def bootstrap_xxmi_config(config: AppConfig, *, wait_seconds: int = 40,
         time.sleep(1.0)
     # 收掉这次"只为生成配置"而拉起的 XXMI。它是**提权进程**，普通权限的 taskkill 杀不掉
     # （实测：进程一直留着），所以同样走 runas。
+    #
+    # 但**只能杀我们自己拉起的那一个**：原先用 `taskkill /IM <映像名>`，会把用户
+    # 自己刚打开的 XXMI 一起杀掉（可能丢它还没落盘的配置）。这里改成 PID 差分
+    # （2026-10-01 修 ⑨）。
     try:
         import ctypes
 
-        ctypes.windll.shell32.ShellExecuteW(
-            None, "runas", "taskkill",
-            f'/IM "{Path(str(launcher_path)).name}" /F',
-            str(Path(launcher_path).parent), 0,
-        )
+        cwd = str(Path(launcher_path).parent)
+        started = _image_pids(image_name) - pids_before
+        if started:
+            for pid in sorted(started):
+                ctypes.windll.shell32.ShellExecuteW(
+                    None, "runas", "taskkill", f"/PID {pid} /F", cwd, 0,
+                )
+        elif not pids_before:
+            ctypes.windll.shell32.ShellExecuteW(
+                None, "runas", "taskkill", f'/IM "{image_name}" /F', cwd, 0,
+            )
         time.sleep(2.0)
     except Exception:  # noqa: BLE001
         pass
@@ -1050,7 +1148,7 @@ def _set_d3dx_loader_target(d3dx_ini: Path, target: str) -> bool:
         except StopIteration:
             return False
         out.insert(index + 1, f"target = {target}")
-    d3dx_ini.write_text(chr(10).join(out) + chr(10), encoding="utf-8", newline=chr(10))
+    _write_ini_atomic(d3dx_ini, chr(10).join(out) + chr(10))
     return True
 
 
@@ -1580,11 +1678,11 @@ def ensure_efmi_library_globals(d3dx_ini: Path, library_root: Path, core_dir: Pa
             existing.add(match.group(0).lower() if match else stripped.lower())
     missing = [value for key, value in declarations.items() if key not in existing]
     if not missing:
-        d3dx_ini.write_text(chr(10).join(out) + chr(10), encoding="utf-8", newline=chr(10))
+        _write_ini_atomic(d3dx_ini, chr(10).join(out) + chr(10))
         return bool(not skipping or out)
     block = ["; EndfieldModController library globals begin", *missing, "; EndfieldModController library globals end"]
     out[index + 1:index + 1] = block
-    d3dx_ini.write_text(chr(10).join(out) + chr(10), encoding="utf-8", newline=chr(10))
+    _write_ini_atomic(d3dx_ini, chr(10).join(out) + chr(10))
     return True
 
 
@@ -1615,7 +1713,7 @@ def ensure_legacy_costume_sections(d3dx_ini: Path) -> bool:
             out.append(line)
     text = chr(10).join(out)
     if "[ShaderOverrideCharacter]" in text and "[CommandListSkin]" in text:
-        d3dx_ini.write_text(chr(10).join(out) + chr(10), encoding="utf-8", newline=chr(10))
+        _write_ini_atomic(d3dx_ini, chr(10).join(out) + chr(10))
         return False
     block = [
         begin,
@@ -1643,7 +1741,7 @@ def ensure_legacy_costume_sections(d3dx_ini: Path) -> bool:
         end,
     ]
     out.extend(["", *block])
-    d3dx_ini.write_text(chr(10).join(out) + chr(10), encoding="utf-8", newline=chr(10))
+    _write_ini_atomic(d3dx_ini, chr(10).join(out) + chr(10))
     return True
 
 
@@ -1697,7 +1795,7 @@ def ensure_efmi_early_includes(d3dx_ini: Path) -> bool:
             out.insert(insert_at, "skip_early_includes_load = 0")
             changed = True
     if changed:
-        d3dx_ini.write_text(chr(10).join(out) + chr(10), encoding="utf-8", newline=chr(10))
+        _write_ini_atomic(d3dx_ini, chr(10).join(out) + chr(10))
     return changed
 
 
@@ -1732,7 +1830,7 @@ def enable_efmi_debug_logging(d3dx_ini: Path) -> bool:
         # Drop the run of empty continuation lines that some older packaging
         # steps inserted; the parser ignores them, but they make d3dx.ini huge.
         cleaned = [line for line in out if line.strip()]
-        d3dx_ini.write_text(chr(10).join(cleaned) + chr(10), encoding="utf-8", newline=chr(10))
+        _write_ini_atomic(d3dx_ini, chr(10).join(cleaned) + chr(10))
     return changed
 
 
@@ -1859,7 +1957,7 @@ def launch_migoto_loader(
             "KeyOverlay=36,0,0,0",
             "",
         ]
-        reshade_ini.write_text(chr(10).join(ini_lines), encoding="utf-8")
+        _write_ini_atomic(reshade_ini, chr(10).join(ini_lines))
 
     # ReShade + EFMI coexistence: put ReShade in the game folder as d3d12.dll
     # (the name Endfield dynamically probes under DX11), and let the EFMI loader
@@ -1873,22 +1971,20 @@ def launch_migoto_loader(
         for proxy_name in ("d3d12.dll",):
             proxy = game_dir / proxy_name
             if proxy.is_file():
-                disabled = game_dir / (proxy_name + ".endfieldmodcontroller.disabled")
-                if disabled.exists():
-                    disabled.unlink()
+                # 备份只增不删（见 _unique_backup_path）
+                disabled = _unique_backup_path(game_dir / (proxy_name + ".endfieldmodcontroller.disabled"))
                 proxy.rename(disabled)
                 actions.append(f"已禁用 ReShade 代理: {proxy_name}")
     if game_dir is not None and reshade_enabled:
         for conflict_name in ("dxgi.dll", "d3d11.dll"):
             conflict = game_dir / conflict_name
             if conflict.is_file():
-                backup = conflict.with_name(conflict.name + ".endfieldmodcontroller.disabled")
-                if backup.exists():
-                    backup.unlink()
+                backup = _unique_backup_path(
+                    conflict.with_name(conflict.name + ".endfieldmodcontroller.disabled"))
                 conflict.rename(backup)
         reshade_dll = config.reshade_dll_path
         if reshade_dll is not None and reshade_dll.is_file():
-            shutil.copy2(reshade_dll, game_dir / "d3d12.dll")
+            _copy_file_atomic(reshade_dll, game_dir / "d3d12.dll")
             _ensure_reshade_disabled_addons(game_dir)
             try:
                 disabled_addons = reshade_integration.disable_conflicting_addons(
@@ -1911,8 +2007,8 @@ def launch_migoto_loader(
                         disabled_game_addon.unlink()
                     game_addon.rename(disabled_game_addon)
             if actions_tsv.is_file():
-                shutil.copy2(actions_tsv, game_dir / "actions.tsv")
-            (game_dir / "user_ini_path.txt").write_text(str(user_ini), encoding="utf-8")
+                _copy_file_atomic(actions_tsv, game_dir / "actions.tsv")
+            _write_ini_atomic(game_dir / "user_ini_path.txt", str(user_ini))
             if not (game_dir / "ReShade.ini").is_file():
                 ini_lines = [
                     "[ADDON]",
@@ -1924,7 +2020,7 @@ def launch_migoto_loader(
                     "KeyOverlay=36,0,0,0",
                     "",
                 ]
-                (game_dir / "ReShade.ini").write_text(chr(10).join(ini_lines), encoding="utf-8")
+                _write_ini_atomic(game_dir / "ReShade.ini", chr(10).join(ini_lines))
             actions.append("deployed ReShade as game-directory d3d12.dll")
 
     game_exe = config.game_exe_path
@@ -1954,7 +2050,7 @@ setlocal
 set "GAME=__GAME__"
 set "APPS=%ProgramData%\ReShade\ReShadeApps.ini"
 if exist "%APPS%" (
-  > "%APPS%.endfieldmodcontroller.bak" echo Apps=%GAME%
+  if not exist "%APPS%.endfieldmodcontroller.bak" copy /Y "%APPS%" "%APPS%.endfieldmodcontroller.bak" >nul
   > "%APPS%" echo Apps=%ProgramData%\ReShade\disabled.exe
 )
 taskkill /F /IM loader.exe >nul 2>&1

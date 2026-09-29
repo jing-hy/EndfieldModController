@@ -234,83 +234,6 @@ def _namespace_from_ini_path(ini_path: Path, mods_root: Path) -> str:
     return "\\mods\\" + str(rel).replace("/", "\\")
 
 
-def split_ini(text: str) -> tuple[list[str], list[IniSection]]:
-    """Split an ini into preamble lines and sections, preserving line order."""
-    lines = text.splitlines()
-    preamble: list[str] = []
-    sections: list[IniSection] = []
-    current_header: str | None = None
-    current_start: int = 0
-    current_lines: list[str] = []
-
-    def flush(end_line: int) -> None:
-        nonlocal current_header, current_start, current_lines
-        if current_header is not None:
-            sections.append(IniSection(
-                header=current_header,
-                start_line=current_start,
-                end_line=end_line,
-                lines=current_lines[:],
-            ))
-        current_lines = []
-
-    for idx, line in enumerate(lines):
-        m = _INI_SECTION_RE.match(line)
-        if m:
-            flush(idx)
-            current_header = m.group(1).strip()
-            current_start = idx
-            current_lines = [line]
-        else:
-            if current_header is None:
-                preamble.append(line)
-            else:
-                current_lines.append(line)
-
-    flush(len(lines))
-    return preamble, sections
-
-
-def parse_namespace(text: str) -> str | None:
-    for line in text.splitlines():
-        m = _NAMESPACE_RE.match(line)
-        if m:
-            return m.group(1)
-        if _INI_SECTION_RE.match(line):
-            break
-    return None
-
-
-def parse_constants(section: IniSection) -> dict[str, ConstantDecl]:
-    out: dict[str, ConstantDecl] = {}
-    for line in section.lines[1:]:
-        stripped = line.strip()
-        if not stripped or stripped.startswith((";", "#")):
-            continue
-        m = _CONST_RE.match(line)
-        if not m:
-            continue
-        flags = (m.group("flags") or "").lower()
-        name = m.group("name")
-        out[name.lower()] = ConstantDecl(
-            name=name,
-            raw_name=m.group("name"),
-            value=(m.group("value") or "").strip(),
-            global_="global" in flags,
-            persist="persist" in flags,
-        )
-    return out
-
-
-def _namespace_from_ini_path(ini_path: Path, mods_root: Path) -> str:
-    """Approximate 3DMigoto's default namespace for a mod ini."""
-    try:
-        rel = ini_path.resolve().relative_to(mods_root.resolve())
-    except ValueError:
-        rel = ini_path.name
-    return "\\mods\\" + str(rel).replace("/", "\\")
-
-
 # ---------------------------------------------------------------------------
 # Action model
 # ---------------------------------------------------------------------------
@@ -1100,7 +1023,11 @@ def patch_mod_hotkeys(
         if backup_root is not None:
             backup_file = backup_root / mod_id / str(ini_path.relative_to(mod_dir))
             backup_file.parent.mkdir(parents=True, exist_ok=True)
-            backup_file.write_bytes(original.encode("utf-8"))
+            # **只在第一次写备份**：第二次运行时 original 已经是上一次 patch 过的
+            # 内容，无条件覆盖会把"真正的原始热键配置"冲掉，之后再也回不去
+            # （2026-10-01 修）。
+            if not backup_file.exists():
+                backup_file.write_bytes(original.encode("utf-8"))
     return records
 
 

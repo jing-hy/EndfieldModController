@@ -65,11 +65,18 @@ def _read_marker(root: Path) -> dict:
 
 
 def _write_marker(root: Path, data: dict) -> None:
+    from . import fsutil
+
     root.mkdir(parents=True, exist_ok=True)
-    (root / MARKER_NAME).write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8", newline="\n")
+    fsutil.write_text_atomic(
+        root / MARKER_NAME,
+        json.dumps(data, ensure_ascii=False, indent=2),
+        newline="\n",
+    )
 
 
-def _latest_release_asset(repo: str, pattern: str) -> tuple[str, str, str]:
+def _latest_release_asset(repo: str, pattern: str) -> tuple[str, str, str, str]:
+    """返回 (下载地址, 版本, 资产名, sha256 digest)。"""
     from . import github
 
     # 先走网页路线（不消耗 API 额度、能借镜像），普通用户没有 token 也能用
@@ -83,7 +90,8 @@ def _latest_release_asset(repo: str, pattern: str) -> tuple[str, str, str]:
     url = str(asset.get("browser_download_url") or "")
     if not url:
         raise RuntimeError(f"{repo}: release asset has no download URL")
-    return url, str(release.get("tag_name") or ""), str(asset.get("name") or "asset.zip")
+    return (url, str(release.get("tag_name") or ""), str(asset.get("name") or "asset.zip"),
+            str(asset.get("digest") or ""))
 
 
 def _release_info(repo: str) -> dict:
@@ -109,6 +117,7 @@ def _download_extract(
     index: int = 1,
     total: int = 1,
     key: str = "builtin",
+    expected_sha256: str = "",
 ) -> None:
     target.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="mc-builtin-") as tmp:
@@ -116,9 +125,26 @@ def _download_extract(
             url,
             Path(tmp) / asset_name,
             chunk_callback=(lambda received, expected: byte_progress(index, total, key, received, expected)) if byte_progress else None,
+            expected_sha256=expected_sha256,
         )
         assert isinstance(archive, Path)
-        dependencies.extract_archive(archive, target, strip_root=True)
+        # 2026-10-01 修（⑧）：原先直接解压进 target（copytree 合并语义）—— 更新时
+        # 旧版本文件不会被清掉，`_find_xxmi_exe` 的 rglob 兜底可能命中旧版 Launcher
+        # 并写进配置；中途失败还会留下"半新半旧"且无从回滚。
+        # 现在：先解压到临时目录 → 校验非空 → **逐文件原子替换**合并进 target。
+        # 刻意**不删除新包里没有的文件**：target 里还有 EFMI / Mods / 用户配置，
+        # 整目录替换会把它们一起弄丢。
+        from . import fsutil
+
+        staging = Path(tmp) / "unpacked"
+        dependencies.extract_archive(archive, staging, strip_root=True)
+        entries = [item for item in staging.rglob("*") if item.is_file()]
+        if not entries:
+            raise RuntimeError(f"{asset_name}: 解压结果为空")
+        for item in entries:
+            destination = target / item.relative_to(staging)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            fsutil.write_bytes_atomic(destination, item.read_bytes())
 
 
 def ensure_xxmi(config: AppConfig, progress: Progress = None, byte_progress: ByteProgress = None) -> BuiltinResult:
@@ -127,12 +153,12 @@ def ensure_xxmi(config: AppConfig, progress: Progress = None, byte_progress: Byt
     marker = _read_marker(root)
     if progress:
         progress(0, 3, "XXMI", "checking")
-    url, version, asset_name = _latest_release_asset(XXMI_REPO, XXMI_ASSET_PATTERN)
+    url, version, asset_name, digest = _latest_release_asset(XXMI_REPO, XXMI_ASSET_PATTERN)
     if existing and marker.get("version") == version:
         if progress:
             progress(1, 3, "XXMI", "up_to_date")
         return BuiltinResult("XXMI", "up_to_date", "already current", version, str(existing))
-    _download_extract(url, asset_name, root, byte_progress, 1, 3, "XXMI")
+    _download_extract(url, asset_name, root, byte_progress, 1, 3, "XXMI", expected_sha256=digest)
     exe = _find_xxmi_exe(root)
     if exe is None:
         raise RuntimeError("XXMI Launcher.exe was not found after extraction")
@@ -163,9 +189,13 @@ def ensure_xxmi_libs(config: AppConfig, progress: Progress = None, byte_progress
         return BuiltinResult("XXMI-Libs", "up_to_date", "already current", version, str(target))
     archive_url = _asset_url(release, zip_name)
     target.mkdir(parents=True, exist_ok=True)
-    _download_extract(archive_url, zip_name, target, byte_progress, 2, 3, "XXMI-Libs")
+    _download_extract(archive_url, zip_name, target, byte_progress, 2, 3, "XXMI-Libs",
+                      expected_sha256=str((assets.get(zip_name) or {}).get("digest") or ""))
     manifest_url = _asset_url(release, "Manifest.json")
-    manifest_data = dependencies._http_get(manifest_url)
+    manifest_data = dependencies._http_get(
+        manifest_url,
+        expected_sha256=str((assets.get("Manifest.json") or {}).get("digest") or ""),
+    )
     assert isinstance(manifest_data, bytes)
     (target / "Manifest.json").write_bytes(manifest_data)
     _write_marker(target, {"version": version, "asset": zip_name, "source": XXMI_LIBS_REPO})
@@ -184,12 +214,12 @@ def ensure_efmi(config: AppConfig, progress: Progress = None, byte_progress: Byt
     marker = _read_marker(target)
     if progress:
         progress(0, 3, "EFMI", "checking")
-    url, version, asset_name = _latest_release_asset(EFMI_REPO, EFMI_ASSET_PATTERN)
+    url, version, asset_name, digest = _latest_release_asset(EFMI_REPO, EFMI_ASSET_PATTERN)
     if core_ini.is_file() and marker.get("version") == version:
         if progress:
             progress(3, 3, "EFMI", "up_to_date")
         return BuiltinResult("EFMI", "up_to_date", "already current", version, str(target))
-    _download_extract(url, asset_name, target, byte_progress, 3, 3, "EFMI")
+    _download_extract(url, asset_name, target, byte_progress, 3, 3, "EFMI", expected_sha256=digest)
     _write_marker(target, {"version": version, "asset": asset_name, "source": EFMI_REPO})
     config.staging_mods_dir = str(target / "Mods")
     config.save()

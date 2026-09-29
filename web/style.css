@@ -454,24 +454,32 @@ progress::-webkit-progress-value { border-radius: 999px; }
   white-space: pre-wrap; word-break: break-word;
 }
 
-/* Mod 库：拖放 zip 导入区 */
-.mod-drop {
-  margin: 10px 0 14px;
-  padding: 18px 16px;
+/* 拖入提示：整页拖放（仅 Mod 库页触发）时的全屏提示层。
+   `pointer-events: none` 是关键 —— 否则这一层会吃掉 dragover/drop 事件。 */
+.drop-hint {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;                 /* 低于 .splash(9999)、高于普通内容 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.drop-hint.hidden { display: none; }
+.drop-hint-inner {
   text-align: center;
-  font-size: 13px;
-  color: var(--muted);
-  border: 1.5px dashed var(--line-strong);
-  border-radius: var(--radius);
-  background: var(--panel);
-  transition: border-color .18s ease, background .18s ease, color .18s ease;
+  padding: 28px 40px;
+  border: 2px dashed var(--accent);
+  border-radius: calc(var(--radius) * 1.4);
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+  box-shadow: 0 18px 50px rgba(0, 0, 0, .28);
 }
-.mod-drop b { color: var(--accent); }
-.mod-drop.over {
-  border-color: var(--accent);
-  color: var(--text);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-}
+.drop-hint-arrow { font-size: 34px; line-height: 1; color: var(--accent); margin-bottom: 8px; }
+.drop-hint-title { font-size: 16px; font-weight: 700; color: var(--text); }
+.drop-hint-sub { margin-top: 6px; font-size: 12px; color: var(--muted); }
 
 .update-badge {
   min-width: 76px;

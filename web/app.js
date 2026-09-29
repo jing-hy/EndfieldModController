@@ -1,7 +1,24 @@
 const state = { config: {}, mods: [], dependency_report: {}, selected: new Set(), lastPrepare: null };
 
+// 后端返回的字符串（Mod 名、角色名、分组、文件路径、错误信息）一律先转义再拼进 HTML。
+// 这些内容来自用户导入的 mod 包与下载的依赖清单 —— 直接拼模板等于把"包名"当代码执行，
+// 而 WebView 里能拿到 window.pywebview.api.*（open_path / apply_app_update 等）。
+function escapeHtml(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// 与 index.html 的 <head> 内联脚本保持**同一份白名单**：两边不一致时，
+// 首屏先按缓存上色、随后 app.js 又把它规范化成 dark —— 页面当场变深，
+// 而且用户的选择会被永久改写进 localStorage（2026-10-01 修）。
+const THEMES = ['light', 'dark', 'amber', 'cyan', 'violet', 'emerald'];
+
 function applyTheme(theme) {
-  const value = theme === 'light' ? 'light' : 'dark';
+  const value = THEMES.includes(theme) ? theme : 'light';
   document.documentElement.dataset.theme = value;
   try { localStorage.setItem('mc-theme', value); } catch (err) { /* ignore */ }
   const button = document.getElementById('theme-toggle');
@@ -74,8 +91,19 @@ function showModalDialog({ title, message, okText = '确定', cancelText = '取�
     const actions = wrap.querySelector('.modal-actions');
     let settled = false;
     const onKey = (event) => {
-      if (event.key === 'Escape') finish(false);
-      if (event.key === 'Enter') finish(true);
+      // 只让**栈顶**弹窗响应键盘：多个弹窗同时存在时（例如轮询失败叠加），
+      // 一次 Enter 会把所有确认框一起按掉，其中包括"净化游戏目录"这类危险操作
+      // （2026-10-01 修）。
+      const modals = document.querySelectorAll('.modal');
+      if (modals.length && modals[modals.length - 1] !== wrap) return;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        finish(false);
+      }
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        finish(true);
+      }
     };
     const finish = (value) => {
       if (settled) return;
@@ -206,7 +234,7 @@ function renderMods() {
     block.className = 'group-block';
     block.innerHTML = `
       <div class="group-header">
-        <h3>${group}</h3>
+        <h3>${escapeHtml(group)}</h3>
         <span class="hint">${mods.length} 个 Mod · 已启用 ${enabledCount}</span>
       </div>
     `;
@@ -220,12 +248,12 @@ function renderMods() {
       card.className = 'mod-card' + (dependency ? ' disabled' : '');
       const checked = dependency || state.selected.has(mod.id);
       card.innerHTML = `
-        <div class="cover" data-cover-box="${mod.id}"><span>无预览图</span></div>
-        <div class="name">${mod.name}</div>
-        <div class="meta">${mod.kind} · id=${mod.id}</div>
-        ${needConfirm ? '<div class="meta" style="color:#d98a1f;cursor:pointer" data-char-pick="' + mod.id + '">⚠ 角色待确认 —— 点此选择</div>' : ''}
+        <div class="cover" data-cover-box="${escapeHtml(mod.id)}"><span>无预览图</span></div>
+        <div class="name">${escapeHtml(mod.name)}</div>
+        <div class="meta">${escapeHtml(mod.kind)} · id=${escapeHtml(mod.id)}</div>
+        ${needConfirm ? '<div class="meta" style="color:#d98a1f;cursor:pointer" data-char-pick="' + escapeHtml(mod.id) + '">⚠ 角色待确认 —— 点此选择</div>' : ''}
         <label class="switch">
-          <input type="checkbox" data-mod-toggle value="${mod.id}" ${checked ? 'checked' : ''} ${dependency ? 'disabled' : ''}>
+          <input type="checkbox" data-mod-toggle value="${escapeHtml(mod.id)}" ${checked ? 'checked' : ''} ${dependency ? 'disabled' : ''}>
           <span class="slider"></span>
         </label>
       `;
@@ -315,14 +343,14 @@ function renderDependencies() {
     const status = item.status || (item.present ? '已安装' : '缺失');
     const statusClass = item.present ? 'ok' : ((item.needed || item.required) ? 'missing' : 'skip');
     const updateBtn = (item.is_app && item.update_available)
-      ? `<button class="primary" data-app-update>更新到 v${item.latest || ''}</button>` : '';
+      ? `<button class="primary" data-app-update>更新到 v${escapeHtml(item.latest || '')}</button>` : '';
     node.innerHTML = `
       <div>
-        <div>${item.display || key}</div>
-        <div class="meta hint">${(item.source || '')}${item.install_dir ? ' · ' + item.install_dir : ''}</div>
+        <div>${escapeHtml(item.display || key)}</div>
+        <div class="meta hint">${escapeHtml(item.source || '')}${item.install_dir ? ' · ' + escapeHtml(item.install_dir) : ''}</div>
       </div>
       <div class="dep-right">
-        <div class="${statusClass}">${status}</div>
+        <div class="${statusClass}">${escapeHtml(status)}</div>
         ${updateBtn}
       </div>
     `;
@@ -365,52 +393,99 @@ function arrayBufferToBase64(buffer) {
   return btoa(binary);
 }
 
-function initModDropZone() {
-  const zone = $('mod-drop');
-  if (!zone) return;
-  const idleHtml = zone.innerHTML;
-  const highlight = (on) => zone.classList.toggle('over', on);
-  ['dragenter', 'dragover'].forEach((name) => zone.addEventListener(name, (event) => {
-    event.preventDefault();
-    highlight(true);
-  }));
-  ['dragleave', 'dragend'].forEach((name) => zone.addEventListener(name, () => highlight(false)));
-  zone.addEventListener('drop', async (event) => {
-    event.preventDefault();
-    highlight(false);
-    const file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
-    if (!file) return;
-    if (!/\.zip$/i.test(file.name)) {
-      await showAlert('目前只支持 .zip 压缩包（其他格式请先解压再拖进来）。', '导入 Mod');
-      return;
+// ── 拖入导入 ────────────────────────────────────────────────────────────────
+// 用户要求：去掉原来那个小方块拖放区，改成**整页**都能拖（仅 Mod 库页生效），
+// 并且拖进窗口还没松手时要有明显提示 —— 否则用户会以为"拖了没反应"。
+let dragDepth = 0;
+let dropBusy = false;
+
+function libraryTabActive() {
+  const tab = $('tab-library');
+  return !!tab && tab.classList.contains('active');
+}
+
+function setDropHint(on, text) {
+  const hint = $('drop-hint');
+  if (!hint) return;
+  const label = $('drop-hint-msg');
+  if (label && text) label.textContent = text;
+  hint.classList.toggle('hidden', !on);
+}
+
+function dragHasFiles(event) {
+  const types = event.dataTransfer && event.dataTransfer.types;
+  return !!types && Array.prototype.indexOf.call(types, 'Files') >= 0;
+}
+
+async function importDroppedFile(file) {
+  if (!file) return;
+  if (!/\.zip$/i.test(file.name)) {
+    await showAlert('目前只支持 .zip 压缩包（其他格式请先解压再拖进来）。', '导入 Mod');
+    return;
+  }
+  dropBusy = true;
+  setDropHint(true, `正在读取 ${file.name} …`);
+  try {
+    const base64 = arrayBufferToBase64(await file.arrayBuffer());
+    setDropHint(true, `正在解压并识别角色：${file.name} …`);
+    const result = await call('import_mod_archive', file.name, base64);
+    if (!result.ok) {
+      await showAlert(result.message || '导入失败', '导入 Mod');
+    } else if (result.need_confirm) {
+      await showAlert(`已导入「${result.name}」，但角色归属不确定 —— `
+        + '请点「确认角色归属」按钮选一下角色。', '导入 Mod');
+    } else {
+      await showAlert(`已导入「${result.name}」，角色归属已识别。`, '导入 Mod');
     }
-    zone.textContent = `正在读取 ${file.name} …`;
-    try {
-      const base64 = arrayBufferToBase64(await file.arrayBuffer());
-      zone.textContent = `正在解压并识别角色：${file.name} …`;
-      const result = await call('import_mod_archive', file.name, base64);
-      if (!result.ok) {
-        await showAlert(result.message || '导入失败', '导入 Mod');
-      } else if (result.need_confirm) {
-        await showAlert(`已导入「${result.name}」，但角色归属不确定 —— `
-          + '请点「确认角色归属」按钮选一下角色。', '导入 Mod');
-      } else {
-        await showAlert(`已导入「${result.name}」，角色归属已识别。`, '导入 Mod');
-      }
-      try { await scan(); } catch (err) { /* 扫描失败不影响导入结果 */ }
-      try { await refreshFromState(); } catch (err) { /* 同上 */ }
-    } catch (err) {
-      await showAlert(`导入失败：${err.message || err}`, '导入 Mod');
-    } finally {
-      zone.innerHTML = idleHtml;
-    }
+    try { await scan(); } catch (err) { /* 扫描失败不影响导入结果 */ }
+    try { await refreshFromState(); } catch (err) { /* 同上 */ }
+  } catch (err) {
+    await showAlert(`导入失败：${err.message || err}`, '导入 Mod');
+  } finally {
+    dropBusy = false;
+    setDropHint(false);
+  }
+}
+
+function initDragImport() {
+  document.addEventListener('dragenter', (event) => {
+    if (!dragHasFiles(event) || !libraryTabActive() || dropBusy) return;
+    event.preventDefault();
+    dragDepth += 1;
+    setDropHint(true, '松开即可导入 Mod');
+  });
+  // dragover 必须 preventDefault，否则浏览器不会派发 drop 事件
+  document.addEventListener('dragover', (event) => {
+    if (!dragHasFiles(event) || !libraryTabActive() || dropBusy) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+  });
+  document.addEventListener('dragleave', (event) => {
+    if (!dragHasFiles(event) || !libraryTabActive()) return;
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0 && !dropBusy) setDropHint(false);
+  });
+  // 拖出窗口 / 按 Esc 取消时的兜底收起
+  window.addEventListener('dragend', () => {
+    dragDepth = 0;
+    if (!dropBusy) setDropHint(false);
+  });
+  document.addEventListener('drop', async (event) => {
+    dragDepth = 0;
+    if (!dragHasFiles(event)) return;
+    event.preventDefault();               // 别让 WebView 自己去打开这个文件
+    if (dropBusy) return;
+    setDropHint(false);
+    if (!libraryTabActive()) return;      // 只有 Mod 库页才处理导入
+    const file = event.dataTransfer.files && event.dataTransfer.files[0];
+    await importDroppedFile(file);
   });
 }
 
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initModDropZone);
+  document.addEventListener('DOMContentLoaded', initDragImport);
 } else {
-  initModDropZone();
+  initDragImport();
 }
 
 async function scan() {
@@ -596,6 +671,15 @@ async function refreshFromState() {
     $('cfg-official_launcher').value = s.detected_official_launcher;
     await call('save_config', { official_launcher: s.detected_official_launcher });
   }
+  // 后端还在后台预热（全盘探测）时 detected_* 是空的：稍后再静默刷新一次补上，
+  // 这样"加载页尽早出现"和"探测结果照旧可用"两件事都成立（2026-10-01 改）。
+  if (s.warming && !state.__warmingRetry) {
+    state.__warmingRetry = true;
+    setTimeout(() => {
+      state.__warmingRetry = false;
+      refreshFromState().catch(() => {});
+    }, 1500);
+  }
   state.mods = s.mods || [];
   const validIds = new Set(state.mods.map(m => m.id));
   state.selected = new Set((s.config.selected_mods || []).filter(id => validIds.has(id)));
@@ -687,7 +771,15 @@ async function pollDependencyProgress(statusEl) {
 let logTimer = null;
 
 async function refreshLog() {
-  const result = await call('read_launch_log', 500);
+  // 日志窗每秒轮询一次，而 call() 失败会弹模态框 —— 后端忙 / 自更新重启期间
+  // 会以 1 秒 1 个的速率往屏幕上叠弹窗，点掉一个又冒一个（2026-10-01 修）。
+  let result;
+  try {
+    result = await call('read_launch_log', 500);
+  } catch (err) {
+    setStatus('读取日志失败：' + ((err && err.message) ? err.message : err));
+    return;
+  }
   $('log-text').textContent = result.text || '(日志为空)';
   $('log-text').scrollTop = $('log-text').scrollHeight;
 }
@@ -1493,12 +1585,12 @@ function showCharacterModal(data) {
     const first = (item.candidates || [])[0] || '';
     const all = [...new Set([...(item.candidates || []), ...(data.known || [])])];
     const opts = all
-      .map((n) => `<option value="${n}"${n === first ? ' selected' : ''}>${n}</option>`)
+      .map((n) => `<option value="${escapeHtml(n)}"${n === first ? ' selected' : ''}>${escapeHtml(n)}</option>`)
       .join('');
     row.innerHTML = `
-      <div style="font-weight:600">${item.name}</div>
-      <div class="hint" style="margin:2px 0 6px">${why}</div>
-      <select data-char-select="${item.id}" style="min-width:220px">
+      <div style="font-weight:600">${escapeHtml(item.name)}</div>
+      <div class="hint" style="margin:2px 0 6px">${escapeHtml(why)}</div>
+      <select data-char-select="${escapeHtml(item.id)}" style="min-width:220px">
         <option value="">（请选择角色）</option>
         ${opts}
       </select>

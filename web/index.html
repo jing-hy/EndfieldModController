@@ -57,9 +57,6 @@
 
   <main>
     <section class="panel active" id="tab-library">
-      <div id="mod-drop" class="mod-drop">
-        把 Mod 的 <b>.zip</b> 拖到这里 → 自动解压进 Mod 库，并尝试识别角色归属
-      </div>
       <div class="switch-item" id="mods-master-card">
         <div class="switch-row">
           <span class="switch-name">开启第三方服装 Mod</span>
@@ -70,7 +67,7 @@
       <div class="toolbar">
         <button id="scan-btn">重新扫描</button>
         <button id="prepare-btn" class="primary">生成控制器</button>
-        <span class="hint">同角色自动互斥，选择自动保存。</span>
+        <span class="hint">同角色自动互斥，选择自动保存。把 .zip 拖到页面任意处即可导入。</span>
       </div>
       <div id="library-status" class="hint"></div>
       <div id="mod-list" class="mod-groups"></div>
@@ -380,6 +377,15 @@
         <button id="log-export-btn">导出诊断包</button>
         <button id="log-clear-btn">清空</button>
       </div>
+    </div>
+  </div>
+
+  <!-- 拖入提示：把 .zip 拖进窗口、还没松手时显示（只在 Mod 库页生效） -->
+  <div id="drop-hint" class="drop-hint hidden">
+    <div class="drop-hint-inner">
+      <div class="drop-hint-arrow">⬇</div>
+      <div class="drop-hint-title" id="drop-hint-msg">松开即可导入 Mod</div>
+      <div class="drop-hint-sub">支持 .zip：自动解压进 Mod 库，并尝试识别角色归属</div>
     </div>
   </div>
 

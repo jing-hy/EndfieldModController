@@ -1,17 +1,33 @@
 # EndfieldModController
 
-《明日方舟：终末地》的一站式 Mod 管理器：把 **DLSS5 神经渲染 + 第一人称视角 + 服装 Mod（EFMI）** 以及 **ShakingBreastManager** 统一到一次「一键启动」里，并自动维护各项注入与初始化自检。Windows 桌面程序（Python + PyWebview），开箱即可双击 exe 运行。
+《明日方舟：终末地》的一站式 Mod 管理器：把 **DLSS5 神经渲染 + 第一人称视角 + 服装 Mod（EFMI）** 以及 **乳摇（SecondaryMotion）** 统一到一次「一键启动」里，并自动维护各项注入与初始化自检。
 
-> 本程序**只做编排与自检**，不实现注入、不改游戏本体文件。注入由 XXMI Launcher 完成，服装 Mod 由 EFMI 加载，神经渲染与第一人称是挂在同一个 ReShade 底座下的 addon。
+Windows 桌面程序（Python + PyWebview），单文件 exe，**零配置启动即用**。当前版本 **0.3.0**。
+
+> 本程序**只做编排与自检**：注入由 XXMI Launcher 完成，服装 Mod 由 EFMI 加载，神经渲染与第一人称是挂在同一个 ReShade 底座下的 addon。
+> 它**不改游戏本体文件**，也不内置任何 Mod —— Mod 都是你自己放进来的。
 
 ---
 
 ## 一、它能做到什么
 
-本机实测通过的组合（同一进程内同时生效）：
+| 能力 | 说明 |
+| --- | --- |
+| **从零装好运行环境** | 首次启动自动下载并安装 XXMI Launcher、XXMI Libraries、EFMI 三个组件（Release 资产带 sha256 校验），装完写好配置 |
+| **Mod 库管理** | 把 `.zip` **拖到页面任意处**即可导入；自动解压进库、尝试识别角色归属，拿不准就问你要哪个角色 |
+| **同角色互斥** | 同一个角色只保留一个 Mod，避免 EFMI 同时加载两个同角色 Mod 把游戏搞崩 |
+| **收编手动 Mod** | 你自己丢进 `Mods` 目录的 Mod 会被认出来、收进库并在界面勾选上 |
+| **一键启动** | 维护 XXMI 的注入库（DLSS5 的 `d3d12.dll` + EFMI 的 `d3d11.dll`）、补齐缺失组件、跑完整初始化自检，然后拉起 XXMI |
+| **插件开关** | DLSS5、第一人称、第三方服装 Mod、乳摇注入，都能单独开关（可逆，靠移动文件而不是删文件） |
+| **游戏目录净化 / 还原** | 把第三方注入物**先备份再移走**（`runtime/game_backup/…`），随时一键还原；被移走的系统模块会自动从 System32 补回 |
+| **诊断与日志** | 启动日志、崩溃监视、一键导出诊断 zip（含日志、注入状态、Windows 事件） |
+| **更新** | 检查/下载新版并自更新（下载后校验 sha256，退出后由脚本替换并重启）；组件（XXMI / EFMI / 乳摇）也能单独更新 |
+| **下载兜底** | 内置轻量加速：慢/抖时临时并发分块，直连不通时临时换镜像线路 —— 按需启用、用完即放，不装证书、不改系统 |
+
+### 注入链（同一进程内同时生效）
 
 ```text
-唯一的 ReShade 底座  runtime\dlss5\d3d12.dll（ReShade 6.8.0）
+唯一的 ReShade 底座  runtime\dlss5\d3d12.dll（ReShade 6.8.0 Addon 版）
   ├─ renodx-dlss5-4.7_汉化.addon64      → DLSS5 神经渲染
   ├─ renodx-endfield-enhancer.addon64   → 第一人称 / 相机
   ├─ dlss5-feed.addon64                 → DLSS5 输入（需启用 DLSS5_Feed technique）
@@ -20,299 +36,203 @@
 服装 Mod 引擎  EFMI\d3d11.dll
 ```
 
-XXMI Launcher 启动游戏时注入上表中的 DLL，「注入库」由本程序自动维护；启动页的开关就是它的快捷切换。**一个游戏进程只能有一个 ReShade 底座**，所以不要把两个 `d3d12.dll` 同时注入。
-
-### 内置集成的组件
-
-| 组件 | 说明 |
-| --- | --- |
-| **DLSS5 神经渲染** | 通过 RenoDX DLSS addon 提供 |
-| **第一人称视角** | 通过 Endfield Enhancer addon 提供（相机与头部隐藏） |
-| **服装 Mod（EFMI）** | 服装/外观 Mod 引擎，支持同角色互斥、快捷键屏蔽 |
-| **ShakingBreastManager** <br><sub>次级运动 / 身体物理插件（v2.3.5）</sub> | 保持它自己的原生 Manager 界面独立运行；本程序负责状态显示、一键拉起它自己的 exe、补齐或卸载它的注入、以及从原仓库检查更新 |
+XXMI Launcher 启动游戏时按「注入库」注入上表里的 DLL，注入库由本程序维护，启动页的开关就是它的快捷切换。
+**一个游戏进程只能有一个 ReShade 底座**，所以不要把两个 `d3d12.dll` 同时注入。
 
 ---
 
-## 二、重要前提：第三方组件请放在**浅路径**
-
-这是实测踩出来的硬限制，**不遵守会表现为「游戏闪退」或「Mod 完全不生效」**：
-
-> EFMI / ReShade 按**自身所在目录**解析 `d3dx.ini`、addon 与 shader 路径。路径一长，游戏就会崩或插件静默失效。
-
-| 放这里 | 结果 |
-| --- | --- |
-| `D:\XXMI2`（8 字符） | 可用 |
-| `runtime\builtin\XXMI`（50 字符） | **不可用** |
-| `D:\DLSS5`（8 字符） | 可用 |
-| `runtime\dlss5`（38 字符） | **不可用** |
-
-用**目录联接（junction）也不管用** —— 进程看到的仍是长路径。
-
-所以推荐的部署形态是把第三方组件放在盘符根下的短目录（如 `D:\XXMI2`、`D:\DLSS5`），控制器本身可以放任意位置。
-
----
-
-## 三、本仓库包含 / 不包含什么
-
-### 已内置：NVIDIA DLSS 运行库（开箱即用）
-
-`nvngx_dlss.dll`（56 MB）+ `nvngx_dlssnr.dll`（158 MB）**已随仓库分发**，放在
-`assets\nvngx\`，**压缩分卷**存放（合计约 125 MB）。首次「一键启动」时程序会自动
-拼接解压回 `runtime\dlss5\` —— **你不需要自己去游戏目录或 NVIDIA 官网找运行库**。
-
-```text
-assets\nvngx\
-├─ manifest.json                     原始大小 / sha256 / 分卷清单
-├─ nvngx_dlss.dll.xz                 22 MB（单文件即可）
-├─ nvngx_dlssnr.dll.xz.part1         52 MB ┐ 压缩后仍有 103 MB，
-└─ nvngx_dlssnr.dll.xz.part2         52 MB ┘ 超过 GitHub 上限，故切成两卷
-```
-
-> 为什么要这么麻烦：GitHub 对**单个文件**有 100 MiB 硬上限，超了 push 会被直接拒绝。
-> 压缩后 `nvngx_dlssnr.dll` 还有 108,400,188 B，所以必须分卷。分卷只是存储形式，
-> 用户侧无感 —— 启动时按序拼接 + 流式解压，解压完比对 sha256 通过才落盘（原子改名，
-> 断电/磁盘满不会留下半截的 DLL）。
->
-> 重新打包（换了运行库版本时）：`python scripts\pack_nvngx_assets.py`，
-> 校验产物：`python scripts\pack_nvngx_assets.py --check`。
-
-### 不包含（避免误传个人数据与体积失控）
-
-- `library/` —— 你自备的服装 Mod（体积大且各有作者授权）
-- `runtime/` —— 第三方组件、日志、崩溃包、备份（体积可达数十 GB）
-- `config.json` —— 你的本机路径配置（仓库里给的是 `config.example.json`）
-- `_tmp/`、`dist/` —— 临时产物与构建输出
-
-其余第三方组件（XXMI Launcher / EFMI / ReShade 底座与各 addon）**不用手动下载**：
-界面的「依赖」页可以一键自动安装（见第九节）。
-
----
-
-## 四、快速开始
+## 二、运行与安装
 
 ### 方式 A：直接双击 exe（推荐）
 
-1. 从 Release 下载 `EndfieldModController.exe`（单文件，**不需要装 Python**）；
-2. **把它放进你的工作区目录**（例如已有 `library\` 和 `runtime\` 的那个目录）；
-3. **双击它**即可，全程不会出现命令行黑窗；
-4. 在界面里点「一键启动」—— 它会先跑初始化自检，缺什么补什么，然后拉起 XXMI Launcher。
-
-> **exe 旁边的目录就是「用户数据根」**：`config.json`、`runtime\`（日志与崩溃包）、
-> `library\`（你的 Mod 库）都会留在那里。也就是说 **exe 放哪儿，它的 Mod 库就在哪儿** ——
-> 想让 exe 用上已有的 Mod 库，把它复制到原工作区目录再双击；放到一个空文件夹里，
-> 界面里自然一个 Mod 都不会有。把 exe 连同这些目录一起搬走即可整体迁移。
-
-想自己从源码打包成 exe：
-
-```bash
-python scripts/build_exe.py            # 单文件 dist/EndfieldModController.exe
-python scripts/build_exe.py --onedir   # 目录模式：启动更快，但不是单文件
-python scripts/build_exe.py --console  # 保留控制台，调试 --cli 用
-```
+1. 下载 `EndfieldModController.exe`（Release 里只有这一个文件）；
+2. 放到一个**你有写权限的目录**（见下方"数据根"），双击；
+3. exe 的 manifest 自己要求管理员权限，会弹一次 UAC —— 点"是"。
+   （XXMI Launcher 的 exe 要求管理员，非管理员启动会直接报 WinError 740，所以默认就按管理员处理。）
 
 ### 方式 B：从源码运行
 
-```bash
+```bat
 pip install -r requirements.txt
-python -m endfieldmodcontroller          # 打开 Pywebview UI
-python -m endfieldmodcontroller --cli    # 只看状态
-python -m endfieldmodcontroller.cli state
+run.vbs          :: 无控制台黑窗（推荐）
+run.bat          :: 有依赖兜底与错误提示，但会闪一个 cmd 窗口
+run.bat --cli    :: 不开界面，直接打印当前状态 JSON（调试用）
 ```
 
-Windows 下也可以直接 `run.bat` / `run.vbs`。
+### ⚠ 数据根 = exe 所在目录
 
-### 首次配置
+`config.json`、`runtime\`、`library\` 都生成在 **exe 所在目录**（源码运行时是仓库根目录）。
+所以：**别把 exe 放进 `Program Files` 这类只读目录**，也别放在临时目录（清理工具会连你的 Mod 库一起删掉）。
 
-打开设置页，填写：
+### 首次启动会发生什么
 
-- Mod 库目录（默认 `library`）
-- staging Mods 目录（你的 EFMI `Mods` 目录）
-- XXMI Launcher 路径（**浅路径**）
-- `Endfield.exe` 路径
-- DLSS5 底座目录（含 `d3d12.dll` 与各 addon）
-- ShakingBreastManager 工具目录
+1. **界面立刻出现**（加载页在窗口创建后立即显示；全盘探测在后台跑，不挡界面）；
+2. 自动下载安装 XXMI / XXMI Libraries / EFMI；
+3. XXMI 的配置是**它首次运行时自己生成**的，所以本程序会先拉起一次 XXMI 生成配置、随后关闭它，并提示：
 
-**配置文件删掉也能启动** —— 默认值全部是相对路径，缺失字段会按内嵌组件自动补齐。
+   > 第一次启动：已临时拉起 XXMI 生成它的配置文件，随后已关闭。**请再点一次「一键启动」**。
 
----
+4. 再点一次「一键启动」就会真正写好注入库并拉起 XXMI。
 
-## 五、启动时会自动做什么
-
-点「一键启动」会依次执行初始化自检（`initialize.ensure_all`），当前共 **16 项**：
-
-| 检查 | 内容 |
-| --- | --- |
-| **`nvngx_assets`** | 随包分发的 DLSS 运行库（`assets\nvngx\` 压缩分卷）是否已在 `runtime\dlss5\` 展开；缺失或损坏时自动拼接解压，**解压后比对 sha256 通过才落盘** |
-| `dlss5_dir` | 底座必需的 `d3d12.dll`、各 addon、plugin、shader 是否在位，缺则从素材目录/备份/内置副本补齐 |
-| `reshade_ini` | `ReShade.ini` 是否含 `[endfield-enhancer]` 段、路径是否指向当前目录，缺则用模板重建（旧文件留 `.bak`） |
-| **`dlss5_preset`** | `PresetPath` 指向的 preset 是否存在**且启用了 `DLSS5_Feed`** —— 缺了它 DLSS5 **静默不工作**（见第六节） |
-| `game_libs` | 游戏目录 `nvngx_dlss.dll` 等运行库，**只在缺失时补齐，绝不覆盖你已有的文件** |
-| `mod_conflicts` | EFMI `Mods` 目录里是否有**同角色两个 Mod**（会直接导致游戏崩溃） |
-| `controller` / `staging` | 控制器 ini 与 Mod staging 是否与当前勾选一致 |
-| `sbm` | **ShakingBreastManager** 的注入是否完整（两个 proxy + `plugin\sbm.dll`） |
-
-其余项目（注入库两条路径、ReShade 段、游戏运行库等）同样逐项校验；补不了的会标成「待处理」并 WARN，**不会静默启动**。
-
-### 手动放进 Mods 的 Mod 会被自动收编
-
-如果你习惯直接把 Mod 文件夹丢进 EFMI 的 `Mods` 目录，本程序在每次启动时会先做一次同步：
-
-1. 找出 `Mods` 里**不是控制器生成**的那些目录（控制器自己的产物一律带 `MC_` 前缀）；
-2. 与 Mod 库比对 —— **先按目录名，再按 ini 里的 `namespace` 特征**（所以你把文件夹改过名也认得出来）；
-3. **库里已有** → 直接在界面上勾选为启用；
-4. **库里没有** → 复制进 `library\`，再勾选为启用；
-5. 收编后把手动目录从 `Mods` 移除，避免和随后生成的 staging 副本构成「同角色成对」。
-
-### Mod 的角色会自动识别，拿不准就问你
-
-每个 Mod 会被自动归类到所属角色（同角色互斥的依据）。识别结果分三种：
-
-- **高置信** —— 名称开头就匹配到角色（中文名、官网英文代号都认，如 `埃特拉变肥美` 或 `estella_bikini`），直接用；
-- **不确定** —— 一个都没匹配到，或者同时出现多个角色名分不清主次；
-- **不确定时会弹窗让你选**，每行会写明原因（「名字里没找到任何角色名」/「出现了多个角色名，分不清哪个才是主体」），候选里把匹配到的排在前面。
-
-选完会写进该 Mod 自己的 `mod.meta.json`，**以后不再问你**，而且跟着 Mod 目录走 —— 迁移、重扫都不会丢。
-
-角色表在 `endfieldmodcontroller/characters.json`，抓自[官网干员情报页](https://endfield.hypergryph.com/operator)（33 位干员），含各种译名变体（佩丽卡/佩利卡、赛希/塞希/塞西、艾维文娜/艾闻维娜、弭弗/弥弗、昼雪/小羊等）。
+> **DLSS5 那套组件没有上游可下载**（`renodx-endfield-enhancer.addon64`、`trans-zh.addon64`、`nvngx_dlssnr.dll` 全网都没有自动可用的发布源），需要随包自备或从可用的旧环境复制到 `runtime\dlss5\`。缺了会明确提示缺哪个文件，而不是静默失败。
 
 ---
 
-## 六、关于 DLSS5 不生效（请先看这条）
+## 三、日常使用
 
-如果面板上出现 `NGX Hook: 创建0` / `成功NR帧: 0` / `0xBAD00007`，**多半不是插件坏了、也不是显卡不支持**，而是 ReShade 里没有任何 technique 被启用。
+### Mod 库页
 
-DLSS5 addon 只在 `DLSS5_Feed` technique 执行**之后**才会去调 DLSS/NGX；而 `DLSS5_Feed.fx` 还要求 `MartysMods_Launchpad` 启用**且排在它上方**。preset 文件由 `ReShade.ini` 里的 `PresetPath` 指定（本程序默认写好）：
+- **导入**：把 `.zip` 拖进窗口 → 出现全屏提示框 → 松手即导入（仅"Mod 库"页接受拖放；拖出窗口或按 Esc 会取消提示）。
+- **角色识别**：导入后按 Mod 名/ini 里的线索猜角色；不确定会弹窗让你选，也可以稍后点卡片上的"角色待确认"。
+- **勾选**：勾选即保存（同角色自动互斥）。点「生成控制器」把选择落成 EFMI 要加载的内容。
+- **热键**：Mod 自带的热键会被统一接管（改成 `VK_F24`），改由本程序的面板/动作队列驱动 —— 避免 Mod 自己的按键和游戏冲突。
 
-```ini
-Techniques=MartysMods_Launchpad@MartysMods_LAUNCHPAD.fx,DLSS5_Feed@DLSS5_Feed.fx
-TechniqueSorting=MartysMods_Launchpad@MartysMods_LAUNCHPAD.fx,DLSS5_Feed@DLSS5_Feed.fx
-```
+### 启动页
 
-注意 `AutoSavePreset=1` 时，**游戏运行中改 preset 会被 ReShade 在退出时覆盖** —— 改动前请先完全退出游戏。
+- **一键启动**：补齐组件 → 同步 XXMI 注入库 → 初始化自检 → 拉起 XXMI（不自动进游戏；进游戏由 XXMI 或「启动游戏」按钮完成）。
+- **打开官方 XXMI**：只打开 XXMI 自己的界面，不动注入库。
+- **强制关闭**：收掉残留的 loader / 游戏进程（**不会**在你没要求的情况下强杀正在玩的游戏）。
+
+### 设置页
+
+路径配置（XXMI / 游戏 / loader / 乳摇工具）、下载加速与线路、主题、单实例与游戏多开防护、是否部署新版 nvngx、依赖清单等。
+`config.json` 里的键与默认值可参考 `config.example.json`（由程序默认值直接导出）。
+
+### 游戏目录净化 / 还原
+
+把游戏目录里的第三方注入物（loader proxy、插件数据、残留 ReShade 痕迹）**先备份再移走**，备份在 `runtime\game_backup\<时间戳>\`（含 `manifest.json` 与还原所需的文件），随时可还原。
+净化前会做内容级判定：**内容不像 ReShade/loader 载荷的 DLL 不会被误移走**（例如游戏自带或他方放的正版 `d3d12.dll`）。
 
 ---
 
-## 七、崩溃了怎么反馈
-
-一键启动后程序会在后台跟踪 `Endfield.exe`，退出时自动收集现场并打包：
-
-- 日志目录：`runtime\logs\`
-- 崩溃包：`runtime\logs\bundles\crash-<时间戳>.zip`（含控制器日志、游戏 `Player.log`、CrashSight 记录、官方转储、注入快照）
-
-**把 zip 直接发到 issue 即可**，里面已经包含定位所需的一切。
-
-关于「崩溃判定」的说明，避免误报困惑：程序用的是 CrashSight 的 **`uploadCrash`**（上传崩溃转储）作为判据。`reportException` **不算** —— 游戏自己会反复记录一些被捕获、并不致命的异常（例如 `[ItemBag]` scope 回退失败），拿它当信号会导致每次正常退出都弹「异常退出」。
-
----
-
-## 八、目录结构
+## 四、目录结构
 
 ```text
-endfieldmodcontroller/          # Python 包
-├─ config.py         # 配置（默认值均为相对路径 + autofill 自愈 + 打包后数据根处理）
-├─ characters.json   # 33 位干员的角色名对照表
-├─ core.py           # Mod 扫描 / 角色识别 / INI 解析 / 控制器生成
-├─ activation.py     # 同角色互斥、依赖按需解析、staging、手动 Mod 收编
-├─ launcher.py       # 启动编排、注入库维护、addon 启停
-├─ initialize.py     # 启动前 14 项自检与补齐
-├─ secondary_motion.py  # ShakingBreastManager 集成
-├─ crashwatch.py     # 崩溃取证与崩溃包
-├─ api.py            # Pywebview 后端 API
-└─ app.py            # 入口
-web/                # 前端 HTML/CSS/JS
-scripts/            # build_exe.py / package_release.py / self_check.py 等
-docs/               # 开发与排障文档
-tests/              # 单元测试
+<exe 所在目录>/
+├─ config.json                  运行配置（原子写；损坏会被隔离成 config.json.broken-<时间戳>）
+├─ library/                     Mod 库（你拖进来的 zip 解压到这里）
+└─ runtime/
+   ├─ builtin/XXMI/             自动下载安装的 XXMI Launcher + Libraries + EFMI
+   ├─ dlss5/                    DLSS5 底座与插件（d3d12.dll / ReShade.ini / *.addon64 / reshade-shaders）
+   ├─ reshade/                  控制器自己的 addon 与 actions.tsv
+   ├─ secondary_motion/         乳摇工具（可选）
+   ├─ game_backup/<时间戳>/      游戏目录净化备份（可还原）
+   ├─ backups/                  引擎目录、配置等的历史备份
+   ├─ logs/                     日志与诊断包（logs/bundles/*.zip）
+   └─ _update/                  自更新下载与残留
 ```
 
----
-
-## 九、第三方组件（均为 MIT 许可）
-
-下列组件**均为 MIT 许可**，出处如下。本仓库**不包含**它们，请从各自原仓库获取，或使用 Release 里的 exe：
-
-| 组件 | 用途 | 原仓库 |
-| --- | --- | --- |
-| XXMI Launcher | 启动游戏并注入 DLL 的加载器 | [SpectrumQT/XXMI-Launcher](https://github.com/SpectrumQT/XXMI-Launcher) |
-| EFMI | 终末地服装 Mod 引擎（3DMigoto 系） | 随 XXMI Launcher 分发（[SpectrumQT](https://github.com/SpectrumQT)） |
-| ReShade | 唯一的图形底座 `d3d12.dll` | [crosire/reshade](https://github.com/crosire/reshade) |
-| RenoDX DLSS addon | DLSS / 神经渲染 | [yumlevi/renodx-dlss-installer](https://github.com/yumlevi/renodx-dlss-installer)（RenoDX 本体：[clshortfuse/renodx](https://github.com/clshortfuse/renodx)） |
-| DLSS5-Feeder | `dlss5-feed.addon64` 与 `DLSS5_Feed.fx` | [jlrouzies-fr/DLSS5-Feeder](https://github.com/jlrouzies-fr/DLSS5-Feeder) |
-| iMMERSE / MartysMods | `MartysMods_LAUNCHPAD` 等效果 | [clayne/iMMERSE](https://github.com/clayne/iMMERSE) / [martymcmodding](https://github.com/martymcmodding/martymcmodding) |
-| DLSS5 素材整合 | 底座与 addon 的打包来源 | [faisalkindi/DLSS5oneclick](https://github.com/faisalkindi/DLSS5oneclick) |
-| **Endfield Enhancer（第一人称 / 相机）** | 第一人称视角插件 | **B 站 UP 主 Hirahido** 制作，感谢授权与分享 |
-| **ShakingBreastManager** | **次级运动 / 身体物理插件（乳摇）** | [Sp1cHless/Arknights-Endfield-Plugin-Secondary-bodyphysics](https://github.com/Sp1cHless/Arknights-Endfield-Plugin-Secondary-bodyphysics) |
-| 3DMigoto | EFMI 所基于的框架 | [bo3b/3Dmigoto](https://github.com/bo3b/3Dmigoto) |
-
-NVIDIA 运行库（`nvngx_dlss.dll` / `nvngx_dlssnr.dll`）**已随本仓库内置**
-（`assets\nvngx\`，压缩分卷约 125 MB），首次启动自动展开到 `runtime\dlss5\`，
-**无需手动获取**。重新打包见第三节。
-
-本项目的路线参考了 B 站教程 `BV1XMh76UEA5`《以防你不知道，你也可以终末地+XXMI+DLSS5+第一人称视角》，感谢原作者的探索。
-**第一人称插件（Endfield Enhancer）由 B 站 UP 主 Hirahido 制作**，特此致谢。
+`library/` 是**你的数据**，任何自动清理都不会碰它；相反，控制器自己的产物一律带 `MC_` 前缀，便于区分。
 
 ---
 
-## 十、版本与更新
+## 五、常见问题
 
-- **版本号出现在窗口标题与界面右上角**（如 `EndfieldModController v0.2.0`）。右上角徽标会自动
-  对比本仓库 Release 的 tag：**有新版会高亮闪烁**，点一下即可查看更新说明、下载并自动更新
-  （替换 exe 后自动重启；任何一步失败都会自动回滚旧版本，全程不弹命令行黑窗）。
-- **「一键启动」自带组件自愈**（用户要求）：随包资产缺失就地展开；在线组件
-  （ReShade 底座 / DLSS5-Feeder / iMMERSE shader）**只补缺失的**，已就位就完全跳过 ——
-  不联网、不拖慢启动。想每次启动都顺带升级到最新，打开设置里的「启动前自动更新依赖」。
-- 需要一次装齐时：依赖页「自动安装/更新」、设置页「一键安装/更新全部组件」。
-- 源码运行模式下不会自动替换自己，只提示 `git pull`。
+**Q：点了一键启动，Mod 没生效 / 注入失败？**
+看启动页的初始化自检结果与 `runtime\logs\launch.log`。常见原因：XXMI 配置还没生成（第一次要点两次启动）、注入库被 XXMI 自己的设置弹窗重置、`d3dx.ini` 的 `[Loader] target` 指错、或游戏目录残留了旧的 loader proxy（用"净化游戏目录"处理）。
 
-### 下载慢 / 连不上 GitHub 怎么办（内置轻量加速）
+**Q：游戏起不来 / 进游戏闪退？**
+先看 `runtime\logs\` 里的崩溃信息与诊断 zip。常见原因：游戏目录缺 `d3dcompiler_47.dll` / `vulkan-1.dll`（净化时会自动补回，补不回会明确报错）、注入库同时挂了两个 ReShade 底座、或 mod 之间同角色冲突。
 
-国内直连 GitHub 常常下不动 —— 实测**裸直连下载 Release 资产会直接 20 秒超时**（`WinError 10060`），
-这也是很多人常驻开着 Steam++ 之类加速器的原因。本程序内置两级**按需**加速，
-思路参考 [SteamTools / Watt Toolkit](https://github.com/BeyondDimension/SteamTools) 的"换一条链路"，
-但**不装证书、不起常驻服务、不改 hosts**，用完全部释放：
+**Q：第一次启动很慢？**
+界面是**立刻**出现的，慢的是后台在遍历盘符找 XXMI / 3DMigoto / 乳摇工具（只影响那几个"检测到的路径"字段，稍后会自动补上）。装组件要看网速。
 
-| 机制 | 什么时候触发 | 实测效果 |
-| --- | --- | --- |
-| **临时并发分块** | 单连接实测低于 1.5 MB/s，或读取超时 | 同一文件切块并发（最多 16 连接，每块独立重试）。27.5 MB 文件：单连接 6.36s ↔ **35.61s**（波动 5.6 倍）→ 并发压到 7~12s |
-| **临时线路切换** | 直连不通，或探测超时 | 自动改用镜像线路（默认 `gh.xmly.dev` → `ghproxy.net` → `gh-proxy.com`），并记住各线路速度，下次先试快的 |
+**Q：下载慢 / 连不上 GitHub？**
+设置页把"下载加速"设为自动、线路设为自动即可：平时单连接，慢或断流时临时并发分块并临时切镜像线路；**镜像下载物会用 Release 提供的 sha256 校验**，校验不过就丢弃重来。用完线程池即销毁，不常驻、不改 hosts、不装证书。
 
-实测（**关闭 Steam++** 的裸网络）：直连 ✗ 超时 → 自动切 `gh.xmly.dev` → 探测 0.37 MB/s 触发并发
-→ **27.5 MB 下载成功**，下载结束 `active=0`（加速已关闭）。开着加速器时，并发同样把
-最坏情况从 35.6s 压到 7.4s。
+**Q：反作弊会不会有问题？**
+本程序不注入、不碰反作弊；注入由 XXMI/EFMI 完成，且只作用于游戏目录里那几个已知文件。所有对游戏目录的改动都可备份、可还原。风险自负（见免责声明）。
 
-设置页可调：**下载加速**（自动 / 强制并发 / 关闭）、**下载线路**（自动 / 仅直连 / 只用镜像）、
-**清除线路记录**；下方会显示上次下载走的线路、速度、是否临时开过并发。
-
-> 走镜像时是**第三方中转**，所以程序只对**公开文件**这么做，且下载后一律校验完整性：
-> 自更新用 Release 的 `sha256`（GitHub API 的 digest），随包资产用 `manifest.json` 里的 sha256。
-> 加速是**临时的** —— 并发线程池在下载函数内销毁，镜像只是本次替换 URL，下载完立刻归零，
-> 没有后台线程、没有常驻代理、没有系统改动。
-
-### 发布新版本要做什么
-
-1. 改 `endfieldmodcontroller/version.py` 里的 `__version__`（窗口标题、更新检测都用它）；
-2. `python scripts\build_exe.py` 重新构建 `dist\EndfieldModController.exe`；
-3. 把 **exe** 和 **`assets` 资产包**都传上去，Release 的 tag 必须是 `v<版本号>`；
-4. 组件有更新时重新打包随包资产：`python scripts\pack_nvngx_assets.py`。
-
-> **Release 需要两个附件**：`EndfieldModController.exe`（约 29 MB，单文件）与
-> `assets-bundle.zip`（把仓库的 `assets\` 目录压进去，约 125 MB）。
-> 单文件 exe 装不下 125 MB 的运行库，所以程序启动时若发现本地没有 `assets\`，
-> 会自动从本仓库 Release 下载这个资产包再展开 —— 用户只下 exe 也能开箱即用。
+**Q：崩溃了怎么反馈？**
+在日志窗点「导出诊断包」，把生成的 zip 附到 issue 里（含日志、注入状态、Windows 应用错误事件）。附崩溃 dump 更好。
 
 ---
 
-## 十一、测试
+## 六、开发
 
-```bash
-python -m pytest tests -q          # 单元测试
-python scripts/self_check.py       # 测试 + 构建产物检查
+```bat
+pip install -r requirements.txt
+python -m pytest tests -q        :: ← 必须指定 tests 目录（见下）
+python scripts/self_check.py     :: 跑测试 + 检查 dist 里的 exe / addon / --cli
+python scripts/build_exe.py      :: 打包单文件 exe → dist\EndfieldModController.exe
+python -m endfieldmodcontroller --cli   :: 打印状态 JSON
 ```
 
+> ⚠ 不要直接在仓库根跑 `python -m pytest -q`：那会把 `_tmp\` 下的临时脚本一起收集，和 `tests\` 里的模块重名后直接报 collection error（整套要跑几分钟才中断）。**用 `python -m pytest tests -q`**（约 7 秒）。
+
+主要模块：
+
+| 模块 | 职责 |
+| --- | --- |
+| `config.py` | 配置读写（原子写/损坏隔离）、路径解析、内嵌组件探测（带缓存与"深/浅"两档） |
+| `core.py` | Mod 库扫描、角色识别、ini 解析与热键接管、控制器产物生成、`d3dx_user.ini` 读写 |
+| `activation.py` | 选择解析（同角色互斥/依赖按需）、staging 生成与清理 |
+| `launcher.py` | 一键启动、注入库维护、XXMI 配置读写、ReShade 运行时准备、进程收尾 |
+| `api.py` | 暴露给前端的接口层（pywebview `js_api`）；构造必须保持"快"，重活放后台预热 |
+| `dependencies.py` / `runtime_deps.py` | 依赖清单、下载与解压（逐文件原子替换）、XXMI/Libs/EFMI 安装 |
+| `dlss5_fetcher.py` / `reshade_integration.py` | DLSS5 组件、ReShade 集成与游戏目录注入审计 |
+| `game_clean.py` | 游戏目录净化/还原（备份式、内容级判定、越界拒绝） |
+| `fastnet.py` / `github.py` / `fsutil.py` | 下载（并发/镜像/校验）、GitHub 查询与缓存、哈希与原子写公共件 |
+| `diagnostics.py` / `crashwatch.py` | 日志、诊断包、崩溃监视与报告 |
+| `web/` | 前端（原生 HTML/CSS/JS，pywebview 里跑） |
+
 ---
 
-## 十二、免责声明
+## 七、发布规则
 
-- 使用 Mod 与第三方注入**可能违反游戏 ToS**，存在账号风险，请自行判断。
-- 本程序**默认不写游戏目录**：仅在你确认的注入路径上操作，所有覆盖都会留下可回滚备份。
-- 第三方组件的可用性、兼容性与授权由各自作者决定，与本项目无关。
+两个固化脚本（**构建**与**上传**分开；上传永远由你自己执行）：
+
+```bat
+python scripts\build_release.py      :: 静态检查 → 构建最新版 + 带版本号副本 + 伪旧版 → 归置旧版
+python scripts\prepare_release.py    :: 校验产物 + 生成 assets-bundle.zip + 打印上传指引（不自动上传）
+```
+
+`build_release.py` 的静态检查（任一失败即中止，**不会**产出半成品）：所有模块 `py_compile`、
+`node --check web/app.js`、`python -m pytest tests -q`。
+
+本地产出**三份 exe**，旧版自动归置：
+
+| 产物 | 用途 | 是否上传 |
+| --- | --- | --- |
+| `dist\EndfieldModController.exe` | 最新版，唯一发行的 exe | ✅ 上传 |
+| `dist\EndfieldModController-<版本>.exe` | 带版本号副本（留档） | ❌ 不上传 |
+| `EndfieldModController-0.1.9-from-<版本>.exe`（`dist\` 与仓库根各一份） | 伪旧版，用于测试自更新 | ❌ 不上传 |
+| `dist\_old\` | 上一代及更早的带版本号副本（构建时**自动归置**；旧伪旧版直接删除） | — |
+
+- 「只上传不带版本号的那个」这条规则**只约束 exe**；其它附件照常上传。
+- `dist\` **只留构建产物**：构建脚本会自动清掉 exe 在 dist 里跑过留下的 `config.json` / `runtime\` /
+  `library\`，以及早期 `--onedir` 的残留目录（`dist\EndfieldModController\`）。
+- Release 附件 = **`EndfieldModController.exe` + `assets-bundle.zip`** 两个。
+  单文件 exe 装不下约 125 MB 的运行时资产（`assets/nvngx` 本身是 xz 分卷），程序在本地找不到
+  `assets\` 时会自动从 Release 下载这个包并展开 —— `prepare_release.py` 会调用
+  `scripts\build_assets_bundle.py` 现打一份 `dist\assets-bundle.zip`（+ `.sha256`）。
+- **不做便携版**（没有 portable zip，也没有相应的打包脚本）。
+- 版本号：与 GitHub 上的有区别就升下一版，未推送期间只领先一个。
+- 伪旧版的版本号固定写成 `0.1.9`（代码是最新的），命名刻意取"旧版本号"以便一眼分辨；
+  上一代伪旧版在下次构建时**自动删除**。
+
+---
+
+## 八、第三方组件与许可
+
+| 组件 | 用途 | 许可 |
+| --- | --- | --- |
+| [XXMI Launcher](https://github.com/SpectrumQT/XXMI-Launcher) | 注入器与启动器 | MIT |
+| [XXMI-Libs-Package](https://github.com/SpectrumQT/XXMI-Libs-Package) / [EFMI-Package](https://github.com/SpectrumQT/EFMI-Package) | 注入库与服装 Mod 引擎 | MIT |
+| [3DMigoto](https://github.com/bo3b/3Dmigoto) | EFMI 的底座 | MIT |
+| [ReShade](https://reshade.me/) | 后处理底座（Addon 版） | BSD-3 |
+| [RenoDX DLSS](https://github.com/clshortfuse/renodx) | DLSS5 神经渲染 | MIT |
+| [Endfield Enhancer](https://github.com/RenoDX-Suite/) | 第一人称 / 相机 | MIT |
+| [iMMERSE](https://github.com/MartysMods/iMMERSE) | ReShade 后处理链 | MIT |
+| ShakingBreastManager / SecondaryMotion | 乳摇 | 见上游仓库 |
+
+各组件版权归原作者所有。本程序只做编排、自检与备份还原，不修改这些组件的源码。
+
+---
+
+## 九、免责声明
+
+- 本程序**不是**官方工具，与鹰角网络 / Hypergryph 无关。
+- 使用 Mod 可能违反游戏用户协议，**风险由使用者自负**；请自行确认你所在环境的规则。
+- 本程序会读写游戏目录中的注入类文件（`d3d12.dll` / `ReShade.ini` / `actions.tsv` 等），但一律先备份、且提供一键还原；**不会**修改游戏本体、资源与存档。
+- 第三方组件由其原作者维护，出问题请先到对应仓库反馈；本程序的集成问题欢迎开 issue。

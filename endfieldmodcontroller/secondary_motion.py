@@ -282,15 +282,22 @@ def remove_injection(config: AppConfig, log: Callable[[str], None] | None = None
     for name in PROXY_NAMES:
         target = game / name
         backup = game / f"{name}.bak"
+        # 2026-10-01 修（⑥）：**先恢复、后删除**，且两步各自独立 try —— 原先挤在
+        # 同一个 try 里，`copy2` 失败就会留下"proxy 已删、原版未回"的半状态：
+        # 游戏目录缺 d3dcompiler_47/vulkan-1，游戏直接起不来。
+        if backup.is_file():
+            try:
+                from . import fsutil
+
+                fsutil.write_bytes_atomic(target, backup.read_bytes())
+                actions.append(f"还原原版 {name}")
+            except OSError as exc:
+                warnings.append(f"还原 {name} 失败（这次不删注入，保持游戏可用）: {exc}")
+                continue
         try:
             if _is_proxy(target):
                 target.unlink()
                 actions.append(f"移除注入 {name}")
-            if backup.is_file():
-                if target.exists():
-                    target.unlink()
-                shutil.copy2(backup, target)
-                actions.append(f"还原原版 {name}")
         except OSError as exc:
             warnings.append(f"处理 {name} 失败: {exc}")
 
@@ -386,13 +393,19 @@ def import_pack(config: AppConfig, archive: Path, log: Callable[[str], None] | N
 
             if any(tool.iterdir()):
                 shutil.copytree(tool, backup)  # 先整体备份旧版（首次安装是空目录，不用备）
+            # 2026-10-01 修（⑥）：不再"就地递归删除"。工具目录只保证"某处有
+            # Manager.exe"，用户完全可能把它解压到桌面或游戏目录里 —— 直接 rmtree
+            # 会连带删掉同目录里与本工具无关的文件，而 `ignore_errors=True`
+            # 又把失败吞了。改成"移动到备份区"：可逆、失败可见。
+            removed_dir = backup.with_name(backup.name + "_replaced")
             for child in list(tool.iterdir()):
                 if child.name in keep or child.name in keep_files:
                     continue
-                if child.is_dir():
-                    shutil.rmtree(child, ignore_errors=True)
-                else:
-                    child.unlink(missing_ok=True)
+                try:
+                    removed_dir.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(child), str(removed_dir / child.name))
+                except OSError as exc:
+                    _log(log, f"WARN 无法移走旧文件 {child.name}: {exc}")
             shutil.copytree(root, tool, dirs_exist_ok=True)
     except (OSError, zipfile.BadZipFile) as exc:
         return {"ok": False, "message": f"更新失败: {exc}"}

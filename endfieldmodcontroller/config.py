@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import sys
+import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,29 @@ def _detect_project_root() -> Path:
 PROJECT_ROOT = _detect_project_root()
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config.json"
 DEFAULT_DATA_ROOT = PROJECT_ROOT / "runtime"
+
+
+def _safe_save(cfg: "AppConfig", path: Path) -> bool:
+    """保存配置，失败只记不抛 —— 配置目录只读（如装在 Program Files）不该让程序起不来。"""
+    try:
+        cfg.save(path)
+        return True
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def _quarantine_broken_config(path: Path) -> None:
+    """把解析不了的 config.json 挪成带时间戳的副本，便于事后排查。
+
+    2026-10-01 修：原先损坏分支只是"重新造一份默认配置"、既不落盘也不留证据，
+    于是每次启动都重复解析失败，用户看到的是"配置莫名清空/改了不生效"。
+    """
+    try:
+        if path.is_file():
+            stamp = time.strftime("%Y%m%d-%H%M%S")
+            path.replace(path.with_name(f"{path.name}.broken-{stamp}"))
+    except OSError:
+        pass
 
 
 @dataclass
@@ -98,21 +122,31 @@ class AppConfig:
     # ---------------------------------------------------------------
     @classmethod
     def load(cls, path: Path | None = None) -> "AppConfig":
-        path = path or DEFAULT_CONFIG_PATH
+        # 兼容 str 入参：这里的类型标注是 Path，但传字符串时原先会直接
+        # AttributeError（str 没有 `.is_file()`）—— 单元测试都传 Path 所以一直
+        # 没暴露（2026-10-01 实测：`EndfieldModControllerApi("...config.json")`）。
+        path = Path(path) if path else DEFAULT_CONFIG_PATH
         if not path.is_file():
             cfg = cls()
             cfg._config_path = str(path)
-            cfg.autofill()
-            cfg.save(path)
+            cfg.autofill(deep=False)   # 只填内嵌路径（毫秒级）；全盘探测交给后台预热
+            _safe_save(cfg, path)
             return cfg
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
+            _quarantine_broken_config(path)
             cfg = cls()
             cfg._config_path = str(path)
-            cfg.autofill()
+            cfg.autofill(deep=False)   # 只填内嵌路径（毫秒级）；全盘探测交给后台预热
+            _safe_save(cfg, path)
             return cfg
         known = {f.name for f in cls.__dataclass_fields__.values() if not f.name.startswith("_")}  # type: ignore[attr-defined]
+        # 合法 JSON 也可能是数组/字符串/数字，`data.items()` 会直接 AttributeError
+        # 把整个启动搞崩（2026-10-01 修：实测 json.loads("[1,2]") 成功但 .items() 抛错）。
+        if not isinstance(data, dict):
+            _quarantine_broken_config(path)
+            data = {}
         filtered = {k: v for k, v in data.items() if k in known}
         cfg = cls(**filtered)
         cfg._config_path = str(path)
@@ -127,8 +161,13 @@ class AppConfig:
                 pass
         return cfg
 
-    def autofill(self) -> list[str]:
-        """把留空的关键路径按**内嵌组件**补齐（优先相对路径），返回被填的字段名。"""
+    def autofill(self, *, deep: bool = True) -> list[str]:
+        """把留空的关键路径按**内嵌组件**补齐（优先相对路径），返回被填的字段名。
+
+        `deep=False` 时**只查内嵌/相对路径**（毫秒级），跳过所有全盘扫描 ——
+        启动时用它，界面才不会被"扫遍所有盘符找 XXMI/migoto"拖住
+        （2026-10-01 改：加载页要尽早出现）。全盘探测由后台预热线程补做。
+        """
         filled: list[str] = []
 
         # ① XXMI Launcher：优先工作区内嵌那份（写相对路径）
@@ -137,7 +176,7 @@ class AppConfig:
             if builtin.is_file():
                 self.xxmi_launcher = "runtime/builtin/XXMI/Resources/Bin/XXMI Launcher.exe"
                 filled.append("xxmi_launcher")
-            else:
+            elif deep:
                 guess = auto_detect_xxmi()
                 if guess:
                     self.xxmi_launcher = guess
@@ -149,7 +188,7 @@ class AppConfig:
             if builtin_sbm.is_file():
                 self.secondary_motion_dir = "runtime/secondary_motion"
                 filled.append("secondary_motion_dir")
-            else:
+            elif deep:
                 guess = auto_detect_secondary_motion()
                 if guess:
                     self.secondary_motion_dir = guess
@@ -163,12 +202,12 @@ class AppConfig:
                 filled.append("reshade_dll")
 
         # ④ 官方启动器 / 3DMigoto loader：自动探测（搜不到就留空，由调用方提示手填）
-        if not self.official_launcher.strip():
+        if deep and not self.official_launcher.strip():
             guess = auto_detect_official_launcher()
             if guess:
                 self.official_launcher = guess
                 filled.append("official_launcher")
-        if not self.migoto_loader.strip():
+        if deep and not self.migoto_loader.strip():
             guess = auto_detect_migoto_loader()
             if guess:
                 self.migoto_loader = guess
@@ -187,7 +226,20 @@ class AppConfig:
             path = Path(path)
         self._config_path = str(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(self.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+        payload = json.dumps(self.to_dict(), ensure_ascii=False, indent=2)
+        # **原子写**：直接 write_text 覆盖时，写到一半被杀/断电会留下半截 JSON，
+        # 下次启动解析失败 → 配置静默重置（"配置莫名清空"就是这么来的）。
+        # 先写同目录临时文件再 os.replace：目标要么是旧的完整文件，要么是新的完整文件。
+        tmp = path.with_name(path.name + f".tmp-{os.getpid()}")
+        try:
+            tmp.write_text(payload, encoding="utf-8")
+            os.replace(tmp, path)
+        except OSError:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+            raise
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -426,6 +478,17 @@ def available_drives() -> list[str]:
 _DETECT_CACHE: dict[str, str] = {}
 
 
+def cached_detect(key: str) -> str:
+    """**只读**探测缓存，绝不触发全盘扫描。
+
+    界面刷新（`get_state()`）原先会同步跑 `auto_detect_xxmi/migoto_loader/
+    official_launcher`，首次全盘扫一遍能把加载页卡住十几秒。现在改成读这里：
+    值由后台预热线程填（`AppConfig.autofill(deep=True)` 会走同一套探测），
+    还没填好就先返回空串，前端稍后再刷新一次即可（2026-10-01 改）。
+    """
+    return _DETECT_CACHE.get(key, "")
+
+
 def auto_detect_game_dir(refresh: bool = False) -> str:
     """自动搜索《终末地》本体目录（即含 Endfield.exe 的那层）。
 
@@ -480,8 +543,21 @@ def _scan_game_dir() -> str:
     return ""
 
 
-def auto_detect_xxmi() -> str:
-    """找 XXMI Launcher：**优先用工作区内嵌的那份**，再退到外部安装。"""
+def auto_detect_xxmi(refresh: bool = False) -> str:
+    """找 XXMI Launcher：**优先用工作区内嵌的那份**，再退到外部安装。
+
+    带缓存（与 migoto / launcher 的探测保持一致）：它会浅扫所有盘符，
+    界面刷新时同步调用能把加载页卡住十几秒（2026-10-01 改）。
+    """
+    if not refresh and "xxmi" in _DETECT_CACHE:
+        return _DETECT_CACHE["xxmi"]
+    result = _scan_xxmi()
+    if result:
+        _DETECT_CACHE["xxmi"] = result
+    return result
+
+
+def _scan_xxmi() -> str:
     builtin = DEFAULT_DATA_ROOT / "builtin" / "XXMI"
     for candidate in (
         builtin / "Resources" / "Bin" / "XXMI Launcher.exe",
@@ -541,7 +617,10 @@ def auto_detect_migoto_loader(refresh: bool = False) -> str:
 
 def _scan_migoto_loader() -> str:
     """Find a working 3DMigoto loader directory (loader.exe + d3d11.dll + d3dx.ini)."""
-    root = Path(__file__).resolve().parents[1]
+    # 打包后 `__file__` 指向 PyInstaller 的临时解包目录，这里必须用 PROJECT_ROOT
+    # （= exe 所在目录），否则永远找不到内嵌的 runtime/migoto ——
+    # 与 _detect_project_root() 的约定保持一致（2026-10-01 修）。
+    root = PROJECT_ROOT
     candidates: list[Path] = []
     for internal in (root / "runtime" / "migoto" / "loader.exe", root / "runtime" / "builtin" / "XXMI" / "EFMI" / "loader.exe"):
         if internal.is_file():
@@ -591,9 +670,6 @@ def _scan_official_launcher() -> str:
                     candidates.append(candidate)
     if candidates:
         return str(candidates[0])
-    for path in candidates:
-        if path.is_file():
-            return str(path)
     for drive in available_drives():
         base = Path(drive)
         if not base.is_dir():

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from . import core as mc_core
+from . import fsutil
 
 MANAGED_DIR_NAME = "EndfieldModControllerManaged"
 
@@ -338,13 +339,27 @@ def _stage_empty(library_root: Path, staging_root: Path, runtime_dir: Path,
                     pass
     except OSError:
         pass
+    # **空选择也必须生成一份空控制器**：否则"一键启动"会在
+    # `Controller files are missing. Run prepare first.` 处直接失败 —— 而
+    # "还没装任何 Mod 就点一键启动"是完全正常的用法
+    # （2026-10-01 从零端到端实测暴露：清空测试目录后 launch() 直接抛错）。
+    controller_dir = staging_root / "MC_Controller"
+    controller_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        mc_core.generate_controller_mod(
+            [],
+            controller_dir,
+            user_ini_path=Path(user_ini_path) if user_ini_path else staging_root.parent / "d3dx_user.ini",
+        )
+    except OSError:
+        pass
     return {
         "active": [],
         "report": "empty-selection: 未选择任何 Mod，已清空 staging",
         "patch_count": 0,
         "action_count": 0,
         "cleared": cleared,
-        "controller_dir": str(staging_root / "MC_Controller"),
+        "controller_dir": str(controller_dir),
     }
 
 
@@ -441,19 +456,19 @@ def stage_and_prepare(
         except OSError:
             pass
         active_targets.append(str(dest))
-    (managed_root / "active_targets.json").write_text(
+    fsutil.write_text_atomic(
+        managed_root / "active_targets.json",
         json.dumps(active_targets, ensure_ascii=False, indent=2),
-        encoding="utf-8",
         newline=chr(10),
     )
-    (staging_root / "MC_Probe.ini").write_text(
+    fsutil.write_text_atomic(
+        staging_root / "MC_Probe.ini",
         "; EndfieldModController load probe" + chr(10)
         + "[Constants]" + chr(10)
         + "global persist $mc_probe_loaded = 20261001" + chr(10)
         + "global persist $mc_probe_frames = 0" + chr(10)
         + "[Present]" + chr(10)
         + "$mc_probe_frames = $mc_probe_frames + 1" + chr(10),
-        encoding="utf-8",
         newline=chr(10),
     )
 

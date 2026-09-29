@@ -578,11 +578,10 @@ def download(
             _remember_line(line.name, False, 0.0)
         errors.append(f"{line.name}: {report.message}")
         _log(log, f"线路 {line.name} 失败：{report.message}")
-        try:
-            if dest.is_file():
-                dest.unlink()
-        except OSError:
-            pass
+        # **不动 dest**：目标文件要么是上一次下载好的完整文件，要么是用户自己的
+        # 文件 —— 一条线路失败不代表它该被删（2026-10-01 修：原实现会 unlink 它，
+        # 等于"这条线路不通就把你已下好的东西删了"）。半成品始终在 work 文件里，
+        # 且只有 finish() 校验通过后才会原子落位到 dest。
 
     report = DownloadReport(
         ok=False, path=str(dest),
@@ -617,15 +616,22 @@ def _attempt_line(
     _log(log, f"开始下载 {dest.name}"
              + (f"（{size / 1048576:.1f} MB）" if size else ""))
 
-    # 已经下完且大小一致 → 直接跳过
-    # 已经下完（大小一致 **且没有未完成的分块记录**）→ 直接跳过
+    # 已经下完（大小一致 **且没有未完成的分块记录**）→ 直接跳过。
+    # 有 expected_sha256 时必须**核对内容**才算数：大小一致但内容被换掉的文件
+    # 不能当成"已下好"，否则镜像/缓存投毒会直接落位（2026-10-01 修）。
     if dest.is_file() and size and dest.stat().st_size == size and not has_partial_parts(dest):
-        report.bytes = size
-        report.seconds = 0.0
-        report.reason = "文件已存在且大小一致"
-        report.message = "已存在"
-        _log(log, "已存在且大小一致，跳过下载")
-        return report
+        if not expected_sha256 or sha256_file(dest).lower() == norm_sha256(expected_sha256):
+            report.bytes = size
+            report.seconds = 0.0
+            report.reason = "文件已存在且大小一致"
+            report.message = "已存在"
+            _log(log, "已存在且大小一致，跳过下载")
+            return report
+        _log(log, "已存在的文件 sha256 与期望不符 → 丢弃并重新下载")
+        try:
+            dest.unlink()
+        except OSError:
+            pass
 
     # 一切下载都写"工作文件"，**成功后才落位到目标路径**。
     # 这样任何一条线路失败、任何一次中断都不会破坏已经下到的数据，
@@ -660,7 +666,27 @@ def _attempt_line(
         report.resumed_from = partial
 
     def finish(work_path: Path) -> None:
-        """校验通过后把工作文件落位到目标路径。"""
+        """校验通过后把工作文件落位到目标路径。
+
+        **所有成功路径都必须经过这里。** sha256 校验原先写在函数末尾，而
+        单连接 / 断点续传 / 文件已存在这几条分支都在前面 return 了 ——
+        等于"有没有校验"取决于网速（2026-10-01 实测：单连接路径期望值与实际
+        哈希完全不同也照样报成功）。现在把校验收口到落位之前，任何一条路径
+        都无法绕过。
+        """
+        if expected_sha256:
+            actual = sha256_file(work_path).lower()
+            expected = norm_sha256(expected_sha256)
+            if actual != expected:
+                # 内容不符：连同工作文件与分块记录一起丢弃，
+                # 否则下一次续传会把这份错误内容当成"已下好的部分"。
+                _clear_parts(work_path)
+                try:
+                    work_path.unlink()
+                except OSError:
+                    pass
+                raise OSError(
+                    f"sha256 校验失败（期望 {expected[:12]}…，实际 {actual[:12]}…），已丢弃下载内容")
         _clear_parts(work_path)
         os.replace(work_path, dest)
 
@@ -772,13 +798,8 @@ def _attempt_line(
         _set_speed(report, started)
         return report
 
-    if expected_sha256:
-        actual = sha256_file(dest)
-        if actual.lower() != expected_sha256.replace("sha256:", "").strip().lower():
-            report.ok = False
-            report.message = "sha256 校验失败"
-            _set_speed(report, started)
-            return report
+    # 校验已经在 finish() 里统一完成（所有成功路径都经过它），
+    # 这里不再对同一个文件重复哈希一遍。
     _set_speed(report, started)
     return report
 
@@ -802,8 +823,14 @@ def _emit_finish(report: DownloadReport) -> None:
 
 
 def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with open(path, "rb") as fh:
-        for chunk in iter(lambda: fh.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+    """对外保留这个入口（多处调用它），实现统一在 fsutil。"""
+    from . import fsutil
+
+    return fsutil.sha256_file(path)
+
+
+def norm_sha256(value: str) -> str:
+    """把 ``sha256:xxxx`` / 大小写混杂的期望值规范成纯小写十六进制。"""
+    from . import fsutil
+
+    return fsutil.norm_sha256(value)

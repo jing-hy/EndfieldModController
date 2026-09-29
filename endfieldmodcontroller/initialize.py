@@ -457,7 +457,12 @@ def _check_game_libs(config: AppConfig, report: Report, log: Callable[[str], Non
             size = target.stat().st_size
             if deploy_new and source.is_file() and size != source.stat().st_size:
                 try:
-                    shutil.copy2(target, target.with_name(name + ".game_original"))
+                    original = target.with_name(name + ".game_original")
+                    # **原版只锁存一次**：第二次替换时 target 已经是内置新版，
+                    # 再备份就把"游戏原版"冲掉了 —— 而上面的注释记着
+                    # "写进新版 nvngx 会让游戏起不来"，原版没了就回不去（2026-10-01 修）。
+                    if not original.is_file():
+                        shutil.copy2(target, original)
                     shutil.copy2(source, target)
                     report.add(f"game:{name}", True, "已替换为内置新版（deploy_new_nvngx=True）", fixed=True)
                     report.action(f"替换 {name} 为内置新版")

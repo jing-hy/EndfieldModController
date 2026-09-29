@@ -125,19 +125,10 @@ def manifest_entries(config: AppConfig) -> list[tuple[str, Path, str, dict[str, 
 
 
 def sha256_file(path: Path, progress: Callable[[int, int], None] | None = None) -> str:
-    digest = hashlib.sha256()
-    size = path.stat().st_size
-    done = 0
-    with open(path, "rb") as fh:
-        while True:
-            chunk = fh.read(CHUNK)
-            if not chunk:
-                break
-            digest.update(chunk)
-            done += len(chunk)
-            if progress:
-                progress(done, size)
-    return digest.hexdigest()
+    """复用 fsutil 的那一份实现（这里只保留对外签名与 progress 回调语义）。"""
+    from . import fsutil
+
+    return fsutil.sha256_file(path, progress)
 
 
 def _decompress_parts(parts: list[Path], dest: Path, *, progress: Progress, name: str) -> int:
@@ -337,8 +328,13 @@ def fetch_bundle(
         try:
             last = json.loads(stamp.read_text(encoding="utf-8"))
             if time.time() - float(last.get("at") or 0) < BUNDLE_STALE_SECONDS:
+                previous = str(last.get("message") or "")
+                # 成功时记的是 "ok:N"（见 remember），直接拿它当"失败原因"会输出
+                # "未能获取资产包：ok:5" 这种莫名其妙的话（2026-10-01 修）。
+                if previous.startswith("ok:"):
+                    previous = "上次已成功展开过内置资产；本次未找到资产包，已跳过（可点重试强制重新拉取）"
                 return {"ok": False, "changed": False,
-                        "message": last.get("message") or "24 小时内已尝试过，跳过"}
+                        "message": previous or "24 小时内已尝试过，跳过"}
         except (OSError, json.JSONDecodeError):
             pass
 
