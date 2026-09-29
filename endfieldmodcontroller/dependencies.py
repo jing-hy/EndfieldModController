@@ -457,6 +457,53 @@ def update_dependency(
         )
 
 
+# 批量下载/安装的失败重试次数（用户 2026-10-01 定：「全部下载完之后如果有失败项，
+# 就重试，3 次截止」）
+MAX_BATCH_RETRIES = 3
+
+
+def run_batch_with_retry(
+    items: list[Any],
+    worker: Callable[[Any, int], Any],
+    *,
+    retries: int = MAX_BATCH_RETRIES,
+    on_retry: Callable[[int, list[Any]], None] | None = None,
+    on_result: Callable[[Any, int, Any], None] | None = None,
+) -> tuple[dict[int, tuple[str, Any]], list[int]]:
+    """**先把所有项都跑一遍**（单项失败不中断其它），再对失败项重试，最多 `retries` 次。
+
+    动机（用户 2026-10-01 要求）：以前"一旦失败就停了"——一项失败后面的项全都不动，
+    用户得手动一个个重来。现在改成：先把能下的都下完，最后再集中重试失败项。
+
+    参数：
+        items     待处理项（保序）
+        worker    `worker(item, attempt) -> result`；抛异常视为该项失败
+        on_retry  每轮重试开始前回调 `(第几次重试, 本轮待重试项)`
+        on_result 每项每次尝试结束后回调 `(item, attempt, ("ok", 结果) | ("fail", 异常))`
+
+    返回 `(outcomes, pending)`：`outcomes[index] = ("ok", 结果) | ("fail", 异常)`，
+    `pending` 是**重试完仍然失败**的下标列表（调用方据此报错）。
+    """
+    outcomes: dict[int, tuple[str, Any]] = {}
+    pending = list(range(len(items)))
+    for attempt in range(retries + 1):
+        if not pending:
+            break
+        if attempt and on_retry:
+            on_retry(attempt, [items[index] for index in pending])
+        still_failing: list[int] = []
+        for index in list(pending):
+            try:
+                outcomes[index] = ("ok", worker(items[index], attempt))
+            except Exception as exc:  # noqa: BLE001
+                outcomes[index] = ("fail", exc)
+                still_failing.append(index)
+            if on_result:
+                on_result(items[index], attempt, outcomes[index])
+        pending = still_failing
+    return outcomes, pending
+
+
 def update_all(
     manifest: dict[str, DependencySpec],
     library_root: Path,
@@ -465,25 +512,46 @@ def update_all(
     enabled_only: bool = True,
     progress: Callable[[int, int, str, str], None] | None = None,
     byte_progress: Callable[[int, int, str, int, int], None] | None = None,
+    retries: int = MAX_BATCH_RETRIES,
 ) -> list[UpdateResult]:
     specs = [spec for spec in manifest.values() if not (enabled_only and not spec.enabled)]
     total = len(specs)
-    results: list[UpdateResult] = []
-    for index, spec in enumerate(specs, start=1):
+
+    def worker(spec: DependencySpec, _attempt: int) -> UpdateResult:
+        index = specs.index(spec) + 1
         if progress:
             progress(index - 1, total, spec.key, "start")
 
-        def on_bytes(received: int, expected: int, *, _index: int = index, _spec: DependencySpec = spec) -> None:
+        def on_bytes(received: int, expected: int, *, _spec: DependencySpec = spec, _index: int = index) -> None:
             if byte_progress:
                 byte_progress(_index, total, _spec.key, received, expected)
 
         try:
-            result = update_dependency(spec, library_root, dry_run=dry_run, chunk_callback=on_bytes if byte_progress else None)
+            result = update_dependency(spec, library_root, dry_run=dry_run,
+                                       chunk_callback=on_bytes if byte_progress else None)
         except Exception as exc:  # noqa: BLE001
             result = UpdateResult(key=spec.key, status="error", message=str(exc))
-        results.append(result)
         if progress:
             progress(index, total, spec.key, result.status)
+        # 只有真正失败的项才交给重试逻辑（已经成功的项不该被重跑）
+        if result.status == "error":
+            raise RuntimeError(result.message or f"{spec.key}: 下载失败")
+        return result
+
+    def on_retry(attempt: int, pending: list[DependencySpec]) -> None:
+        if progress:
+            for spec in pending:
+                progress(specs.index(spec), total, spec.key, f"重试第 {attempt}/{retries} 次")
+
+    outcomes, _pending = run_batch_with_retry(specs, worker, retries=retries, on_retry=on_retry)
+    results: list[UpdateResult] = []
+    for index, spec in enumerate(specs):
+        kind, payload = outcomes[index]
+        if kind == "ok":
+            results.append(payload)
+        else:
+            message = payload.message if isinstance(payload, UpdateResult) else str(payload)
+            results.append(UpdateResult(key=spec.key, status="error", message=message))
     return results
 
 

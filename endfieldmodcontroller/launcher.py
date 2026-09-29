@@ -691,6 +691,11 @@ def ensure_injections(config: AppConfig) -> dict[str, Any]:
     """
     actions: list[str] = []
     warnings: list[str] = []
+    # 本次是否"为了生成配置临时拉起过一次 XXMI" —— 是的话说明这是第一次启动，
+    # 紧接着那次真正的启动有较大概率失败，UI 要在**拉起 XXMI 之后**据此弹提示
+    # （用户 2026-10-01：「我说的第一次启动是在拉起 xxmi 之后再谈，选项应该是
+    #   再次启动和先不启动」）。
+    xxmi_bootstrapped = False
 
     # ① **XXMI 的配置文件本身必须先存在** —— 它是 XXMI 首次运行时生成的，空环境里没有，
     #    于是下面所有写入（game_folder / enabled_importers / 签名 / extra_libraries）
@@ -698,6 +703,7 @@ def ensure_injections(config: AppConfig) -> dict[str, Any]:
     try:
         boot = bootstrap_xxmi_config(config, log=lambda m: actions.append(m))
         if boot.get("created"):
+            xxmi_bootstrapped = True
             actions.append(str(boot.get("message")))
         elif not boot.get("ok"):
             warnings.append(str(boot.get("message")))
@@ -770,6 +776,8 @@ def ensure_injections(config: AppConfig) -> dict[str, Any]:
         "actions": actions,
         "warnings": warnings,
         "initialize": report,
+        # 供 UI 判断"要不要提示用户再启动一次"（第一次启动才为 True）
+        "xxmi_bootstrapped": xxmi_bootstrapped,
     }
 
 

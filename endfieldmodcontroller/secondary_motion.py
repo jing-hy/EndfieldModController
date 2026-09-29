@@ -152,8 +152,24 @@ def _pack_version(tool_dir: Path | None) -> str:
     return ""
 
 
-def _assets_root() -> Path:
-    """随包分发的资产根目录（`<项目根>/assets`）。"""
+def _assets_root(config: AppConfig | None = None) -> Path:
+    """随包分发的资产根目录（`<数据根>/assets`）。
+
+    ⚠️ **不能用 `Path(__file__).resolve().parents[1]`** —— 打包成单文件 exe 之后
+    `__file__` 指向 PyInstaller 的临时解压目录（`sys._MEIPASS`），而 `assets` 既没打进
+    exe、也不在那个临时目录里，于是 **exe 版永远报「找不到 sbm 注入源」**，表现为
+    「自动安装不会装 sbm」（用户 2026-09-29 实测反馈）。源码运行时路径恰好是对的，
+    所以这个 bug 一直没暴露。
+
+    `assets` 和 `config.json` / `runtime` / `library` 一样位于**数据根**（exe 所在目录），
+    所以优先用 `config.base_dir`，找不到才回退到源码布局。
+    """
+    if config is not None:
+        base = getattr(config, "base_dir", None)
+        if base is not None:
+            candidate = Path(base) / "assets"
+            if candidate.is_dir():
+                return candidate
     return Path(__file__).resolve().parents[1] / "assets"
 
 
@@ -165,7 +181,7 @@ def _source_candidates(config: AppConfig) -> list[Path]:
     整个源被判成工具目录、assets 反而没被用上 → `characters.default.json` 补不进去。
     所以改为：每个文件各自在候选列表里找**第一个存在的**，两个源互补。
     """
-    candidates: list[Path] = [_assets_root() / "secondary_motion"]
+    candidates: list[Path] = [_assets_root(config) / "secondary_motion"]
     tool = _tool_dir(config)
     if tool is not None:
         candidates.append(tool)
@@ -185,16 +201,27 @@ def ensure_injection(config: AppConfig, log: Callable[[str], None] | None = None
     """补齐乳摇注入：两个 proxy + plugin\\sbm.dll + 插件数据。已装的不动，缺失才补。"""
     actions: list[str] = []
     warnings: list[str] = []
+
+    # ⚠️ **这一步必须放在所有提前 return 之前**。它给管理器预写 `settings.json`
+    # （记住游戏目录），与"注入源找不找得到"毫无关系；原先挂在函数末尾，于是
+    # "找不到 sbm 注入源"那次提前 return 时**根本没写**，用户打开管理器仍然被要求
+    # 选文件夹（2026-09-29 实测：从零安装后的工具目录里没有 settings.json）。
+    settings_state = ensure_manager_settings(config)
+    if settings_state.get("changed"):
+        actions.append(str(settings_state.get("message") or "写入乳摇管理器 settings.json"))
+    elif not settings_state.get("ok"):
+        warnings.append(str(settings_state.get("message")))
+
     candidates = _source_candidates(config)
     game = game_dir(config)
     if game is None:
-        return {"ok": False, "message": "未定位到游戏目录", "actions": [], "warnings": []}
+        return {"ok": False, "message": "未定位到游戏目录", "actions": actions, "warnings": warnings}
     if not candidates:
         return {
             "ok": False,
             "message": "找不到 sbm 注入源（assets/secondary_motion 与乳摇工具目录都不存在）",
-            "actions": [],
-            "warnings": [],
+            "actions": actions,
+            "warnings": warnings,
         }
 
     for name in PROXY_NAMES:
@@ -248,16 +275,83 @@ def ensure_injection(config: AppConfig, log: Callable[[str], None] | None = None
             shutil.copy2(source_preset, preset)
             actions.append("安装插件预设 SecondaryMotion\\presets\\Default.json")
     runtime_cfg = data_dir / "runtime" / "config.json"
-    if not runtime_cfg.is_file():
+    # **文件在、但 enabled 是 false 也要纠正** —— 用户 2026-09-29 实测：工具目录里
+    # 那份从发布包解出来的是 `{"enabled": false}`，只判断"文件是否存在"就会放过它，
+    # 管理器与插件都因此不工作。
+    runtime_data: dict[str, Any] = {}
+    if runtime_cfg.is_file():
+        try:
+            loaded = json.loads(runtime_cfg.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                runtime_data = loaded
+        except (OSError, ValueError):
+            runtime_data = {}
+    if not runtime_data.get("enabled"):
+        runtime_data.update({
+            "revision": runtime_data.get("revision") or 1,
+            "enabled": True,
+            "active_preset": runtime_data.get("active_preset") or "Default",
+        })
         try:
             runtime_cfg.parent.mkdir(parents=True, exist_ok=True)
             runtime_cfg.write_text(
-                json.dumps({"revision": 1, "enabled": True, "active_preset": "Default"},
-                           ensure_ascii=False, indent=2) + "\n",
+                json.dumps(runtime_data, ensure_ascii=False, indent=2) + "\n",
                 encoding="utf-8", newline="\n")
-            actions.append("写入插件配置 SecondaryMotion\\runtime\\config.json（enabled）")
+            actions.append("写入插件配置 SecondaryMotion\\runtime\\config.json（enabled=true）")
         except OSError as exc:
             warnings.append(f"写入插件配置失败: {exc}")
+
+    # ③ **乳摇管理器自己用的那份也要有实体文件**（用户 2026-09-29 反馈「sbm 启动管理的
+    #    时候还是显示请选择文件」）。原因：工具发布包里只带模板 ——
+    #    `data\characters.default.template.json`、`presets\Default.template.json`，
+    #    而管理器按 `runtime\config.json` 的 `active_preset` 去读 `presets\<名字>.json`，
+    #    读不到就只能让用户手动"选择文件"。这里把模板**实例化**成实体文件：
+    #    已存在的一律不动（不覆盖用户调过的参数与预设）。
+    tool = _tool_dir(config)
+    if tool is not None:
+        for relative, template_relative in (
+            (("data", "characters.default.json"), ("data", "characters.default.template.json")),
+            (("presets", "Default.json"), ("presets", "Default.template.json")),
+            (("presets", "User.json"), ("presets", "User.template.json")),
+        ):
+            target = tool.joinpath(*relative)
+            if target.is_file():
+                continue
+            source = _pick(candidates, *relative)
+            if source is None:
+                candidate = tool.joinpath(*template_relative)
+                source = candidate if candidate.is_file() else None
+            if source is None:
+                continue
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, target)
+                actions.append(f"生成乳摇管理器文件 {target.name}（来自 {source.name}）")
+            except OSError as exc:
+                warnings.append(f"生成 {target.name} 失败: {exc}")
+        tool_cfg = tool / "runtime" / "config.json"
+        tool_data: dict[str, Any] = {}
+        if tool_cfg.is_file():
+            try:
+                loaded = json.loads(tool_cfg.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    tool_data = loaded
+            except (OSError, ValueError):
+                tool_data = {}
+        if not tool_data.get("enabled"):
+            tool_data.update({
+                "revision": tool_data.get("revision") or 1,
+                "enabled": True,
+                "active_preset": tool_data.get("active_preset") or "Default",
+            })
+            try:
+                tool_cfg.parent.mkdir(parents=True, exist_ok=True)
+                tool_cfg.write_text(
+                    json.dumps(tool_data, ensure_ascii=False, indent=2) + "\n",
+                    encoding="utf-8", newline="\n")
+                actions.append("修正乳摇管理器 runtime\\config.json（enabled=true）")
+            except OSError as exc:
+                warnings.append(f"修正乳摇管理器配置失败: {exc}")
 
     for action in actions:
         _log(log, action)
@@ -319,7 +413,64 @@ def remove_injection(config: AppConfig, log: Callable[[str], None] | None = None
         _log(log, action)
     for warning in warnings:
         _log(log, f"WARN {warning}")
+    # 注：管理器那份 settings.json 已经在函数开头写过（那里不会因提前 return 被跳过），
+    # 这里不再重复调用，避免把同一条 action 记两遍。
     return {"ok": not warnings, "actions": actions, "warnings": warnings}
+
+
+def ensure_manager_settings(config: AppConfig) -> dict[str, Any]:
+    """给乳摇管理器预写 `settings.json`，免掉"每次启动都要选游戏文件夹"。
+
+    依据（反编译 `SecondaryMotion.Manager.dll` 的字符串表，2026-09-29）：
+      * 它把用户选的游戏目录记在**自己目录下的 `settings.json`** 里，结构就只有两个字段
+        —— 字符串表里能直接看到模板 `{ "game_data_dir": ..., "language": ... }`
+        以及日志格式 `manager_dir:` / `settings.game_data_dir:` / `(none)`；
+      * 缺这个字段时弹 `Msg_GameFolderRequired`，文案是
+        "Select the game folder (the one containing Endfield.exe, e.g. ...\\Endfield Game)"；
+      * 它自己的校验是"该目录里要有 `plugins\\`、`Endfield.exe` 或 `UnityPlayer.dll`"。
+    用户 2026-09-29 反馈「sbm 还是要选文件夹」，而那个 settings.json 从没被写出来过，
+    所以初始化时把检测到的游戏目录写进去。已有的 `settings.json` **保留其它字段**，
+    只在缺失/为空时补 `game_data_dir`。
+    """
+    tool = _tool_dir(config)
+    if tool is None:
+        return {"ok": False, "message": "未找到乳摇工具目录"}
+    game = game_dir(config)
+    if game is None:
+        return {"ok": False, "message": "未定位到游戏目录"}
+    settings_path = tool / "settings.json"
+    # ⚠️ `game_data_dir` 要的是**游戏目录下的 `SecondaryMotion` 数据目录**，不是游戏根目录！
+    # 2026-09-29 实测：写成游戏根目录（`...\Endfield Game`）时管理器仍然弹「请选择游戏文件夹」；
+    # 对照"用户手动选过一次"的原始包 `settings.json` 才知道正确值是
+    # `<游戏目录>\SecondaryMotion`。（管理器界面上的提示语写的是"选含 Endfield.exe 的那层"，
+    # 但它自己落盘时存的是数据目录 —— 别照提示语的语义写。）
+    data_dir = game / "SecondaryMotion"
+    data: dict[str, Any] = {}
+    if settings_path.is_file():
+        try:
+            loaded = json.loads(settings_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                data = loaded
+        except (OSError, ValueError):
+            data = {}
+    current = str(data.get("game_data_dir") or "").strip()
+    if current and Path(current) == data_dir:
+        return {"ok": True, "changed": False, "path": str(settings_path),
+                "message": "乳摇管理器的游戏目录已记录"}
+    data["game_data_dir"] = str(data_dir)
+    data.setdefault("language", "zh-CN")
+    try:
+        if settings_path.is_file():
+            backup = settings_path.with_name(settings_path.name + ".bak")
+            if not backup.is_file():
+                shutil.copy2(settings_path, backup)
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n",
+                                 encoding="utf-8", newline="\n")
+    except OSError as exc:
+        return {"ok": False, "message": f"写入 settings.json 失败: {exc}"}
+    return {"ok": True, "changed": True, "path": str(settings_path),
+            "message": f"已记录乳摇管理器的游戏目录: {game}"}
 
 
 def launch_manager(config: AppConfig) -> dict[str, Any]:

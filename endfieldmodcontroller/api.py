@@ -278,6 +278,36 @@ class EndfieldModControllerApi:
     def get_config(self) -> dict[str, Any]:
         return self.config.to_dict()
 
+    def first_run_state(self) -> dict[str, Any]:
+        """判断"还没初始化"并给前端一段说明。
+
+        用户 2026-10-01 要求：「第一次启动的时候要在启动后弹个弹窗，说明第一次未初始化，
+        终末地启动可能失败，再次点击一键启动即可」。
+
+        判据：三个内置组件里**任何一个没装**（或控制器产物没生成）就算未初始化。
+        """
+        from . import runtime_deps
+
+        try:
+            report = runtime_deps.builtin_report(self.config)
+        except Exception:  # noqa: BLE001
+            report = {}
+        missing = [key for key, item in (report or {}).items() if not item.get("present")]
+        controller_ready = (self.config.controller_dir / "controller.ini").is_file()
+        return {
+            "first_run": bool(missing) or not controller_ready,
+            "missing_components": missing,
+            # 用户 2026-10-01 要求：首次不要直接推"一键启动"，而是先问要不要引导。
+            "onboarding_done": bool(getattr(self.config, "onboarding_done", False)),
+        }
+
+    def pending_update(self) -> dict[str, Any]:
+        """有没有"已下载但还没安装"的更新包（用户选"稍后"时会留着它）。"""
+        try:
+            return selfupdate.pending_payload(self.config)
+        except Exception as exc:  # noqa: BLE001
+            return {"pending": False, "error": str(exc)}
+
     def get_state(self) -> dict[str, Any]:
         from . import diagnostics, secondary_motion
 
@@ -298,6 +328,10 @@ class EndfieldModControllerApi:
             "reshade_addon_ready": (self.config.reshade_runtime_path / "Addons" / "endfieldmodcontroller.addon").is_file(),
             # 这三个探测**读缓存**，不在这里触发全盘扫描（否则加载页会被卡住十几秒）；
             # 缓存由后台预热线程填好，前端看到 warming=True 时会再刷新一次。
+            # 有"已下载但没安装"的更新包时，前端启动后会问用户要不要现在装
+            "pending_update": self.pending_update(),
+            # 未初始化（组件没装齐/控制器没生成）时，前端启动后弹窗说明"再点一次一键启动"
+            "first_run": self.first_run_state(),
             "warming": not self._warm_done,
             "detected_xxmi": cached_detect("xxmi"),
             "detected_migoto_loader": cached_detect("migoto"),
@@ -442,35 +476,18 @@ class EndfieldModControllerApi:
             "results": [],
         }
 
-        def progress(current: int, total: int, key: str, status: str) -> None:
-            if self._dep_task is None:
-                return
-            self._dep_task["current"] = current
-            self._dep_task["total"] = total
-            self._dep_task["percent"] = (current / total * 100.0) if total else 0.0
-            self._dep_task["message"] = f"{key}: {status}"
-            self._dep_task["log"].append(f"{key}: {status}")
-
-        def byte_progress(index: int, total: int, key: str, received: int, expected: int) -> None:
-            if self._dep_task is None:
-                return
-            if total:
-                base = (index - 1) / total
-                inner = (received / expected) if expected else 0.0
-                self._dep_task["percent"] = min(99.9, (base + inner / total) * 100.0)
-            self._dep_task["current"] = index - 1
-            self._dep_task["total"] = total
-            if expected:
-                self._dep_task["message"] = f"{key}: {received / 1048576:.1f}/{expected / 1048576:.1f} MB"
-            else:
-                self._dep_task["message"] = f"{key}: 下载中 {received / 1048576:.1f} MB"
+        progress, byte_progress, bump = self._make_dep_progress()
 
         def worker() -> None:
             assert self._dep_task is not None
             try:
                 if include_builtin:
+                    self._dep_task["total"] = 3          # 只有 XXMI / XXMI-Libs / EFMI
+                    self._dep_task["current"] = 0
                     results = runtime_deps.ensure_all(self.config, progress)
                     self._dep_task["results"] = [result.__dict__ for result in results]
+                    self._dep_task["current"] = len(results)
+                    self._dep_task["percent"] = 100.0
                     self._dep_task["message"] = "内置运行环境已处理"
                     return
                 manifest = dependencies.load_manifest(self.config.dependency_manifest_path)
@@ -481,6 +498,9 @@ class EndfieldModControllerApi:
                         mods = [mod for mod in mods if mod.id in selected or mod.is_dependency]
                     required = core.collect_required_dependency_names(mods)
                     manifest = dependencies.select_missing_dependencies(manifest, self.config.library_path, required)
+                # 本次要处理的依赖项数就是分母（这条路径只装依赖清单，不含其它阶段）
+                self._dep_task["total"] = max(len(manifest), 1)
+                self._dep_task["current"] = 0
                 results = dependencies.update_all(
                     manifest,
                     self.config.library_path,
@@ -488,9 +508,11 @@ class EndfieldModControllerApi:
                     progress=progress,
                     byte_progress=byte_progress,
                 )
+                self._dep_task["current"] = len(results)
+                # 完成时对齐：保证"100%"和"N/N 项"一致（过程中不动分母，见 stage/进度回调）
+                self._dep_task["total"] = max(len(results), 1)
                 self._dep_task["results"] = [r.__dict__ for r in results]
                 self._dep_task["percent"] = 100.0
-                self._dep_task["current"] = self._dep_task.get("total", 0)
                 self._dep_task["message"] = "完成"
             except Exception as exc:  # noqa: BLE001
                 self._dep_task["message"] = f"失败: {exc}"
@@ -500,6 +522,70 @@ class EndfieldModControllerApi:
 
         threading.Thread(target=worker, name="mc-dependency-update", daemon=True).start()
         return self.get_dependency_progress()
+
+    def _make_dep_progress(self):
+        """构造 (progress, byte_progress, bump) 三件套，供依赖任务使用。
+
+        全局进度 = **已完成项数 / 预估总项数**，覆盖全部下载阶段：随包资产、
+        XXMI/XXMI-Libs/EFMI、DLSS5 在线组件、依赖清单、乳摇。
+
+        为什么这么做（2026-10-01 用户反馈「进度条和实际下载不符，现在进度条只管 3 个组件，
+        我需要全都管」）：以前每个模块通过 `progress(current, total, …)` **各自覆盖**
+        `task["total"]`，谁最后调用谁说了算 —— 最后调的是 `runtime_deps.ensure_all`（它报
+        `total=3`），于是进度条就只剩"3 个组件"。现在各模块报的 (current,total) **只用于
+        显示"当前在做什么"**，全局进度改由 `bump()` 按实际完成的项数累加。
+        """
+
+        def progress(current: int, total: int, key: str, status: str) -> None:
+            task = self._dep_task
+            if task is None:
+                return
+            task["message"] = f"{key}: {status}"
+            task["log"].append(f"{key}: {status}")
+
+        def byte_progress(index: int, total: int, key: str, received: int, expected: int) -> None:
+            task = self._dep_task
+            if task is None:
+                return
+            done = int(task.get("current", 0))
+            total_items = max(int(task.get("total", 0)), 1)
+            inner = (received / expected) if expected else 0.0
+            # 只把"当前这一项内部的字节进度"并进总百分比，量纲保持一致（项 → 项）
+            task["percent"] = min(99.0, (done + min(max(inner, 0.0), 1.0)) / total_items * 100.0)
+            if expected:
+                task["message"] = f"{key}: {received / 1048576:.1f}/{expected / 1048576:.1f} MB"
+            else:
+                task["message"] = f"{key}: 下载中 {received / 1048576:.1f} MB"
+
+        def bump(count: int = 1, label: str = "") -> None:
+            """某个阶段完成：把已完成项数加上 count 并刷新全局进度。"""
+            task = self._dep_task
+            if task is None:
+                return
+            task["current"] = int(task.get("current", 0)) + max(int(count), 0)
+            task["total"] = max(int(task.get("total", 0)), task["current"], 1)
+            task["percent"] = min(99.0, task["current"] / task["total"] * 100.0)
+            if label:
+                task["message"] = label
+
+        return progress, byte_progress, bump
+
+    def _estimate_update_total(self) -> int:
+        """预估"一键更新"总共要处理多少项（用于进度条的分母）。"""
+        est = 0
+        try:
+            est += len(runtime_assets.manifest_entries(self.config)) or 1
+        except Exception:  # noqa: BLE001
+            est += 1
+        if self.config.use_builtin_runtime:
+            est += 3                                  # XXMI / XXMI-Libs / EFMI
+        est += len(dlss5_fetcher.COMPONENTS)          # ReShade 底座 / DLSS5-Feeder / iMMERSE
+        try:
+            est += len(dependencies.load_manifest(self.config.dependency_manifest_path)) or 1
+        except Exception:  # noqa: BLE001
+            est += 1
+        est += 1                                      # 乳摇（第三方工具）
+        return max(est, 1)
 
     def start_full_update(self, dry_run: bool = False) -> dict[str, Any]:
         if self._dep_task and self._dep_task.get("running"):
@@ -518,34 +604,59 @@ class EndfieldModControllerApi:
             "results": [],
         }
 
-        def progress(current: int, total: int, key: str, status: str) -> None:
-            if self._dep_task is None:
-                return
-            self._dep_task["current"] = current
-            self._dep_task["total"] = total
-            self._dep_task["percent"] = (current / total * 100.0) if total else 0.0
-            self._dep_task["message"] = f"{key}: {status}"
-            self._dep_task["log"].append(f"{key}: {status}")
-
-        def byte_progress(index: int, total: int, key: str, received: int, expected: int) -> None:
-            if self._dep_task is None:
-                return
-            if total:
-                base = (index - 1) / total
-                inner = (received / expected) if expected else 0.0
-                self._dep_task["percent"] = min(99.9, (base + inner / total) * 100.0)
-            self._dep_task["current"] = index - 1
-            self._dep_task["total"] = total
-            if expected:
-                self._dep_task["message"] = f"{key}: {received / 1048576:.1f}/{expected / 1048576:.1f} MB"
-            else:
-                self._dep_task["message"] = f"{key}: 下载中 {received / 1048576:.1f} MB"
+        progress, byte_progress, bump = self._make_dep_progress()
 
         def worker() -> None:
             assert self._dep_task is not None
             from types import SimpleNamespace as _NS
             try:
+                # 全局进度分母：**一开始就按"实际要处理的项数"算好，中途不再变动**。
+                # 用户 2026-10-01 反馈「从 0 开始最开始是共 11 项，然后 12 项搞好又变成 12 项」
+                # —— 原因是用"预估"当分母，而真实运行时会按"只装缺失的"过滤依赖项，
+                # 到结束时我又把分母校正成实际值，于是数字中途跳变。现在提前算准。
+                manifest_all = dependencies.load_manifest(self.config.dependency_manifest_path)
+                mods_for_deps = self._mods()
+                selected_for_deps = set(self.config.selected_mods or [])
+                if selected_for_deps:
+                    mods_for_deps = [m for m in mods_for_deps
+                                     if m.id in selected_for_deps or m.is_dependency]
+                required_names = core.collect_required_dependency_names(mods_for_deps)
+                missing_specs = dependencies.select_missing_dependencies(
+                    manifest_all, self.config.library_path, required_names)
+                combined_specs = {key: spec for key, spec in manifest_all.items() if spec.enabled}
+                combined_specs.update(missing_specs)
+                try:
+                    asset_count = len(runtime_assets.manifest_entries(self.config)) or 1
+                except Exception:  # noqa: BLE001
+                    asset_count = 1
+                self._dep_task["total"] = max(
+                    len(combined_specs), 1,
+                ) + 3 + len(dlss5_fetcher.COMPONENTS) + asset_count + 1
+                # 把预估值单独留一份：完成时用它和实际项数比对，差得多就说明预估公式要校准
+                self._dep_task["estimated_total"] = self._dep_task["total"]
+                self._dep_task["current"] = 0
                 results = []
+                # 每阶段新增了几项：写进日志，用来校准"分母应该固定成多少"。
+                # 用户要求「总项目应该是固定值，如果检查了没问题也计入」—— 要满足它，
+                # 就得先知道哪个阶段最后少产出了条目（见完成分支的比对日志）。
+                _stage_mark = [0]
+
+                def stage_done() -> None:
+                    """一个阶段跑完：把"已完成项数"设为当前累计的结果条数。
+
+                    用**绝对量**（`len(results)`）而不是增量，重复调用也安全。
+                    """
+                    task = self._dep_task
+                    if task is None:
+                        return
+                    added = len(results) - _stage_mark[0]
+                    _stage_mark[0] = len(results)
+                    task["current"] = len(results)
+                    task["total"] = max(int(task.get("total", 0)), len(results), 1)
+                    task["percent"] = min(99.0, len(results) / task["total"] * 100.0)
+                    task["log"].append(
+                        f"阶段完成：新增 {added} 项，累计 {len(results)}/{task['total']} 项"
+                    )
                 # ① 随包分发的 DLSS 运行库（压缩分卷）：离线可用，缺失/损坏才展开。
                 #    放在最前 —— 后面的 DLSS5 组件与游戏目录补齐都可能用到它。
                 try:
@@ -563,16 +674,39 @@ class EndfieldModControllerApi:
                         ):
                             results.append(_NS(
                                 key=f"nvngx:{asset.name}",
-                                status={"present": "已就位", "extracted": "已展开"}.get(asset.status, "失败"),
+                                # 状态口径：只有真正的 error/failed 才算"失败"；
+                                # missing / missing_source / skipped 属于"缺/跳过"，
+                                # 不该被统计进"完成，但有 N 项失败"（2026-10-01 修）。
+                                status={
+                                    "present": "已就位", "extracted": "已展开",
+                                    "missing": "缺失", "missing_source": "缺少资产包",
+                                    "skipped": "跳过", "error": "失败", "failed": "失败",
+                                }.get(str(asset.status), str(asset.status) or "完成"),
                                 message=asset.message,
                             ))
                 except Exception as exc:  # noqa: BLE001
                     results.append(_NS(key="nvngx", status="失败", message=str(exc)))
+                stage_done()
                 if self.config.use_builtin_runtime:
                     if dry_run:
                         results.extend(runtime_deps.dry_run_results(self.config))
                     else:
-                        results.extend(runtime_deps.ensure_all(self.config, progress, byte_progress))
+                        # BuiltinResult 的 status 是英文（installed/up_to_date/error…），
+                        # 前端按"失败"两个字统计失败项，直接塞进去会**漏报**；这里统一成中文
+                        # （2026-10-01 修：用户看到"完成，但有 1 项失败"却不知道是哪一项）。
+                        for item in runtime_deps.ensure_all(self.config, progress, byte_progress):
+                            results.append(_NS(
+                                key=item.key,
+                                status={
+                                    "installed": "已安装", "up_to_date": "已是最新",
+                                    "present": "已就位", "skipped": "跳过",
+                                    "error": "失败", "failed": "失败", "missing": "缺失",
+                                }.get(str(item.status), str(item.status) or "完成"),
+                                message=item.message,
+                                version=item.version,
+                                path=item.path,
+                            ))
+                stage_done()
                 # ② DLSS5 组件：有公开上游的那几个（ReShade 底座 / DLSS5-Feeder / iMMERSE shader）
                 try:
                     if dry_run:
@@ -594,15 +728,10 @@ class EndfieldModControllerApi:
                             ))
                 except Exception as exc:  # noqa: BLE001
                     results.append(_NS(key="dlss5", status="失败", message=str(exc)))
-                manifest = dependencies.load_manifest(self.config.dependency_manifest_path)
-                mods = self._mods()
-                selected = set(self.config.selected_mods or [])
-                if selected:
-                    mods = [mod for mod in mods if mod.id in selected or mod.is_dependency]
-                required = core.collect_required_dependency_names(mods)
-                missing = dependencies.select_missing_dependencies(manifest, self.config.library_path, required)
-                combined = {key: spec for key, spec in manifest.items() if spec.enabled}
-                combined.update(missing)
+                stage_done()
+                # 复用开头已算好的清单（分母就是按它定的，别再重复算一遍）
+                manifest = manifest_all
+                combined = combined_specs
                 results.extend(dependencies.update_all(
                     combined,
                     self.config.library_path,
@@ -611,6 +740,7 @@ class EndfieldModControllerApi:
                     progress=progress,
                     byte_progress=byte_progress,
                 ))
+                stage_done()
                 # 乳摇插件（第三方工具）也走同一个更新流程，不再单列按钮
                 try:
                     from types import SimpleNamespace
@@ -648,10 +778,24 @@ class EndfieldModControllerApi:
                     from types import SimpleNamespace as _NS
 
                     results.append(_NS(key="secondary_motion", status="跳过", message=str(exc)))
+                # 完成：**把分子分母对齐到实际完成项数**，保证"100%"和"N/N 项"一定一致。
+                # ⚠️ 这里踩过两次、两个要求必须同时满足：
+                #   ① 过程中分母不许变（用户「从 0 开始最开始是共 11 项，然后 12 项搞好又变成
+                #      12 项」）→ 过程中只上调、不下调，见 stage_done()；
+                #   ② 完成时"100%"必须和"N/N"对得上（用户 2026-09-29 实测反馈「现在显示的是
+                #      100% · 已完成 12/13 项」）→ 预估分母比实际项数多时，在**最后一刻**对齐。
+                #      此时进度已经结束，不会造成过程中跳变。
+                done_items = len(results)
                 self._dep_task["results"] = [result.__dict__ for result in results]
+                self._dep_task["current"] = done_items
+                self._dep_task["total"] = max(done_items, 1)
                 self._dep_task["percent"] = 100.0
-                self._dep_task["current"] = self._dep_task.get("total", 0)
                 self._dep_task["message"] = "完成"
+                estimated = int(self._dep_task.get("estimated_total") or 0)
+                if estimated and estimated != done_items:
+                    self._dep_task["log"].append(
+                        f"一键更新完成：实际 {done_items} 项，预估 {estimated} 项（预估公式待校准）"
+                    )
             except Exception as exc:  # noqa: BLE001
                 self._dep_task["message"] = f"失败: {exc}"
                 self._dep_task["log"].append(f"失败: {exc}")
@@ -903,6 +1047,37 @@ class EndfieldModControllerApi:
     # ------------------------------------------------------------------
     # 初始化自检（一键启动时自动跑，也可手动触发）
     # ------------------------------------------------------------------
+    def xxmi_running(self) -> dict[str, Any]:
+        """XXMI Launcher 是否还在运行？
+
+        前端用它等「XXMI 拉起终末地之后自动关闭」—— 用户要求把首次启动的提示**挪到
+        XXMI 关闭之后**再弹（原话：「之前说 xxmi 拉起的时候出的那个弹窗改成 xxmi 关闭
+        后出，xxmi 会在拉起终末地后自动关闭」）。那一刻游戏到底起没起来已经能看出来，
+        提示才有意义。
+        """
+        path = self.config.xxmi_launcher_path
+        if path is None:
+            return {"running": False, "reason": "未配置 XXMI Launcher"}
+        try:
+            pids = launcher._image_pids(Path(str(path)).name)
+        except Exception as exc:  # noqa: BLE001
+            return {"running": False, "reason": str(exc)}
+        return {"running": bool(pids), "count": len(pids)}
+
+    def game_running(self) -> dict[str, Any]:
+        """终末地（Endfield.exe）现在在不在跑。
+
+        前端在 XXMI 退出之后用它判断"游戏到底起没起来" —— 用户要求：
+        「可以在 xxmi 退出后检测终末地状态，如果在拉起后 10s 内退出就弹弹窗」。
+        """
+        pids: set[int] = set()
+        for name in ("Endfield.exe", "Endfield"):
+            try:
+                pids |= launcher._image_pids(name)
+            except Exception:  # noqa: BLE001
+                continue
+        return {"running": bool(pids), "count": len(pids)}
+
     def prepare_launch(self) -> dict[str, Any]:
         """一键启动前真正要跑的东西：收编手动 Mod + 同步 XXMI 注入库 + 完整初始化自检。
 
@@ -925,6 +1100,9 @@ class EndfieldModControllerApi:
             "injection": launcher.dlss5_injection_status(self.config),
             "manual_mods": synced,
             "component_update": component_update,
+            # 第一次启动为 True（本次临时拉起 XXMI 生成过配置）→ UI 在拉起 XXMI 之后
+            # 弹「再次启动 / 先不启动」
+            "xxmi_bootstrapped": bool(report.get("xxmi_bootstrapped", False)),
         }
 
     def _ensure_components_for_launch(self) -> dict[str, Any]:
@@ -953,8 +1131,156 @@ class EndfieldModControllerApi:
             result["errors"].append(f"在线组件: {exc}")
         return result
 
+    def _import_archive_file(self, archive_path: Path, name: str) -> dict[str, Any]:
+        """把**已经落盘**的 .zip 解压进 Mod 库，然后复用收编 + 角色归属流程。
+
+        `import_mod_archive`（小包一次性传）与 `import_mod_finish`（大包分块传）
+        都走这里，保证两条路径行为一致。
+        """
+        import re
+        import shutil
+        import zipfile
+
+        launcher._append_log(self.config, f"导入: 开始解压 {name}（{archive_path.stat().st_size} B）")
+        base = re.sub(r'[\\/:*?"<>|]', "_", Path(name).stem).strip() or "imported_mod"
+        dest = self.config.library_path / base
+        suffix = 1
+        while dest.exists():
+            suffix += 1
+            dest = self.config.library_path / f"{base}_{suffix}"
+        try:
+            dest.mkdir(parents=True, exist_ok=True)
+            root = dest.resolve()
+            with zipfile.ZipFile(archive_path) as archive:
+                for member in archive.namelist():
+                    # 防 zip slip：任何解析后跑到目标目录之外的条目一律拒绝
+                    target = (dest / member).resolve()
+                    if not str(target).startswith(str(root)):
+                        raise ValueError(f"压缩包里有非法路径: {member}")
+                archive.extractall(dest)
+        except (zipfile.BadZipFile, ValueError, OSError) as exc:
+            launcher._append_log(self.config, f"导入失败（解压）: {exc}")
+            shutil.rmtree(dest, ignore_errors=True)
+            return {"ok": False, "message": f"解压失败：{exc}"}
+
+        # 很多 Mod 包外面还套了一层同名目录；若里面只有一个子目录且没有文件，把内容提上来，
+        # 否则扫描时会把那一层当成 Mod 名、角色也识别不到。
+        try:
+            children = list(dest.iterdir())
+            if len(children) == 1 and children[0].is_dir():
+                inner = children[0]
+                for item in list(inner.iterdir()):
+                    shutil.move(str(item), str(dest / item.name))
+                inner.rmdir()
+        except OSError:
+            pass
+
+        launcher._append_log(self.config, f"导入: 解压完成 → {dest.name}，开始收编与角色识别")
+        try:
+            synced = self.import_manual_mods()
+            # 从扫描结果里取这个新 Mod（**不管它有没有进"待确认"列表**）—— 角色被成功识别时
+            # 它不会出现在 pending 里，但调用方仍然需要知道识别成了谁。
+            mods = self._mods()
+            target = next((m for m in mods if str(m.path).startswith(str(dest))), None)
+            pending = self.pending_characters()
+            pending_ids = {item.get("id") for item in (pending.get("pending") or [])}
+        except Exception as exc:  # noqa: BLE001
+            # 收编/识别阶段出问题时**不要**让整个进程崩：把原因写进日志并如实返回
+            launcher._append_log(self.config, f"导入: 收编或识别失败（文件已解压到库）: {exc}")
+            return {"ok": False, "dest": str(dest),
+                    "message": f"已解压到 Mod 库，但收编/识别失败：{exc}"}
+        info = None
+        if target is not None:
+            info = {
+                "id": target.id,
+                "name": target.name,
+                "group": target.group,
+                "confidence": target.char_confidence,
+                "candidates": list(target.char_candidates),
+            }
+        launcher._append_log(self.config, f"导入: 完成 {dest.name}（识别={target.group if target else '未识别'}）")
+        return {
+            "ok": True,
+            "name": dest.name,
+            "dest": str(dest),
+            "synced": synced,
+            "group": (target.group if target is not None else ""),
+            "confidence": (target.char_confidence if target is not None else ""),
+            "candidates": (list(target.char_candidates) if target is not None else []),
+            "need_confirm": bool(target is not None and target.id in pending_ids),
+            "imported": info,
+            "pending_total": pending.get("total", 0),
+        }
+
+    def import_mod_begin(self, file_name: str) -> dict[str, Any]:
+        """开始**分块**接收拖进来的压缩包。
+
+        为什么要分块：pywebview 的 js_api 参数走 WebView2 的消息通道，一次性把几十 MB
+        的 base64 丢过去会**先卡住再闪退**（2026-10-01 用户实测：「拖 zip 进去会卡在解压
+        和识别角色，然后闪退」）。改成前端每块 1 MB、逐块调用，后端追加写临时文件。
+        """
+        name = Path(str(file_name or "")).name
+        if not name.lower().endswith(".zip"):
+            return {"ok": False, "message": "目前只支持 .zip（其他格式请先解压）"}
+        import time as _time
+
+        incoming = self.config.runtime_path / "_incoming"
+        incoming.mkdir(parents=True, exist_ok=True)
+        token = f"{int(_time.time())}-{os.getpid()}-{abs(hash(name)) % 100000}"
+        part = incoming / f"{token}.zip.part"
+        try:
+            part.write_bytes(b"")
+        except OSError as exc:
+            return {"ok": False, "message": f"创建临时文件失败：{exc}"}
+        sessions = getattr(self, "_import_sessions", None)
+        if sessions is None:
+            sessions = {}
+            self._import_sessions = sessions
+        sessions[token] = {"path": part, "name": name, "size": 0}
+        launcher._append_log(self.config, f"导入: 开始接收 {name}（分块）")
+        return {"ok": True, "token": token}
+
+    def import_mod_chunk(self, token: str, data_b64: str) -> dict[str, Any]:
+        """接收一个分块（base64）。"""
+        sessions = getattr(self, "_import_sessions", None) or {}
+        info = sessions.get(str(token))
+        if not info:
+            return {"ok": False, "message": "导入会话已失效，请重新拖入"}
+        import base64
+
+        try:
+            blob = base64.b64decode(data_b64 or "", validate=False)
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "message": f"分块解码失败：{exc}"}
+        try:
+            with open(info["path"], "ab") as handle:
+                handle.write(blob)
+        except OSError as exc:
+            return {"ok": False, "message": f"写入分块失败：{exc}"}
+        info["size"] += len(blob)
+        if info["size"] > 600 * 1024 * 1024:
+            return {"ok": False, "message": "压缩包超过 600 MB，请先解压后手动放进 Mod 库"}
+        return {"ok": True, "received": info["size"]}
+
+    def import_mod_finish(self, token: str) -> dict[str, Any]:
+        """分块接收完毕：落盘完成 → 走与一次性导入完全相同的解压 + 收编流程。"""
+        sessions = getattr(self, "_import_sessions", None) or {}
+        info = sessions.pop(str(token), None)
+        if not info:
+            return {"ok": False, "message": "导入会话已失效，请重新拖入"}
+        part: Path = info["path"]
+        if not part.is_file() or part.stat().st_size == 0:
+            return {"ok": False, "message": "没有收到文件内容"}
+        try:
+            return self._import_archive_file(part, str(info["name"]))
+        finally:
+            try:
+                part.unlink()
+            except OSError:
+                pass
+
     def import_mod_archive(self, file_name: str, data_b64: str) -> dict[str, Any]:
-        """把拖进界面的 `.zip` 解压进 Mod 库，然后复用既有的收编 + 角色归属流程。
+        """把拖进界面的 `.zip` 解压进 Mod 库（**一次性传**，小包用；大包走分块接口）。
 
         用户需求（原话）：「如果在 Mod 库界面，能直接拖 zip 进去，然后自动解压，解析角色归属」。
 
@@ -963,9 +1289,6 @@ class EndfieldModControllerApi:
         把内存和调用参数撑爆，超过 `max_bytes` 直接拒绝并提示改用文件选择。
         """
         import base64
-        import re
-        import shutil
-        import zipfile
 
         name = Path(str(file_name or "")).name
         if not name.lower().endswith(".zip"):
@@ -989,72 +1312,13 @@ class EndfieldModControllerApi:
             archive_path.write_bytes(blob)
         except OSError as exc:
             return {"ok": False, "message": f"写入临时文件失败：{exc}"}
-
-        base = re.sub(r'[\\/:*?"<>|]', "_", Path(name).stem).strip() or "imported_mod"
-        dest = self.config.library_path / base
-        suffix = 1
-        while dest.exists():
-            suffix += 1
-            dest = self.config.library_path / f"{base}_{suffix}"
         try:
-            dest.mkdir(parents=True, exist_ok=True)
-            root = dest.resolve()
-            with zipfile.ZipFile(archive_path) as archive:
-                for member in archive.namelist():
-                    # 防 zip slip：任何解析后跑到目标目录之外的条目一律拒绝
-                    target = (dest / member).resolve()
-                    if not str(target).startswith(str(root)):
-                        raise ValueError(f"压缩包里有非法路径: {member}")
-                archive.extractall(dest)
-        except (zipfile.BadZipFile, ValueError, OSError) as exc:
-            shutil.rmtree(dest, ignore_errors=True)
-            return {"ok": False, "message": f"解压失败：{exc}"}
+            return self._import_archive_file(archive_path, name)
         finally:
             try:
                 archive_path.unlink()
             except OSError:
                 pass
-
-        # 很多 Mod 包外面还套了一层同名目录；若里面只有一个子目录且没有文件，把内容提上来，
-        # 否则扫描时会把那一层当成 Mod 名、角色也识别不到。
-        try:
-            children = list(dest.iterdir())
-            if len(children) == 1 and children[0].is_dir():
-                inner = children[0]
-                for item in list(inner.iterdir()):
-                    shutil.move(str(item), str(dest / item.name))
-                inner.rmdir()
-        except OSError:
-            pass
-
-        synced = self.import_manual_mods()
-        # 从扫描结果里取这个新 Mod（**不管它有没有进"待确认"列表**）—— 角色被成功识别时
-        # 它不会出现在 pending 里，但调用方仍然需要知道识别成了谁。
-        mods = self._mods()
-        target = next((m for m in mods if str(m.path).startswith(str(dest))), None)
-        pending = self.pending_characters()
-        pending_ids = {item.get("id") for item in (pending.get("pending") or [])}
-        info = None
-        if target is not None:
-            info = {
-                "id": target.id,
-                "name": target.name,
-                "group": target.group,
-                "confidence": target.char_confidence,
-                "candidates": list(target.char_candidates),
-            }
-        return {
-            "ok": True,
-            "name": dest.name,
-            "dest": str(dest),
-            "synced": synced,
-            "group": (target.group if target is not None else ""),
-            "confidence": (target.char_confidence if target is not None else ""),
-            "candidates": (list(target.char_candidates) if target is not None else []),
-            "need_confirm": bool(target is not None and target.id in pending_ids),
-            "imported": info,
-            "pending_total": pending.get("total", 0),
-        }
 
     def import_manual_mods(self) -> dict[str, Any]:
         """把手动放进 Mods 目录的 Mod 收编进库，并在界面里标记为已开启。
@@ -1277,6 +1541,10 @@ class EndfieldModControllerApi:
             task["results"] = [{"key": "endfieldmodcontroller", "status": status, "message": message}]
             task["message"] = message
             task["percent"] = 100.0
+            # 失败/异常也要落到 launch.log：以前只写内存里的任务状态，程序一退就没了，
+            # 事后根本查不出"那一项失败"到底是什么（2026-10-01 实测踩到）。
+            if status not in ("已更新", "已是最新"):
+                launcher._append_log(self.config, f"自更新{status}：{message}")
 
         def worker() -> None:
             try:
@@ -1304,15 +1572,14 @@ class EndfieldModControllerApi:
                 if not result.get("ok"):
                     finish("失败", f"下载失败：{result.get('message')}")
                     return
-                task["message"] = "下载完成，正在替换并重启…"
-                applied = selfupdate.apply_update(
-                    self.config, archive=result.get("path", ""), log=log)
-                if applied.get("ok"):
-                    finish("已更新", applied.get("message") or "正在重启为新版")
-                    if applied.get("restart"):
-                        threading.Timer(1.8, lambda: os._exit(0)).start()
-                else:
-                    finish("失败", applied.get("message") or "替换失败")
+                # **下载完成先停下，交给用户决定何时安装**（用户 2026-10-01 要求：
+                # 「下载完应该跳一个弹窗，让用户选择是立即重启程序更新还是稍后」）。
+                # 前端看到 status="已下载" 会弹确认框：
+                #   立即 → 调 apply_app_update()（替换 + 自动重启）
+                #   稍后 → 保留 runtime\_update\ 里的更新包，下次启动时再由 pending_update 提示
+                task["message"] = f"v{latest} 已下载完成，等待你选择何时安装"
+                task["pending_apply"] = True
+                finish("已下载", f"v{latest} 已下载完成，可以立即重启安装，或稍后再说")
             except Exception as exc:  # noqa: BLE001
                 finish("失败", f"{exc}")
             finally:

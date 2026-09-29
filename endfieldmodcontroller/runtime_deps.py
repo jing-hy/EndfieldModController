@@ -229,14 +229,50 @@ def ensure_efmi(config: AppConfig, progress: Progress = None, byte_progress: Byt
 
 
 def ensure_all(config: AppConfig, progress: Progress = None, byte_progress: ByteProgress = None) -> list[BuiltinResult]:
+    """安装三个内置组件（XXMI / XXMI-Libs / EFMI）。
+
+    **单项失败不中断其它项，跑完后再对失败项重试（最多 3 次）。**
+    用户 2026-10-01 要求：「下载一旦失败就停了，改成全部下载完之后如果有失败项，
+    就重试，3 次截止」——以前 `ensure_xxmi` 抛异常会让后面两个组件连试都不试。
+    """
+    steps: list[tuple[str, Callable[..., BuiltinResult], int]] = [
+        ("XXMI", ensure_xxmi, 0),
+        ("XXMI-Libs", ensure_xxmi_libs, 1),
+        ("EFMI", ensure_efmi, 2),
+    ]
+    total = len(steps)
+    ok_status = {"installed", "up_to_date", "skipped", "present"}
+    if progress:
+        progress(0, total, "builtin", "start")
+
+    def worker(step: tuple[str, Callable[..., BuiltinResult], int], attempt: int) -> BuiltinResult:
+        key, function, index = step
+        if progress:
+            progress(index, total, key, "start" if attempt == 0 else f"重试第 {attempt} 次")
+        result = function(config, progress, byte_progress)
+        if not isinstance(result, BuiltinResult):
+            raise RuntimeError(f"{key}: 安装没有返回结果")
+        if str(result.status) not in ok_status:
+            raise RuntimeError(result.message or f"{key}: 安装失败（{result.status}）")
+        if progress:
+            progress(index + 1, total, key, result.status)
+        return result
+
+    def on_retry(attempt: int, pending: list[tuple[str, Callable[..., BuiltinResult], int]]) -> None:
+        if progress:
+            for key, _function, index in pending:
+                progress(index, total, key, f"重试第 {attempt}/{dependencies.MAX_BATCH_RETRIES} 次")
+
+    outcomes, _pending = dependencies.run_batch_with_retry(steps, worker, on_retry=on_retry)
     results: list[BuiltinResult] = []
+    for index, (key, _function, _i) in enumerate(steps):
+        kind, payload = outcomes[index]
+        if kind == "ok":
+            results.append(payload)
+        else:
+            results.append(BuiltinResult(key=key, status="error", message=str(payload)))
     if progress:
-        progress(0, 3, "builtin", "start")
-    results.append(ensure_xxmi(config, progress, byte_progress))
-    results.append(ensure_xxmi_libs(config, progress, byte_progress))
-    results.append(ensure_efmi(config, progress, byte_progress))
-    if progress:
-        progress(3, 3, "builtin", "complete")
+        progress(total, total, "builtin", "complete")
     return results
 
 

@@ -389,6 +389,21 @@
     </div>
   </div>
 
+  <!-- 新手引导：高亮目标控件 + 气泡说明（用户要求的第一版引导流程） -->
+  <div id="tour" class="tour hidden">
+    <div class="tour-spot" id="tour-spot"></div>
+    <div class="tour-card" id="tour-card">
+      <div class="tour-progress" id="tour-progress">1 / 4</div>
+      <h3 id="tour-title">标题</h3>
+      <div class="tour-body" id="tour-body">说明</div>
+      <div class="tour-actions">
+        <button id="tour-skip">跳过引导</button>
+        <button id="tour-prev">上一步</button>
+        <button id="tour-next" class="primary">下一步</button>
+      </div>
+    </div>
+  </div>
+
   <script src="app.js"></script>
 </body>
 </html>

@@ -358,18 +358,20 @@ sh.Run """" & target & """", 1, False
 ' PyInstaller 6.x (onefile) validates the PARENT process of the child it spawns --
 ' see pyinstaller issue #9513 / PR #9520: having another program in between breaks
 ' the check. The chain here is: old exe -> this script (wscript.exe) -> new exe.
-' If this script exits before the new instance's bootloader finishes unpacking, the
+' If this script exits while the new instance's bootloader is still unpacking, the
 ' new instance shows "Security validation failure: invalid originating onefile
-' parent process (PID not found)!" -- exactly what the user hit on 2026-09-29 (the
-' update itself still succeeded). So: poll until the new process shows up, then
-' keep this script alive a while longer so the parent is definitely still there.
-' (This template must stay pure ASCII: WSH reads .vbs as ANSI.)
-For i = 1 To 40
+' parent process (PID not found)!". The 2026-10-01 occurrence was NOT fixed by
+' waiting longer -- the real cause was inherited _MEIPASS2/_PYI_* env vars in the
+' launching process (see apply_update()). Still, keep this script alive until the
+' new build is really up: a finished onefile start shows TWO processes (parent
+' bootloader + the child it spawns after unpacking), so wait for count >= 2.
+' (This template must stay pure ASCII: WSH reads .vbs as ANSI. Comments included!)
+For i = 1 To 120
   Set procs = wmi.ExecQuery("SELECT ProcessId FROM Win32_Process WHERE Name='" & procname & "'")
-  If procs.Count > 0 Then Exit For
+  If procs.Count >= 2 Then Exit For
   WScript.Sleep 1000
 Next
-WScript.Sleep 15000
+WScript.Sleep 5000
 On Error Resume Next
 fso.DeleteFile backup, True
 fso.DeleteFile newFile, True
@@ -435,17 +437,37 @@ def apply_update(
         # 会在第 1 行第 1 个字符报「无效字符 800A0408」（2026-09-27 实测踩到）。
         # 三个路径改为命令行参数传给脚本（见模板头部注释），所以这里不再 .format()：
         # 既不会因路径含中文抛 UnicodeEncodeError，也不会因路径含 {} 被 format 解析。
+        #
+        # 2026-10-01 加保险：模板里**连注释都不能出现非 ASCII**（我写中文注释就踩了，
+        # 结果 write_text 抛 UnicodeEncodeError → 下载成功却"替换失败"，界面报
+        # "完成，但有 1 项失败"）。回归测试见 tests/test_selfupdate_template.py。
+        VBS_TEMPLATE.encode("ascii")
+    except UnicodeEncodeError as exc:
+        return {"ok": False,
+                "message": f"更新脚本模板含非 ASCII 字符（程序缺陷，请反馈）：{exc}"}
+    try:
         script.write_text(VBS_TEMPLATE, encoding="ascii", newline="\r\n")
-    except (OSError, UnicodeEncodeError) as exc:
+    except OSError as exc:
         return {"ok": False, "message": f"生成更新脚本失败：{exc}"}
 
     try:
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        # **先清掉 PyInstaller 的 onefile 环境变量**（2026-10-01 读 bootloader 源码确认）：
+        # 本进程是 onefile 的"子进程"，环境里带着 `_MEIPASS2` / `_PYI_*`；它们会被
+        # wscript 继承、再传给新 exe —— 而 PyInstaller 只在"application home dir 是
+        # 继承来的"（即看到 `_MEIPASS2`）时才去校验"originating onefile parent PID"，
+        # 且该校验在**提权运行**时强制启用（我们的 exe 带 --uac-admin）。于是新 exe 把
+        # 自己当成子进程、去找一个早已退出的父 PID，弹出
+        # `Security validation failure: invalid originating onefile parent process
+        # (PID not found)!`。清掉后新 exe 以"父 bootloader"身份干净启动，不进这段校验。
+        env = {key: value for key, value in os.environ.items()
+               if not key.upper().startswith(("_MEI", "_PYI"))}
         # wscript 跑 VBS，全程隐藏（不出现 cmd 黑窗）；路径走参数，中文路径同样可用
         subprocess.Popen(
             ["wscript.exe", "//nologo", str(script), str(target), str(new_exe), target.name],
             creationflags=creationflags,
             close_fds=True,
+            env=env,
         )
     except OSError as exc:
         return {"ok": False, "message": f"启动更新脚本失败：{exc}"}
@@ -464,6 +486,25 @@ def apply_update(
 def _pending_version(config: AppConfig) -> str:
     cached = _read_cache(config)
     return str(cached.get("latest") or "")
+
+
+def pending_payload(config: AppConfig) -> dict[str, Any]:
+    """有没有"已下载但还没安装"的更新包。
+
+    用户 2026-10-01 要求「下载完应该跳一个弹窗，让用户选择是立即重启程序更新还是稍后」，
+    选"稍后"的包就留在这里；下次启动时由前端根据本函数的结果再问一次。
+    """
+    payload = Path(config.runtime_path) / "_update" / "EndfieldModController.exe"
+    if not payload.is_file():
+        return {"pending": False}
+    from .version import __version__
+
+    latest = _pending_version(config)
+    if latest and _version_tuple(latest) <= _version_tuple(__version__):
+        # 已经是最新（或本地更高）→ 这个包没必要再装
+        return {"pending": False, "stale": True, "latest": latest}
+    return {"pending": True, "latest": latest, "path": str(payload),
+            "size": payload.stat().st_size}
 
 
 def cleanup_stale(config: AppConfig) -> list[str]:

@@ -424,11 +424,38 @@ async function importDroppedFile(file) {
     return;
   }
   dropBusy = true;
-  setDropHint(true, `正在读取 ${file.name} …`);
+  // **松开鼠标就收起提示层**（用户要求：「应该是释放就消失」）。提示层的职责只是
+  // "拖进来时告诉你松手即可导入" —— 之后的进度改在**状态栏**显示。否则它会一直挂在
+  // 屏幕上、还可能盖住结果弹窗，看起来就像卡死（2026-10-01 实测）。
+  setDropHint(false);
+  setStatus(`正在读取 ${file.name} …`);
   try {
-    const base64 = arrayBufferToBase64(await file.arrayBuffer());
-    setDropHint(true, `正在解压并识别角色：${file.name} …`);
-    const result = await call('import_mod_archive', file.name, base64);
+    // **分块上传**：pywebview 的 js_api 参数走 WebView2 消息通道，一次性把整包的 base64
+    // 丢过去会先卡住再闪退（2026-10-01 用户实测：「拖 zip 进去会卡在解压和识别角色，
+    // 然后闪退」）。改成每块 1 MB 逐块传，进度显示在状态栏。
+    const begin = await call('import_mod_begin', file.name);
+    if (!begin.ok) {
+      await showAlert(begin.message || '导入失败', '导入 Mod');
+      return;
+    }
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const CHUNK = 1024 * 1024;
+    let sent = 0;
+    while (sent < bytes.length) {
+      const end = Math.min(sent + CHUNK, bytes.length);
+      const slice = bytes.slice(sent, end);
+      const part = await call('import_mod_chunk', begin.token, arrayBufferToBase64(slice.buffer));
+      if (!part.ok) {
+        await showAlert(part.message || '传输失败', '导入 Mod');
+        return;
+      }
+      sent = end;
+      const pct = Math.floor(sent * 100 / Math.max(bytes.length, 1));
+      setStatus(`正在上传 ${file.name}：${pct}%（${(sent / 1048576).toFixed(1)} MB）`);
+    }
+    setStatus(`正在解压并识别角色：${file.name} …`);
+    const result = await call('import_mod_finish', begin.token);
+    dropBusy = false;
     if (!result.ok) {
       await showAlert(result.message || '导入失败', '导入 Mod');
     } else if (result.need_confirm) {
@@ -710,12 +737,19 @@ async function pollDependencyProgress(statusEl) {
     const total = progress.total || 0;
     const current = progress.current || 0;
     const percent = Number(progress.percent || 0);
+    // **"下载完成"弹出来之前不要到 100%**（用户 2026-10-01 要求）：任务还在跑时封顶 99%，
+    // 只有 running=False（真正结束）才允许显示 100%。否则 99.9% 会被 toFixed(0) 显示成 100%，
+    // 看起来像"已经好了却没弹完成"。
+    const stillRunning = progress.running !== false;
+    const shownPercent = stillRunning ? Math.min(99, percent) : Math.min(100, percent);
     $('dep-progress').max = 100;
-    $('dep-progress').value = Math.max(0, Math.min(100, percent));
-    // 进度条旁**只显示总进度**（百分比 + 第几个组件）；带字节的细节交给下面的日志框，
+    $('dep-progress').value = Math.max(0, shownPercent);
+    // 进度条旁**只显示总进度**（百分比 + 已完成项数）；带字节的细节交给下面的日志框，
     // 否则这里会变成「0/3 XX: 12.3/27.9 MB」——两个不同量纲的进度挤在一起，看着像对不上。
+    // 分母现在是**全部下载项**（随包资产 + XXMI/Libs/EFMI + DLSS5 在线组件 + 依赖清单 + 乳摇），
+    // 不再只是"3 个组件"（2026-10-01 用户要求「进度条要全都管」）。
     $('dep-progress-text').textContent = total
-      ? `${percent.toFixed(0)}%  ·  组件 ${current}/${total}`
+      ? `${shownPercent.toFixed(0)}%  ·  已完成 ${current}/${total} 项`
       : (progress.message || '');
 
     if (current < lastDoneCount) lastDoneCount = 0;   // 进程号回退 = 新任务，重新计数
@@ -744,13 +778,30 @@ async function pollDependencyProgress(statusEl) {
         + (innerLogs.length ? '\n\n' + innerLogs.slice(-12).join('\n') : '');
     }
     if (!progress.running) {
-      out.textContent = JSON.stringify(progress.results || [], null, 2);
-      // 用户要求：下载完成时日志里要写明「完成」，并且顶部气泡也要弹出来
       const done = progress.results || [];
       const failedCount = done.filter(r => /失败/.test(String((r || {}).status || ''))).length;
+      // 「已下载」既不是失败也不是完成：要问用户何时安装（用户 2026-10-01 要求
+      // 「下载完应该跳一个弹窗，让用户选择是立即重启程序更新还是稍后」）。
+      const downloaded = done.find(r => /已下载/.test(String((r || {}).status || '')));
       const doneMessage = done.length === 0
         ? '任务结束'
-        : (failedCount ? `完成，但有 ${failedCount} 项失败` : `下载与安装完成（${done.length} 项）✅`);
+        : (failedCount ? `完成，但有 ${failedCount} 项失败`
+          : (downloaded ? String(downloaded.message || '更新已下载完成')
+            : `下载与安装完成（${done.length} 项）✅`));
+      // ⚠️ **不要把结果明细以原始 JSON 倒出来**（用户 2026-09-29 原话：「下载界面下面
+      // 不需要这一堆」——那串 `[{key,status,message,version,path}, …]` 全是他看不懂的
+      // 内部字段）。成功的项没有信息量，所以只列"非成功"的那几项，一行一项说人话。
+      const okStatus = /已安装|已是最新|已就位|已展开|已更新|已补齐|installed|up_to_date|present|extracted/i;
+      const problems = done.filter(r => !okStatus.test(String((r || {}).status || '')));
+      out.textContent = doneMessage
+        + (problems.length
+          ? '\n\n' + problems.map((r) => {
+            const key = String((r || {}).key || '');
+            const status = String((r || {}).status || '');
+            const message = String((r || {}).message || '').trim();
+            return `· ${key}：${status}${message && message !== status ? `（${message}）` : ''}`;
+          }).join('\n')
+          : '');
       if (logBox) {
         logBox.textContent = `${logBox.textContent}\n—— ${doneMessage} ——`;
         logBox.scrollTop = logBox.scrollHeight;
@@ -762,9 +813,146 @@ async function pollDependencyProgress(statusEl) {
       } catch (err) {
         /* 刷新失败不影响任务结果展示 */
       }
+      if (downloaded) {
+        await askApplyUpdate(downloaded.message);
+      }
       break;
     }
     await new Promise(resolve => setTimeout(resolve, 400));
+  }
+}
+
+// ── 新手引导（分步 tour）──────────────────────────────────────────────────────
+// 用户 2026-10-01 要求：不要上来就推"一键启动"，先问要不要引导；引导顺序是
+// 依赖页（箭头指「自动安装/更新」并建议点）→ 能拖 zip → 一键启动 → 设置页能一键还原。
+const TOUR_STEPS = [
+  {
+    tab: 'dependencies',
+    target: 'dep-update-all-btn',
+    title: '第一步：先把组件装齐',
+    body: '这里是「依赖」页。点这个「自动安装/更新」按钮，程序会自动下载并安装\n'
+      + 'XXMI Launcher、XXMI 库、EFMI、DLSS5 组件等全部依赖（需要联网）。\n\n'
+      + '建议先点它，等装完再去启动。',
+  },
+  {
+    tab: 'library',
+    target: '',
+    title: '第二步：把 Mod 拖进来',
+    body: '在「Mod 库」页，把 Mod 的 .zip 直接拖到页面任意位置即可导入：\n'
+      + '松手后自动解压进库，并尝试识别角色归属。\n\n'
+      + '同一个角色只保留一个 Mod（自动互斥），避免游戏崩溃。',
+  },
+  {
+    tab: 'launch',
+    target: 'oneclick-launch-btn',
+    title: '第三步：一键启动',
+    body: '点这个「一键启动」：程序会补齐缺失组件、同步注入库、跑一遍初始化自检，\n'
+      + '然后拉起 XXMI Launcher（不会自动进游戏，进游戏在 XXMI 里点 Start）。\n\n'
+      + '第一次可能会提示"已临时拉起 XXMI 生成配置文件"，看到后再点一次即可。',
+  },
+  {
+    tab: 'settings',
+    target: 'game-restore-btn',
+    title: '第四步：随时可以还原',
+    body: '「设置」页有「一键还原游戏本体」：\n'
+      + '本程序对游戏目录做的任何改动都可回滚（净化前会完整备份、只移动不删除）。\n\n'
+      + '出问题就点它，游戏目录会回到原版状态。',
+  },
+];
+
+let tourIndex = 0;
+let tourActive = false;
+
+function tourShow(stepIndex) {
+  const step = TOUR_STEPS[stepIndex];
+  if (!step) return;
+  const wrap = $('tour');
+  const spot = $('tour-spot');
+  const card = $('tour-card');
+  if (!wrap || !spot || !card) return;
+  tourIndex = stepIndex;
+  tourActive = true;
+  wrap.classList.remove('hidden');
+  $('tour-progress').textContent = `${stepIndex + 1} / ${TOUR_STEPS.length}`;
+  $('tour-title').textContent = step.title;
+  $('tour-body').textContent = step.body;
+  $('tour-prev').style.visibility = stepIndex === 0 ? 'hidden' : 'visible';
+  $('tour-next').textContent = stepIndex === TOUR_STEPS.length - 1 ? '开始使用' : '下一步';
+  if (step.tab) showTab(step.tab);
+  // 等两帧再量位置：切换页面后布局才稳定
+  requestAnimationFrame(() => {
+    const el = step.target ? $(step.target) : null;
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' });
+    requestAnimationFrame(() => {
+      if (el) {
+        const r = el.getBoundingClientRect();
+        const pad = 8;
+        Object.assign(spot.style, {
+          left: `${r.left - pad}px`, top: `${r.top - pad}px`,
+          width: `${r.width + pad * 2}px`, height: `${r.height + pad * 2}px`,
+        });
+        const below = r.bottom + 16;
+        const cardTop = (below + 230 < window.innerHeight) ? below : Math.max(16, r.top - 250);
+        Object.assign(card.style, {
+          left: `${Math.min(Math.max(16, r.left), Math.max(16, window.innerWidth - 440))}px`,
+          top: `${cardTop}px`, transform: 'none',
+        });
+      } else {
+        // 没有具体目标（例如"能拖 zip"这一步）：聚光收成一个点，卡片居中
+        Object.assign(spot.style, { left: '50%', top: '40%', width: '0px', height: '0px' });
+        Object.assign(card.style, { left: '50%', top: '46%', transform: 'translate(-50%, 0)' });
+      }
+    });
+  });
+}
+
+function tourFinish() {
+  tourActive = false;
+  const wrap = $('tour');
+  if (wrap) wrap.classList.add('hidden');
+  // 跳过与走完都记下来，下次启动不再问
+  try {
+    const p = call('save_config', { onboarding_done: true });
+    if (p && p.catch) p.catch(() => {});
+  } catch (err) { /* 忽略 */ }
+}
+
+function initTour() {
+  const wrap = $('tour');
+  if (!wrap) return;
+  $('tour-skip').onclick = () => tourFinish();
+  $('tour-next').onclick = () => {
+    if (tourIndex >= TOUR_STEPS.length - 1) tourFinish();
+    else tourShow(tourIndex + 1);
+  };
+  $('tour-prev').onclick = () => { if (tourIndex > 0) tourShow(tourIndex - 1); };
+  window.addEventListener('resize', () => { if (tourActive) tourShow(tourIndex); });
+}
+
+// 下载完成后问用户：立即重启安装，还是稍后（用户 2026-10-01 要求）
+async function askApplyUpdate(message) {
+  // 用户要求：「下载完应该跳一个弹窗，让用户选择是立即重启程序更新还是稍后」。
+  // 用带自定义按钮文字的模态框（而不是"确定/取消"），这样和上一个"是否下载"的
+  // 确认不会混在一起 —— 2026-10-01 用户反馈"只有动态气泡、没有选择弹窗"，
+  // 就是因为两个确认框按钮长得一样、被连着点掉了。
+  const yes = await showModalDialog({
+    title: '更新已下载',
+    message: `${message || '更新已下载完成'}\n\n`
+      + '· 立即重启安装：程序会自动退出、替换文件并重启为新版\n'
+      + '· 稍后：保留已下载的更新包，下次启动时再问你',
+    okText: '立即重启安装',
+    cancelText: '稍后',
+  });
+  if (!yes) {
+    setStatus('更新已下载完成，下次启动时会再问你一次');
+    return;
+  }
+  setStatus('正在准备安装，程序即将退出并重启…');
+  try {
+    const r = await call('apply_app_update');
+    if (!r || !r.ok) await showAlert((r && r.message) || '安装失败', '更新');
+  } catch (err) {
+    await showAlert(`安装失败：${err.message || err}`, '更新');
   }
 }
 
@@ -1018,34 +1206,146 @@ function bind() {
 
   // ── 一键启动：先跑初始化自检（缺什么补什么），再拉起 XXMI ──
   if ($('oneclick-launch-btn')) {
+    // 一次完整的「一键启动」：初始化自检（缺什么补什么）→ 拉起 XXMI。
+    // 返回 needsSecondStart：**第一次启动**时为 true（本次真的临时拉起过 XXMI 生成
+    // 配置文件，或程序尚未初始化），UI 据此在**拉起 XXMI 之后**提示用户再启动一次
+    // —— 用户 2026-10-01：「我说的第一次启动是在拉起 xxmi 之后再谈，选项应该是
+    //    再次启动和先不启动」。
+    // 等 XXMI 退出：XXMI 在把终末地拉起来之后会**自己关闭**，那一刻"游戏起没起来"
+    // 才看得出来。用户要求提示改到这个时机（原话：「之前说 xxmi 拉起的时候出的那个弹窗
+    // 改成 xxmi 关闭后出，xxmi 会在拉起终末地后自动关闭」）。
+    // 最多等 10 分钟；查询失败就当它还在运行，继续等（不打扰用户）。
+    const waitXxmiClosed = async (timeoutMs = 10 * 60 * 1000) => {
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        await new Promise((resolve) => { setTimeout(resolve, 2000); });
+        try {
+          const state = await call('xxmi_running');
+          if (!state || !state.running) return true;
+        } catch (err) { /* 查询失败不拦路，继续等 */ }
+      }
+      return false;
+    };
+
+    // XXMI 退出之后，看终末地到底起没起来 —— 这才是"这一把成不成"的判据。
+    // 用户要求：「可以在 xxmi 退出后检测终末地状态，如果在拉起后 10s 内退出就弹弹窗」。
+    //   ① 等 Endfield.exe 出现（最多 30 秒，XXMI 退出到游戏进程出现之间有个空档）；
+    //   ② 出现之后再盯 10 秒 —— 如果它在这 10 秒内就退出了，说明是"启动失败"那种闪退；
+    //   ③ 没出现 / 10 秒内退出 ⇒ ok=false，前端据此弹「再启动一次」。
+    const watchGameAfterXxmi = async (appearMs = 30000, aliveMs = 10000) => {
+      const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
+      const appearDeadline = Date.now() + appearMs;
+      let sawGame = false;
+      while (Date.now() < appearDeadline) {
+        await sleep(1000);
+        try {
+          const g = await call('game_running');
+          if (g && g.running) { sawGame = true; break; }
+        } catch (err) { /* 查询失败继续等 */ }
+      }
+      if (!sawGame) return { ok: false, reason: '等了 30 秒没看到终末地进程 —— 游戏没有启动' };
+      const aliveDeadline = Date.now() + aliveMs;
+      while (Date.now() < aliveDeadline) {
+        await sleep(1000);
+        try {
+          const g = await call('game_running');
+          if (!g || !g.running) return { ok: false, reason: '终末地启动后 10 秒内就退出了（启动失败）' };
+        } catch (err) { /* 查询失败当作还在跑 */ }
+      }
+      return { ok: true, reason: '' };
+    };
+
+    const runOneClickLaunch = async () => {
+      logLine('开始一键启动…');
+      setStatus('正在初始化自检…');
+      logLine('① 同步 XXMI 注入库 + 初始化自检（缺什么补什么）');
+      const r = await call('prepare_launch');
+      const checks = (r.initialize && r.initialize.checks) || [];
+      for (const c of checks) {
+        const flag = c.ok ? (c.fixed ? '已补齐' : '就绪') : '待处理';
+        logLine(`   [${flag}] ${c.key} — ${c.message}`);
+      }
+      if ((r.actions || []).length) logLine(`   本次动作: ${r.actions.join(' / ')}`);
+      for (const w of (r.warnings || [])) logLine(`   ⚠ ${w}`);
+      const inj = r.injection || {};
+      logLine(`   注入库(${inj.enabled ? '已开' : '未开'}): ${(inj.extra_libraries || '(空)').split('\n').join('  +  ')}`);
+      if ($('init-status')) {
+        $('init-status').textContent = checks
+          .map((c) => `[${c.ok ? (c.fixed ? '已补齐' : '就绪') : '待处理'}] ${c.key}  ${c.message}`)
+          .join('\n');
+      }
+
+      logLine('② 拉起 XXMI Launcher，请在它的界面里点 Start 启动游戏');
+      const launched = await call('launch_official_gui');
+      logLine(`   ${launched.message || 'XXMI Launcher 已打开'}`);
+      logLine('进游戏后按 Home 打开 ReShade 面板检查插件。');
+      setStatus('已拉起 XXMI，请在它的界面点 Start');
+      // **等 XXMI 关闭之后再提示**（用户要求）：XXMI 把终末地拉起来后会自己退出，
+      // 那一刻"游戏到底起没起来"才看得出来。没退出就继续等（最多 10 分钟）。
+      logLine('③ 等 XXMI 退出（它拉起终末地后会自己关闭）…');
+      setStatus('已在等 XXMI 退出…');
+      const xxmiClosed = await waitXxmiClosed();
+      logLine(xxmiClosed ? '   XXMI 已退出' : '   等了 10 分钟 XXMI 还没退出，先继续');
+
+      // 判定"这一次算不算第一次启动"：
+      //   * `xxmi_bootstrapped` —— 后端透传的硬标志，本次真的临时拉起过 XXMI 生成配置；
+      //   * `onboarding_done` 为假 —— 用户还没走过/没跳过首次引导。
+      // ⚠️ 不能用 `first_run`：它的判据是"三个内置组件里还有没装的"，只要有一个没装就
+      //    永远为真 —— 那样每次点一键启动都会提示（用户 2026-09-29 反馈弹窗反复弹）。
+      let firstUse = false;
+      try {
+        const fr = await call('first_run_state');
+        firstUse = !(fr && fr.onboarding_done);
+      } catch (err) { /* 探测失败不拦路 */ }
+      // ④ XXMI 退出后再看终末地起没起来（用户要求：「可以在 xxmi 退出后检测终末地
+      //    状态，如果在拉起后 10s 内退出就弹弹窗」）—— 这比"是不是第一次启动"准得多：
+      //    之前出现过「显示 xxmi 已退出但并没有弹窗」，就是因为判据还是那两个标志。
+      logLine('④ 检测终末地是否已启动（等它出现最多 30 秒，出现后再盯 10 秒）…');
+      setStatus('正在检测终末地是否启动…');
+      const game = await watchGameAfterXxmi();
+      logLine(game.ok ? '   终末地已在运行' : `   ⚠ ${game.reason}`);
+      // 游戏没起来**一定**提示；"第一次启动"（刚生成配置 / 还没走过引导）也提示一次
+      return {
+        needsSecondStart: !game.ok || !!r.xxmi_bootstrapped || firstUse,
+        gameReason: game.reason || '',
+      };
+    };
+
     $('oneclick-launch-btn').onclick = async () => {
       const btn = $('oneclick-launch-btn');
       btn.disabled = true;
       try {
-        logLine('开始一键启动…');
-        setStatus('正在初始化自检…');
-        logLine('① 同步 XXMI 注入库 + 初始化自检（缺什么补什么）');
-        const r = await call('prepare_launch');
-        const checks = (r.initialize && r.initialize.checks) || [];
-        for (const c of checks) {
-          const flag = c.ok ? (c.fixed ? '已补齐' : '就绪') : '待处理';
-          logLine(`   [${flag}] ${c.key} — ${c.message}`);
+        const { needsSecondStart, gameReason } = await runOneClickLaunch();
+        // 提示**放在拉起 XXMI 之后**（用户要求：「我说的第一次启动是在拉起 xxmi 之后
+        // 再谈，选项应该是再次启动和先不启动」）。
+        // 归因按用户 2026-09-29 的澄清写：**点 XXMI 的 Start 之后，终末地有概率不会
+        // 正常启动** —— 不是"程序生成完配置自动关闭"那回事，也不是坏了；没起来就再
+        // 启动一次。（"临时拉起 XXMI 生成配置"是另一件独立的事，只写进日志。）
+        //
+        // **只弹一次**：原先写成 `for (round < 3)` + 每轮重新判断，结果连弹三次
+        // （用户 2026-09-29 反馈「按了再次启动那个弹窗会反复弹」）。现在点「再次启动」
+        // 就重跑一遍，**重跑后不再提示**。
+        if (needsSecondStart) {
+          const again = await showModalDialog({
+            title: '第一次启动有概率起不来 —— 没起来就再来一次',
+            // ⚠️ 本弹窗用 textContent 纯文本渲染，不要写 markdown 记号（会原样显示星号）
+            message: (gameReason ? `本次检测：${gameReason}\n\n` : '')
+              + '点了 XXMI 界面里的 Start 之后，终末地有概率不会正常启动 —— 这是已知现象，不是坏了。\n\n'
+              + '· 如果发现游戏没开起来（点了 Start 没反应，或过了几秒进程还没出现），\n'
+              + '  再启动一次通常就好了\n'
+              + '· 这个概率主要出现在第一次启动的时候\n'
+              + '· 「再次启动」＝ 现在就帮你重跑一遍「一键启动」（会重新拉起 XXMI，\n'
+              + '  你在它界面里再点一次 Start）\n'
+              + '· 「先不启动」＝ 什么都不做，你随时可以自己再点「一键启动」\n',
+            okText: '再次启动',
+            cancelText: '先不启动',
+          });
+          if (again) {
+            logLine('');
+            logLine('按你的选择再启动一次…');
+            await runOneClickLaunch();
+          }
         }
-        if ((r.actions || []).length) logLine(`   本次动作: ${r.actions.join(' / ')}`);
-        for (const w of (r.warnings || [])) logLine(`   ⚠ ${w}`);
-        const inj = r.injection || {};
-        logLine(`   注入库(${inj.enabled ? '已开' : '未开'}): ${(inj.extra_libraries || '(空)').split('\n').join('  +  ')}`);
-        if ($('init-status')) {
-          $('init-status').textContent = checks
-            .map((c) => `[${c.ok ? (c.fixed ? '已补齐' : '就绪') : '待处理'}] ${c.key}  ${c.message}`)
-            .join('\n');
-        }
-
-        logLine('② 拉起 XXMI Launcher，请在它的界面里点 Start 启动游戏');
-        const launched = await call('launch_official_gui');
-        logLine(`   ${launched.message || 'XXMI Launcher 已打开'}`);
-        logLine('进游戏后按 Home 打开 ReShade 面板检查插件。');
-        setStatus('已拉起 XXMI，请在它的界面点 Start');
       } catch (err) {
         logLine(`✗ 启动失败: ${err.message || err}`);
         setStatus(`启动失败: ${err.message || err}`);
@@ -1262,7 +1562,7 @@ function bind() {
       if (!checkOnly) await showAlert(`已是最新版本 v${r.current}`);
       return r;
     }
-    if (!await showConfirm(`发现新版本 v${r.latest}（当前 v${r.current}）\n\n现在下载并自动更新吗？\n· 更新时程序会自动退出并重启为新版\n· 更新期间请不要手动打开程序（替换过程中会被打断）\n· config.json 与 Mod 库不受影响\n· 失败会自动回滚旧版本\n\n进度会显示在「依赖」页`)) return r;
+    if (!await showConfirm(`发现新版本 v${r.latest}（当前 v${r.current}）\n\n现在下载吗？\n· 下载完成后会**再问一次**：立即重启安装，还是稍后\n· 更新期间请不要手动打开程序（替换过程中会被打断）\n· config.json 与 Mod 库不受影响\n· 失败会自动回滚旧版本\n\n进度会显示在「依赖」页`)) return r;
 
     if (!r.frozen) {
       // 源码运行模式没法替换自己：只下载更新包，然后提示手动 git pull
@@ -1486,6 +1786,7 @@ async function boot() {
   });
   splashMsg('正在绑定界面…');
   try { bind(); diag.push('bind ✓'); } catch (err) { diag.push(`bind ✗ ${err.message || err}`); console.error('bind 失败', err); }
+  try { initTour(); } catch (err) { console.error('initTour 失败', err); }
   splashMsg('正在读取配置…');
   try {
     await refreshFromState();
@@ -1525,6 +1826,40 @@ async function boot() {
   // 才可见（2026-10-01 实测定位）。
   try { call('ui_ready').catch(() => {}); } catch (err) { /* 忽略 */ }
   startCrashPolling();
+  // 上次更新选了"稍后"：启动后过一会儿再问一次（延后询问，不拖慢首屏）
+  setTimeout(async () => {
+    try {
+      const pending = await call('pending_update');
+      if (pending && pending.pending) {
+        await askApplyUpdate(`已下载 v${pending.latest || '新版'} 的更新`);
+      }
+    } catch (err) { /* 忽略：不影响正常使用 */ }
+  }, 1500);
+  // 第一次使用（未初始化、且没走过引导）：**先问要不要引导**，而不是直接推一键启动。
+  // 用户 2026-10-01 要求：「不要上来就一键启动，应该问是否需要引导，然后是和跳过，
+  // 引导应该先调到依赖页，箭头指一键更新下载介绍并建议点击，然后说一下能拖 zip 文件
+  // 进来，然后建议一键启动并同时说明能在设置页一键还原」。
+  setTimeout(async () => {
+    try {
+      const fr = await call('first_run_state');
+      if (!fr || fr.onboarding_done) return;
+      const missing = (fr.missing_components || []).join('、');
+      const start = await showModalDialog({
+        title: '要不要看一下使用引导？',
+        message: (fr.first_run
+          ? `检测到本程序还没完成初始化${missing ? `（当前缺少：${missing}）` : ''}。\n\n`
+          : '') +
+          '引导会带你走一遍最关键的几步（约 1 分钟）：\n'
+          + '· 在「依赖」页一键装齐全部组件\n'
+          + '· 在「Mod 库」页把 zip 拖进来导入 Mod\n'
+          + '· 一键启动，以及出问题时怎么一键还原\n',
+        okText: '开始引导',
+        cancelText: '跳过',
+      });
+      if (start) tourShow(0);
+      else tourFinish();       // 跳过也记下来，下次不再问
+    } catch (err) { /* 忽略 */ }
+  }, 1200);
   // 角色识别不确定的 Mod：弹窗让用户选（延后一点，别和启动流程抢时间）
   setTimeout(() => { startCharacterCheck(); }, 1500);
 }

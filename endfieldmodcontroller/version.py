@@ -1,14 +1,14 @@
 """版本号与仓库信息（窗口标题、右上角更新检测、自我更新共用一处）。
 
-改版本号只需要改这里 + 打对应 tag（如 `v0.2.8`）的 GitHub release。
+改版本号只需要改这里 + 打对应 tag（如 `v0.4.0`）的 GitHub release。
 
 版本号规则（用户 2026-09-27 定）：**与 GitHub 上的有区别就升下一版，但没推送时只领先一个** ——
-即 GitHub 最新是 v0.2.7 时，本地不管累积多少改动都保持 0.2.8，推送发版后才继续往上走。
+即 GitHub 最新是 v0.3.1 时，本地不管累积多少改动都保持 0.4.0，推送发版后才继续往上走。
 """
 from __future__ import annotations
 
 APP_NAME = "EndfieldModController"
-__version__ = "0.3.1"
+__version__ = "0.4.0"
 
 # 自我更新与"检查更新"指向的仓库
 REPO = "jing-hy/EndfieldModController"

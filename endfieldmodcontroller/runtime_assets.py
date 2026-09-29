@@ -257,25 +257,63 @@ def ensure_all(
     本地没有 `assets\\`（典型情况：用户只下了单文件 exe，没下资产包）时，
     会尝试从本仓库 Release 拉一次 `assets-bundle.zip` 再展开。
     """
+    # **必须在任何分支之前导入**：之前只把它放在"本地没有 assets"的分支里，结果本地
+    # 有 assets 时后面的 `dependencies.run_batch_with_retry` 直接 UnboundLocalError
+    # （2026-10-01 实测抓到）。
+    import time as _time
+
+    from . import dependencies
+
     found = manifest_entries(config)
     if not found and allow_fetch:
-        fetched = fetch_bundle(config, log=log)
-        if fetched.get("changed"):
-            found = manifest_entries(config)
-        elif fetched.get("message"):
-            _log(log, f"未能获取资产包：{fetched['message']}")
+        # 拉资产包是**网络下载**，失败要重试（用户 2026-10-01 要求「全部下载完之后如果
+        # 有失败项，就重试，3 次截止」）。以前一次失败就直接报"找不到随包资产"，
+        # 界面上看起来就是"完成，但有 1 项失败"。
+        for attempt in range(dependencies.MAX_BATCH_RETRIES + 1):
+            if attempt:
+                _log(log, f"资产包获取失败，重试第 {attempt}/{dependencies.MAX_BATCH_RETRIES} 次 …")
+            fetched = fetch_bundle(config, log=log, force=bool(attempt))
+            if fetched.get("changed"):
+                found = manifest_entries(config)
+                break
+            if attempt >= dependencies.MAX_BATCH_RETRIES:
+                if fetched.get("message"):
+                    _log(log, f"未能获取资产包：{fetched['message']}")
+            else:
+                _time.sleep(1.5)
     if not found:
         return [AssetResult(
             "*", "missing_source",
             "找不到随包资产目录 assets\\nvngx、(assets\\dlss5)"
             "（源码/便携包不完整，或用的是旧版 Release）",
         )]
-    results: list[AssetResult] = []
-    for group, root, name, entry in found:
-        results.append(ensure_file(
+
+    def worker(item: tuple[str, Path, str, dict[str, Any]], attempt: int) -> AssetResult:
+        group, root, name, entry = item
+        if attempt:
+            _log(log, f"重试展开资产 {name}（第 {attempt}/{dependencies.MAX_BATCH_RETRIES} 次）…")
+        result = ensure_file(
             config, name, entry, root,
-            group=group, progress=progress, log=log, force=force, verify=verify,
-        ))
+            group=group, progress=progress, log=log,
+            force=force or bool(attempt), verify=verify,
+        )
+        # **缺失也要重试**（用户 2026-10-01 明确要求）—— 状态不是"已就位 / 已展开"就
+        # 当作失败交给重试逻辑；缺失通常是分卷没解开或上次下载中断，force 重跑一次
+        # 往往就补上了。只有重试完仍缺，才在结果里如实报"缺失"。
+        status = str(getattr(result, "status", "") or "")
+        if status not in ("present", "extracted"):
+            raise RuntimeError(getattr(result, "message", "") or f"{name}: {status or '缺失'}")
+        return result
+
+    # 单项失败不中断其它项，失败项再重试（与下载同一套策略）
+    outcomes, _pending = dependencies.run_batch_with_retry(list(found), worker)
+    results: list[AssetResult] = []
+    for index, (_group, _root, name, _entry) in enumerate(found):
+        kind, payload = outcomes[index]
+        if kind == "ok":
+            results.append(payload)
+        else:
+            results.append(AssetResult(name, "error", str(payload)))
     return results
 
 

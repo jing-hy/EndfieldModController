@@ -21,6 +21,57 @@ _MONITOR_LOCK = threading.Lock()
 _MONITOR_THREAD: threading.Thread | None = None
 
 
+def open_path(config: Any, path: Path) -> dict[str, Any]:
+    """在资源管理器里定位到指定文件/目录。
+
+    ⚠️ 这个函数**曾经缺失**：`api.open_path_in_explorer()` 与 `api.open_logs_dir()` 一直在调
+    `diagnostics.open_path(...)`，但模块里根本没有它 —— 于是崩溃弹窗上点"打开路径"必然报
+    `AttributeError: module 'endfieldmodcontroller.diagnostics' has no attribute 'open_path'`
+    （用户 2026-09-29 实测报的）。
+
+    安全约束与 `api.open_path` 保持一致（那条路径 2026-10-01 加固过）：
+      * 只允许打开本程序自己的目录（runtime / 配置目录 / Mod 库）与游戏目录；
+      * **不直接运行可执行文件** —— Windows 上 `os.startfile` 对 exe/bat/lnk 是"执行"，
+        页面一旦被注入脚本就是任意代码执行；这里一律用 `explorer /select,` 定位。
+    """
+    import subprocess
+
+    target = Path(path).expanduser()
+    try:
+        target = target.resolve()
+    except OSError as exc:
+        return {"ok": False, "message": f"路径无法解析: {exc}"}
+    if not target.exists():
+        return {"ok": False, "message": f"路径不存在: {target}"}
+
+    def _under(candidate: Path, root: Path) -> bool:
+        try:
+            candidate.relative_to(root.resolve())
+            return True
+        except (ValueError, OSError):
+            return False
+
+    allowed = [config.runtime_path, config.base_dir, config.library_path]
+    try:
+        from . import reshade_integration
+
+        game_dir = reshade_integration.detect_game_dir(config)
+    except Exception:  # noqa: BLE001
+        game_dir = None
+    if game_dir is not None:
+        allowed.append(game_dir)
+    if not any(_under(target, root) for root in allowed):
+        return {"ok": False, "message": f"拒绝打开程序目录之外的路径: {target}"}
+
+    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        # 目录用 /select 也能定位（父目录里高亮该项）；文件则高亮文件本身
+        subprocess.Popen(["explorer", f"/select,{target}"], creationflags=creationflags)
+    except OSError as exc:
+        return {"ok": False, "message": f"打开失败: {exc}"}
+    return {"ok": True, "path": str(target)}
+
+
 def logs_dir(config: Any) -> Path:
     return Path(config.runtime_path) / "logs"
 

@@ -93,6 +93,8 @@ class AppConfig:
     # 工具自身单实例：已有控制器在跑时，第二个实例直接提示并退出（避免两个进程同时改
     # 注入库/staging 造成互相踩踏）。关掉它就能开多个窗口。
     single_instance: bool = True
+    # 新手引导是否已完成/已跳过（用户 2026-10-01 要求把"首次使用提示"做成分步引导）
+    onboarding_done: bool = False
     # 是否把内置的新版 DLSS 运行库（nvngx_dlss / nvngx_dlssnr）部署进游戏目录。
     # 默认 False —— 实测新版 nvngx 会让游戏起不来，只在缺失时才补齐。
     deploy_new_nvngx: bool = False

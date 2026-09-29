@@ -426,21 +426,36 @@ def ensure_all(
     only_missing: bool = False,
     force: bool = False,
 ) -> list[dict[str, Any]]:
-    """按顺序安装/更新所有在线组件。默认只补缺失的，不动已就位的。"""
-    results: list[dict[str, Any]] = []
-    for component in COMPONENTS:
+    """按顺序安装/更新所有在线组件。默认只补缺失的，不动已就位的。
+
+    **单项失败不中断其它项，跑完后再对失败项重试（最多 3 次）** —— 用户 2026-10-01
+    要求：「下载一旦失败就停了，改成全部下载完之后如果有失败项，就重试，3 次截止」。
+    """
+    def work(component: Component, attempt: int) -> dict[str, Any]:
         state = _component_state(config, component)
         if only_missing and state["present"]:
-            results.append({"key": component.key, "ok": True, "changed": False,
-                            "message": "已就位，跳过", "status": "跳过"})
-            continue
-        _log(log, f"处理组件 {component.display} …")
-        try:
-            result = install(config, component.key, log=log, force=force)
-        except Exception as exc:  # noqa: BLE001
-            result = {"ok": False, "changed": False, "message": str(exc)}
+            return {"key": component.key, "ok": True, "changed": False,
+                    "message": "已就位，跳过", "status": "跳过"}
+        _log(log, f"处理组件 {component.display} …" if attempt == 0
+             else f"重试组件 {component.display}（第 {attempt} 次）…")
+        result = install(config, component.key, log=log, force=force)
         result["key"] = component.key
         result["status"] = ("已安装" if result.get("changed") else
                             ("已是最新" if result.get("ok") else "失败"))
-        results.append(result)
+        if not result.get("ok"):
+            raise RuntimeError(str(result.get("message") or f"{component.key}: 安装失败"))
+        return result
+
+    def on_retry(attempt: int, pending: list[Component]) -> None:
+        _log(log, f"有 {len(pending)} 个组件失败，重试第 {attempt}/{dependencies.MAX_BATCH_RETRIES} 次")
+
+    outcomes, _pending = dependencies.run_batch_with_retry(list(COMPONENTS), work, on_retry=on_retry)
+    results: list[dict[str, Any]] = []
+    for index, component in enumerate(COMPONENTS):
+        kind, payload = outcomes[index]
+        if kind == "ok":
+            results.append(payload)
+        else:
+            results.append({"key": component.key, "ok": False, "changed": False,
+                            "message": str(payload), "status": "失败"})
     return results

@@ -2,7 +2,7 @@
 
 《明日方舟：终末地》的一站式 Mod 管理器：把 **DLSS5 神经渲染 + 第一人称视角 + 服装 Mod（EFMI）** 以及 **乳摇（SecondaryMotion）** 统一到一次「一键启动」里，并自动维护各项注入与初始化自检。
 
-Windows 桌面程序（Python + PyWebview），单文件 exe，**零配置启动即用**。当前版本 **0.3.1**。
+Windows 桌面程序（Python + PyWebview），单文件 exe，**零配置启动即用**。当前版本 **0.4.0**。
 
 > 本程序**只做编排与自检**：注入由 XXMI Launcher 完成，服装 Mod 由 EFMI 加载，神经渲染与第一人称是挂在同一个 ReShade 底座下的 addon。
 > 它**不改游戏本体文件**，也不内置任何 Mod —— Mod 都是你自己放进来的。
@@ -19,6 +19,8 @@ Windows 桌面程序（Python + PyWebview），单文件 exe，**零配置启动
 | **收编手动 Mod** | 你自己丢进 `Mods` 目录的 Mod 会被认出来、收进库并在界面勾选上 |
 | **一键启动** | 维护 XXMI 的注入库（DLSS5 的 `d3d12.dll` + EFMI 的 `d3d11.dll`）、补齐缺失组件、跑完整初始化自检，然后拉起 XXMI |
 | **插件开关** | DLSS5、第一人称、第三方服装 Mod、乳摇注入，都能单独开关（可逆，靠移动文件而不是删文件） |
+| **DLSS5 自检** | 检查并补齐 shader 编译依赖、ReShade 标准头、纹理目录、preset 里的 technique 与运动矢量来源 —— 这几项缺任何一项都会"看起来都装了，就是不出帧" |
+| **乳摇开箱可用** | 自动实例化管理器的模板文件、纠正 `enabled` 开关、并预写 `settings.json` 记住游戏目录（不再每次让你选文件夹） |
 | **游戏目录净化 / 还原** | 把第三方注入物**先备份再移走**（`runtime/game_backup/…`），随时一键还原；被移走的系统模块会自动从 System32 补回 |
 | **诊断与日志** | 启动日志、崩溃监视、一键导出诊断 zip（含日志、注入状态、Windows 事件） |
 | **更新** | 检查/下载新版并自更新（下载后校验 sha256，退出后由脚本替换并重启）；组件（XXMI / EFMI / 乳摇）也能单独更新 |
@@ -30,10 +32,11 @@ Windows 桌面程序（Python + PyWebview），单文件 exe，**零配置启动
 唯一的 ReShade 底座  runtime\dlss5\d3d12.dll（ReShade 6.8.0 Addon 版）
   ├─ renodx-dlss5-4.7_汉化.addon64      → DLSS5 神经渲染
   ├─ renodx-endfield-enhancer.addon64   → 第一人称 / 相机
-  ├─ dlss5-feed.addon64                 → DLSS5 输入（需启用 DLSS5_Feed technique）
+  ├─ dlss5-feed.addon64                 → 给 DLSS5 喂"颜色 + 运动矢量 + 深度"
   ├─ trans-zh.addon64                   → 面板汉化
-  └─ reshade-shaders\                   → 含 DLSS5_Feed.fx
+  └─ reshade-shaders\                   → DLSS5_Feed.fx、iMMERSE、ReShade 标准头
 服装 Mod 引擎  EFMI\d3d11.dll
+乳摇注入       游戏目录的 d3dcompiler_47.dll / vulkan-1.dll（代理）+ plugin\sbm.dll
 ```
 
 XXMI Launcher 启动游戏时按「注入库」注入上表里的 DLL，注入库由本程序维护，启动页的开关就是它的快捷切换。
@@ -45,7 +48,7 @@ XXMI Launcher 启动游戏时按「注入库」注入上表里的 DLL，注入�
 
 ### 方式 A：直接双击 exe（推荐）
 
-1. 下载 `EndfieldModController.exe`（Release 里只有这一个文件）；
+1. 下载 `EndfieldModController.exe`（Release 里 exe 只有这一个文件，另有一个 `assets-bundle.zip`）；
 2. 放到一个**你有写权限的目录**（见下方"数据根"），双击；
 3. exe 的 manifest 自己要求管理员权限，会弹一次 UAC —— 点"是"。
    （XXMI Launcher 的 exe 要求管理员，非管理员启动会直接报 WinError 740，所以默认就按管理员处理。）
@@ -68,13 +71,43 @@ run.bat --cli    :: 不开界面，直接打印当前状态 JSON（调试用）
 
 1. **界面立刻出现**：窗口 1~3 秒内出现并显示加载页（从零启动实测 2.7 秒；窗口底色跟随主题，加载页至少显示 0.7 秒），**不存在"亮着窗口一片空白"的阶段**；全盘探测在首屏出来之后才开始，不挡界面；
 2. 自动下载安装 XXMI / XXMI Libraries / EFMI；
-3. XXMI 的配置是**它首次运行时自己生成**的，所以本程序会先拉起一次 XXMI 生成配置、随后关闭它，并提示：
+3. XXMI 的配置是**它首次运行时自己生成**的，所以本程序会先拉起一次 XXMI 生成配置、随后关闭它，并在拉起 XXMI 之后提示：
 
-   > 第一次启动：已临时拉起 XXMI 生成它的配置文件，随后已关闭。**请再点一次「一键启动」**。
+   > 第一次启动可能失败 —— 建议再启动一次。
+   > 点了 XXMI 里的 Start 之后，终末地有概率不会正常启动；如果发现游戏没开起来，**再启动一次**通常就好了。
+
+   （提示只在"真的拉起来过 XXMI"或"还没走过首次引导"时出现一次，不会反复弹。）
 
 4. 再点一次「一键启动」就会真正写好注入库并拉起 XXMI。
 
-> **DLSS5 那套组件没有上游可下载**（`renodx-endfield-enhancer.addon64`、`trans-zh.addon64`、`nvngx_dlssnr.dll` 全网都没有自动可用的发布源），需要随包自备或从可用的旧环境复制到 `runtime\dlss5\`。缺了会明确提示缺哪个文件，而不是静默失败。
+> **DLSS5 那套组件没有上游可下载**（`renodx-endfield-enhancer.addon64`、`trans-zh.addon64`、`nvngx_dlssnr.dll` 全网都没有自动可用的发布源），需要随包自备（`assets\dlss5\`）或从可用的旧环境复制到 `runtime\dlss5\`。缺了会明确提示缺哪个文件，而不是静默失败。
+
+### ⚠ DLSS5 首次使用：还要在 ReShade 面板里点两下
+
+DLSS5 能不能出帧，除了文件齐全以外，**还取决于两个 ReShade 效果是否被"激活"** —— 而这个激活状态是 ReShade 的内部状态，光靠写配置文件不一定生效（本程序会把 preset 里的 technique 与顺序都写好，但首次通常仍需手动点一次）：
+
+1. 进游戏后按 **Home** 打开 ReShade 面板 → **主页** → 找到**效果列表**；
+2. 找到 **`iMMERSE: Launchpad`**（说明写着 "enable and move to the top!"）→ 点它右边的「**置顶激活效果**」；
+3. 再找到 **`DLSS5_Feed`** → 也点「置顶激活效果」；
+4. ⚠️ **保证 `iMMERSE: Launchpad` 排在 `DLSS5_Feed` 上面**（说明书要求 provider 在 DLSS5_Feed **之上**）——"置顶"会把它弄到最上面，必要时在列表里拖动调整；
+5. 正常退出游戏（ReShade 会自动把设置写回 `ReShadePreset.ini`，`AutoSavePreset` 默认开启）。
+
+之后每次启动都会保持。判断是否真的工作了，进游戏后看面板这几行：
+
+```
+NGX Hook：创建/评估      不该一直是 0
+成功NR帧                 应该开始涨
+```
+
+或者看日志 `runtime\dlss5\dlss5-feed.log`，成功时是这样：
+
+```
+################ feed: opening D3D12 session ################
+[feed] NVSDK_NGX_D3D12_Init -> 0x00000001 (Success)
+[feed] feature ready: 3840x2160 DLAA, flags=74 ...
+[feed] frame 1 delivered (3840x2160, reset=1)
+[feed] 600 frames: feed CPU 0.4x ms/frame ...
+```
 
 ---
 
@@ -98,6 +131,8 @@ run.bat --cli    :: 不开界面，直接打印当前状态 JSON（调试用）
 路径配置（XXMI / 游戏 / loader / 乳摇工具）、下载加速与线路、主题、单实例与游戏多开防护、是否部署新版 nvngx、依赖清单等。
 `config.json` 里的键与默认值可参考 `config.example.json`（由程序默认值直接导出）。
 
+> **关于"部署新版 nvngx"**：默认**关闭**。DLSS5 的神经渲染接口（`NVSDK_NGX_D3D12_EvaluateFeature_C`）住在 `nvngx_dlssnr.dll` 里，本程序会把它放在 `runtime\dlss5\` 供 addon 加载；游戏目录里那份 `nvngx_dlss.dll` 保持**游戏原版**即可。打开这个开关会额外用新版覆盖游戏目录（改前留 `*.game_original`），**可能影响游戏启动**，不确定就别开。
+
 ### 游戏目录净化 / 还原
 
 把游戏目录里的第三方注入物（loader proxy、插件数据、残留 ReShade 痕迹）**先备份再移走**，备份在 `runtime\game_backup\<时间戳>\`（含 `manifest.json` 与还原所需的文件），随时可还原。
@@ -113,12 +148,13 @@ run.bat --cli    :: 不开界面，直接打印当前状态 JSON（调试用）
 ├─ library/                     Mod 库（你拖进来的 zip 解压到这里）
 └─ runtime/
    ├─ builtin/XXMI/             自动下载安装的 XXMI Launcher + Libraries + EFMI
-   ├─ dlss5/                    DLSS5 底座与插件（d3d12.dll / ReShade.ini / *.addon64 / reshade-shaders）
+   ├─ dlss5/                    DLSS5 底座与插件（d3d12.dll / ReShade.ini / ReShadePreset.ini
+   │                            / *.addon64 / nvngx_*.dll / reshade-shaders / dlss5-feed.cfg）
    ├─ reshade/                  控制器自己的 addon 与 actions.tsv
    ├─ secondary_motion/         乳摇工具（可选）
    ├─ game_backup/<时间戳>/      游戏目录净化备份（可还原）
    ├─ backups/                  引擎目录、配置等的历史备份
-   ├─ logs/                     日志与诊断包（logs/bundles/*.zip）
+   ├─ logs/                     日志与诊断包（logs/bundles/*.zip 是崩溃包）
    └─ _update/                  自更新下载与残留
 ```
 
@@ -128,11 +164,36 @@ run.bat --cli    :: 不开界面，直接打印当前状态 JSON（调试用）
 
 ## 五、常见问题
 
+### DLSS5 相关（面板显示不正常时按顺序看）
+
+**Q：面板显示「0 渲染」/ `NGX Hook 创建 0`？**
+`nvngx_dlssnr.dll` 没就位。确认 `runtime\dlss5\` 里有这两个文件：`nvngx_dlss.dll`（58,977,904 B）与 `nvngx_dlssnr.dll`（165,840,496 B）——**游戏目录保持原版即可**，不需要动它。日志里会有 `Failed to find NVSDK_NGX_D3D12_EvaluateFeature_C` 这条（正常，它旁边的 `EvaluateFeature hooked` 才是关键）。
+
+**Q：能进游戏，但「成功NR帧」一直是 0？**
+按顺序查三处：
+1. `runtime\dlss5\dlss5-feed.log` 里是不是 `motion vectors will be zero (still images only)` —— 是的话说明运动矢量来源没配，`ReShade.ini` 的 `[GENERAL] PreprocessorDefinitions` 与 `ReShadePreset.ini` 里都要有 `DLSS5_MV_PROVIDER=1`；
+2. 日志里是不是 `LaunchPad technique found (DISABLED)` —— 是的话按上文「DLSS5 首次使用」到面板里激活两个效果；
+3. 日志里是不是只有 `launchPad technique found (enabled)` 就没了、没有 `opening D3D12 session` —— 那是 `DLSS5_Feed` 这个 effect **没被激活**，同样去面板点一次。
+
+**Q：ReShade 提示「编译一些效果时出现了错误」？**
+那是完整 shader 集合里几个无关效果（`MartysMods_FFTBLOOM.fx`、`INSIGHT.fx`、`RSRetroArch\mdapt.fx`、`DH\dh_uber_rt.fx`、`AstrayFX\RadiantGI.fx`）编译失败，**与 DLSS5 无关**，程序会把它们移到 `_quarantine_bad_shaders\`。真正要关心的是日志里有没有 `Failed to compile ... DLSS5_Feed.fx: could not open included file 'ReShade.fxh'` —— 那说明缺 ReShade 标准头，重跑一次自检即可（`dlss5:shader_deps` 会补齐）。
+
+**Q：`dlss5-feed.addon64` 要不要升级到新版？**
+**不要**。旧版（76,800 B，0.1.0）会自己跑一个 DLAA pass，适合"游戏本身没有 DLSS 或走 Streamline"的情况；1.18.0-beta.1（332,800 B）自述是给"**没有 DLSS 的游戏**"用的，在终末地上不会出帧。程序随包分发的是旧版。
+
+### 其他
+
+**Q：乳摇管理器每次都要我选游戏文件夹？**
+`<乳摇工具目录>\SecondaryMotion\settings.json` 里的 `game_data_dir` 必须是 **`<游戏目录>\SecondaryMotion`**（数据目录，不是游戏根目录）。程序初始化时会自动写好；要手动改的话注意这一点。
+
+**Q：第一人称没效果，点面板按钮也没反应？**
+`runtime\dlss5\ReShade.ini` 的 `[endfield-enhancer]` 段里，`CameraEFMICompatibility` 必须是 `1`（与 EFMI 服装 Mod 共存所必需），另外 `CameraFirstPersonMovement` / `CameraMeshHeadHiding` / `CameraFirstPersonDialogue` / `CameraSmoothPerspectiveTransition` 都建议为 `1`，`ShortcutFirstPerson=112`（F1）是切换键。程序初始化时会写入这套可用默认值。
+
 **Q：点了一键启动，Mod 没生效 / 注入失败？**
 看启动页的初始化自检结果与 `runtime\logs\launch.log`。常见原因：XXMI 配置还没生成（第一次要点两次启动）、注入库被 XXMI 自己的设置弹窗重置、`d3dx.ini` 的 `[Loader] target` 指错、或游戏目录残留了旧的 loader proxy（用"净化游戏目录"处理）。
 
 **Q：游戏起不来 / 进游戏闪退？**
-先看 `runtime\logs\` 里的崩溃信息与诊断 zip。常见原因：游戏目录缺 `d3dcompiler_47.dll` / `vulkan-1.dll`（净化时会自动补回，补不回会明确报错）、注入库同时挂了两个 ReShade 底座、或 mod 之间同角色冲突。
+先看 `runtime\logs\bundles\` 里最新的崩溃包（程序检测到异常退出会自动打包，里面含游戏的 `Player.log`、CrashSight 日志、模块列表与我们的分析）。已排除过的常见原因：注入库同时挂了两个 ReShade 底座、mod 之间同角色冲突、游戏目录缺 `d3dcompiler_47.dll` / `vulkan-1.dll`。**也不要同时开"部署新版 nvngx"**。
 
 **Q：第一次启动会很慢吗？**
 不会。窗口 1~3 秒内出现（从零启动实测 2.7 秒），而且**任何阶段都不会出现空白窗口**：窗口底色跟随主题、加载页至少显示 0.7 秒，并分步提示「正在绑定界面 → 正在读取配置 → 正在扫描 Mod 库」。
@@ -145,7 +206,7 @@ run.bat --cli    :: 不开界面，直接打印当前状态 JSON（调试用）
 本程序不注入、不碰反作弊；注入由 XXMI/EFMI 完成，且只作用于游戏目录里那几个已知文件。所有对游戏目录的改动都可备份、可还原。风险自负（见免责声明）。
 
 **Q：崩溃了怎么反馈？**
-在日志窗点「导出诊断包」，把生成的 zip 附到 issue 里（含日志、注入状态、Windows 应用错误事件）。附崩溃 dump 更好。
+程序检测到游戏异常退出时会自动把「控制器日志 + 游戏日志 + 崩溃转储」打包到 `runtime\logs\bundles\crash-<时间戳>.zip`，在弹窗里点「打开路径」即可定位（也可以用日志窗的「导出诊断包」）。把 zip 附到 issue 里。
 
 ---
 
@@ -170,12 +231,18 @@ python -m endfieldmodcontroller --cli   :: 打印状态 JSON
 | `activation.py` | 选择解析（同角色互斥/依赖按需）、staging 生成与清理 |
 | `launcher.py` | 一键启动、注入库维护、XXMI 配置读写、ReShade 运行时准备、进程收尾 |
 | `api.py` | 暴露给前端的接口层（pywebview `js_api`）；构造必须保持"快"，重活放后台预热 |
+| `initialize.py` | 初始化自检（ReShade.ini 重建并**保留所有段**、DLSS5 shader/preset/运动矢量、游戏目录运行库、Mod 冲突检测） |
+| `secondary_motion.py` | 乳摇：状态、注入、模板实例化、`settings.json`（游戏数据目录） |
 | `dependencies.py` / `runtime_deps.py` | 依赖清单、下载与解压（逐文件原子替换）、XXMI/Libs/EFMI 安装 |
 | `dlss5_fetcher.py` / `reshade_integration.py` | DLSS5 组件、ReShade 集成与游戏目录注入审计 |
 | `game_clean.py` | 游戏目录净化/还原（备份式、内容级判定、越界拒绝） |
 | `fastnet.py` / `github.py` / `fsutil.py` | 下载（并发/镜像/校验）、GitHub 查询与缓存、哈希与原子写公共件 |
 | `diagnostics.py` / `crashwatch.py` | 日志、诊断包、崩溃监视与报告 |
 | `web/` | 前端（原生 HTML/CSS/JS，pywebview 里跑） |
+
+### 测试清单
+
+仓库根目录的 `TESTING.md` 是一份可照做的全功能验收清单（按测试环境分段、编号稳定，出问题按编号反馈即可）。
 
 ---
 
@@ -189,7 +256,7 @@ python scripts\prepare_release.py        :: 校验产物 + 生成 assets-bundle.
 python scripts\upload_release_assets.py  :: 上传两个附件（大文件走直连，见下）
 ```
 
-> **大文件上传的坑（2026-10-01 实测）**：机器上开着 Steam++ / Watt Toolkit 时，它会把 github
+> **大文件上传的坑（实测）**：机器上开着 Steam++ / Watt Toolkit 时，它会把 github
 > 相关域名写进 hosts 指向 `127.0.0.1` 的本地反代，而该反代对**大 body 的 POST 上传**支持不好 ——
 > 实测 1 / 5 / 20 / 60 MB 都能过，126 MB 的 `assets-bundle.zip` 会在发出约 100 KB 后被强断
 > （`gh release upload` 报 HTTP 502：`RequestBodyDestination … 远程主机强迫关闭了一个现有的连接`）。
@@ -212,9 +279,10 @@ python scripts\upload_release_assets.py  :: 上传两个附件（大文件走直
 - `dist\` **只留构建产物**：构建脚本会自动清掉 exe 在 dist 里跑过留下的 `config.json` / `runtime\` /
   `library\`，以及早期 `--onedir` 的残留目录（`dist\EndfieldModController\`）。
 - Release 附件 = **`EndfieldModController.exe` + `assets-bundle.zip`** 两个。
-  单文件 exe 装不下约 125 MB 的运行时资产（`assets/nvngx` 本身是 xz 分卷），程序在本地找不到
+  单文件 exe 装不下运行时资产（`assets/nvngx` 本身是 xz 分卷），程序在本地找不到
   `assets\` 时会自动从 Release 下载这个包并展开 —— `prepare_release.py` 会调用
   `scripts\build_assets_bundle.py` 现打一份 `dist\assets-bundle.zip`（+ `.sha256`）。
+  ⚠️ **改过 `assets\` 之后一定要重新生成它**，别拿旧包发布。
 - **不做便携版**（没有 portable zip，也没有相应的打包脚本）。
 - 版本号：与 GitHub 上的有区别就升下一版，未推送期间只领先一个。
 - 伪旧版的版本号固定写成 `0.1.9`（代码是最新的），命名刻意取"旧版本号"以便一眼分辨；
@@ -231,9 +299,17 @@ python scripts\upload_release_assets.py  :: 上传两个附件（大文件走直
 | [3DMigoto](https://github.com/bo3b/3Dmigoto) | EFMI 的底座 | MIT |
 | [ReShade](https://reshade.me/) | 后处理底座（Addon 版） | BSD-3 |
 | [RenoDX DLSS](https://github.com/clshortfuse/renodx) | DLSS5 神经渲染 | MIT |
-| [Endfield Enhancer](https://github.com/RenoDX-Suite/) | 第一人称 / 相机 | MIT |
-| [iMMERSE](https://github.com/MartysMods/iMMERSE) | ReShade 后处理链 | MIT |
-| ShakingBreastManager / SecondaryMotion | 乳摇 | 见上游仓库 |
+| [Endfield Enhancer](https://github.com/RenoDX-Suite/) | 第一人称 / 相机（英文原版） | MIT |
+| **第一人称中文补丁** —— B站 up 主 **Hirahido** | 第一人称 / 相机面板的**中文**版本 | 版权归原作者 |
+| [iMMERSE](https://github.com/MartysMods/iMMERSE) | ReShade 后处理链（Launchpad 等） | MIT |
+| [dlss5-feed](https://www.nexusmods.com/) | 给 DLSS5 喂颜色/运动矢量/深度 | 见其说明 |
+| [ShakingBreastManager / SecondaryMotion](https://github.com/Sp1cHless/Arknights-Endfield-Plugin-Secondary-bodyphysics) | 乳摇 | 见上游仓库 |
+| NVIDIA NGX 运行库（`nvngx_dlss.dll` / `nvngx_dlssnr.dll`） | DLSS 与神经渲染运行库 | NVIDIA 版权，随包仅为免去手动下载 |
+
+**关于第一人称中文补丁（特别声明）**：随包分发的第一人称**中文**补丁由 **B站 up 主 Hirahido** 制作，
+版权归其所有（源自作者发布的"终末地EE"）。
+本程序**只做分发与安装编排**，不修改其内容；如果你是该补丁的作者且不希望被随包分发，
+请在 issue 里说明，我会立即移除。英文原版第一人称插件来自 [Endfield Enhancer](https://github.com/RenoDX-Suite/)（RenoDX Suite）。
 
 各组件版权归原作者所有。本程序只做编排、自检与备份还原，不修改这些组件的源码。
 
@@ -243,5 +319,5 @@ python scripts\upload_release_assets.py  :: 上传两个附件（大文件走直
 
 - 本程序**不是**官方工具，与鹰角网络 / Hypergryph 无关。
 - 使用 Mod 可能违反游戏用户协议，**风险由使用者自负**；请自行确认你所在环境的规则。
-- 本程序会读写游戏目录中的注入类文件（`d3d12.dll` / `ReShade.ini` / `actions.tsv` 等），但一律先备份、且提供一键还原；**不会**修改游戏本体、资源与存档。
+- 本程序会读写游戏目录中的注入类文件（`d3d12.dll` / `d3dcompiler_47.dll` / `vulkan-1.dll` / `plugin\sbm.dll` / `SecondaryMotion\` 等），但一律先备份、且提供一键还原；**不会**修改游戏本体、资源与存档。
 - 第三方组件由其原作者维护，出问题请先到对应仓库反馈；本程序的集成问题欢迎开 issue。

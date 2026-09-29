@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import runtime_assets
-from .config import AppConfig
+from .config import AppConfig, PROJECT_ROOT
 
 # DLSS5 目录里必须具备的最小文件集（缺一不可，否则三件套跑不起来）
 DLSS5_REQUIRED_FILES = (
@@ -36,8 +36,69 @@ GAME_LIBS = ("nvngx_dlss.dll", "nvngx_dlssnr.dll")
 # 其中游戏原版**并不存在**、属于 DLSS5 专属的文件：只在 deploy_new_nvngx=True 时部署
 GAME_LIBS_OPTIONAL = ("nvngx_dlssnr.dll",)
 ENHANCER_SECTION = "[endfield-enhancer]"
+
+# ── 语言：第一人称插件与 ReShade 面板都配成中文 ──────────────────────────────
+# 用户 2026-10-01：「我进去之后发现第一人称 mod 有个开关，跳（勾）了之后才能把
+# 语言变成中文，你看一下配置在哪里，我要初始化的时候就配置成中文」。
+#
+# 取证（2026-10-01，直接读 `renodx-endfield-enhancer.addon64` 的字符串表）：
+#   * 开关的 ini 键就是 `[endfield-enhancer] Language` —— 菜单里的搜索索引串是
+#     `EndfieldEnhancerMenu / ##search / Pages / Language / EN / ZH`，即它的选项
+#     只有两个：EN / ZH；
+#   * 缺中文字体时它自己的报错原文是
+#     "Chinese font missing: in ReShade Settings, select Chinese as the overlay
+#      language or choose a Chinese-capable Global font (for example
+#      Windows/Fonts/msyh.ttc)" → 说明**ReShade 面板语言也要设成中文**；
+#   * 它内嵌的 ReShade 语言表是 `en` = English、`zh-CN` = 简体中文 (Simplified
+#     Chinese)，所以 `[OVERLAY] Language` 要写 `zh-CN`。
+#
+# 数值映射（2026-09-29 由**用户手动切换后的文件**定案）：**`1` = 中文（ZH），`2` = 英文（EN）**。
+# 决定性证据（唯一一种真正携带用户意图的证据）：用户手动在面板里把语言切到中文后，
+# addon 把配置写进 `D:\zmdmod\modtest\runtime\dlss5\ReShade.ini`（18:57:22，清空重建后的
+# 环境），里面 `[endfield-enhancer] Language=1`。闭环验证：初始化曾写 2 → 用户看到英文
+# （「第一人称mod还是英语」）→ 他手动切中文 → 写回 1。
+# ⚠️ 这个值我反复错过两次，教训写在记忆里：① **出厂默认值 = 1 并不能说明它代表哪个选项**
+#    （addon 首次运行写出的全是出厂值，其中 Language=1 恰好就是中文）；
+#    ② 一度拿"用户实机那份 ini 里是 1"当依据 —— 但那份里 Language 从未被他改过，无效；
+#    ③ 只有"**用户亲手改过的那个键**"（对照出厂快照能看出变更）才能定值。
+FIRSTPERSON_LANGUAGE_ZH = "1"
+FIRSTPERSON_LANGUAGE_EN = "2"
+
+# 重建 ini 时给 `[endfield-enhancer]` 的**可用默认段**。
+# ⚠️ 只写 `Language` 是错的（2026-09-29 踩过）：其余键会由 addon 按它自己的默认补成 0 ——
+# 其中 `ShortcutFirstPerson=0` 意味着**根本没有切换第一人称的快捷键**，用户按什么键都没
+# 反应，表现就是「第一人称没效果」；`CameraEFMICompatibility=0` 还会让它与 EFMI 服装 Mod
+# 共存不了。这里按**主环境（已验证可用）**的取值给一套能直接用的默认，符合用户
+# "零配置启动即用"的准则。
+FIRSTPERSON_DEFAULT_SECTION = (
+    "[endfield-enhancer]\n"
+    "CameraEFMICompatibility=1\n"            # 与 EFMI 服装 Mod 共存所必需
+    "CameraFirstPerson=0\n"                  # 默认不常开，用快捷键切换
+    "CameraFirstPersonDialogue=1\n"
+    "CameraFirstPersonFOV=60\n"
+    "CameraFirstPersonFOVOverride=0\n"
+    "CameraFirstPersonMovement=1\n"
+    "CameraMeshHeadHiding=1\n"
+    "CameraSmoothPerspectiveTransition=1\n"
+    f"Language={FIRSTPERSON_LANGUAGE_ZH}\n"  # 界面语言：中文
+    "ShortcutFirstPerson=112\n"              # F1 切换第一人称
+)
+
 # DLSS5 的 ReShade preset 必须启用的 technique。
 # **顺序有意义** —— DLSS5_Feed.fx 明确要求 MartysMods_Launchpad 启用且排在它上面。
+#
+# 运动矢量来源（`DLSS5_MV_PROVIDER` 预处理宏）也必须指定，否则 DLSS5_Feed 会报
+# 「motion vectors will be zero (still images only)」—— 表现就是"不生成帧 / 只有静止
+# 画面有效"（用户 2026-09-29 反馈「dlss5 还是没生成帧」）。取值见 DLSS5_Feed.fx 头部：
+#   0 texMotionVectors（qUINT_motionvectors / DRME / dh_uber_motion，**需要另装 provider**）
+#   1 Launchpad（iMMERSE Deferred::MotionVectorsTex）← 我们本来就随包带了它，选这个
+#   2 VORT    3 LumeniteFX Kernel    4 LumeniteFX QuantMotion
+DLSS5_MV_PROVIDER_LAUNCHPAD = 1
+# preset 里 `EffectSorting` 的顺序：provider 的效果文件必须排在 DLSS5_Feed 之前，
+# 否则 addon 会报「provider is installed but DISABLED: enable it above DLSS 5 Feed.」。
+DLSS5_PRESET_EFFECT_ORDER = "MartysMods_LAUNCHPAD.fx,DLSS5_Feed.fx"
+DLSS5_PROVIDER_EFFECT = "MartysMods_LAUNCHPAD.fx"
+DLSS5_FEED_EFFECT = "DLSS5_Feed.fx"
 DLSS5_PRESET_TECHNIQUES = (
     "MartysMods_Launchpad@MartysMods_LAUNCHPAD.fx",
     "DLSS5_Feed@DLSS5_Feed.fx",
@@ -219,15 +280,138 @@ def _check_dlss5_dir(config: AppConfig, report: Report, log: Callable[[str], Non
                 source_zip = parent_zip
                 break
         if source_zip is None:
-            report.add("dlss5:shaders", False, "reshade-shaders 缺失且找不到 reshade-shaders.zip", manual=True)
+            report.add("dlss5:shader_deps", False, "reshade-shaders 缺失且找不到 reshade-shaders.zip", manual=True)
         else:
             try:
                 with zipfile.ZipFile(source_zip) as archive:
                     archive.extractall(dlss5)
-                report.add("dlss5:shaders", True, f"已从 {source_zip.name} 解压恢复", fixed=True)
+                report.add("dlss5:shader_deps", True, f"已从 {source_zip.name} 解压恢复", fixed=True)
                 report.action("解压恢复 reshade-shaders")
             except (OSError, zipfile.BadZipFile) as exc:
-                report.add("dlss5:shaders", False, f"解压失败: {exc}", manual=True)
+                report.add("dlss5:shader_deps", False, f"解压失败: {exc}", manual=True)
+
+
+# DLSS5 的 shader 编译依赖（**缺一个整条链就废**）。
+# 2026-09-29 用户报「reshade 提示编译出错」，`ReShade.log` 原文：
+#     ERROR | Failed to compile '...\reshade-shaders\Shaders\DLSS5_Feed.fx':
+#     DLSS5_Feed.fx(60, 1): preprocessor error: could not open included file 'ReShade.fxh'
+# 原因：从零环境只展开了 `DLSS5_Feed.fx` 与 `iMMERSE\`，**没有 ReShade 的 6 个标准头**，
+# 也没有 `Textures\` 目录（`AreaLUT.png` 等找不到，ReShade 另报 WARN）。
+# 这里按需补齐；源优先用随包 `assets\dlss5\`，其次用 dlss5 目录自身（开发机是全量的）。
+DLSS5_SHADER_FILES: tuple[tuple[str, ...], ...] = (
+    ("Shaders", "ReShade.fxh"),
+    ("Shaders", "ReShadeUI.fxh"),
+    ("Shaders", "Blending.fxh"),
+    ("Shaders", "DrawText.fxh"),
+    ("Shaders", "Macros.fxh"),
+    ("Shaders", "TriDither.fxh"),
+    ("Shaders", "DLSS5_Feed.fx"),
+    ("Shaders", "iMMERSE", "MartysMods_LAUNCHPAD.fx"),
+)
+
+
+def _check_dlss5_shaders(config: AppConfig, report: Report, log: Callable[[str], None] | None) -> None:
+    """DLSS5 需要的 shader 与 ReShade 标准头必须在位、Textures 目录必须存在。"""
+    if not config.dlss5_injection:
+        report.add("dlss5:shader_deps", True, "DLSS5 已在启动页关闭（跳过 shader 依赖检查）")
+        return
+    root = config.dlss5_path / "reshade-shaders"
+    # ⚠️ **不能用 `Path(__file__).resolve().parents[1]`** —— 打包成单文件 exe 后 `__file__`
+    # 指向 PyInstaller 的临时解压目录（`sys._MEIPASS`），而 assets 既没打进 exe、也不在那里，
+    # 于是 exe 版**永远补不上 shader 标准头**，用户看到的就是
+    # `Failed to compile 'DLSS5_Feed.fx': preprocessor error: could not open included file
+    #  'ReShade.fxh'`（2026-09-29 实测）。`assets` 和 config.json / runtime / library 一样位于
+    # **数据根**（exe 所在目录），所以走 `config.base_dir`。
+    base_dir = getattr(config, "base_dir", None) or PROJECT_ROOT
+    project_assets = Path(base_dir) / "assets" / "dlss5"
+    sources = [project_assets / "shaders", root / "Shaders"]
+    sources = [p for p in sources if p.is_dir()]
+
+    missing: list[str] = []
+    installed: list[str] = []
+    for relative in DLSS5_SHADER_FILES:
+        target = root.joinpath(*relative)
+        if target.is_file():
+            continue
+        source = next((base.joinpath(*relative[1:]) for base in sources
+                       if base.joinpath(*relative[1:]).is_file()), None)
+        if source is None:
+            missing.append("/".join(relative))
+            continue
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+            installed.append("/".join(relative))
+            report.action(f"补齐 DLSS5 shader 依赖 {relative[-1]}")
+        except OSError as exc:
+            missing.append(f"{'/'.join(relative)}（写入失败: {exc}）")
+
+    # Textures 目录：不存在时 ReShade 会刷 "Failed to resolve search path ... error code 2"
+    # ⚠️ 判据必须是"目录存在**且里面有文件**" —— 只看目录在不在的话，**空目录会被跳过**，
+    # 而空目录同样会让 ReShade 报错、也会让 iMMERSE / DLSS5_Feed 找不到 AreaLUT.png 之类的
+    # 纹理（2026-09-29 实测：从零安装后目录已存在但 0 个文件，于是永远补不上）。
+    textures = root / "Textures"
+    try:
+        has_textures = textures.is_dir() and any(textures.iterdir())
+    except OSError:
+        has_textures = False
+    if not has_textures:
+        texture_sources = [project_assets / "textures", root / "Textures"]
+        source_dir = next((p for p in texture_sources
+                           if p.is_dir() and any(p.iterdir())), None)
+        try:
+            textures.mkdir(parents=True, exist_ok=True)
+            copied = 0
+            if source_dir is not None:
+                for item in source_dir.iterdir():
+                    if item.is_file():
+                        shutil.copy2(item, textures / item.name)
+                        copied += 1
+                report.action(f"补齐 DLSS5 纹理（{copied} 个文件 → reshade-shaders\\Textures）")
+        except OSError as exc:
+            missing.append(f"Textures 目录（创建失败: {exc}）")
+
+    if missing:
+        report.add("dlss5:shader_deps", False,
+                   "缺少 DLSS5 shader 依赖（会导致 ReShade 编译出错）: " + "、".join(missing),
+                   manual=True)
+    else:
+        report.add("dlss5:shader_deps", True,
+                   f"DLSS5 shader 依赖就绪（本轮补齐 {len(installed)} 个）" if installed
+                   else "DLSS5 shader 依赖就绪（DLSS5_Feed.fx + ReShade 标准头）",
+                   fixed=bool(installed))
+    if log and installed:
+        _log(log, f"补齐 DLSS5 shader 依赖: {', '.join(installed)}")
+
+
+def _merge_preset_line(body: str, key: str, required: list[str], *, front: bool = False) -> str:
+    """把 `required` 并入 preset 里 `key=` 那一行（逗号分隔、去重、保序）。
+
+    ⚠️ **绝不要整体重写 preset**：ReShade 自己写出来的那份有 17 KB —— 含 500 多个
+    technique 的排序，以及每个效果的变量表（`[MartysMods_LAUNCHPAD.fx]` 之类）。
+    整体重写会把它们全砸掉，**连 technique 的"已启用"状态一起丢**，于是下次启动
+    Launchpad 又变回 DISABLED（2026-09-29 反复踩这个坑）。所以只能"就地增补"。
+    """
+    lines = [line.rstrip("\r") for line in body.split("\n")]
+    for index, line in enumerate(lines):
+        if line.lstrip().startswith("[") or "=" not in line:
+            continue
+        if line.split("=", 1)[0].strip() != key:
+            continue
+        items = [item.strip() for item in line.split("=", 1)[1].split(",") if item.strip()]
+        have = {item.split("@", 1)[0] if "@" in item else item for item in items}
+        for name in required:
+            bare = name.split("@", 1)[0] if "@" in name else name
+            if bare not in have:
+                items.insert(0, name) if front else items.append(name)
+                have.add(bare)
+        lines[index] = f"{key}=" + ",".join(items)
+        return "\n".join(lines)
+    # 没有这一行就追加
+    while lines and not lines[-1].strip():
+        lines.pop()
+    lines.append(f"{key}=" + ",".join(required))
+    return "\n".join(lines)
 
 
 def _check_dlss5_preset(config: AppConfig, report: Report, log: Callable[[str], None] | None) -> None:
@@ -278,21 +462,80 @@ def _check_dlss5_preset(config: AppConfig, report: Report, log: Callable[[str], 
         except OSError:
             body = ""
 
-    if "DLSS5_Feed@DLSS5_Feed.fx" in body:
-        report.add("dlss5:preset", True, f"{preset_path.name} 已启用 DLSS5_Feed")
+    # 判据必须严：**"出现过"不算数** —— 两项都要启用（=1）且排序里 Launchpad 在前。
+    # 2026-10-01 用户报「DLSS5 又出现不开始」，日志里写着
+    # `LaunchPad technique found (DISABLED)`；而旧判据只看"有没有 DLSS5_Feed@DLSS5_Feed.fx"
+    # 就直接放行（第 281 行），所以这种"写了但没启用 / 顺序不对"的状态**永远不会被修**，
+    # 用户只能看到面板 NGX Hook 创建0 / 成功NR帧 0。
+    launchpad_name, feed_name = DLSS5_PRESET_TECHNIQUES
+    # ReShade 的 preset 里 technique 有两种写法：`Name@Effect.fx`（**列出即启用**，ReShade
+    # 自己写出来的就是这种）与 `Name@Effect.fx=1`/`=0`（显式启用/禁用）。两种都要认 ——
+    # 只认 `=1` 会把 ReShade 写的合法格式误判成"没启用"，于是每次启动都去"修"一遍
+    # （2026-09-29 实测：ReShade 写的是不带 `=1` 的形式）。
+    enabled_map: dict[str, str] = {}
+    for name, value in re.findall(r"([\w.\-]+@[\w.\-]+\.fx)\s*(?:=\s*([01]))?", body):
+        enabled_map[name] = value or "1"
+    sorting_line = ""
+    for line in body.splitlines():
+        if line.strip().startswith("TechniqueSorting="):
+            sorting_line = line.split("=", 1)[1]
+            break
+    order_ok = True
+    if sorting_line:
+        pos_launchpad = sorting_line.find(launchpad_name)
+        pos_feed = sorting_line.find(feed_name)
+        order_ok = pos_launchpad != -1 and (pos_feed == -1 or pos_launchpad < pos_feed)
+    # `EffectSorting` 也必须查：addon 判断 provider 能不能用，看的是 **effect list** 的顺序
+    # （DLSS5_Feed.fx 说明书第 16-24 行），少了它只会得到
+    # `motion-vector provider MartysMods_Launchpad is installed but DISABLED:
+    #  enable it above DLSS 5 Feed.`（2026-09-29 实测）—— 而且旧判据不查它，
+    # 这种状态永远不会被修。
+    effect_order_line = ""
+    for line in body.splitlines():
+        if line.strip().startswith("EffectSorting="):
+            effect_order_line = line.split("=", 1)[1]
+            break
+    effect_order_ok = False
+    if effect_order_line:
+        pos_provider = effect_order_line.find(DLSS5_PROVIDER_EFFECT)
+        pos_feed_fx = effect_order_line.find(DLSS5_FEED_EFFECT)
+        effect_order_ok = (pos_provider != -1
+                           and (pos_feed_fx == -1 or pos_provider < pos_feed_fx))
+    if (enabled_map.get(launchpad_name) == "1" and enabled_map.get(feed_name) == "1"
+            and order_ok and effect_order_ok):
+        report.add("dlss5:preset", True,
+                   f"{preset_path.name} 已启用 MartysMods_Launchpad + DLSS5_Feed（technique 与 effect 顺序均正确）")
         return
+    _log(log, "DLSS5 preset 需要修复："
+              f"MartysMods_Launchpad={enabled_map.get(launchpad_name, '缺失')}、"
+              f"DLSS5_Feed={enabled_map.get(feed_name, '缺失')}、"
+              f"technique 顺序正确={order_ok}、effect 顺序正确={effect_order_ok}")
 
     techniques = ",".join(DLSS5_PRESET_TECHNIQUES)
+    # **就地增补，绝不整体重写**（ReShade 自己写的那份有 17 KB，含 500+ technique 排序和
+    # 各效果的变量表；整体重写会把"已启用"状态一起丢掉 —— 2026-09-29 反复踩）。
+    # 同时**不带 `=1`**、与 ReShade 自己写出来的格式保持一致（它认"列出即启用"）。
+    updated = body or ""
+    updated = _merge_preset_line(
+        updated, "PreprocessorDefinitions",
+        [f"DLSS5_MV_PROVIDER={DLSS5_MV_PROVIDER_LAUNCHPAD}"],
+    )
+    # provider 必须排在 DLSS5_Feed **之上**（effect list 与 technique 顺序都要）。
+    # ⚠️ **不要写 `=1`** —— 照 ReShade 自己写出来的格式（"列出即启用"）。
+    # 2026-09-29 实测：手写 `DLSS5_Feed@DLSS5_Feed.fx=1` 时 addon 一直不开 session，
+    # 而 ReShade 自己写成不带 `=1` 之后 `feature ready / frame delivered` 才出现。
+    updated = _merge_preset_line(updated, "Techniques", [feed_name, launchpad_name])
+    updated = _merge_preset_line(updated, "TechniqueSorting",
+                                 [feed_name, launchpad_name], front=True)
+    updated = _merge_preset_line(updated, "EffectSorting",
+                                 [DLSS5_FEED_EFFECT, DLSS5_PROVIDER_EFFECT], front=True)
     try:
         if body:
             backup = preset_path.with_name(f"{preset_path.name}.bak-before-fix")
             if not backup.is_file():
                 shutil.copy2(preset_path, backup)
         preset_path.parent.mkdir(parents=True, exist_ok=True)
-        preset_path.write_text(
-            f"PreprocessorDefinitions=\nTechniques={techniques}\nTechniqueSorting={techniques}\n",
-            encoding="utf-8",
-        )
+        preset_path.write_text(updated + "\n", encoding="utf-8", newline="\r\n")
     except OSError as exc:
         report.add("dlss5:preset", False, f"写入 preset 失败: {exc}", manual=True)
         return
@@ -301,10 +544,10 @@ def _check_dlss5_preset(config: AppConfig, report: Report, log: Callable[[str], 
         "dlss5:preset",
         True,
         f"已{'修复' if body else '重建'} {preset_path.name}"
-        "（启用 MartysMods_Launchpad + DLSS5_Feed）",
+        "（启用 MartysMods_Launchpad + DLSS5_Feed，保留其余内容）",
         fixed=True,
     )
-    report.action(f"写入 {preset_path.name}")
+    report.action(f"增补 {preset_path.name}（不覆盖 ReShade 写的内容）")
 
 
 def _check_reshade_ini(config: AppConfig, report: Report, log: Callable[[str], None] | None) -> None:
@@ -319,7 +562,20 @@ def _check_reshade_ini(config: AppConfig, report: Report, log: Callable[[str], N
             report.add("reshade_ini", False, f"读取失败: {exc}", manual=True)
             return
 
-    needs_rebuild = (not text) or (ENHANCER_SECTION not in text)
+    # ⚠️ 光有 `[endfield-enhancer]` 段**不足以**判定 ini 完好：从零环境里 ReShade.ini
+    #    可能只剩各个 addon 运行时自己写进去的段（`[endfield-enhancer]` / `[INSTALL]` /
+    #    `[RenoDX.DLSS5]`），**没有 `[GENERAL]`** —— 于是既没有 `EffectSearchPaths`
+    #    （ReShade 不知道去哪找 shader）也没有 `PresetPath`（没有 preset），DLSS5 整条链
+    #    都不工作。用户 2026-09-29 报「dlss5 还是没启动」，日志原文：
+    #        DLSS5_Feed.fx is not loaded (technique/textures missing)
+    #    所以这里把这些关键项一并作为"需要重建"的判据。
+    needs_rebuild = (
+        (not text)
+        or (ENHANCER_SECTION not in text)
+        or ("[GENERAL]" not in text)
+        or ("EffectSearchPaths" not in text)
+        or ("PresetPath" not in text)
+    )
     did_rebuild = False
     if needs_rebuild:
         rebuilt_text = _rebuild_ini(config, text)
@@ -353,6 +609,48 @@ def _check_reshade_ini(config: AppConfig, report: Report, log: Callable[[str], N
         except OSError as exc:
             report.add("reshade_ini", False, f"重写路径失败: {exc}", manual=True)
             return
+    # 中文补丁（终末地EE.addon64 / renodx-endfield-enhancer.addon64）的说明书
+    # （包里的 `ini文件修改内容.txt`）只写了一件事：
+    #     [INSTALL]
+    #     PreventUnloading=1
+    # 没有它，ReShade 卸载时会把 addon 一并卸掉，表现就是"补丁装了但面板还是英文/没生效"。
+    # 2026-10-01 用户反馈「第一人称中文补丁还是没打上」—— 查下来 dlss5 目录那份
+    # ReSade.ini（真正生效的那份）缺这一段，而 migoto 目录那份有。
+    if "PreventUnloading" not in text:
+        block = "[INSTALL]" + chr(10) + "PreventUnloading=1" + chr(10) + chr(10)
+        candidate = (block + text) if text.strip() else block
+        try:
+            if ini.is_file():
+                backup = ini.with_name(ini.name + ".bak-before-preventunloading")
+                if not backup.is_file():
+                    shutil.copy2(ini, backup)
+            ini.write_text(candidate, encoding="utf-8", newline="\r\n")
+            text = candidate
+            did_rebuild = True
+            report.action("写入 [INSTALL] PreventUnloading=1（第一人称中文补丁要求）")
+        except OSError as exc:
+            report.add("reshade_ini", False, f"写入 PreventUnloading 失败: {exc}", manual=True)
+            return
+
+    # 语言：初始化就把第一人称插件与 ReShade 面板配成中文（用户 2026-10-01 要求）
+    try:
+        # DLSS5 的运动矢量来源：不写这个宏，运动矢量全零 ⇒ 只对静止画面有效（"不生成帧"）
+        text, mv_changed = _ensure_mv_provider(text)
+        if mv_changed:
+            ini.write_text(text, encoding="utf-8", newline="\r\n")
+            report.action("写入 DLSS5_MV_PROVIDER=1（运动矢量来源：iMMERSE Launchpad）")
+        language_text, language_changed = _ensure_chinese_language(text)
+        if language_changed:
+            if ini.is_file():
+                backup = ini.with_name(ini.name + ".bak-before-language")
+                if not backup.is_file():
+                    shutil.copy2(ini, backup)
+            ini.write_text(language_text, encoding="utf-8", newline="\r\n")
+            text = language_text
+            report.action("写入中文语言（第一人称插件 Language=ZH、ReShade 面板 Language=zh-CN）")
+    except OSError as exc:  # noqa: PERF203
+        report.add("reshade_language", False, f"写入中文语言设置失败: {exc}", manual=True)
+
     report.add(
         "reshade_ini",
         True,
@@ -361,6 +659,181 @@ def _check_reshade_ini(config: AppConfig, report: Report, log: Callable[[str], N
         else "ReShade.ini 就绪（含 [endfield-enhancer] 段，路径正确）",
         fixed=did_rebuild,
     )
+
+
+def _set_ini_key(text: str, section: str, key: str, value: str) -> tuple[str, bool]:
+    """在 `[section]` 段内把 `key` 设为 `value`（存在就替换、不存在就插到段首）。
+
+    返回 `(新文本, 是否有改动)`；无改动时原样返回输入（调用方据此决定要不要写盘）。
+    段不存在时把整段追加到文件末尾。**只在目标段内动手**，不会碰同名的其它段。
+    """
+    lines = [line.rstrip("\r") for line in text.split("\n")]
+    header = f"[{section}]"
+    start: int | None = None
+    for index, line in enumerate(lines):
+        if line.strip().lower() == header.lower():
+            start = index
+            break
+    pattern = re.compile(rf"^\s*{re.escape(key)}\s*=", re.I)
+    if start is None:
+        while lines and not lines[-1].strip():
+            lines.pop()
+        lines.extend(["", header, f"{key}={value}", ""])
+        return "\n".join(lines), True
+    end = len(lines)
+    for index in range(start + 1, len(lines)):
+        if lines[index].lstrip().startswith("["):
+            end = index
+            break
+    for index in range(start + 1, end):
+        if pattern.match(lines[index]):
+            if lines[index].strip() == f"{key}={value}":
+                return text, False
+            lines[index] = f"{key}={value}"
+            return "\n".join(lines), True
+    lines.insert(start + 1, f"{key}={value}")
+    return "\n".join(lines), True
+
+
+def _ensure_mv_provider(text: str) -> tuple[str, bool]:
+    """确保 `[GENERAL]` 的 `PreprocessorDefinitions` 里有 `DLSS5_MV_PROVIDER=1`（Launchpad）。
+
+    不加这一项，DLSS5_Feed 的运动矢量全为零 ⇒ **只对静止画面有效、动态画面等于没效果**
+    （用户 2026-09-29 报「dlss5 还是没生成帧」）。选 1 是因为随包就带了
+    `iMMERSE\\MartysMods_LAUNCHPAD.fx`，它提供 `Deferred::MotionVectorsTex`；
+    而默认的 0（texMotionVectors）需要另装 qUINT/DRME 之类的 provider，我们没带。
+    """
+    want = f"DLSS5_MV_PROVIDER={DLSS5_MV_PROVIDER_LAUNCHPAD}"
+    lines = [line.rstrip("\r") for line in text.split("\n")]
+    header_seen = False
+    for index, line in enumerate(lines):
+        if line.strip().lower() == "[general]":
+            header_seen = True
+            continue
+        if header_seen and line.lstrip().startswith("["):
+            break
+        if header_seen and re.match(r"^\s*PreprocessorDefinitions\s*=", line, re.I):
+            value = line.split("=", 1)[1]
+            parts = [p.strip() for p in value.split(",") if p.strip()]
+            if any(p.upper().startswith("DLSS5_MV_PROVIDER=") for p in parts):
+                return text, False
+            parts.append(want)
+            lines[index] = "PreprocessorDefinitions=" + ",".join(parts)
+            return "\n".join(lines), True
+    if not header_seen:
+        return text, False
+    # 段在但没有这一行 → 插到 [GENERAL] 后面
+    for index, line in enumerate(lines):
+        if line.strip().lower() == "[general]":
+            lines.insert(index + 1, "PreprocessorDefinitions=" + want)
+            return "\n".join(lines), True
+    return text, False
+
+
+def _ensure_chinese_language(text: str) -> tuple[str, bool]:
+    """把第一人称插件的界面语言设成中文（用户要求「初始化的时候就配置成中文」）。
+
+    **只写 `[endfield-enhancer] Language` 这一处。**依据：用户手动把面板语言切成中文后，
+    addon 写回的只有这一个键（实测 `modtest\\runtime\\dlss5\\ReShade.ini` 里只有
+    `[endfield-enhancer] Language=1`，`[OVERLAY]` 段连 Language 键都没有）⇒ 中文**不需要**
+    动 ReShade 面板语言。因此**不要**顺手改 `[OVERLAY] Language` —— 那会让 ReShade 自己的
+    面板也变中文，属于需求外的改动（我一度加过 `zh-CN`，已撤掉）。
+    """
+    return _set_ini_key(text, "endfield-enhancer", "Language", FIRSTPERSON_LANGUAGE_ZH)
+
+
+# ── 内置的 ReShade.ini 底稿（官方 DLSS5 模板的等价内容）────────────────────────
+# 为什么必须内置：从零环境（用户只下 exe + 资产包）里 `ReShade.ini.dlss5-template`
+# **不存在**，`_rebuild_ini()` 于是返回 None → **ReShade.ini 从未被正确生成**，
+# 最终只剩各个 addon 运行时自己写进去的段（`[endfield-enhancer]` / `[INSTALL]` /
+# `[RenoDX.DLSS5]`）——**没有 `[GENERAL]`** ⇒ ReShade 拿不到 `EffectSearchPaths`
+# （不知道去哪找 shader）与 `PresetPath`（没有 preset）⇒ **DLSS5 整条链不工作**。
+# 用户 2026-09-29 报「dlss5 还是没启动」，`dlss5-feed.log` 原文就是：
+#     DLSS5_Feed.fx is not loaded (technique/textures missing) -- install it into
+#     reshade-shaders\Shaders.
+# 路径故意写成 `.\` 相对形式，随后由 `_rebuild_ini()` 统一替换成本机绝对路径。
+BUILTIN_RESHADE_INI_BASE = (
+    "[GENERAL]\n"
+    r"EffectSearchPaths=.\reshade-shaders\Shaders\**" "\n"
+    r"IntermediateCachePath=.\Temp\ReShade" "\n"
+    "NoDebugInfo=1\n"
+    "NoEffectCache=0\n"
+    "NoReloadOnInit=0\n"
+    "PerformanceMode=0\n"
+    "PreprocessorDefinitions=RESHADE_DEPTH_INPUT_IS_UPSIDE_DOWN=1,RESHADE_DEPTH_INPUT_IS_REVERSED=1\n"
+    r"PresetPath=.\ReShadePreset.ini" "\n"
+    "PresetShortcutKeys=\n"
+    "PresetShortcutPaths=\n"
+    "PresetTransitionDuration=1000\n"
+    "SkipLoadingDisabledEffects=0\n"
+    "StartupPresetPath=\n"
+    r"TextureSearchPaths=.\reshade-shaders\Textures\**" "\n"
+    "\n"
+    "[INPUT]\n"
+    "ForceShortcutModifiers=1\n"
+    "InputProcessing=2\n"
+    "KeyEffects=0,0,0,0\n"
+    "KeyFPS=0,0,0,0\n"
+    "KeyFrametime=0,0,0,0\n"
+    "KeyNextPreset=0,0,0,0\n"
+    "KeyOverlay=36,0,0,0\n"
+    "KeyPerformanceMode=0,0,0,0\n"
+    "KeyPreviousPreset=0,0,0,0\n"
+    "KeyReload=0,0,0,0\n"
+    "KeyScreenshot=44,0,0,0\n"
+    "\n"
+    "[OVERLAY]\n"
+    "AutoSavePreset=1\n"
+    "ClockFormat=0\n"
+    "FPSPosition=1\n"
+    "Language=\n"
+    "ShowClock=0\n"
+    "ShowForceLoadEffectsButton=1\n"
+    "ShowFPS=2\n"
+    "ShowFrameTime=0\n"
+    "ShowPresetName=0\n"
+    "ShowPresetTransitionMessage=1\n"
+    "ShowScreenshotMessage=1\n"
+    "TutorialProgress=4\n"
+    "VariableListHeight=200.000000\n"
+    "VariableListUseTabs=0\n"
+    "\n"
+    "[SCREENSHOT]\n"
+    "ClearAlpha=1\n"
+    "FileFormat=1\n"
+    "FileNaming=%AppName% %Date% %Time%\n"
+    "JPEGQuality=90\n"
+    "PostSaveCommand=\n"
+    'PostSaveCommandArguments="%TargetPath%"\n'
+    "PostSaveCommandHideWindow=0\n"
+    "PostSaveCommandWorkingDirectory=." + "\\" + "\n"
+    "SaveBeforeShot=0\n"
+    "SaveOverlayShot=0\n"
+    "SavePath=." + "\\" + "\n"
+    "SavePresetFile=0\n"
+    "SoundPath=\n"
+    "\n"
+    "[STYLE]\n"
+    "Alpha=1.000000\n"
+    "ChildRounding=0.000000\n"
+    "ColFPSText=1.000000,1.000000,0.784314,1.000000\n"
+    "EditorFont=\n"
+    "EditorFontSize=20\n"
+    "EditorStyleIndex=0\n"
+    "Font=\n"
+    "FontSize=20\n"
+    "FPSScale=1.000000\n"
+    "FrameRounding=0.000000\n"
+    "GrabRounding=0.000000\n"
+    "HdrOverlayBrightness=203.000000\n"
+    "HdrOverlayOverwriteColorSpaceTo=0\n"
+    "LatinFont=\n"
+    "PopupRounding=0.000000\n"
+    "ScrollbarRounding=0.000000\n"
+    "StyleIndex=2\n"
+    "TabRounding=4.000000\n"
+    "WindowRounding=0.000000\n"
+)
 
 
 def _default_path_for(key: str, dlss5: Path) -> str:
@@ -386,12 +859,15 @@ def _rebuild_ini(config: AppConfig, current: str) -> str | None:
             if candidate.is_file():
                 template = candidate
                 break
-    if not template.is_file():
-        return None
-    try:
-        base = template.read_text(encoding="utf-8-sig", errors="replace")
-    except OSError:
-        return None
+    # **找不到模板也要能重建** —— 用内置底稿兜底。从零环境里模板文件根本不存在，
+    # 原来这里直接 `return None`，于是 ReShade.ini 永远生不出 `[GENERAL]` 段 ——
+    # 那正是用户 2026-09-29 报的「dlss5 还是没启动」的根因（详见 BUILTIN_RESHADE_INI_BASE）。
+    base = BUILTIN_RESHADE_INI_BASE
+    if template.is_file():
+        try:
+            base = template.read_text(encoding="utf-8-sig", errors="replace")
+        except OSError:
+            base = BUILTIN_RESHADE_INI_BASE
 
     section: str | None = None
     # 从历史备份里取 enhancer 段（候选一律由配置推导，不硬编码本机路径）
@@ -414,7 +890,9 @@ def _rebuild_ini(config: AppConfig, current: str) -> str | None:
             section = "[endfield-enhancer]\n" + match.group(1).rstrip() + "\n"
             break
     if section is None:
-        return None
+        # 连历史备份里都没有 `[endfield-enhancer]` 段时，至少写一个能用的最小段 ——
+        # Language 直接给中文（用户要求"初始化就配成中文"），其余值交给 addon 自己补。
+        section = FIRSTPERSON_DEFAULT_SECTION
 
     dlss5 = config.dlss5_path
     base = base.replace(r".\reshade-shaders\Shaders\**", str(dlss5 / "reshade-shaders" / "Shaders" / "**"))
@@ -422,23 +900,43 @@ def _rebuild_ini(config: AppConfig, current: str) -> str | None:
     base = base.replace(r".\Temp\ReShade", str(dlss5 / "Temp" / "ReShade"))
     base = base.replace(r".\ReShadePreset.ini", str(dlss5 / "ReShadePreset.ini"))
     # [endfield-enhancer] 要放最上面一层（与教程一致）
-    return section + "\n" + base.rstrip() + "\n"
+    # ⚠️ **保留原文件里除"标准段"之外的所有段** —— 只用模板重建会丢掉各个 addon
+    # 自己的配置段（`[RENODX-DLSS]` / `[RENODX-DLSS-preset1]` / `[RenoDX.DLSS5]` …），
+    # 而那些段正是 DLSS5 能不能工作的关键：2026-09-29 实测，`[RENODX-DLSS]` 被丢之后
+    # 面板显示「成功NR帧 0 / 超分 请求ON 活动OFF」，补回来才继续往下走。
+    # 标准段（GENERAL/INPUT/OVERLAY/SCREENSHOT/STYLE）继续由模板提供 —— 它们含
+    # `EffectSearchPaths` / `PresetPath` 这些必须指向本机绝对路径的键。
+    preserved: list[str] = []
+    if current:
+        standard = {"general", "input", "overlay", "screenshot", "style"}
+        for match in re.finditer(r"^\[([^\]]+)\][^\r\n]*\r?\n(.*?)(?=^\[|\Z)", current, re.S | re.M):
+            name = match.group(1).strip()
+            if name.lower() in standard or name.lower() == ENHANCER_SECTION.strip("[]").lower():
+                continue
+            body = match.group(2).rstrip()
+            preserved.append(f"[{name}]\n" + (body + "\n" if body else ""))
+
+    tail = base.rstrip() + "\n"
+    if preserved:
+        tail += "\n" + "\n".join(preserved)
+    return section + "\n" + tail
 
 
 def _check_game_libs(config: AppConfig, report: Report, log: Callable[[str], None] | None) -> None:
-    """游戏目录的 DLSS 运行库。
+    """游戏目录的 DLSS 运行库（DLSS5 需要的那份）。
 
-    **默认绝不覆盖游戏目录里已有的文件** —— 2026-09-27 实测：方案里的新版
-    `nvngx_dlss.dll`(58,977,904 B) + `nvngx_dlssnr.dll`(165,840,496 B) 一旦被
-    写进游戏目录，游戏就起不来；把 nvngx 还原成游戏原版(54,779,504 B) 并移走
-    dlssnr 后，同一套注入能正常进游戏。而本函数原来的逻辑是"大小不符就从内置
-    副本补齐"，于是**每次一键启动都会把用户刚还原好的原版又覆盖成新版**，
-    表现为"手动启动没事、用控制器就崩"。
+    **为什么必须部署新版**（用户 2026-09-29 决策："直接部署"）：神经渲染接口
+    `NVSDK_NGX_D3D12_EvaluateFeature_C` 住在 `nvngx_dlssnr.dll` 里。游戏目录只有原版
+    `nvngx_dlss.dll`(54,779,504 B)、没有 dlssnr 时，DLSS5 addon 会报
+    `vtable::Hook(Failed to find NVSDK_NGX_D3D12_EvaluateFeature_C)` ⇒ **一次渲染都
+    不会发生**（用户看到的就是「DLSS5 显示 0 渲染」）——而且要排查很久，因为文件看起来
+    都齐、shader 也编译通过。
 
-    现在的策略：
-      * 文件已存在（无论大小）→ 保持原样，只在报告里注明；
-      * 文件缺失 → 才从内置副本补齐（并先备份游戏原版）。
-    需要主动部署新版运行库时，用 config.deploy_new_nvngx = True 显式开启。
+    ⚠️ 历史包袱：2026-09-27 曾记录"写进新版 nvngx 游戏就起不来"，所以这里默认**不覆盖**
+    过一阵。那次真正的原因是注入链顺序（两个 hook 框架抢点），后来改用 Bypass + ReShade
+    先注入已修复，因此 2026-09-29 起 `deploy_new_nvngx` 默认 **True**：大小不符就替换成
+    内置新版；替换前把游戏原版锁存成 `*.game_original`（**只锁存一次**，别把原版冲掉），
+    用户随时可回滚。
     """
     from . import reshade_integration
 
@@ -712,6 +1210,8 @@ def ensure_all(config: AppConfig, log: Callable[[str], None] | None = None) -> d
     _check_bundled_assets(config, report, log)
     _check_dlss5_dir(config, report, log)
     _check_reshade_ini(config, report, log)
+    # shader 依赖要先补齐，否则 preset 里启用的 technique 编不过（"编译出错"）
+    _check_dlss5_shaders(config, report, log)
     _check_dlss5_preset(config, report, log)
     _check_game_libs(config, report, log)
     _check_controller(config, report, log)

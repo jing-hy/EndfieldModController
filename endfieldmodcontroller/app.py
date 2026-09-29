@@ -86,6 +86,20 @@ def main(argv: list[str] | None = None) -> int:
         print("pywebview is not installed. Run: pip install -r requirements.txt")
         return 1
 
+    # 诊断：onefile 的环境变量若被继承下来，PyInstaller 会认为本进程是"子进程"，进而
+    # 去校验一个可能早已不存在的父 PID（弹 `Security validation failure: invalid
+    # originating onefile parent process (PID not found)!` —— 只在**提权**运行时启用）。
+    # 自更新脚本启动新版本前已经清理过这些变量；这里只做留痕，方便下次一眼看出
+    # "是不是又被继承了"（2026-10-01）。
+    try:
+        from . import launcher as _launcher
+
+        leaked = sorted(k for k in os.environ if k.upper().startswith(("_MEI", "_PYI")))
+        if leaked:
+            _launcher._append_log(api.config, f"启动自检: 检测到 onefile 环境变量残留 {leaked}（可能影响重启后的启动）")
+    except Exception:  # noqa: BLE001
+        pass
+
     # 窗口的初始背景色：WebView2 初始化那 1~2 秒里窗口内容是空的，默认白色在深色
     # 主题下很刺眼，看起来也像"卡住了"（2026-10-01 实测：从零启动窗口先白屏，
     # 加载页因此几乎看不到）。按主题给底色，白屏期直接就是主题色。
@@ -100,6 +114,9 @@ def main(argv: list[str] | None = None) -> int:
         height=800,
         min_size=(980, 680),
         background_color=window_bg,
+        # 允许选中/复制文字（用户 2026-10-01 要求「日志框要允许复制」）。
+        # pywebview 默认 text_select=False，会在 WebView2 层禁掉选择，CSS 压不住。
+        text_select=True,
     )
     webview.start()
     # 关闭窗口后必须真的退出：后台还可能有下载/监控类工作线程，
