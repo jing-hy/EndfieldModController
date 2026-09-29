@@ -351,6 +351,68 @@ async function startAppUpdateFromDep() {
   await pollDependencyProgress($('dep-results'));
 }
 
+// ── Mod 库：把 zip 直接拖进来 ────────────────────────────────────────────────
+// 用户需求：「如果在 Mod 库界面，能直接拖 zip 进去，然后自动解压，解析角色归属」。
+// pywebview 拿不到拖放文件的本地路径（WebView2 沙箱里 File.path 不可用），所以这里
+// 读成 ArrayBuffer 再转 base64 交给后端解压；后端复用既有的收编 + 角色归属链路。
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const chunk = 0x8000;                       // 分块拼接，避免 apply 参数过多导致栈溢出
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+function initModDropZone() {
+  const zone = $('mod-drop');
+  if (!zone) return;
+  const idleHtml = zone.innerHTML;
+  const highlight = (on) => zone.classList.toggle('over', on);
+  ['dragenter', 'dragover'].forEach((name) => zone.addEventListener(name, (event) => {
+    event.preventDefault();
+    highlight(true);
+  }));
+  ['dragleave', 'dragend'].forEach((name) => zone.addEventListener(name, () => highlight(false)));
+  zone.addEventListener('drop', async (event) => {
+    event.preventDefault();
+    highlight(false);
+    const file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
+    if (!file) return;
+    if (!/\.zip$/i.test(file.name)) {
+      await showAlert('目前只支持 .zip 压缩包（其他格式请先解压再拖进来）。', '导入 Mod');
+      return;
+    }
+    zone.textContent = `正在读取 ${file.name} …`;
+    try {
+      const base64 = arrayBufferToBase64(await file.arrayBuffer());
+      zone.textContent = `正在解压并识别角色：${file.name} …`;
+      const result = await call('import_mod_archive', file.name, base64);
+      if (!result.ok) {
+        await showAlert(result.message || '导入失败', '导入 Mod');
+      } else if (result.need_confirm) {
+        await showAlert(`已导入「${result.name}」，但角色归属不确定 —— `
+          + '请点「确认角色归属」按钮选一下角色。', '导入 Mod');
+      } else {
+        await showAlert(`已导入「${result.name}」，角色归属已识别。`, '导入 Mod');
+      }
+      try { await scan(); } catch (err) { /* 扫描失败不影响导入结果 */ }
+      try { await refreshFromState(); } catch (err) { /* 同上 */ }
+    } catch (err) {
+      await showAlert(`导入失败：${err.message || err}`, '导入 Mod');
+    } finally {
+      zone.innerHTML = idleHtml;
+    }
+  });
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initModDropZone);
+} else {
+  initModDropZone();
+}
+
 async function scan() {
   setStatus('扫描中...');
   const result = await call('scan');

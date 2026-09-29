@@ -907,6 +907,109 @@ class EndfieldModControllerApi:
             result["errors"].append(f"在线组件: {exc}")
         return result
 
+    def import_mod_archive(self, file_name: str, data_b64: str) -> dict[str, Any]:
+        """把拖进界面的 `.zip` 解压进 Mod 库，然后复用既有的收编 + 角色归属流程。
+
+        用户需求（原话）：「如果在 Mod 库界面，能直接拖 zip 进去，然后自动解压，解析角色归属」。
+
+        为什么走 base64：pywebview 拿不到拖放文件的**本地路径**（WebView2 沙箱里
+        `File.path` 不可用），所以前端用 `FileReader` 读出内容再传过来。为避免超大包
+        把内存和调用参数撑爆，超过 `max_bytes` 直接拒绝并提示改用文件选择。
+        """
+        import base64
+        import re
+        import shutil
+        import zipfile
+
+        name = Path(str(file_name or "")).name
+        if not name.lower().endswith(".zip"):
+            return {"ok": False, "message": "目前只支持 .zip（其他格式请先解压）"}
+        max_bytes = 300 * 1024 * 1024
+        try:
+            blob = base64.b64decode(data_b64 or "", validate=False)
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "message": f"数据解码失败：{exc}"}
+        if not blob:
+            return {"ok": False, "message": "没有收到文件内容"}
+        if len(blob) > max_bytes:
+            return {"ok": False,
+                    "message": f"压缩包太大（{len(blob) / 1048576:.1f} MB），"
+                               f"超过 {max_bytes // 1048576} MB，请先解压后手动放到 Mod 库"}
+
+        incoming = self.config.runtime_path / "_incoming"
+        incoming.mkdir(parents=True, exist_ok=True)
+        archive_path = incoming / name
+        try:
+            archive_path.write_bytes(blob)
+        except OSError as exc:
+            return {"ok": False, "message": f"写入临时文件失败：{exc}"}
+
+        base = re.sub(r'[\\/:*?"<>|]', "_", Path(name).stem).strip() or "imported_mod"
+        dest = self.config.library_path / base
+        suffix = 1
+        while dest.exists():
+            suffix += 1
+            dest = self.config.library_path / f"{base}_{suffix}"
+        try:
+            dest.mkdir(parents=True, exist_ok=True)
+            root = dest.resolve()
+            with zipfile.ZipFile(archive_path) as archive:
+                for member in archive.namelist():
+                    # 防 zip slip：任何解析后跑到目标目录之外的条目一律拒绝
+                    target = (dest / member).resolve()
+                    if not str(target).startswith(str(root)):
+                        raise ValueError(f"压缩包里有非法路径: {member}")
+                archive.extractall(dest)
+        except (zipfile.BadZipFile, ValueError, OSError) as exc:
+            shutil.rmtree(dest, ignore_errors=True)
+            return {"ok": False, "message": f"解压失败：{exc}"}
+        finally:
+            try:
+                archive_path.unlink()
+            except OSError:
+                pass
+
+        # 很多 Mod 包外面还套了一层同名目录；若里面只有一个子目录且没有文件，把内容提上来，
+        # 否则扫描时会把那一层当成 Mod 名、角色也识别不到。
+        try:
+            children = list(dest.iterdir())
+            if len(children) == 1 and children[0].is_dir():
+                inner = children[0]
+                for item in list(inner.iterdir()):
+                    shutil.move(str(item), str(dest / item.name))
+                inner.rmdir()
+        except OSError:
+            pass
+
+        synced = self.import_manual_mods()
+        # 从扫描结果里取这个新 Mod（**不管它有没有进"待确认"列表**）—— 角色被成功识别时
+        # 它不会出现在 pending 里，但调用方仍然需要知道识别成了谁。
+        mods = self._mods()
+        target = next((m for m in mods if str(m.path).startswith(str(dest))), None)
+        pending = self.pending_characters()
+        pending_ids = {item.get("id") for item in (pending.get("pending") or [])}
+        info = None
+        if target is not None:
+            info = {
+                "id": target.id,
+                "name": target.name,
+                "group": target.group,
+                "confidence": target.char_confidence,
+                "candidates": list(target.char_candidates),
+            }
+        return {
+            "ok": True,
+            "name": dest.name,
+            "dest": str(dest),
+            "synced": synced,
+            "group": (target.group if target is not None else ""),
+            "confidence": (target.char_confidence if target is not None else ""),
+            "candidates": (list(target.char_candidates) if target is not None else []),
+            "need_confirm": bool(target is not None and target.id in pending_ids),
+            "imported": info,
+            "pending_total": pending.get("total", 0),
+        }
+
     def import_manual_mods(self) -> dict[str, Any]:
         """把手动放进 Mods 目录的 Mod 收编进库，并在界面里标记为已开启。
 

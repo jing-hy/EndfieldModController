@@ -454,6 +454,25 @@ progress::-webkit-progress-value { border-radius: 999px; }
   white-space: pre-wrap; word-break: break-word;
 }
 
+/* Mod 库：拖放 zip 导入区 */
+.mod-drop {
+  margin: 10px 0 14px;
+  padding: 18px 16px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--muted);
+  border: 1.5px dashed var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--panel);
+  transition: border-color .18s ease, background .18s ease, color .18s ease;
+}
+.mod-drop b { color: var(--accent); }
+.mod-drop.over {
+  border-color: var(--accent);
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
 .update-badge {
   min-width: 76px;
   border-radius: 999px;
