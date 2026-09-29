@@ -108,6 +108,30 @@ def detect_game_dir(config: AppConfig) -> Path | None:
     if game_exe is not None and game_exe.is_file():
         return game_exe.parent
 
+    # ② 从**官方启动器路径**推断 `<启动器根>/games/<游戏目录>`。
+    #    空环境里往往是这种情况：`official_launcher` 有值、`game_exe` 为空，而这里以前
+    #    没有这一步，于是只能靠全盘扫描兜底（在 exe 里可能失败、或被缓存成空）→
+    #    「未定位到游戏目录」→ 连带 XXMI 的 `game_folder` 写不进去、sbm 检查也报
+    #    「注入不完整」（2026-09-29 定位：这两个现象其实是同一个根因）。
+    launcher_hint = str(getattr(config, "official_launcher", "") or "").strip()
+    if launcher_hint:
+        try:
+            root = config.resolve_path(launcher_hint).parent
+        except Exception:  # noqa: BLE001
+            root = None
+        if root is not None:
+            for games_name in ("games", "Games"):
+                games_dir = root / games_name
+                if not games_dir.is_dir():
+                    continue
+                try:
+                    children = sorted(games_dir.iterdir())
+                except OSError:
+                    continue
+                for child in children:
+                    if child.is_dir() and (child / "Endfield.exe").is_file():
+                        return child
+
     launcher = config.xxmi_launcher_path
     if launcher is None:
         return None

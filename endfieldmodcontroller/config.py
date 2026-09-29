@@ -435,7 +435,11 @@ def auto_detect_game_dir(refresh: bool = False) -> str:
     if not refresh and "game_dir" in _DETECT_CACHE:
         return _DETECT_CACHE["game_dir"]
     result = _scan_game_dir()
-    _DETECT_CACHE["game_dir"] = result
+    # **不要缓存空结果**：搜索失败常常是一时的（程序刚启动、某个盘暂时不可访问等），
+    # 一旦把空串固化下来，之后所有调用都会拿到空 —— 表现为「游戏目录未定位」，并连带
+    # sbm 检查报「注入不完整」（2026-09-29 定位到的两个现象是同一个根因）。
+    if result:
+        _DETECT_CACHE["game_dir"] = result
     return result
 
 
