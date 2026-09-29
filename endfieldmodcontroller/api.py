@@ -33,11 +33,23 @@ class EndfieldModControllerApi:
         # "加载页"迟迟不出现（用户要求"所有情况都要尽早展示加载页面"）。于是所有
         # 重活（深探测、清理上次更新残留）挪到后台预热线程：前端先看到加载页，
         # 预热完成后再刷新一次即可（2026-10-01 改）。
+        #
+        # 2026-10-01 追加修复（实测从零启动窗口要 9.8 秒）：预热里的全盘扫描会和
+        # WebView2 初始化抢磁盘与 GIL —— 有 config 时 autofill 直接跳过探测所以很快，
+        # 从零时才真扫，正好卡在 webview.start() 里。现在预热先等前端首屏就绪
+        # （ui_ready()）再动手，最多等 15 秒。
         self._warm_done = False
+        self._ui_ready = threading.Event()
         threading.Thread(target=self._warm_up, name="mc-warm-up", daemon=True).start()
+
+    def ui_ready(self) -> dict[str, Any]:
+        """前端首屏渲染完成后调用：这时才允许后台开始全盘探测。"""
+        self._ui_ready.set()
+        return {"ok": True}
 
     def _warm_up(self) -> None:
         """后台预热：全盘探测 + 清理上次自更新残留。**别把重活挪回 __init__。**"""
+        self._ui_ready.wait(timeout=15)
         try:
             if self.config.autofill(deep=True):
                 try:
@@ -272,7 +284,10 @@ class EndfieldModControllerApi:
         # 留痕：用来判断前端是否真的完成了初始化（界面空白时先看这几行有没有）
         diagnostics.log_event(self.config, "UI 调用 get_state()", category="ui")
         mods = self._mods()
-        game_dir = reshade_integration.detect_game_dir(self.config)
+        # **不扫盘**：本方法跑在 GUI 线程上，扫盘会把窗口渲染一起冻住（详见
+        # reshade_integration.detect_game_dir 的注释）。从零启动时这里返回 None，
+        # 后台预热完成后前端会自动再刷一次，那时就能经 official_launcher 推断出来。
+        game_dir = reshade_integration.detect_game_dir(self.config, allow_scan=False)
         render_api = reshade_integration.detect_render_api(game_dir) if game_dir is not None else "unknown"
         return {
             "config": self.config.to_dict(),

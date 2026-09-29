@@ -154,7 +154,11 @@ class AppConfig:
             cfg.theme = "light"
         # 关键路径留空时按工作区内的内嵌组件补齐并落盘：
         # 这样把 config.json 整个删掉，一键启动依然能自建出完整可用配置。
-        if cfg.autofill():
+        # **必须 deep=False**：默认的 deep=True 会扫遍所有盘符找 XXMI/乳摇/官方启动器/
+        # migoto loader —— 实测这一行让"config 已存在"的加载路径多花 6.93 秒，
+        # 而从零分支（上面那两处）反而是快的，正好造成"从零启动慢、之后快"的错觉
+        # （2026-10-01 实测定位：窗口要等到 9.8 秒才可见）。缺的字段交给后台预热补。
+        if cfg.autofill(deep=False):
             try:
                 cfg.save(path)
             except OSError:

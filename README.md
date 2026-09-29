@@ -2,7 +2,7 @@
 
 《明日方舟：终末地》的一站式 Mod 管理器：把 **DLSS5 神经渲染 + 第一人称视角 + 服装 Mod（EFMI）** 以及 **乳摇（SecondaryMotion）** 统一到一次「一键启动」里，并自动维护各项注入与初始化自检。
 
-Windows 桌面程序（Python + PyWebview），单文件 exe，**零配置启动即用**。当前版本 **0.3.0**。
+Windows 桌面程序（Python + PyWebview），单文件 exe，**零配置启动即用**。当前版本 **0.3.1**。
 
 > 本程序**只做编排与自检**：注入由 XXMI Launcher 完成，服装 Mod 由 EFMI 加载，神经渲染与第一人称是挂在同一个 ReShade 底座下的 addon。
 > 它**不改游戏本体文件**，也不内置任何 Mod —— Mod 都是你自己放进来的。
@@ -66,7 +66,7 @@ run.bat --cli    :: 不开界面，直接打印当前状态 JSON（调试用）
 
 ### 首次启动会发生什么
 
-1. **界面立刻出现**（加载页在窗口创建后立即显示；全盘探测在后台跑，不挡界面）；
+1. **界面立刻出现**：窗口 1~3 秒内出现并显示加载页（从零启动实测 2.7 秒；窗口底色跟随主题，加载页至少显示 0.7 秒），**不存在"亮着窗口一片空白"的阶段**；全盘探测在首屏出来之后才开始，不挡界面；
 2. 自动下载安装 XXMI / XXMI Libraries / EFMI；
 3. XXMI 的配置是**它首次运行时自己生成**的，所以本程序会先拉起一次 XXMI 生成配置、随后关闭它，并提示：
 
@@ -134,8 +134,9 @@ run.bat --cli    :: 不开界面，直接打印当前状态 JSON（调试用）
 **Q：游戏起不来 / 进游戏闪退？**
 先看 `runtime\logs\` 里的崩溃信息与诊断 zip。常见原因：游戏目录缺 `d3dcompiler_47.dll` / `vulkan-1.dll`（净化时会自动补回，补不回会明确报错）、注入库同时挂了两个 ReShade 底座、或 mod 之间同角色冲突。
 
-**Q：第一次启动很慢？**
-界面是**立刻**出现的，慢的是后台在遍历盘符找 XXMI / 3DMigoto / 乳摇工具（只影响那几个"检测到的路径"字段，稍后会自动补上）。装组件要看网速。
+**Q：第一次启动会很慢吗？**
+不会。窗口 1~3 秒内出现（从零启动实测 2.7 秒），而且**任何阶段都不会出现空白窗口**：窗口底色跟随主题、加载页至少显示 0.7 秒，并分步提示「正在绑定界面 → 正在读取配置 → 正在扫描 Mod 库」。
+费时间的是后台"遍历盘符找 XXMI / 3DMigoto / 乳摇工具"，它在首屏出来**之后**才开始，只影响设置页那几个「检测到的路径」字段（探测完自动补上），不影响你操作。真正看网速的是首次下载安装 XXMI / Libraries / EFMI。
 
 **Q：下载慢 / 连不上 GitHub？**
 设置页把"下载加速"设为自动、线路设为自动即可：平时单连接，慢或断流时临时并发分块并临时切镜像线路；**镜像下载物会用 Release 提供的 sha256 校验**，校验不过就丢弃重来。用完线程池即销毁，不常驻、不改 hosts、不装证书。
@@ -180,12 +181,20 @@ python -m endfieldmodcontroller --cli   :: 打印状态 JSON
 
 ## 七、发布规则
 
-两个固化脚本（**构建**与**上传**分开；上传永远由你自己执行）：
+三个固化脚本（**构建**与**上传**分开；上传永远由你自己执行）：
 
 ```bat
-python scripts\build_release.py      :: 静态检查 → 构建最新版 + 带版本号副本 + 伪旧版 → 归置旧版
-python scripts\prepare_release.py    :: 校验产物 + 生成 assets-bundle.zip + 打印上传指引（不自动上传）
+python scripts\build_release.py          :: 静态检查 → 构建最新版 + 带版本号副本 + 伪旧版 → 归置旧版
+python scripts\prepare_release.py        :: 校验产物 + 生成 assets-bundle.zip + 打印上传指引
+python scripts\upload_release_assets.py  :: 上传两个附件（大文件走直连，见下）
 ```
+
+> **大文件上传的坑（2026-10-01 实测）**：机器上开着 Steam++ / Watt Toolkit 时，它会把 github
+> 相关域名写进 hosts 指向 `127.0.0.1` 的本地反代，而该反代对**大 body 的 POST 上传**支持不好 ——
+> 实测 1 / 5 / 20 / 60 MB 都能过，126 MB 的 `assets-bundle.zip` 会在发出约 100 KB 后被强断
+> （`gh release upload` 报 HTTP 502：`RequestBodyDestination … 远程主机强迫关闭了一个现有的连接`）。
+> `upload_release_assets.py` 的做法是：用 DoH 查真实 IP，再用 `curl --resolve` 直连上传
+> （实测 126 MB / 23 秒 / 5.7 MB/s 成功），**不改 hosts、不动系统代理**，下载路径不受影响。
 
 `build_release.py` 的静态检查（任一失败即中止，**不会**产出半成品）：所有模块 `py_compile`、
 `node --check web/app.js`、`python -m pytest tests -q`。

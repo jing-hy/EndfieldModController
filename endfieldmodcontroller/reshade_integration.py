@@ -103,7 +103,7 @@ def restore_conflicting_addons(game_dir: Path, *, log: Callable[[str], None] | N
     return {"restored": restored, "warnings": warnings}
 
 
-def detect_game_dir(config: AppConfig) -> Path | None:
+def detect_game_dir(config: AppConfig, *, allow_scan: bool = True) -> Path | None:
     game_exe = config.game_exe_path
     if game_exe is not None and game_exe.is_file():
         return game_exe.parent
@@ -148,6 +148,13 @@ def detect_game_dir(config: AppConfig) -> Path | None:
         if path.is_dir():
             return path
     # ③ 兜底：自动搜索游戏本体（不硬编码任何盘符/目录）
+    #
+    # `allow_scan=False` 时**绝不扫盘** —— 界面刷新（get_state）走的就是这条路。
+    # pywebview 的 js_api 调用是在 GUI 线程上执行的，这里一旦扫遍所有盘符，窗口渲染
+    # 会被一起冻住：2026-10-01 实测从零启动时窗口出现后一直白屏，日志里
+    # `get_state()` → `scan()` 之间隔了 18 秒，用户看到的就是"窗口亮得慢、没有加载页"。
+    if not allow_scan:
+        return None
     from .config import auto_detect_game_dir
 
     guess = auto_detect_game_dir()

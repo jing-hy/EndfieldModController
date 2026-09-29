@@ -1449,9 +1449,16 @@ function splashMsg(text) {
   const el = $('splash-msg');
   if (el) el.textContent = text;
 }
+// 加载页至少显示这么久：WebView2 首次渲染要 1 秒上下，一就绪就立刻收起的话
+// 用户根本看不到加载页，只看到"白屏闪一下"（2026-10-01 实测定位）。
+const SPLASH_MIN_MS = 700;
+const __splashStart = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
 function splashDone() {
   const el = $('splash');
-  if (el) el.classList.add('hidden');
+  if (!el) return;
+  const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  const wait = Math.max(0, SPLASH_MIN_MS - (now - __splashStart));
+  setTimeout(() => el.classList.add('hidden'), wait);
 }
 // 看门狗：无论初始化成功与否，18 秒后强制收起加载页。
 // 否则任何一处 JS 异常都会让界面永远停在"正在扫描 Mod 库…"。
@@ -1467,6 +1474,16 @@ async function boot() {
   if (__booted) return;
   __booted = true;
   const diag = [];
+  // **先把加载页画出来**再做别的：`bind()` 会同步操作大量 DOM，后面紧跟 await 又会
+  // 让出主线程 —— 不先让浏览器绘制一次的话，用户看到的就是"窗口亮着一片空白，
+  // 然后直接跳到主界面"，加载页几乎不存在（2026-10-01 实测定位到这一点）。
+  await new Promise((resolve) => {
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => setTimeout(resolve, 0));
+    } else {
+      setTimeout(resolve, 0);
+    }
+  });
   splashMsg('正在绑定界面…');
   try { bind(); diag.push('bind ✓'); } catch (err) { diag.push(`bind ✗ ${err.message || err}`); console.error('bind 失败', err); }
   splashMsg('正在读取配置…');
@@ -1503,6 +1520,10 @@ async function boot() {
   }
   paintLog($('log-text'));
   splashDone();
+  // 首屏已经出来了：这时才告诉后端"可以开始后台全盘探测了"。
+  // 否则那些扫描会和 WebView2 窗口初始化抢磁盘/GIL，从零启动时窗口要等约 10 秒
+  // 才可见（2026-10-01 实测定位）。
+  try { call('ui_ready').catch(() => {}); } catch (err) { /* 忽略 */ }
   startCrashPolling();
   // 角色识别不确定的 Mod：弹窗让用户选（延后一点，别和启动流程抢时间）
   setTimeout(() => { startCharacterCheck(); }, 1500);

@@ -86,6 +86,12 @@ def main(argv: list[str] | None = None) -> int:
         print("pywebview is not installed. Run: pip install -r requirements.txt")
         return 1
 
+    # 窗口的初始背景色：WebView2 初始化那 1~2 秒里窗口内容是空的，默认白色在深色
+    # 主题下很刺眼，看起来也像"卡住了"（2026-10-01 实测：从零启动窗口先白屏，
+    # 加载页因此几乎看不到）。按主题给底色，白屏期直接就是主题色。
+    theme = str(getattr(api.config, "theme", "light") or "light")
+    window_bg = "#eef2f7" if theme == "light" else "#0a0e13"
+
     webview.create_window(
         WINDOW_TITLE,
         str(WEB_DIR / "index.html"),
@@ -93,6 +99,7 @@ def main(argv: list[str] | None = None) -> int:
         width=1180,
         height=800,
         min_size=(980, 680),
+        background_color=window_bg,
     )
     webview.start()
     # 关闭窗口后必须真的退出：后台还可能有下载/监控类工作线程，
