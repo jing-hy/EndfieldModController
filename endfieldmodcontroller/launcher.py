@@ -321,6 +321,49 @@ def prepare_reshade_runtime(config: AppConfig, controller_dir: Path) -> dict[str
     }
 
 
+def ensure_xxmi_signing_key(config_path: Path) -> dict[str, Any]:
+    """确保 XXMI 的签名密钥存在；**缺了就生成一对 ECDSA(P-384)**。
+
+    为什么需要：XXMI 把 `extra_libraries` 等标为 *unsecure settings*，值必须带
+    `*_signature`（用同目录的 `private_key.der` 签）。而 **XXMI 的便携包里不带这对
+    密钥**，于是空环境写注入库必然失败（报「找不到 XXMI 私钥」）→ 表现为「注入失败」
+    （2026-09-29 实测定位：把工作区那对密钥复制过去，注入立刻成功、`enabled` 变 True）。
+    XXMI 用**同目录**的 `public_key.der` 校验，所以自己生成一对即可通过。
+
+    文件格式与 XXMI 一致：**base64 文本包装的 DER**（实测私钥 248 B / 公钥 160 B）。
+    """
+    security = config_path.parent / "Resources" / "Security"
+    key_file = security / "private_key.der"
+    pub_file = security / "public_key.der"
+    if key_file.is_file() and pub_file.is_file():
+        return {"ok": True, "generated": False, "message": "XXMI 签名密钥已存在"}
+    try:
+        import base64
+
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+    except ImportError as exc:  # pragma: no cover
+        return {"ok": False, "generated": False,
+                "message": f"缺少 cryptography，无法生成 XXMI 签名密钥：{exc}"}
+    try:
+        security.mkdir(parents=True, exist_ok=True)
+        key = ec.generate_private_key(ec.SECP384R1())
+        private_der = key.private_bytes(
+            encoding=serialization.Encoding.DER,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+        public_der = key.public_key().public_bytes(
+            encoding=serialization.Encoding.DER,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+        key_file.write_bytes(base64.b64encode(private_der))
+        pub_file.write_bytes(base64.b64encode(public_der))
+    except (OSError, ValueError) as exc:
+        return {"ok": False, "generated": False, "message": f"生成 XXMI 签名密钥失败：{exc}"}
+    return {"ok": True, "generated": True, "message": f"已为 XXMI 生成签名密钥（{security}）"}
+
+
 def sign_xxmi_setting(config_path: Path, value: str) -> str:
     """用 XXMI 自己的私钥给「危险设置」的值签名。
 
@@ -340,6 +383,10 @@ def sign_xxmi_setting(config_path: Path, value: str) -> str:
     except ImportError as exc:  # pragma: no cover
         raise LaunchError("缺少 cryptography，无法为 XXMI 设置签名（pip install cryptography）") from exc
     key_file = config_path.parent / "Resources" / "Security" / "private_key.der"
+    if not key_file.is_file():
+        # 便携包里不带这对密钥；空环境因此写不进注入库（2026-09-29 实测）。
+        # XXMI 用同目录的 public_key.der 校验，所以缺了就自己生成一对。
+        ensure_xxmi_signing_key(config_path)
     if not key_file.is_file():
         raise LaunchError(f"找不到 XXMI 私钥: {key_file}")
     der = base64.b64decode(key_file.read_bytes().strip())
@@ -593,12 +640,58 @@ def configure_xxmi_extra_libraries(config: AppConfig) -> dict[str, Any]:
     if not backup.exists():
         shutil.copy2(config_path, backup)
     config_path.write_text(json.dumps(data, ensure_ascii=False, indent=4), encoding="utf-8")
+    # 顺便告诉 XXMI 游戏装在哪 —— 否则它界面里不会出现终末地的启动按钮（2026-09-29 实测）
+    game_folder = ensure_xxmi_game_folder(config)
     return {
         "config_path": str(config_path),
         "backup": str(backup),
         "extra_libraries": reshade_path,
+        "game_folder": game_folder.get("message", ""),
     }
 
+
+
+def ensure_xxmi_game_folder(config: AppConfig) -> dict[str, Any]:
+    """把游戏目录写进 XXMI 配置的 `Importers.EFMI.Importer.game_folder`。
+
+    **不做这件事，XXMI 界面里就不会出现终末地的启动按钮** —— 实测空环境下该字段是空
+    字符串（2026-09-29），XXMI 既搜不到游戏、也没人告诉它路径，于是"没有启动按钮"。
+    顺带把 `Launcher.active_importer` 设为 `EFMI`（本方案跑的就是 EFMI / 服装 Mod）。
+    """
+    launcher_path = config.xxmi_launcher_path
+    if launcher_path is None:
+        return {"ok": False, "changed": False, "message": "未配置 XXMI Launcher"}
+    game_dir = reshade_integration.detect_game_dir(config)
+    if game_dir is None:
+        return {"ok": False, "changed": False, "message": "未定位到游戏目录"}
+    config_path = reshade_integration.xxmi_config_path(launcher_path)
+    if config_path is None or not config_path.is_file():
+        return {"ok": False, "changed": False, "message": "找不到 XXMI 配置文件"}
+    try:
+        data = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {"ok": False, "changed": False, "message": f"读取 XXMI 配置失败：{exc}"}
+    if not isinstance(data, dict):
+        return {"ok": False, "changed": False, "message": "XXMI 配置格式异常"}
+
+    changed: list[str] = []
+    importer = data.setdefault("Importers", {}).setdefault("EFMI", {}).setdefault("Importer", {})
+    if str(importer.get("game_folder") or "") != str(game_dir):
+        importer["game_folder"] = str(game_dir)
+        changed.append("Importers.EFMI.Importer.game_folder")
+    launcher_block = data.setdefault("Launcher", {})
+    if launcher_block.get("active_importer") != "EFMI":
+        launcher_block["active_importer"] = "EFMI"
+        changed.append("Launcher.active_importer")
+    if not changed:
+        return {"ok": True, "changed": False, "game_dir": str(game_dir),
+                "message": f"XXMI 已指向游戏目录（{game_dir.name}）"}
+    try:
+        config_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError as exc:
+        return {"ok": False, "changed": False, "message": f"写入 XXMI 配置失败：{exc}"}
+    return {"ok": True, "changed": True, "game_dir": str(game_dir),
+            "message": f"已让 XXMI 指向游戏目录（{', '.join(changed)}）"}
 
 
 def restore_xxmi_extra_libraries(config: AppConfig) -> dict[str, Any]:

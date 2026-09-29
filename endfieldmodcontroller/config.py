@@ -282,8 +282,25 @@ class AppConfig:
 
     @property
     def efmi_dll_path(self) -> Path | None:
+        """EFMI 注入用的 `d3d11.dll`。
+
+        XXMI 装好后这个 dll 可能在**两处**：已经部署过的 `EFMI/d3d11.dll`，或者
+        包目录 `Resources/Packages/XXMI/d3d11.dll`（还没部署到 EFMI/ 时就只有这里）。
+        实测空环境（2026-09-29）**只有后者**，而这里原先只找前者 → 一键启动报
+        「注入失败」。
+        """
         efmi = self.efmi_dir
-        return (efmi / "d3d11.dll") if efmi is not None else None
+        if efmi is None:
+            return None
+        direct = efmi / "d3d11.dll"
+        if direct.is_file():
+            return direct
+        # 回退：XXMI 自带的包目录（efmi 是 <XXMI>/EFMI，所以 parent 就是 <XXMI>）
+        for rel in ("Resources/Packages/XXMI/d3d11.dll", "Resources/Packages/EFMI/d3d11.dll"):
+            candidate = efmi.parent / rel
+            if candidate.is_file():
+                return candidate
+        return direct            # 两处都没有 → 返回原路径，供上层给出可读的报错
 
     # ---------------------------------------------------------------
     # SecondaryMotion（乳摇管理器）

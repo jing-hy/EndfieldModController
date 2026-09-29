@@ -949,6 +949,27 @@ function bind() {
   const efmiToggle = $('cfg-efmi-injection');
   if (efmiToggle) efmiToggle.onchange = () => applyModsMaster(efmiToggle.checked);
   // 初始化自检
+  // 一键还原游戏本体：把游戏目录里所有第三方插件文件移走（先整体备份），恢复成原版状态
+  if ($('game-restore-btn')) {
+    $('game-restore-btn').onclick = async () => {
+      if (!await showConfirm(
+        '把终末地游戏目录里所有第三方插件文件移走、恢复成原版状态？\n\n'
+        + '· 会先整体备份，随时可以用「从备份还原」搬回来\n'
+        + '· loader proxy 会用系统原版文件补回\n'
+        + '· Mod 库、配置与已装组件都不受影响',
+        '一键还原游戏本体')) return;
+      setStatus('正在还原游戏本体…');
+      try {
+        const result = await call('game_clean_backup_and_clean', true);
+        await showAlert(result.message || (result.ok ? '游戏目录已还原为原版状态。' : '还原失败'),
+                        '一键还原游戏本体');
+      } catch (err) {
+        await showAlert(`还原失败：${err.message || err}`, '一键还原游戏本体');
+      }
+      await refreshFromState();
+    };
+  }
+
   if ($('init-check-btn')) {
     $('init-check-btn').onclick = async () => {
       setStatus('正在做初始化自检…');
