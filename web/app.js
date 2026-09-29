@@ -599,7 +599,18 @@ async function pollDependencyProgress(statusEl) {
     }
     if (!progress.running) {
       out.textContent = JSON.stringify(progress.results || [], null, 2);
-      setStatus('依赖任务完成');
+      // 用户要求：下载完成时日志里要写明「完成」，并且顶部气泡也要弹出来
+      const done = progress.results || [];
+      const failedCount = done.filter(r => /失败/.test(String((r || {}).status || ''))).length;
+      const doneMessage = done.length === 0
+        ? '任务结束'
+        : (failedCount ? `完成，但有 ${failedCount} 项失败` : `下载与安装完成（${done.length} 项）✅`);
+      if (logBox) {
+        logBox.textContent = `${logBox.textContent}\n—— ${doneMessage} ——`;
+        logBox.scrollTop = logBox.scrollHeight;
+      }
+      showToast(doneMessage);
+      setStatus(doneMessage);
       try {
         await refreshFromState();
       } catch (err) {

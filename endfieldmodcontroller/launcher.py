@@ -322,31 +322,64 @@ def prepare_reshade_runtime(config: AppConfig, controller_dir: Path) -> dict[str
 
 
 def ensure_xxmi_signing_key(config_path: Path) -> dict[str, Any]:
-    """确保 XXMI 的签名密钥存在；**缺了就生成一对 ECDSA(P-384)**。
+    """确保 XXMI 的签名密钥**和** `Security.user_signature` 都在；缺了就生成一对。
 
-    为什么需要：XXMI 把 `extra_libraries` 等标为 *unsecure settings*，值必须带
-    `*_signature`（用同目录的 `private_key.der` 签）。而 **XXMI 的便携包里不带这对
-    密钥**，于是空环境写注入库必然失败（报「找不到 XXMI 私钥」）→ 表现为「注入失败」
-    （2026-09-29 实测定位：把工作区那对密钥复制过去，注入立刻成功、`enabled` 变 True）。
-    XXMI 用**同目录**的 `public_key.der` 校验，所以自己生成一对即可通过。
+    **为什么必须连 `user_signature` 一起设**（2026-09-29 读 XXMI 源码确认）：
+    `xxmi_launcher/core/config_manager.py` 的 `AppConfigSecurity.__init__` 逻辑是
 
-    文件格式与 XXMI 一致：**base64 文本包装的 DER**（实测私钥 248 B / 公钥 160 B）。
+        if public_key is None or not verify(Config.Security.user_signature, ...):
+            generate_key_pair(); write_key_pair(keys_path)
+            Config.Security.user_signature = sign(os.getlogin())
+
+    也就是说：**只要 `user_signature` 校验不过，XXMI 一启动就会自己重新生成一对密钥**。
+    我们之前**只生成了密钥对、没设 `user_signature`**，于是 XXMI 一启动就换掉密钥，
+    我们写下的所有 `*_signature` 全部作废 → 它再弹「Failed to validate unsecure
+    settings!」→ 用户一点 Reset，`extra_libraries` / `enabled` / `game_folder` 全被
+    清空 —— 这就是空环境「注入失败」的真相。
+
+    密钥与签名格式与 XXMI 完全一致：**ECDSA(P-384)**、base64 文本包装的 **DER**、
+    **SHA-256**；`user_signature` 签的是 `os.getlogin()`。
     """
-    security = config_path.parent / "Resources" / "Security"
-    key_file = security / "private_key.der"
-    pub_file = security / "public_key.der"
-    if key_file.is_file() and pub_file.is_file():
-        return {"ok": True, "generated": False, "message": "XXMI 签名密钥已存在"}
+    security_dir = config_path.parent / "Resources" / "Security"
+    key_file = security_dir / "private_key.der"
+    pub_file = security_dir / "public_key.der"
     try:
         import base64
+        import os
 
-        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives import hashes, serialization
         from cryptography.hazmat.primitives.asymmetric import ec
     except ImportError as exc:  # pragma: no cover
         return {"ok": False, "generated": False,
                 "message": f"缺少 cryptography，无法生成 XXMI 签名密钥：{exc}"}
+
+    data: dict[str, Any] = {}
+    if config_path.is_file():
+        try:
+            loaded = json.loads(config_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                data = loaded
+        except (OSError, json.JSONDecodeError):
+            data = {}
+    security_block = data.setdefault("Security", {})
+    if not isinstance(security_block, dict):
+        security_block = {}
+        data["Security"] = security_block
+
+    if key_file.is_file() and pub_file.is_file() and str(security_block.get("user_signature") or ""):
+        return {"ok": True, "generated": False,
+                "message": "XXMI 签名密钥与 user_signature 均已存在"}
+
     try:
-        security.mkdir(parents=True, exist_ok=True)
+        login = os.getlogin()
+    except OSError:                       # 某些服务/无控制台环境会失败
+        login = os.environ.get("USERNAME") or ""
+    if not login:
+        return {"ok": False, "generated": False,
+                "message": "取不到当前登录用户名，无法生成 XXMI 的 user_signature"}
+
+    try:
+        security_dir.mkdir(parents=True, exist_ok=True)
         key = ec.generate_private_key(ec.SECP384R1())
         private_der = key.private_bytes(
             encoding=serialization.Encoding.DER,
@@ -359,9 +392,15 @@ def ensure_xxmi_signing_key(config_path: Path) -> dict[str, Any]:
         )
         key_file.write_bytes(base64.b64encode(private_der))
         pub_file.write_bytes(base64.b64encode(public_der))
+        # 关键：连 user_signature 一起写，否则 XXMI 启动时会重新生成密钥、把我们写的签名全废掉
+        security_block["user_signature"] = base64.b64encode(
+            key.sign(login.encode("utf-8"), ec.ECDSA(hashes.SHA256()))
+        ).decode("ascii")
+        config_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     except (OSError, ValueError) as exc:
         return {"ok": False, "generated": False, "message": f"生成 XXMI 签名密钥失败：{exc}"}
-    return {"ok": True, "generated": True, "message": f"已为 XXMI 生成签名密钥（{security}）"}
+    return {"ok": True, "generated": True,
+            "message": f"已生成 XXMI 签名密钥并写入 user_signature（{security_dir}）"}
 
 
 def sign_xxmi_setting(config_path: Path, value: str) -> str:
@@ -566,6 +605,30 @@ def ensure_injections(config: AppConfig) -> dict[str, Any]:
     """
     actions: list[str] = []
     warnings: list[str] = []
+
+    # ⚠️ **必须在任何配置改写之前**先确保 XXMI 的签名密钥与 Security.user_signature 就位。
+    # 否则会出现"后写覆盖先写"：写 extra_libraries 时才发现缺密钥、于是生成密钥并写好
+    # user_signature，可紧接着上层又用手里的**旧配置副本**写回，把 user_signature 盖回空值
+    # —— XXMI 启动时发现它无效，就自己重新生成一对密钥，把我们写的所有签名全废掉，
+    # 再弹「Failed to validate unsecure settings!」（2026-09-29 实测：user_signature 长度 0）。
+    try:
+        launcher_path = config.xxmi_launcher_path
+        if launcher_path is not None:
+            xxmi_config = reshade_integration.xxmi_config_path(launcher_path)
+            if xxmi_config is not None and xxmi_config.is_file():
+                key_state = ensure_xxmi_signing_key(xxmi_config)
+                if key_state.get("generated"):
+                    actions.append(str(key_state.get("message") or "已生成 XXMI 签名密钥"))
+    except Exception as exc:  # noqa: BLE001
+        warnings.append(f"准备 XXMI 签名密钥失败: {exc}")
+
+    # 让 XXMI 知道游戏装在哪 —— 否则它界面里不会出现终末地的启动按钮（2026-09-29 空环境实测）
+    try:
+        game_folder_state = ensure_xxmi_game_folder(config)
+        if game_folder_state.get("changed"):
+            actions.append(str(game_folder_state.get("message") or "已让 XXMI 指向游戏目录"))
+    except Exception as exc:  # noqa: BLE001
+        warnings.append(f"写入 XXMI 游戏目录失败: {exc}")
 
     # 先按两个开关同步 addon 的启停（同一底座下的 DLSS5 / 第一人称各自独立）
     status = component_addon_status(config)
