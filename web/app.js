@@ -553,6 +553,9 @@ async function startFullUpdate(dryRun, statusEl) {
   await pollDependencyProgress(out);
 }
 
+// 依赖任务里"已完成的组件数"，用来做「每装完一个就刷新一次列表」的增量刷新
+let lastDoneCount = 0;
+
 async function pollDependencyProgress(statusEl) {
   const out = statusEl || $('dep-results');
   const isDepPanel = out === $('dep-results');
@@ -563,7 +566,22 @@ async function pollDependencyProgress(statusEl) {
     const percent = Number(progress.percent || 0);
     $('dep-progress').max = 100;
     $('dep-progress').value = Math.max(0, Math.min(100, percent));
-    $('dep-progress-text').textContent = `${current}/${total} ${progress.message || ''}`;
+    // 进度条旁**只显示总进度**（百分比 + 第几个组件）；带字节的细节交给下面的日志框，
+    // 否则这里会变成「0/3 XX: 12.3/27.9 MB」——两个不同量纲的进度挤在一起，看着像对不上。
+    $('dep-progress-text').textContent = total
+      ? `${percent.toFixed(0)}%  ·  组件 ${current}/${total}`
+      : (progress.message || '');
+
+    if (current < lastDoneCount) lastDoneCount = 0;   // 进程号回退 = 新任务，重新计数
+    // 每装完一个组件就刷新一次依赖列表（用户要求），别等全部完成才刷新。
+    if (progress.running && current > lastDoneCount) {
+      lastDoneCount = current;
+      try {
+        await refreshFromState();
+      } catch (err) {
+        /* 单个组件刷新失败不影响整体任务 */
+      }
+    }
     // 详细过程（含"尝试线路 / 直连失败 / 断点续传 / 校验"等）全部写进下面那个日志框，
     // 它专门用来展示下载细节，所以这里不做过滤；界面上方只留进度条与一行状态。
     const logBox = $('dep-log');
