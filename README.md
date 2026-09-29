@@ -82,24 +82,11 @@ run.bat --cli    :: 不开界面，直接打印当前状态 JSON（调试用）
 
 > **DLSS5 那套组件没有上游可下载**（`renodx-endfield-enhancer.addon64`、`trans-zh.addon64`、`nvngx_dlssnr.dll` 全网都没有自动可用的发布源），需要随包自备（`assets\dlss5\`）或从可用的旧环境复制到 `runtime\dlss5\`。缺了会明确提示缺哪个文件，而不是静默失败。
 
-### ⚠ DLSS5 首次使用：还要在 ReShade 面板里点两下
+### DLSS5 装完直接玩，不需要手动配置
 
-DLSS5 能不能出帧，除了文件齐全以外，**还取决于两个 ReShade 效果是否被"激活"** —— 而这个激活状态是 ReShade 的内部状态，光靠写配置文件不一定生效（本程序会把 preset 里的 technique 与顺序都写好，但首次通常仍需手动点一次）：
+出帧所需的全部条件（ReShade shader 标准头与纹理、NGX 运行库、运动矢量来源、preset 里两个 technique 的启用与顺序）都由初始化自检自动写好、每轮校验，**不需要你进游戏点任何东西**：一键启动 → 进游戏 → 面板 `成功NR帧` 应该就开始涨。
 
-1. 进游戏后按 **Home** 打开 ReShade 面板 → **主页** → 找到**效果列表**；
-2. 找到 **`iMMERSE: Launchpad`**（说明写着 "enable and move to the top!"）→ 点它右边的「**置顶激活效果**」；
-3. 再找到 **`DLSS5_Feed`** → 也点「置顶激活效果」；
-4. ⚠️ **保证 `iMMERSE: Launchpad` 排在 `DLSS5_Feed` 上面**（说明书要求 provider 在 DLSS5_Feed **之上**）——"置顶"会把它弄到最上面，必要时在列表里拖动调整；
-5. 正常退出游戏（ReShade 会自动把设置写回 `ReShadePreset.ini`，`AutoSavePreset` 默认开启）。
-
-之后每次启动都会保持。判断是否真的工作了，进游戏后看面板这几行：
-
-```
-NGX Hook：创建/评估      不该一直是 0
-成功NR帧                 应该开始涨
-```
-
-或者看日志 `runtime\dlss5\dlss5-feed.log`，成功时是这样：
+想确认它真在工作，最直接是看 `runtime\dlss5\dlss5-feed.log`，成功时是这样：
 
 ```
 ################ feed: opening D3D12 session ################
@@ -108,6 +95,8 @@ NGX Hook：创建/评估      不该一直是 0
 [feed] frame 1 delivered (3840x2160, reset=1)
 [feed] 600 frames: feed CPU 0.4x ms/frame ...
 ```
+
+万一没出帧，按 FAQ「能进游戏但成功NR帧一直是 0」那三条路径排查（那里也包含"实在不行在面板里手工激活一次"的兜底做法）。
 
 ---
 
@@ -170,10 +159,10 @@ NGX Hook：创建/评估      不该一直是 0
 `nvngx_dlssnr.dll` 没就位。确认 `runtime\dlss5\` 里有这两个文件：`nvngx_dlss.dll`（58,977,904 B）与 `nvngx_dlssnr.dll`（165,840,496 B）——**游戏目录保持原版即可**，不需要动它。日志里会有 `Failed to find NVSDK_NGX_D3D12_EvaluateFeature_C` 这条（正常，它旁边的 `EvaluateFeature hooked` 才是关键）。
 
 **Q：能进游戏，但「成功NR帧」一直是 0？**
-按顺序查三处：
-1. `runtime\dlss5\dlss5-feed.log` 里是不是 `motion vectors will be zero (still images only)` —— 是的话说明运动矢量来源没配，`ReShade.ini` 的 `[GENERAL] PreprocessorDefinitions` 与 `ReShadePreset.ini` 里都要有 `DLSS5_MV_PROVIDER=1`；
-2. 日志里是不是 `LaunchPad technique found (DISABLED)` —— 是的话按上文「DLSS5 首次使用」到面板里激活两个效果；
-3. 日志里是不是只有 `launchPad technique found (enabled)` 就没了、没有 `opening D3D12 session` —— 那是 `DLSS5_Feed` 这个 effect **没被激活**，同样去面板点一次。
+正常情况下不该出现——初始化自检会把下面三件事都办好。真遇到了按顺序查：
+1. `runtime\dlss5\dlss5-feed.log` 里是不是 `motion vectors will be zero (still images only)` —— 是的话说明运动矢量来源没配，`ReShade.ini` 的 `[GENERAL] PreprocessorDefinitions` 与 `ReShadePreset.ini` 里都要有 `DLSS5_MV_PROVIDER=1`（重跑一次「一键检测全部」会补）；
+2. 日志里是不是 `Failed to compile ... DLSS5_Feed.fx: could not open included file 'ReShade.fxh'` —— 是的话说明缺 ReShade 标准头，重跑自检（`dlss5:shader_deps` 会补齐；注意 `runtime\dlss5\reshade-shaders\Textures\` 也要有文件，空目录同样不行）；
+3. 日志里是不是 `LaunchPad technique found (DISABLED)`、或者只有 `LaunchPad technique found (enabled)` 却没有 `opening D3D12 session` —— 说明 preset 里的 technique 没有真正生效。先确认 `ReShadePreset.ini` 里 `Techniques=` 含 `MartysMods_Launchpad@MartysMods_LAUNCHPAD.fx` 与 `DLSS5_Feed@DLSS5_Feed.fx`、`EffectSorting=MartysMods_LAUNCHPAD.fx,DLSS5_Feed.fx`；**必须完全退出游戏后再改**（`AutoSavePreset=1` 时 ReShade 退出会把内存状态写回、覆盖你的改动）。若仍不生效，兜底手段是进游戏按 Home → 主页 → 效果列表，把 `iMMERSE: Launchpad` 与 `DLSS5_Feed` 各点一次「置顶激活效果」（并保证 Launchpad 排在 DLSS5_Feed 之上），正常退出让 ReShade 自己写回 preset。
 
 **Q：ReShade 提示「编译一些效果时出现了错误」？**
 那是完整 shader 集合里几个无关效果（`MartysMods_FFTBLOOM.fx`、`INSIGHT.fx`、`RSRetroArch\mdapt.fx`、`DH\dh_uber_rt.fx`、`AstrayFX\RadiantGI.fx`）编译失败，**与 DLSS5 无关**，程序会把它们移到 `_quarantine_bad_shaders\`。真正要关心的是日志里有没有 `Failed to compile ... DLSS5_Feed.fx: could not open included file 'ReShade.fxh'` —— 那说明缺 ReShade 标准头，重跑一次自检即可（`dlss5:shader_deps` 会补齐）。
