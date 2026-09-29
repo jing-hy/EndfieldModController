@@ -19,6 +19,7 @@
 """
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -54,6 +55,11 @@ def main() -> int:
         cmd += ["--icon", str(ICON)]
     else:
         print(f"!! 没找到图标 {ICON}，将使用 PyInstaller 默认图标")
+    if os.name == "nt":
+        # 让 exe 的 manifest 自己要求管理员：**双击即弹 UAC 提权，用户零配置**。
+        # 需要它的原因：XXMI Launcher 的 exe 要求管理员权限，非管理员启动会直接报
+        # WinError 740（2026-09-29 实测）。
+        cmd += ["--uac-admin"]
     # pywebview 在 Windows 上走 WebView2，经 pythonnet/clr 调用，必须显式带上
     cmd += ["--collect-all", "webview"]
     for hidden in ("clr", "pythonnet", "PIL", "cryptography", "webview.platforms.edgechromium"):

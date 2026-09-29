@@ -1341,8 +1341,19 @@ def launch(
     if not start_game:
         _append_log(config, "游戏未由 EndfieldModController 启动；请从 XXMI Launcher 手动启动游戏。")
 
-    if config.require_admin and hasattr(os, "geteuid") and os.geteuid() != 0:  # pragma: no cover
-        raise LaunchError("Administrator privileges are required for launch")
+    # 非管理员时**只记一条日志，不阻止启动**。
+    # 原来这里写的是 `hasattr(os, "geteuid") and os.geteuid() != 0` —— 那是 Unix 专用，
+    # 在 Windows 上恒为假，等于这个开关从来没生效过（2026-09-29 发现）。
+    # 真正需要提权的是 XXMI Launcher（它的 exe 要求管理员），那一步在下面的
+    # _spawn_command 里会按 require_admin 自动走 runas 提权；这里补一条可读的提示。
+    if config.require_admin and os.name == "nt":
+        try:
+            import ctypes
+
+            if not ctypes.windll.shell32.IsUserAnAdmin():
+                _append_log(config, "当前不是管理员：启动 XXMI 时会自动请求提权（XXMI 需要管理员）")
+        except Exception:  # noqa: BLE001
+            pass
 
     launcher_path = config.xxmi_launcher_path
     assert launcher_path is not None

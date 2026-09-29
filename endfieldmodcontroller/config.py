@@ -87,7 +87,9 @@ class AppConfig:
     launch_extra_args: list[str] = field(default_factory=list)
     selected_mods: list[str] = field(default_factory=list)
     auto_update_dependencies: bool = False
-    require_admin: bool = False
+    # 默认为 True：XXMI Launcher 的 exe 要求管理员权限（非管理员启动会直接报
+    # WinError 740），而用户要的是「零配置启动即用」，所以默认就按管理员处理。
+    require_admin: bool = True
 
     _config_path: str = field(default="", init=False, repr=False)
 
