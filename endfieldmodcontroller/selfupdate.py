@@ -290,6 +290,15 @@ If failed Then
   End If
   WScript.Sleep 1500
   sh.Run """" & target & """", 1, False
+  ' Same wait as in step 4: the rollback branch used to delete this script and exit
+  ' right away, which makes the new instance report
+  ' "invalid originating onefile parent process (PID not found)".
+  For i = 1 To 40
+    Set procs = wmi.ExecQuery("SELECT ProcessId FROM Win32_Process WHERE Name='{procname}'")
+    If procs.Count > 0 Then Exit For
+    WScript.Sleep 1000
+  Next
+  WScript.Sleep 15000
   fso.DeleteFile WScript.ScriptFullName, True
   WScript.Quit 1
 End If
@@ -298,7 +307,22 @@ End If
 ' The exe was renamed into place (not half-written), so a short settle is enough.
 WScript.Sleep 1000
 sh.Run """" & target & """", 1, False
-WScript.Sleep 3000
+
+' PyInstaller 6.x (onefile) validates the PARENT process of the child it spawns --
+' see pyinstaller issue #9513 / PR #9520: having another program in between breaks
+' the check. The chain here is: old exe -> this script (wscript.exe) -> new exe.
+' If this script exits before the new instance's bootloader finishes unpacking, the
+' new instance shows "Security validation failure: invalid originating onefile
+' parent process (PID not found)!" -- exactly what the user hit on 2026-09-29 (the
+' update itself still succeeded). So: poll until the new process shows up, then
+' keep this script alive a while longer so the parent is definitely still there.
+' (This template must stay pure ASCII: WSH reads .vbs as ANSI.)
+For i = 1 To 40
+  Set procs = wmi.ExecQuery("SELECT ProcessId FROM Win32_Process WHERE Name='{procname}'")
+  If procs.Count > 0 Then Exit For
+  WScript.Sleep 1000
+Next
+WScript.Sleep 15000
 On Error Resume Next
 fso.DeleteFile backup, True
 fso.DeleteFile newFile, True
