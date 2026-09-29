@@ -32,9 +32,27 @@ try { applyTheme(localStorage.getItem('mc-theme') || 'light'); } catch (err) { /
 })();
 
 function $(id) { return document.getElementById(id); }
+// 顶部气泡：右上角那行灰字已按用户要求去掉（CSS 里 #global-status 隐藏），
+// 状态改为顶部居中的圆角气泡，几秒后自动向上收起。
+let toastTimer = null;
+let lastToastText = '';
+
+function showToast(text, ms = 3400) {
+  const el = $('toast');
+  if (!el || !text) return;
+  // 同一条消息连续出现时不重复弹（setStatus 在轮询里会被高频调用）
+  if (text === lastToastText && el.classList.contains('show')) return;
+  lastToastText = text;
+  el.textContent = text;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), ms);
+}
+
 function setStatus(text) {
   const el = $('global-status');
-  if (el) el.textContent = text;
+  if (el) el.textContent = text;   // 元素已隐藏，保留写入只为兼容调试
+  if (text) showToast(text);
 }
 
 // ── 日志分级（英文等级 + 分色）──────────────────────────────
@@ -494,6 +512,13 @@ async function pollDependencyProgress(statusEl) {
     $('dep-progress').max = 100;
     $('dep-progress').value = Math.max(0, Math.min(100, percent));
     $('dep-progress-text').textContent = `${current}/${total} ${progress.message || ''}`;
+    // 详细过程（含"尝试线路 / 直连失败 / 断点续传 / 校验"等）全部写进下面那个日志框，
+    // 它专门用来展示下载细节，所以这里不做过滤；界面上方只留进度条与一行状态。
+    const logBox = $('dep-log');
+    if (logBox && (progress.log || []).length) {
+      logBox.textContent = progress.log.join('\n');
+      logBox.scrollTop = logBox.scrollHeight;
+    }
     if (!isDepPanel) {
       // 在别处触发时（设置页的一键安装/更新），把实时进度写到那块面板里。
       // 「尝试线路：X」「线路 X 失败：…」这些是**自动换线路的中间过程**，不是下载失败 ——

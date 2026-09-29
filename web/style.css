@@ -347,6 +347,102 @@ pre.code-block { max-height: 330px; }
   .setting-row { grid-template-columns: 1fr; }
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+   UI 高级化（用户 2026-09-27 要求）
+     · 圆角统一：所有尖角组件（按钮 / 输入 / 卡片 / 进度条 / 标签）都改圆角
+     · 磨砂玻璃：`--panel` 本身已是半透明，叠 backdrop-filter 得到玻璃质感
+     · 柔和多层阴影 + 1px 边缘光 + 统一缓动
+     · 右上角灰字状态移到顶部圆角气泡，几秒后向上收起
+   ═══════════════════════════════════════════════════════════════════ */
+
+button, input[type="text"], select, .dep-item, .card, .code-block,
+progress, .tag, .badge, .pill, pre { border-radius: var(--radius-sm, 12px); }
+
+button {
+  transition: transform .12s ease, box-shadow .18s ease, background .18s ease;
+}
+button:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(0, 0, 0, .28); }
+button:active { transform: translateY(0); box-shadow: none; }
+
+input[type="text"], select {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: inset 0 1px 0 var(--line-strong);
+  transition: border-color .16s ease, box-shadow .16s ease;
+}
+input[type="text"]:focus, select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+.dep-item, .card {
+  background: var(--panel);
+  backdrop-filter: blur(10px) saturate(140%);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  border: 1px solid var(--line);
+  box-shadow: inset 0 1px 0 var(--line-strong), 0 6px 18px rgba(0, 0, 0, .18);
+  border-radius: var(--radius, 16px);
+}
+
+/* 顶部气泡（替代右上角灰字状态） */
+#global-status { display: none !important; }
+.toast {
+  position: fixed; top: 16px; left: 50%;
+  transform: translate(-50%, -26px);
+  opacity: 0; pointer-events: none;
+  max-width: min(680px, 86vw);
+  padding: 9px 20px;
+  border-radius: 999px;
+  font-size: 13px; line-height: 1.45;
+  color: var(--text);
+  background: var(--panel-strong);
+  backdrop-filter: blur(14px) saturate(150%);
+  -webkit-backdrop-filter: blur(14px) saturate(150%);
+  border: 1px solid var(--line-strong);
+  box-shadow: var(--shadow), inset 0 1px 0 var(--line-strong);
+  z-index: 9999;
+  transition: opacity .26s ease, transform .32s cubic-bezier(.22, 1, .36, 1);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+/* 依赖页的下载日志框：矮一点 + 反色（深底浅字），专门展示下载过程细节 */
+.dep-log {
+  margin: 8px 0 12px;
+  max-height: 104px; min-height: 52px;
+  overflow-y: auto;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm, 10px);
+  font-size: 12px; line-height: 1.55;
+  color: #c9d4e6;
+  background: linear-gradient(180deg, #202634, #171b25);
+  border: 1px solid rgba(255, 255, 255, .07);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .05), 0 6px 16px rgba(0, 0, 0, .22);
+  white-space: pre-wrap; word-break: break-all;
+}
+[data-theme="light"] .dep-log { color: #d7e0ee; background: linear-gradient(180deg, #2b3242, #212734); }
+
+/* 模态框统一成玻璃卡片 + 顶部强调线 */
+.modal > div, .modal-content, .modal-card {
+  border-radius: var(--radius, 16px);
+  background: var(--panel-strong);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  border: 1px solid var(--line-strong);
+  box-shadow: var(--shadow), inset 0 1px 0 var(--line-strong);
+  overflow: hidden;
+}
+.modal > div::before, .modal-content::before {
+  content: ""; display: block; height: 3px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  opacity: .85;
+}
+
+progress { border-radius: 999px; overflow: hidden; }
+progress::-webkit-progress-bar { border-radius: 999px; }
+progress::-webkit-progress-value { border-radius: 999px; }
+
 .update-badge {
   min-width: 76px;
   border-radius: 999px;
