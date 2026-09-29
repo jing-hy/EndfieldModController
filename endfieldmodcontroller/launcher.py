@@ -606,6 +606,18 @@ def ensure_injections(config: AppConfig) -> dict[str, Any]:
     actions: list[str] = []
     warnings: list[str] = []
 
+    # ① **XXMI 的配置文件本身必须先存在** —— 它是 XXMI 首次运行时生成的，空环境里没有，
+    #    于是下面所有写入（game_folder / enabled_importers / 签名 / extra_libraries）
+    #    全都会落空，表现为「注入失败」（2026-09-29 端到端实测定位）。
+    try:
+        boot = bootstrap_xxmi_config(config, log=lambda m: actions.append(m))
+        if boot.get("created"):
+            actions.append(str(boot.get("message")))
+        elif not boot.get("ok"):
+            warnings.append(str(boot.get("message")))
+    except Exception as exc:  # noqa: BLE001
+        warnings.append(f"准备 XXMI 配置文件失败: {exc}")
+
     # ⚠️ **必须在任何配置改写之前**先确保 XXMI 的签名密钥与 Security.user_signature 就位。
     # 否则会出现"后写覆盖先写"：写 extra_libraries 时才发现缺密钥、于是生成密钥并写好
     # user_signature，可紧接着上层又用手里的**旧配置副本**写回，把 user_signature 盖回空值
@@ -712,6 +724,60 @@ def configure_xxmi_extra_libraries(config: AppConfig) -> dict[str, Any]:
         "game_folder": game_folder.get("message", ""),
     }
 
+
+
+def bootstrap_xxmi_config(config: AppConfig, *, wait_seconds: int = 40,
+                          log: Callable[[str], None] | None = None) -> dict[str, Any]:
+    """XXMI 的配置是**它首次运行时生成**的；刚从包里解压出来时并不存在。
+
+    不存在时我们写的 `game_folder` / `active_importer` / `enabled_importers` /
+    `extra_libraries` / 签名**全都无处落地** —— 这正是空环境「注入失败」的最后一环
+    （2026-09-29 端到端实测：`写入 XXMI 注入库失败: 找不到 XXMI Launcher Config.json`）。
+
+    做法：**先用 runas 把它拉起来一次**（XXMI 的 exe 要求管理员），等它把配置写出来
+    （通常几秒），再把进程收掉；随后 `ensure_injections()` 才写我们的字段。
+    本机 `ConsentPromptBehaviorAdmin=0`（直接提升、不弹 UAC），所以这一步无人值守也能过。
+    """
+    launcher_path = config.xxmi_launcher_path
+    if launcher_path is None or not Path(launcher_path).is_file():
+        return {"ok": False, "created": False, "message": "未配置 XXMI Launcher"}
+    cfg_path = reshade_integration.xxmi_config_path(launcher_path)
+    if cfg_path is not None and cfg_path.is_file():
+        return {"ok": True, "created": False, "message": "XXMI 配置已存在"}
+    if log:
+        log("XXMI 还没有配置文件（它首次运行才会生成），先启动一次让它生成…")
+    try:
+        _spawn_elevated(config, str(launcher_path), str(Path(launcher_path).parent), show_window=0)
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "created": False, "message": f"启动 XXMI 失败：{exc}"}
+    deadline = time.time() + max(5, int(wait_seconds))
+    created_path: Path | None = None
+    while time.time() < deadline:
+        # ⚠️ 必须**每轮重新计算**路径：`xxmi_config_path()` 只在文件存在时才返回路径，
+        #    一开始它必然返回 None —— 只算一次就永远等不到（第一次实测"等了 40s 没等到"
+        #    就是这个原因，而配置其实早在第 ~20 秒就写好了）。
+        created_path = reshade_integration.xxmi_config_path(launcher_path)
+        if created_path is not None and created_path.is_file():
+            break
+        time.sleep(1.0)
+    # 收掉这次"只为生成配置"而拉起的 XXMI。它是**提权进程**，普通权限的 taskkill 杀不掉
+    # （实测：进程一直留着），所以同样走 runas。
+    try:
+        import ctypes
+
+        ctypes.windll.shell32.ShellExecuteW(
+            None, "runas", "taskkill",
+            f'/IM "{Path(str(launcher_path)).name}" /F',
+            str(Path(launcher_path).parent), 0,
+        )
+        time.sleep(2.0)
+    except Exception:  # noqa: BLE001
+        pass
+    if created_path is not None and created_path.is_file():
+        return {"ok": True, "created": True,
+                "message": "已启动一次 XXMI 生成配置文件，随后把它关掉了"}
+    return {"ok": False, "created": False,
+            "message": f"等了 {wait_seconds}s 仍没等到 XXMI 写出配置"}
 
 
 def ensure_xxmi_game_folder(config: AppConfig) -> dict[str, Any]:
