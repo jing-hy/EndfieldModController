@@ -175,11 +175,34 @@ def hold_seconds(document: dict[str, Any], alert: dict[str, Any] | None = None) 
 
 # ---------------------------------------------------------------- 拉取
 def fetch_document(*, timeout: int = 20) -> dict[str, Any]:
-    """真的去仓库拉一次（**不吃 github 缓存**，预警要新鲜）。失败抛异常，由上层兜。"""
-    from . import github
+    """真的去仓库拉一次（**不吃 github 缓存**，预警要新鲜）。两条路线都失败才抛异常。
 
-    payload = github.api_get(contents_url(), timeout=timeout, use_cache=False)
-    return decode_contents(payload)
+    ① **GitHub API** 的 contents 接口（有 token 时额度 5000/小时）；
+    ② **网页 raw 路由**（`github.com/<repo>/raw/main/alerts.json`）—— 经 :mod:`fastnet`，
+    直连不通**自动走镜像线路**，而且**不消耗 API 额度**。
+
+    2026-09-30 加②的原因：用户指出「github额度不影响，会自动路由」—— 项目里查组件的
+    release 早就"网页优先"了，但公告这条只打了 API。**预警是保护通道，不该被匿名额度
+    （60 次/小时）挡住**，所以这里也必须能回退。
+    """
+    from . import fastnet, github
+
+    errors: list[str] = []
+    try:
+        payload = github.api_get(contents_url(), timeout=timeout, use_cache=False)
+        return decode_contents(payload)
+    except Exception as exc:  # noqa: BLE001 —— API 挂了就走网页
+        errors.append(f"API 路线: {exc}")
+    raw_url = f"https://github.com/{REPO}/raw/main/{FILE_NAME}"
+    try:
+        _final, body = fastnet.fetch(raw_url, headers={"Accept": "text/plain"}, timeout=timeout)
+        document = json.loads(body.decode("utf-8", errors="replace"))
+        if not isinstance(document, dict) or document.get("alerts") is None:
+            raise ValueError("raw 路线拿到的不是合法的 alerts 文档")
+        return document
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"网页路线: {exc}")
+    raise RuntimeError("；".join(errors))
 
 
 def load_document(config: Any, *, timeout: int = 20,

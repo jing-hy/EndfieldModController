@@ -144,16 +144,36 @@ def check_update(
     }
     from . import github
 
+    # ⚠ 2026-09-30：这里以前**只打 API**（`LATEST_API`），匿名额度用尽就整条自更新检查失败、
+    # 界面显示"GitHub API 额度用尽"。用户点出「额度不影响，会自动路由」—— 本程序查组件
+    # release 早就"网页优先 + 镜像回退"了，只有自更新这条漏了。现在同样先走网页，
+    # 再尽量用 API 把 size / digest / 正文补全（有额度时更完整，补不到就算了）。
+    repo_slug = REPO_URL.rsplit("github.com/", 1)[-1].strip("/")
+    release: dict[str, Any] = {}
+    error = ""
     try:
-        release = _fetch_json(LATEST_API, timeout=timeout)
-    except github.GitHubError as exc:
-        # 限流 / 404 都已经翻译成人话，原样带给界面
-        result["error"] = str(exc)
+        release = github.releases_latest(repo_slug, ttl=0)
+    except Exception as exc:  # noqa: BLE001 —— 网页不通/仓库没 release
+        error = str(exc)
+    if release:
+        try:
+            detail = _fetch_json(LATEST_API, timeout=timeout)
+            if isinstance(detail, dict):
+                by_name = {str(a.get("name") or ""): a for a in (detail.get("assets") or [])}
+                for asset in (release.get("assets") or []):
+                    extra = by_name.get(str(asset.get("name") or ""))
+                    if isinstance(extra, dict):
+                        asset["size"] = int(extra.get("size") or 0)
+                        asset["digest"] = str(extra.get("digest") or "")
+                for key in ("body", "name", "published_at", "html_url"):
+                    if detail.get(key):
+                        release.setdefault(key, detail[key])
+        except Exception:  # noqa: BLE001 —— 只是补全信息，失败不影响检查更新
+            pass
+    if not release:
+        result["error"] = error or "查询失败"
         result["checked_at"] = int(time.time())
         _write_cache(config, result)
-        return result
-    except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
-        result["error"] = f"查询失败：{exc}"
         return result
 
     tag = str(release.get("tag_name") or "").lstrip("vV")

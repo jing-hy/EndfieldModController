@@ -265,6 +265,49 @@ def releases_latest(
     return api_get(f"https://api.github.com/repos/{repo}/releases/latest", ttl=ttl)
 
 
+def _releases_list_via_web(repo: str, *, limit: int = 10) -> list[dict[str, Any]]:
+    """**不消耗 API 额度**地列出 release（**含预发布**）：atom feed 取 tag → expanded_assets 取资产。
+
+    2026-09-30 加：`releases_list()` 原先只打 API，匿名额度用尽就查不到东西 ——
+    而 Endfield Poser 上游只发预发布版、只能走列表接口拿，结果表现为"一直缺失、下载不了"。
+    这里用 `releases.atom`（GitHub 的 Atom feed，零额度、经 fastnet 可借镜像）拿 tag，
+    再逐个用 expanded_assets 页面取资产名。拿不到精确的 size 与 `prerelease` 标记，
+    所以 `prerelease` 一律按 True 记（这条路线本来就是为"要预发布版"准备的）。
+    """
+    from . import fastnet
+
+    _final, body = fastnet.fetch(
+        f"https://github.com/{repo}/releases.atom",
+        headers={"Accept": "application/atom+xml"}, timeout=25,
+    )
+    page = body.decode("utf-8", errors="replace")
+    tags = list(dict.fromkeys(re.findall(r"/releases/tag/([^\"'<>\s]+)", page)))
+    out: list[dict[str, Any]] = []
+    for tag in tags[:max(1, min(int(limit), 100))]:
+        assets: list[dict[str, Any]] = []
+        try:
+            _f, html = fastnet.fetch(
+                f"https://github.com/{repo}/releases/expanded_assets/{tag}",
+                headers={"Accept": "text/html"}, timeout=25,
+            )
+            names = ASSET_LINK_RE.findall(html.decode("utf-8", errors="replace"))
+            assets = [
+                {
+                    "name": name,
+                    "browser_download_url": f"https://github.com/{repo}/releases/download/{tag}/{name}",
+                    "size": 0,          # 网页上没有可靠大小 → 排序时按名字里的版本号
+                }
+                for name in dict.fromkeys(names)
+            ]
+        except Exception:  # noqa: BLE001 —— 单个 tag 的资产拿不到就跳过它
+            continue
+        out.append({
+            "tag_name": tag, "prerelease": True, "draft": False,
+            "assets": assets, "source": "web",
+        })
+    return out
+
+
 def releases_list(
     repo: str,
     *,
@@ -282,7 +325,13 @@ def releases_list(
     则退回全部候选，避免"只有预发布就报没有"）。
     """
     url = f"https://api.github.com/repos/{repo}/releases?per_page={max(1, min(int(limit), 100))}"
-    data = api_get(url, ttl=ttl)
+    try:
+        data = api_get(url, ttl=ttl)
+    except Exception:  # noqa: BLE001 —— API 不通 / 额度用尽 → 走网页路线（零额度、可借镜像）
+        fallback = _releases_list_via_web(repo, limit=limit)
+        if not fallback:
+            raise
+        data = fallback
     if not isinstance(data, list):
         raise GitHubError(f"{repo}: Release 列表格式异常")
     candidates = [item for item in data if isinstance(item, dict) and not item.get("draft")]
