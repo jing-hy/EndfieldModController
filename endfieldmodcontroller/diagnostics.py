@@ -578,6 +578,46 @@ def _safe_zip_write(archive: zipfile.ZipFile, path: Path, arcname: str, *, max_b
         return
 
 
+def _nvngx_fingerprint(config: Any) -> list[str]:
+    """把 DLSS5 那两个运行库的「指纹」写进诊断包 summary。
+
+    为什么要有（2026-09-30 issue #3）：用户只报"dlss5 开不了"，而我们能拿到的
+    `runtime\\dlss5` 证据只有日志里的展开记录 —— 文件到底在不在、是不是随包那份，
+    以前全靠猜。这两个数（精确字节 + 与基线的 sha256 是否一致）一眼就能判定。
+    """
+    from . import runtime_assets
+
+    lines = ["", "-- DLSS5 运行库指纹（出不出帧先看这里）--"]
+    dlss5 = Path(config.dlss5_path)
+    try:
+        entries = {name: dict(entry) for _g, _root, name, entry in runtime_assets.manifest_entries(config)}
+    except Exception as exc:  # noqa: BLE001
+        lines.append(f"（读取随包清单失败: {exc}）")
+        return lines
+    for name in ("nvngx_dlss.dll", "nvngx_dlssnr.dll"):
+        entry = entries.get(name) or {}
+        expected = int(entry.get("size") or 0)
+        want_sha = str(entry.get("sha256") or "")
+        path = dlss5 / name
+        if not path.is_file():
+            lines.append(f"{name}: **缺失**（随包基线 {expected:,} 字节）—— DLSS5 的 NR 一定起不来")
+            continue
+        try:
+            actual = path.stat().st_size
+            got = runtime_assets.sha256_file(path) if want_sha else ""
+        except OSError as exc:
+            lines.append(f"{name}: 读取失败 {exc}")
+            continue
+        verdict = "n/a"
+        if want_sha:
+            verdict = "是" if got.lower() == want_sha.lower() else "**否（内容被换过）**"
+        lines.append(
+            f"{name}: size={actual:,}（基线 {expected:,}）与随包基线 sha256 一致={verdict} "
+            f"sha256={got[:16]}…"
+        )
+    return lines
+
+
 def create_diagnostic_bundle(config: Any, *, game_dir: Path | None = None, note: str = "manual") -> Path:
     """Create a zip with logs and lightweight context files (no game binaries)."""
     _capture_windows_events(config)
@@ -599,6 +639,7 @@ def create_diagnostic_bundle(config: Any, *, game_dir: Path | None = None, note:
         f"loader={loader_dir}",
         f"game_dir={game_dir}",
     ]
+    summary.extend(_nvngx_fingerprint(config))
 
     with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for path in sorted(target_dir.glob("*.log")):

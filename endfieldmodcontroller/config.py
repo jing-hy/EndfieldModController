@@ -96,7 +96,9 @@ class AppConfig:
     # 新手引导是否已完成/已跳过（用户 2026-10-01 要求把"首次使用提示"做成分步引导）
     onboarding_done: bool = False
     # 是否把内置的新版 DLSS 运行库（nvngx_dlss / nvngx_dlssnr）部署进游戏目录。
-    # 默认 False —— 实测新版 nvngx 会让游戏起不来，只在缺失时才补齐。
+    # 默认 False：替换游戏原版的 nvngx_dlss.dll 有让游戏起不来的风险，而 DLSS5 的 NR
+    # 签名运行时本来就不在游戏目录（由 addon 从 `<数据根>\runtime\dlss5` 加载），
+    # 所以默认不去动游戏目录；打开后才会在大小不符时替换/补齐并锁存 `*.game_original`。
     deploy_new_nvngx: bool = False
     # 乳摇/次级运动管理器（第三方 SecondaryMotion 工具）所在目录，留空则自动探测
     secondary_motion_dir: str = ""
@@ -193,6 +195,16 @@ class AppConfig:
                 if guess:
                     self.xxmi_launcher = guess
                     filled.append("xxmi_launcher")
+
+        # ①b Staging Mods 跟着「当前用的那份 XXMI」走：用户指定了**外部** XXMI 时，他的
+        #     Mod 全在那份里，再把 Mod stage 到内置 `EFMI\Mods` 等于白装
+        #     （2026-09-30 issue #4：用户问"怎么用我自己之前那份 xxmi"）。
+        #     只在当前值为空、或还是内置默认值(相对路径)时纠正；用户自己填的路径一律不动。
+        if not self.staging_mods_dir.strip() or self._is_builtin_staging():
+            external_mods = self._external_efmi_mods()
+            if external_mods is not None:
+                self.staging_mods_dir = str(external_mods)
+                filled.append("staging_mods_dir")
 
         # ② 乳摇工具：优先工作区内嵌那份
         if not self.secondary_motion_dir.strip():
@@ -350,6 +362,36 @@ class AppConfig:
         for parent in candidates:
             if (parent / "EFMI" / "d3d11.dll").is_file():
                 return parent / "EFMI"
+        return None
+
+    def _is_builtin_staging(self) -> bool:
+        """当前 staging 目录是不是"内置那份"（空值或落在内置 runtime 下都算）。"""
+        value = self.staging_mods_dir.strip()
+        if not value:
+            return True
+        try:
+            self.resolve_path(value).relative_to(self.builtin_runtime_path)
+            return True
+        except (OSError, ValueError):
+            return False
+
+    def _external_efmi_mods(self) -> Path | None:
+        """用户**自己那份** XXMI 的 `EFMI\\Mods`；内置那份不算"外部"，找不到返回 None。
+
+        刻意不走 `efmi_dir`：那个属性内置优先兜底，会把"内置 EFMI"也返回回来，
+        而这里要回答的是"用户到底有没有在用一份外部 XXMI"。
+        """
+        launcher = self.xxmi_launcher_path
+        if launcher is None:
+            return None
+        for parent in launcher.parents:
+            try:
+                parent.relative_to(self.builtin_runtime_path)
+                continue                      # 内置那份不算外部
+            except ValueError:
+                pass
+            if (parent / "EFMI" / "d3d11.dll").is_file():
+                return parent / "EFMI" / "Mods"
         return None
 
     @property

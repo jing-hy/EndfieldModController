@@ -132,6 +132,27 @@ def manifest_entries(config: AppConfig) -> list[tuple[str, Path, str, dict[str, 
 # 正常出帧**（modtest 实测：1.18 从 13:19 跑到 13:22、frame 7200、35 fps、NGX 310.8），
 # 所以"与随包不同"**只是差异提示，不是故障判定** —— 别再写"1.18 不会出帧"这种断言
 # （此前 README 与自检文案都这么写，是错的）。真不出帧时要看 dlss5-feed.log 与面板 NR 帧。
+def _baseline_hint(name: str) -> str:
+    """给"缺失/大小不符"补一句"这意味着什么、该怎么修"。
+
+    2026-09-30 issue #3：用户 `runtime\\dlss5\\nvngx_dlssnr.dll` 被动过，自检只报
+    "与基线不一致"，看不出后果与动作 —— 而面板那边其实已经在喊 NR 起不来。
+    """
+    if name == "nvngx_dlssnr.dll":
+        return (
+            "；这是 DLSS5 神经渲染(NR)用的**签名运行时**，缺了/被换过就会"
+            "「NR feature 未绑定、成功 NR 帧恒为 0、最新 NR NGX 结果 0xBAD00001」。"
+            "删掉该文件后点「一键启动」会重新展开；若它反复消失，把 runtime\\dlss5 "
+            "加进杀毒软件白名单"
+        )
+    return ""
+
+
+# 哈希校验只对小资产做：`nvngx_dlss.dll`(59 MB) / `nvngx_dlssnr.dll`(165 MB) 全量 sha256
+# 每次自检要读两百多 MB，会把"一键启动"拖慢好几秒 —— 大文件只比大小；几个 addon
+# （合计约 6 MB）才逐个校验内容，"大小对但内容被换过"就能查出来了。
+MAX_HASH_BYTES = 16 << 20
+
 FEED_NAME = "dlss5-feed.addon64"
 FEED_BASELINE_SIZE = 76_800
 FEED_BASELINE_SHA256 = "6ea59b3237ed9f1e2bdc6e258518347ccb7e03dfdc2f96fc08addc8974527dad"
@@ -154,7 +175,8 @@ def baseline_mismatches(config: AppConfig, *, check_hash: bool = False) -> list[
             mismatches.append({
                 "name": name, "group": group, "kind": "missing",
                 "expected": expected, "actual": 0,
-                "message": f"{name} 不在 runtime\\dlss5（随包基线 {expected:,} 字节）",
+                "message": (f"{name} 不在 runtime\\dlss5（随包基线 {expected:,} 字节）"
+                            + _baseline_hint(name)),
             })
             continue
         actual = path.stat().st_size
@@ -163,10 +185,10 @@ def baseline_mismatches(config: AppConfig, *, check_hash: bool = False) -> list[
                 "name": name, "group": group, "kind": "size",
                 "expected": expected, "actual": actual,
                 "message": (f"{name} 是 {actual:,} 字节，随包基线 {expected:,} 字节 —— "
-                            f"可能被别的整合包替换或手动升级过"),
+                            f"可能被别的整合包替换或手动升级过" + _baseline_hint(name)),
             })
             continue
-        if check_hash and want_sha:
+        if check_hash and want_sha and 0 < expected <= MAX_HASH_BYTES:
             got = sha256_file(path)
             if got and got.lower() != want_sha.lower():
                 mismatches.append({

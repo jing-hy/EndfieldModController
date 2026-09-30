@@ -45,6 +45,27 @@ Progress = Callable[[int, int, str, str], None] | None
 ByteProgress = Callable[[int, int, str, int, int], None] | None
 
 
+def _points_at_builtin(config: AppConfig, value: str) -> bool:
+    """这个字段"还是我们自动填的"吗？—— 空值、或路径落在内置 runtime 下都算。
+
+    用途：区分「用户自己指定了外部 XXMI」与「我们上一轮自动填的内置路径」。
+    只有前者之外的情况才允许被安装流程改写：用户明确填了外部 XXMI 时**绝不能覆盖**
+    （issue #4：他刚改好的路径会在每次内置组件更新后被改回内置，表现为"设置自己变回去"）。
+    相对路径（`runtime/builtin/...`）按数据根解析，所以内置写法同样判为 True。
+    """
+    if not str(value or "").strip():
+        return True
+    try:
+        resolved = Path(config.resolve_path(value))
+    except (OSError, ValueError):
+        return False
+    try:
+        resolved.relative_to(config.builtin_runtime_path)
+        return True
+    except ValueError:
+        return False
+
+
 def _find_xxmi_exe(root: Path) -> Path | None:
     candidates = [
         root / "Resources" / "Bin" / "XXMI Launcher.exe",
@@ -174,8 +195,13 @@ def ensure_xxmi(config: AppConfig, progress: Progress = None, byte_progress: Byt
     exe = _find_xxmi_exe(root)
     if exe is None:
         raise RuntimeError("XXMI Launcher.exe was not found after extraction")
-    config.xxmi_launcher = str(exe)
-    config.save()
+    # 只往"我们自动填的内置路径"上写回；用户明确指定了外部 XXMI 就**不许覆盖**
+    # （issue #4：他改好的 `F:\XXMI Launcher` 会在内置组件更新后被改回内置，表现为
+    #  "设置自己变回去了"，而他要用的正是自己那份）。内置那份照旧装好、依赖页可见，
+    #  只是不再劫持 `xxmi_launcher`。
+    if _points_at_builtin(config, config.xxmi_launcher):
+        config.xxmi_launcher = str(exe)
+        config.save()
     _write_marker(root, {"version": version, "asset": asset_name, "source": XXMI_REPO})
     if progress:
         progress(1, 3, "XXMI", "installed")
@@ -233,8 +259,11 @@ def ensure_efmi(config: AppConfig, progress: Progress = None, byte_progress: Byt
         return BuiltinResult("EFMI", "up_to_date", "already current", version, str(target))
     _download_extract(url, asset_name, target, byte_progress, 3, 3, "EFMI", expected_sha256=digest)
     _write_marker(target, {"version": version, "asset": asset_name, "source": EFMI_REPO})
-    config.staging_mods_dir = str(target / "Mods")
-    config.save()
+    # 同理：用户把 staging 指到别处（例如他自己那份 XXMI 的 `EFMI\Mods`）时不覆盖 ——
+    # 否则他的 Mod 会被送进内置那份，外部 XXMI 永远读不到（issue #4 的另一半）。
+    if _points_at_builtin(config, config.staging_mods_dir):
+        config.staging_mods_dir = str(target / "Mods")
+        config.save()
     if progress:
         progress(3, 3, "EFMI", "installed")
     return BuiltinResult("EFMI", "installed", "installed", version, str(target))

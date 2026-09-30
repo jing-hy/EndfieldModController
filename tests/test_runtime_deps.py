@@ -32,7 +32,9 @@ class RuntimeDepsTests(unittest.TestCase):
         self.config = AppConfig(
             library_dir=str(self.root / "library"),
             runtime_dir=str(self.root / "runtime"),
-            staging_mods_dir=str(self.root / "runtime" / "EFMI" / "Mods"),
+            # 内置那份（绝对写法）—— 用户填了外部路径时 ensure_efmi 不该覆盖，
+            # 那一半由 test_external_xxmi_is_not_hijacked 覆盖。
+            staging_mods_dir=str(self.root / "runtime" / "builtin" / "XXMI" / "EFMI" / "Mods"),
             builtin_runtime_dir=str(self.root / "runtime" / "builtin"),
             dependency_manifest=str(Path(__file__).resolve().parents[1] / "dependencies.json"),
         )
@@ -102,6 +104,44 @@ class RuntimeDepsTests(unittest.TestCase):
         self.assertTrue(report["EFMI"]["present"])
         # Poser：安装包下到 runtime\poser 之后 present 必须为真（供依赖页显示）
         self.assertTrue(report["Poser"]["present"])
+
+    def _make_external_xxmi(self) -> Path:
+        """造一份「用户自己那份 XXMI」（带 `EFMI\\d3d11.dll`，供 _external_efmi_mods 识别）。"""
+        external = self.root / "my-xxmi"
+        (external / "Resources" / "Bin").mkdir(parents=True, exist_ok=True)
+        (external / "Resources" / "Bin" / "XXMI Launcher.exe").write_bytes(b"exe")
+        (external / "EFMI").mkdir(parents=True, exist_ok=True)
+        (external / "EFMI" / "d3d11.dll").write_bytes(b"dll")
+        return external
+
+    def test_external_xxmi_is_not_hijacked(self) -> None:
+        """用户指定自己那份 XXMI 时，自动流程不许改他的路径（2026-09-30 issue #4）。"""
+        external = self._make_external_xxmi()
+        launcher = str(external / "Resources" / "Bin" / "XXMI Launcher.exe")
+        self.config.xxmi_launcher = launcher
+        self.config.staging_mods_dir = str(external / "EFMI" / "Mods")
+
+        self.assertFalse(runtime_deps._points_at_builtin(self.config, launcher))
+        self.assertFalse(runtime_deps._points_at_builtin(self.config, self.config.staging_mods_dir))
+        self.assertTrue(runtime_deps._points_at_builtin(self.config, ""))
+        self.assertTrue(runtime_deps._points_at_builtin(
+            self.config, str(self.config.builtin_runtime_path / "XXMI" / "EFMI" / "Mods")))
+
+        self.config.autofill(deep=False)
+        self.assertEqual(self.config.xxmi_launcher, launcher)
+        self.assertEqual(self.config.staging_mods_dir, str(external / "EFMI" / "Mods"))
+
+    def test_staging_follows_external_xxmi(self) -> None:
+        """用了外部 XXMI、但 staging 还是内置默认值时，自动跟到那份的 `EFMI\\Mods`。"""
+        external = self._make_external_xxmi()
+        self.config.xxmi_launcher = str(external / "Resources" / "Bin" / "XXMI Launcher.exe")
+        self.config.staging_mods_dir = str(self.config.builtin_runtime_path / "XXMI" / "EFMI" / "Mods")
+
+        filled = self.config.autofill(deep=False)
+        self.assertIn("staging_mods_dir", filled)
+        got = Path(self.config.staging_mods_dir)
+        # 同一个目录在 Windows 下可能是长名/短名（ADMINI~1）、大小写也不同，比对结构
+        self.assertEqual((got.name, got.parent.name, got.parent.parent.name), ("Mods", "EFMI", "my-xxmi"))
 
 
 if __name__ == "__main__":

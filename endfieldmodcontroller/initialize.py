@@ -923,20 +923,19 @@ def _rebuild_ini(config: AppConfig, current: str) -> str | None:
 
 
 def _check_game_libs(config: AppConfig, report: Report, log: Callable[[str], None] | None) -> None:
-    """游戏目录的 DLSS 运行库（DLSS5 需要的那份）。
+    """游戏目录的 DLSS 运行库。
 
-    **为什么必须部署新版**（用户 2026-09-29 决策："直接部署"）：神经渲染接口
-    `NVSDK_NGX_D3D12_EvaluateFeature_C` 住在 `nvngx_dlssnr.dll` 里。游戏目录只有原版
-    `nvngx_dlss.dll`(54,779,504 B)、没有 dlssnr 时，DLSS5 addon 会报
-    `vtable::Hook(Failed to find NVSDK_NGX_D3D12_EvaluateFeature_C)` ⇒ **一次渲染都
-    不会发生**（用户看到的就是「DLSS5 显示 0 渲染」）——而且要排查很久，因为文件看起来
-    都齐、shader 也编译通过。
+    **DLSS5 的 NR 运行时不在游戏目录**（2026-09-30 更正）：`NVSDK_NGX_D3D12_EvaluateFeature_C`
+    住在 `nvngx_dlssnr.dll` 里，而 RenoDX 的 DLSS5 addon 是**从 addon 自己所在目录**加载那份
+    签名运行时 —— 即 `<数据根>\\runtime\\dlss5\\nvngx_dlssnr.dll`（addon 内的提示串就写着
+    "the nvngx_dlssnr.dll in the addon folder"）。所以游戏目录里的 `nvngx_dlssnr.dll` 属于
+    **游戏原版本来就没有**的文件，缺失是正常状态；要不要额外放一份进游戏目录，由
+    `GAME_LIBS_OPTIONAL` + `deploy_new_nvngx` 决定。
 
-    ⚠️ 历史包袱：2026-09-27 曾记录"写进新版 nvngx 游戏就起不来"，所以这里默认**不覆盖**
-    过一阵。那次真正的原因是注入链顺序（两个 hook 框架抢点），后来改用 Bypass + ReShade
-    先注入已修复，因此 2026-09-29 起 `deploy_new_nvngx` 默认 **True**：大小不符就替换成
-    内置新版；替换前把游戏原版锁存成 `*.game_original`（**只锁存一次**，别把原版冲掉），
-    用户随时可回滚。
+    ⚠️ 历史包袱：2026-09-27 曾记录"写进新版 nvngx 游戏就起不来"（真正原因是注入链顺序，
+    后来改用 Bypass + ReShade 先注入已修复）。但**替换游戏原版的 `nvngx_dlss.dll` 仍有让
+    游戏起不来的风险**，所以 `deploy_new_nvngx` 保持默认 **False**：打开后才在大小不符时
+    替换，替换前把原版锁存成 `*.game_original`（只锁存一次），用户可随时回滚。
     """
     from . import reshade_integration
 
@@ -1047,13 +1046,18 @@ def _check_bundled_versions(config: AppConfig, report: Report, log: Callable[[st
     """随包组件基线校验：`runtime\\dlss5` 里那几个文件是不是「我们实测可用的那一版」。
 
     为什么要有这一项（2026-09-30 一个 issue 的教训）：玩家很容易拿别处的「DLSS5 整合包」
-    覆盖 `runtime\\dlss5\\`，其中 `dlss5-feed.addon64` 升到 1.18 之后在终末地上**不会出帧**，
-    还会引出很难查的崩溃。这里**只提示、不自动覆盖**用户文件（他的东西他做主）。
+    覆盖 `runtime\\dlss5\\` —— 其中 `nvngx_dlssnr.dll`（NR 的签名运行时）被换掉或删掉时，
+    DLSS5 面板会显示「NR 未绑定 / 成功 NR 帧 0 / 最新 NR NGX 结果 0xBAD00001」，而文件
+    看着都齐、shader 也编得过，极难排查（2026-09-30 issue #3 正是）。这里**只提示、
+    不自动覆盖**用户文件（他的东西他做主）。
+
+    `check_hash=True`：**小文件**逐个校验 sha256，"大小对但内容被换过"也能查出来；
+    59/165 MB 的 nvngx 只比大小（全量哈希会把一键启动拖慢几秒，见 runtime_assets）。
     """
     from . import runtime_assets
 
     try:
-        summary = runtime_assets.baseline_summary(config)
+        summary = runtime_assets.baseline_summary(config, check_hash=True)
     except Exception as exc:  # noqa: BLE001
         report.add("bundled_versions", False, f"随包组件基线校验失败: {exc}", manual=True)
         return
