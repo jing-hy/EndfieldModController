@@ -288,17 +288,17 @@ python scripts\upload_release_assets.py  :: 上传两个附件（大文件走直
 | [3DMigoto](https://github.com/bo3b/3Dmigoto) | EFMI 的底座 | MIT |
 | [ReShade](https://reshade.me/) | 后处理底座（Addon 版） | BSD-3 |
 | [RenoDX DLSS](https://github.com/clshortfuse/renodx) | DLSS5 神经渲染 | MIT |
-| [Endfield Enhancer](https://github.com/RenoDX-Suite/) | 第一人称 / 相机（英文原版） | MIT |
+| Endfield Enhancer（RenoDX 出品） | 第一人称 / 相机（英文原版） | MIT |
 | **第一人称中文补丁** —— B站 up 主 **Hirahido** | 第一人称 / 相机面板的**中文**版本 | 版权归原作者 |
-| [iMMERSE](https://github.com/MartysMods/iMMERSE) | ReShade 后处理链（Launchpad 等） | MIT |
-| [dlss5-feed](https://www.nexusmods.com/) | 给 DLSS5 喂颜色/运动矢量/深度 | 见其说明 |
+| [iMMERSE](https://github.com/martymcmodding/iMMERSE)（Marty's Mods） | ReShade 后处理链（Launchpad 等） | MIT |
+| DLSS 5 Feed（`dlss5-feed.addon64`） | 给 DLSS5 喂颜色/运动矢量/深度 | 见其说明（无公开仓库，随包分发） |
 | [ShakingBreastManager / SecondaryMotion](https://github.com/Sp1cHless/Arknights-Endfield-Plugin-Secondary-bodyphysics) | 乳摇 | 见上游仓库 |
 | NVIDIA NGX 运行库（`nvngx_dlss.dll` / `nvngx_dlssnr.dll`） | DLSS 与神经渲染运行库 | NVIDIA 版权，随包仅为免去手动下载 |
 
 **关于第一人称中文补丁（特别声明）**：随包分发的第一人称**中文**补丁由 **B站 up 主 Hirahido** 制作，
 版权归其所有（源自作者发布的"终末地EE"）。
 本程序**只做分发与安装编排**，不修改其内容；如果你是该补丁的作者且不希望被随包分发，
-请在 issue 里说明，我会立即移除。英文原版第一人称插件来自 [Endfield Enhancer](https://github.com/RenoDX-Suite/)（RenoDX Suite）。
+请在 issue 里说明，我会立即移除。英文原版第一人称插件来自 **Endfield Enhancer**（RenoDX 出品，无公开仓库，同样随包分发）。
 
 各组件版权归原作者所有。本程序只做编排、自检与备份还原，不修改这些组件的源码。
 
