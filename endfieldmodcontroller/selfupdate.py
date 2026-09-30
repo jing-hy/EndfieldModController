@@ -408,6 +408,14 @@ def apply_update(
         payload = candidates[0] if candidates else None
     if payload is None or not payload.is_file():
         return {"ok": False, "message": "没有找到已下载的更新包，请先点「下载更新」"}
+    # 装之前严格核一遍：这个包必须是"当前 latest 那一份"（size + sha256）。
+    # 2026-09-30 实测 bug：`_update\` 里躺着更早下载的 0.6.0，却被当成 0.6.1 装上，
+    # 结果"装了还是旧版 → 又提示 → 又装"。这里直接拒绝，让用户重新下载。
+    if payload.suffix.lower() == ".exe":
+        reason = _payload_stale_reason(config, payload, check_hash=True)
+        if reason:
+            return {"ok": False, "stale": True,
+                    "message": f"已下载的更新包不是最新版：{reason}。请重新点「下载更新」。"}
 
     # zip 里的 exe 先解出来
     if payload.suffix.lower() == ".zip":
@@ -488,6 +496,35 @@ def _pending_version(config: AppConfig) -> str:
     return str(cached.get("latest") or "")
 
 
+def _payload_stale_reason(config: AppConfig, payload: Path, *, check_hash: bool = False) -> str:
+    """这个"已下载的更新包"已经过时了吗？是就返回原因，否则返回空串。
+
+    **为什么必须查**（2026-09-30 实测的 bug）：`pending_payload()` 原先只比较
+    「latest 比当前版本新」，**完全没看 `_update\\` 里那个包到底是哪一版** —— 于是把
+    更早下载的 0.6.0（29,445,166 B）当成 v0.6.1 装上去，重启后还是旧版，又提示、又装、
+    又旧；用户看到的就是「**拉取的都是 0.6.0**」＋「打开又提示有 0.6.1」＋「反复弹弹窗」。
+
+    判据用 `check_update()` 存下来的同一份缓存：`latest` 与它对应的 `asset_size` / `digest`。
+    `check_hash=False` 时只比大小（微秒级，可放在 `get_state()` 这种频繁路径上）；
+    真要安装前再 `check_hash=True` 严格核一遍内容。
+    """
+    cached = _read_cache(config)
+    latest = str(cached.get("latest") or "")
+    expected_size = int(cached.get("asset_size") or 0)
+    expected_sha = str(cached.get("digest") or "").replace("sha256:", "").strip().lower()
+    try:
+        actual_size = payload.stat().st_size
+    except OSError as exc:
+        return f"读不到已下载的包：{exc}"
+    if expected_size and actual_size != expected_size:
+        return (f"已下载的包是 {actual_size:,} 字节，而 v{latest} 是 {expected_size:,} 字节"
+                f"（多半是更早版本留下的旧包）")
+    if check_hash and expected_sha:
+        if _sha256(payload).lower() != expected_sha:
+            return f"已下载的包与 v{latest} 的 sha256 不一致（内容不是这一版）"
+    return ""
+
+
 def pending_payload(config: AppConfig) -> dict[str, Any]:
     """有没有"已下载但还没安装"的更新包。
 
@@ -503,6 +540,11 @@ def pending_payload(config: AppConfig) -> dict[str, Any]:
     if latest and _version_tuple(latest) <= _version_tuple(__version__):
         # 已经是最新（或本地更高）→ 这个包没必要再装
         return {"pending": False, "stale": True, "latest": latest}
+    # 还必须确认这个包**就是 latest 那一份**（只比"latest 更新"是不够的 —— 见
+    # `_payload_stale_reason` 里那个"装了还是旧版、反复提示"的实测 bug）
+    reason = _payload_stale_reason(config, payload)
+    if reason:
+        return {"pending": False, "stale": True, "latest": latest, "reason": reason}
     return {"pending": True, "latest": latest, "path": str(payload),
             "size": payload.stat().st_size}
 
@@ -522,6 +564,17 @@ def cleanup_stale(config: AppConfig) -> list[str]:
                     pass
     update_dir = config.runtime_path / UPDATE_DIR_NAME
     if update_dir.is_dir():
+        # 与当前 latest 对不上的旧包**立刻**清掉（2026-09-30：正是它让用户看到
+        # "反复弹窗、装的还是旧版"）—— 别等下面那条"7 天"规则。
+        candidate = update_dir / "EndfieldModController.exe"
+        if candidate.is_file():
+            reason = _payload_stale_reason(config, candidate)
+            if reason:
+                try:
+                    candidate.unlink()
+                    removed.append(candidate.name)
+                except OSError:
+                    pass
         cutoff = time.time() - 7 * 24 * 3600
         for item in update_dir.glob("*"):
             try:
