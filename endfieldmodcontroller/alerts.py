@@ -182,9 +182,29 @@ def fetch_document(*, timeout: int = 20) -> dict[str, Any]:
     return decode_contents(payload)
 
 
+def local_source_path(config: Any) -> Path:
+    """本地调试数据源：`<数据根>\\alerts.local.json`。
+
+    用户 2026-09-30 要求「做一个测试版，检测指向本地的一个文件，这样测试」——
+    **有这个文件时就直接用它、完全不联网**（改文件存盘、重启程序即见效），
+    测完把它删掉就自动回到走 GitHub 的正常流程。它**不写缓存**，所以不会污染线上拉到的结果。
+    """
+    return Path(config.runtime_path) / "alerts.local.json"
+
+
 def load_document(config: Any, *, timeout: int = 20,
                   log: Callable[[str], None] | None = None) -> dict[str, Any]:
-    """拉文档；失败时**静默**回退到上次成功缓存（再没有就返回空）。"""
+    """拉文档；失败时**静默**回退到上次成功缓存（再没有就返回空）。
+
+    优先级：**本地文件（`alerts.local.json`）> GitHub > 上次成功的缓存**。
+    """
+    local = local_source_path(config)
+    if local.is_file():
+        data = _read_json(local)
+        if data.get("alerts") is not None:
+            _log(log, f"公告/预警：用本地文件 {local.name}（本次不联网）")
+            return data
+        _log(log, f"公告/预警：本地文件 {local.name} 里没有 alerts 数组，已忽略")
     document: dict[str, Any] = {}
     try:
         document = fetch_document(timeout=timeout)

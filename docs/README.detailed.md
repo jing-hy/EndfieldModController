@@ -159,6 +159,8 @@ run.bat --cli    :: 不开界面，直接打印当前状态 JSON（调试用）
 
 落地文件都在 `runtime\_state\`：`alerts_cache.json`（上次成功拉到的那份，断网时回退用它）、`alerts_seen.json`（已读公告 id）、`alert_restore_point.json`（还原点）。**拉取失败一律静默**，不影响启动、更不拖慢首屏。
 
+**本地调试（不联网测这个功能）**：往 `<数据根>\runtime\alerts.local.json` 放一份格式相同的文件，管理器就**只读它、完全不联网** —— 改完存盘、重启程序即见效；删掉它立刻回到正常流程（联网读仓库那份）。它不会被写进缓存，所以不会污染线上拉到的结果。
+
 ### 游戏目录净化 / 还原
 
 把游戏目录里的第三方注入物（loader proxy、插件数据、残留 ReShade 痕迹）**先备份再移走**，备份在 `runtime\game_backup\<时间戳>\`（含 `manifest.json` 与还原所需的文件），随时可还原。
