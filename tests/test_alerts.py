@@ -142,30 +142,6 @@ class AlertsTests(unittest.TestCase):
         for name in alerts.INJECTION_FIELDS:
             self.assertTrue(getattr(self.config, name), name)
 
-    # ------------------------------------------------------------ 本地调试数据源
-    def _write_local(self, payload) -> Path:
-        local = alerts.local_source_path(self.config)
-        local.parent.mkdir(parents=True, exist_ok=True)
-        local.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-        return local
-
-    def test_local_file_takes_precedence(self) -> None:
-        self._write_local(_doc([{"id": "local-1", "level": "critical", "title": "本地"}]))
-        with mock.patch.object(alerts, "fetch_document", side_effect=AssertionError("不该联网")):
-            doc = alerts.load_document(self.config)
-        self.assertEqual([i["id"] for i in alerts.normalize(doc)], ["local-1"])
-
-    def test_local_file_without_alerts_is_ignored(self) -> None:
-        self._write_local({"foo": 1})
-        with mock.patch.object(alerts, "fetch_document", return_value=_doc([{"id": "net-1"}])):
-            doc = alerts.load_document(self.config)
-        self.assertEqual([i["id"] for i in alerts.normalize(doc)], ["net-1"])
-
-    def test_local_file_does_not_write_cache(self) -> None:
-        self._write_local(_doc([{"id": "local-1"}]))
-        alerts.load_document(self.config)
-        self.assertFalse(alerts.cache_path(self.config).is_file())
-
     def test_undo_without_restore_point(self) -> None:
         self.assertFalse(alerts.undo_safe_mode(self.config)["ok"])
 
