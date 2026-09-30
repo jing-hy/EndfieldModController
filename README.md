@@ -2,7 +2,7 @@
 
 《明日方舟：终末地》的一站式 Mod 管理器：把 **DLSS5 神经渲染 + 第一人称视角 + 服装 Mod（EFMI）+ 乳摇物理 + 摆姿 / MMD 播放**统一到一次「一键启动」里；运行环境从零自动装好，**零配置启动即用**。
 
-Windows 桌面程序（Python + Pywebview），单文件 exe。当前版本 **0.6.0** —— [下载最新版](https://github.com/jing-hy/EndfieldModController/releases)
+Windows 桌面程序（Python + Pywebview），单文件 exe。当前版本 **0.6.1** —— [下载最新版](https://github.com/jing-hy/EndfieldModController/releases)
 
 > 📖 安装细节、目录结构、逐项故障排查、开发与发布流程 → **[详细文档](docs/README.detailed.md)**
 
@@ -81,6 +81,9 @@ Windows 桌面程序（Python + Pywebview），单文件 exe。当前版本 **0.
 
 **Q：游戏版本更新后老 Mod 失效？**
 用 Mod 卡片「⋯」里的「**修复**」（实验性）——它会适配资源槽位号，**改前自动备份、可一键回滚**。
+
+**Q：我本来就有另一份装好 Mod 的 XXMI，想继续用它？**
+可以。在设置里把 XXMI 指到你那份、把 Mod 的中转目录也指到那份，并关掉"用内置运行环境"这一项 —— 之后程序既不会下载/更新自带那份，也不会改你填的路径。想换回来就反向操作。
 
 ## 五、第三方组件与许可
 
