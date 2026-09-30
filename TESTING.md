@@ -7,9 +7,9 @@
 
 | 位置 | 版本 | 说明 |
 |---|---|---|
-| GitHub Release | **0.3.1** | 已发布（Latest），两个附件齐全 |
-| 工作区源码 / `dist` | **0.3.2** | 含本次"自更新重启弹 Error"修复，**未推送** |
-| `D:\zmdmod\modtest\` | `0.1.9-from-0.3.2.exe` | 纯从零的伪旧版；自更新目标是 **0.3.1** |
+| GitHub Release | **0.4.0** | 已发布（Latest） |
+| 工作区源码 / `dist` | **0.5.0** | 本轮新增 **Endfield Poser（摆姿 / MMD）** 集成；**未推送**（按用户要求"先不动 github"） |
+| `D:\zmdmod\modtest\` | 0.4.0 | 本轮**不动它**（用户明确要求） |
 
 ---
 
@@ -101,3 +101,20 @@
 | 38 ★★ | 从零环境点「一键启动」 | 弹窗出现在**拉起 XXMI 之后**（不是点按钮之前），标题「第一次启动可能失败 —— 建议再启动一次」，按钮是「再次启动」/「先不启动」；点「再次启动」会立刻重跑一遍，且**不会重复弹** |
 | 39 ★★ | 进游戏按 Home 看第一人称插件菜单的语言 | 是**中文**（初始化把 [endfield-enhancer] Language 锁在 **1** = 中文，已用你实机那份 ini 定案；并把 [OVERLAY] Language 设为 zh-CN）。若仍是英文/方框，告诉我（或补中文字体 [STYLE] Font） |
 | 40 ★★ | 「依赖」页「一键更新」 | 进度条**分母全程只有一个值**（如 13 项），不会出现 11→12 这种跳变；在弹出「下载完成」之前**不会到 100%** |
+
+## H. 2026-10-01 追加：Endfield Poser（摆姿 / MMD 播放）集成
+
+> 上游是 **AGPL-3.0**：本程序**不随包分发**它的二进制，只从它的官方 Release 下载安装包，再调用**它自己的安装向导**把文件写进游戏目录。它的版本目前**全是预发布版**，所以更新检查走的是 release 列表接口（能用是重点，见 42）。
+
+| # | 操作 | 预期结果 |
+| --- | --- | --- |
+| 41 ★★ | 看启动页 | 第 5 个滑块「Endfield Poser」（默认**开**，小字写明注入 <code>d3dcompiler_47</code> proxy ＋ <code>plugin\poser.dll</code>，游戏内按 L）；旁边多一个按钮「打开摆姿页（Poser）」；「打开 Poser 日志」在**设置页**「启动与诊断」那一行 |
+| 42 ★★ | 点「一键启动」（或依赖页「自动安装/更新」） | 自动下载 `Endfield-Poser-v<版本>-win64.zip`（约 6.9 MB）到 `runtime\poser\`，日志显示线路与 sha256 校验；**上游只有预发布版也必须能取到**（失败会明说"没有可用 Release"或网络原因，不许静默） |
+| 43 ★★ | 装完看游戏目录 | 出现 `plugin\poser.dll`、`plugin\poser-install.json`、`d3dcompiler_47.dll`（proxy，十几~几十 KB，**不是**系统原版那几 MB）、`plugin\mmd\character-faces\*.face.json`（37 份）；**乳摇那套没被动过**：`plugin\sbm.dll` 与 `SecondaryMotion\` 数据都在 |
+| 44 ★★ | 设置页看「未检查 Endfield Poser 状态」那个窗 | 显示：安装包版本 / 游戏内已就位 / **loader = poser 版 proxy（安装记录归 Poser）** / 表情校准份数 / 共存插件（`sbm.dll`）/ 摆姿页连接状态；有不一致会单独提示 |
+| 45 ★★ | 进游戏（验证同进程共存） | 按 **L** 出 Poser 面板、按住 **Alt** 有光标；同时 ReShade 面板（Home）里 DLSS5 与第一人称照常、服装 Mod 照常、乳摇照常；**全程没有 cmd 黑窗** |
+| 46 ★★ | 游戏运行时点启动页「打开摆姿页（Poser）」 | 浏览器打开 `http://127.0.0.1:18923` 并能看到角色骨骼；若提示未确认协议 → 在游戏内先点一次它的《用户协议》确认，再打开即可 |
+| 47 ★★ | 关掉「Endfield Poser」滑块 → 重启游戏 | Poser 面板**不再出现**（`plugin\poser.dll` 变成 `plugin\poser.dll.endfieldmodcontroller.disabled`），**乳摇 / 服装 Mod / DLSS5 照常**；再打开滑块（会自动恢复文件）→ 面板回来 |
+| 48 ★ | 真正卸载 Poser | 用它的卸载向导移除；重启游戏后面板消失，**乳摇仍然生效**（因为 `plugin\sbm.dll` 还在，loader 被保留 —— 这是刻意行为，日志/返回值里会写明"保留 loader"） |
+| 49 ★ | 设置页「游戏目录体检」→「备份并净化」→「从备份还原」 | 体检列表里能看到 `plugin\poser.dll`、`plugin\poser-install.json`、`plugin\poses`、`plugin\mmd`（分类标成 Endfield Poser 的数据）；净化后这些都被移走且可从备份完整还原（姿态库、表情校准都回来） |
+| 50 ★ | 设置页「检查组件更新」/「一键安装/更新全部组件」 | 更新检查里多一行「Endfield Poser: 当前 … → 最新 …（预发布）」；一键更新的确认框里列出它；**不推送任何东西到 GitHub**（只下载） |

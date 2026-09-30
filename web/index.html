@@ -118,10 +118,18 @@
           </div>
           <div class="switch-desc">次级运动（乳摇）插件：注入 <code>d3dcompiler_47</code> / <code>vulkan-1</code> proxy ＋ <code>plugin\sbm.dll</code>，需另开它自己的管理器界面调参</div>
         </div>
+        <div class="switch-item">
+          <div class="switch-row">
+            <span class="switch-name">Endfield Poser</span>
+            <label class="switch"><input type="checkbox" id="cfg-poser_injection" checked><span class="slider"></span></label>
+          </div>
+          <div class="switch-desc">摆姿 / MMD 播放插件：注入 <code>d3dcompiler_47</code> proxy ＋ <code>plugin\poser.dll</code>；游戏内按 <code>L</code> 开面板、按住 <code>Alt</code> 取光标。安装包从它的官方 Release 下载（上游 AGPL-3.0，不随包分发）</div>
+        </div>
       </div>
 
       <div class="toolbar">
         <button id="sbm-launch-btn">启动插件界面（乳摇管理器）</button>
+        <button id="poser-webui-btn">打开摆姿页（Poser）</button>
         <button id="prepare-launch-btn">生成控制器</button>
         <button id="integrity-btn">检查/修复完整性</button>
         <button id="game-inject-audit-btn">检查游戏目录注入</button>
@@ -191,6 +199,10 @@
         <div class="setting-row">
           <span class="setting-label">乳摇工具目录</span>
           <input id="cfg-secondary_motion_dir" type="text" readonly class="auto-input" placeholder="自动：&lt;主路径&gt;/secondary_motion">
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Endfield Poser 安装包</span>
+          <input id="cfg-poser_dir" type="text" readonly class="auto-input" placeholder="自动：&lt;主路径&gt;/poser（从官方 Release 下载）">
         </div>
         <div class="setting-row">
           <span class="setting-label">ReShade 注入方式</span>
@@ -266,6 +278,7 @@
         <button id="migoto-launch-btn" class="primary">启动官方 XXMI / EFMI 界面</button>
         <button id="open-log-btn">查看启动日志</button>
         <button id="export-diagnostics-btn">导出诊断包</button>
+        <button id="poser-log-btn">打开 Poser 日志</button>
         <button id="force-close-game-btn">强制结束残留游戏</button>
       </div>
       <div class="toolbar">
@@ -298,6 +311,7 @@
       <pre id="dlss5-status" class="code-block">未检查注入状态</pre>
       <pre id="init-status" class="code-block">未运行初始化自检</pre>
       <pre id="game-inject-status" class="code-block">未检查游戏目录注入</pre>
+      <pre id="poser-status" class="code-block">未检查 Endfield Poser 状态</pre>
       <pre id="update-status" class="code-block">未检查更新</pre>
       <div id="settings-status" class="hint"></div>
     </section>
@@ -318,6 +332,13 @@
         <li>DLSS5 页勾「启用DLSS神经渲染」+「启用超分；风格选电影，总体/结构强度拉满，角色皮肤结构 ≥ 0。</li>
         <li>Enhancer 的 Camera 页：先开 Camera Controls → First Person = On → Third Person During Combat = <b>Off</b>（打 boss 才不会被踢出第一人称）→ EFMI/XXMI Compatibility = On。</li>
         <li>快捷键：<code>F6</code> 神经渲染开关、<code>F11</code> Mod 显示、<code>,</code> 第一人称、<code>F12</code> EFMI 帮助。</li>
+      </ul>
+      <h3>Endfield Poser（摆姿 / MMD 播放，可选）</h3>
+      <ul>
+        <li>上游 <a href="https://github.com/OedoSoldier/Endfield-Poser" target="_blank" rel="noopener">OedoSoldier/Endfield-Poser</a>（AGPL-3.0，<code>honxi1/Endfield-Poser</code> 的功能分支）：游戏内摆姿、姿态库、MMD 播放、表情与镜头。<b>本程序不随包分发它的二进制</b>，只从它的官方 Release 下载安装包，再调用<b>它自己的安装向导</b>把文件写进游戏目录；使用前请在游戏内确认它的《用户协议》。</li>
+        <li>它和乳摇（SecondaryMotion）用<b>同一套注入机制</b>：游戏目录里的 <code>d3dcompiler_47</code> proxy 会把 <code>plugin\*.dll</code> 全部加载进游戏进程，所以两个插件能共存；卸载其中一方时，只要另一方还在，proxy 会被保留。</li>
+        <li>游戏内快捷键：<code>L</code> 显示/隐藏面板、<code>P</code> 冻结/解冻、按住 <code>Alt</code> 呼出光标、<code>Ctrl+F5/F6/F7/F8</code> 播放/暂停/停止/回首帧。它还有一个独立摆姿页 <code>http://127.0.0.1:18923</code>（游戏运行时用浏览器打开，启动页有「打开摆姿页」按钮）。</li>
+        <li>开关含义：关掉只把 <code>plugin\poser.dll</code> 改名（可逆、不动 proxy、不动其它插件），进游戏就不再加载它；要真正移除文件请点设置页的卸载（走它自己的卸载向导）。</li>
       </ul>
       <h3>注意</h3>
       <ul>

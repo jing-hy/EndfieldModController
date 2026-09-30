@@ -24,6 +24,11 @@ EFMI_REPO = "SpectrumQT/EFMI-Package"
 XXMI_ASSET_PATTERN = "Portable"
 XXMI_LIBS_ASSET_PATTERN = "XXMI-PACKAGE"
 EFMI_ASSET_PATTERN = "EFMI-PACKAGE"
+# Endfield Poser（摆姿 / MMD 播放插件）：上游**只发预发布版**，所以取 release 时
+# 必须走列表接口 include_prerelease（/releases/latest 会跳过预发布 —— 见 github.releases_list）。
+# 它不随包分发（AGPL-3.0），下载到这里之后由 poser.py 调它自己的安装向导写游戏目录。
+POSER_REPO = "OedoSoldier/Endfield-Poser"
+POSER_ASSET_PATTERN = "win64.zip"
 MARKER_NAME = ".endfieldmodcontroller_builtin.json"
 
 
@@ -75,12 +80,19 @@ def _write_marker(root: Path, data: dict) -> None:
     )
 
 
-def _latest_release_asset(repo: str, pattern: str) -> tuple[str, str, str, str]:
-    """返回 (下载地址, 版本, 资产名, sha256 digest)。"""
+def _latest_release_asset(repo: str, pattern: str, *, include_prerelease: bool = False) -> tuple[str, str, str, str]:
+    """返回 (下载地址, 版本, 资产名, sha256 digest)。
+
+    `include_prerelease=True` 时走 :func:`github.releases_list`（列表接口）——
+    只有它能拿到预发布版（Endfield Poser 目前全是预发布）。
+    """
     from . import github
 
-    # 先走网页路线（不消耗 API 额度、能借镜像），普通用户没有 token 也能用
-    release = github.releases_latest(repo)
+    if include_prerelease:
+        release = github.releases_list(repo, include_prerelease=True)
+    else:
+        # 先走网页路线（不消耗 API 额度、能借镜像），普通用户没有 token 也能用
+        release = github.releases_latest(repo)
     assets = release.get("assets") or []
     lowered = pattern.lower()
     matches = [asset for asset in assets if lowered in str(asset.get("name", "")).lower()]
@@ -228,8 +240,42 @@ def ensure_efmi(config: AppConfig, progress: Progress = None, byte_progress: Byt
     return BuiltinResult("EFMI", "installed", "installed", version, str(target))
 
 
+def ensure_poser(
+    config: AppConfig,
+    progress: Progress = None,
+    byte_progress: ByteProgress = None,
+    *,
+    force: bool = False,
+) -> BuiltinResult:
+    """下载/更新 Endfield Poser 安装包（**只落到数据目录，绝不碰游戏目录**）。
+
+    包解压到 `<主路径>/runtime/poser`；把 proxy 与 `plugin\\poser.dll` 装进游戏目录
+    由**上游自己的安装向导**完成（见 `poser.ensure_injection()`）——这是刻意的：
+    向导自带 PE 校验、原子写、失败回滚和安装记录。
+
+    上游目前**只发预发布版**，所以这里必须 `include_prerelease=True`
+    （`/releases/latest` 会跳过预发布，用它永远查不到 Poser）。
+    """
+    root = config.poser_path
+    marker = _read_marker(root)
+    url, version, asset_name, digest = _latest_release_asset(
+        POSER_REPO, POSER_ASSET_PATTERN, include_prerelease=True
+    )
+    present = (root / "plugin" / "poser.dll").is_file() or (root / "poser.dll").is_file()
+    if not force and present and marker.get("version") == version:
+        return BuiltinResult("Poser", "up_to_date", "already current", version, str(root))
+    _download_extract(url, asset_name, root, byte_progress, 1, 1, "Poser", expected_sha256=digest)
+    if not ((root / "plugin" / "poser.dll").is_file() or (root / "poser.dll").is_file()):
+        raise RuntimeError("解压后没找到 plugin\\poser.dll —— 上游安装包结构可能变了，请到上游 Release 页手动下载")
+    _write_marker(root, {
+        "version": version, "asset": asset_name, "source": POSER_REPO,
+        "prerelease": True, "license": "AGPL-3.0",
+    })
+    return BuiltinResult("Poser", "installed", "installed", version, str(root))
+
+
 def ensure_all(config: AppConfig, progress: Progress = None, byte_progress: ByteProgress = None) -> list[BuiltinResult]:
-    """安装三个内置组件（XXMI / XXMI-Libs / EFMI）。
+    """安装四个内置组件（XXMI / XXMI-Libs / EFMI / Endfield Poser）。
 
     **单项失败不中断其它项，跑完后再对失败项重试（最多 3 次）。**
     用户 2026-10-01 要求：「下载一旦失败就停了，改成全部下载完之后如果有失败项，
@@ -239,6 +285,7 @@ def ensure_all(config: AppConfig, progress: Progress = None, byte_progress: Byte
         ("XXMI", ensure_xxmi, 0),
         ("XXMI-Libs", ensure_xxmi_libs, 1),
         ("EFMI", ensure_efmi, 2),
+        ("Poser", ensure_poser, 3),
     ]
     total = len(steps)
     ok_status = {"installed", "up_to_date", "skipped", "present"}
@@ -329,5 +376,21 @@ def builtin_report(config: AppConfig) -> dict[str, dict]:
             "status": "已安装" if (efmi_root / "Core" / "EFMI" / "main.ini").is_file() else ("缺失" if config.use_builtin_runtime else "无需"),
             "version": efmi_marker.get("version", ""),
             "enabled": config.use_builtin_runtime,
+        },
+        "Poser": {
+            "display": "Endfield Poser (摆姿 / MMD 播放)",
+            "source": "builtin",
+            "install_dir": str(config.poser_path),
+            "present": ((config.poser_path / "plugin" / "poser.dll").is_file()
+                        or (config.poser_path / "poser.dll").is_file()),
+            # Poser 是可选的第四方插件（AGPL-3.0，不随包分发）：缺失只影响它自己，
+            # 所以 required=False —— 但开关开着时 needed=True，一键启动会去补。
+            "required": False,
+            "needed": bool(config.poser_injection),
+            "status": ("已安装" if ((config.poser_path / "plugin" / "poser.dll").is_file()
+                                    or (config.poser_path / "poser.dll").is_file())
+                       else ("缺失" if config.poser_injection else "无需")),
+            "version": _read_marker(config.poser_path).get("version", ""),
+            "enabled": bool(config.poser_injection),
         },
     }

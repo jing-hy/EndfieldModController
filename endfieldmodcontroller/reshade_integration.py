@@ -752,7 +752,33 @@ LOADER_PROXY_DISABLED_SUFFIX = ".loader.endfieldmodcontroller.disabled"
 PLUGIN_DISABLED_SUFFIX = ".endfieldmodcontroller.disabled"
 GAME_INJECTION_MANIFEST = "game_dir_injections.json"
 PLUGIN_DIR_NAME = "plugin"
-_BOOTSTRAP_MARKERS = (b"[LOADER] started", b"no plugin dlls found", b"[LOADER] loading")
+# 游戏目录里的 loader proxy 有**两套血统**（两者都会把 `<游戏目录>\plugin\*.dll`
+# 全部加载进游戏进程，所以"任一命中"都算 loader proxy）：
+#   * SecondaryMotion（乳摇）的 proxy：`[LOADER] started` / `[LOADER] loading` / …
+#   * Endfield Poser 的 proxy：`[PROXY] plugins loaded via …`（它自己的安装器
+#     `Test-OurProxy` 也认这个串）。
+# 2026-10-01 补：此前只认第一套，于是 Poser 的 proxy 在审计 / 停用 / 「一键还原游戏
+# 本体」里会被**整体漏判** —— 表现为"游戏目录已经干净"，其实还挂着注入。
+_SBM_PROXY_MARKERS = (b"[LOADER] started", b"no plugin dlls found", b"[LOADER] loading")
+_POSER_PROXY_MARKER = b"[PROXY] plugins loaded via "
+_BOOTSTRAP_MARKERS = _SBM_PROXY_MARKERS + (_POSER_PROXY_MARKER,)
+
+
+def loader_kind(path: Path) -> str:
+    """这个 DLL 属于哪套 loader proxy：``"sbm"`` / ``"poser"`` / ``""``（不是 proxy）。
+
+    谁提供 proxy 决定"哪个插件能被加载"，所以状态显示与两个插件之间的协调都要用它。
+    """
+    try:
+        with path.open("rb") as handle:
+            blob = handle.read(512 * 1024)
+    except OSError:
+        return ""
+    if _POSER_PROXY_MARKER in blob:
+        return "poser"
+    if any(marker in blob for marker in _SBM_PROXY_MARKERS):
+        return "sbm"
+    return ""
 
 
 def game_injection_manifest_path(config: AppConfig) -> Path:

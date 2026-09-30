@@ -23,6 +23,10 @@ class RuntimeDepsTests(unittest.TestCase):
             zf.writestr("d3d11.dll", b"dll")
         with zipfile.ZipFile(self.efmi_zip, "w") as zf:
             zf.writestr("EFMI/Core/EFMI/main.ini", b"ini")
+        # Endfield Poser（第四方插件，2026-10-01 起也在 ensure_all 的批次里）
+        self.poser_zip = self.root / "poser.zip"
+        with zipfile.ZipFile(self.poser_zip, "w") as zf:
+            zf.writestr("plugin/poser.dll", b"dll")
         self.manifest_json.write_text('{"version": "v-test", "signatures": {}}', encoding="utf-8")
         self.config_path = self.root / "config.json"
         self.config = AppConfig(
@@ -38,10 +42,13 @@ class RuntimeDepsTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_ensure_builtin_runtime(self) -> None:
-        def fake_latest(repo, pattern):
-            # 签名与 runtime_deps._latest_release_asset 一致：第 4 项是 Release 资产的 sha256 digest
+        def fake_latest(repo, pattern, **kwargs):
+            # 签名与 runtime_deps._latest_release_asset 一致：第 4 项是 Release 资产的 sha256 digest。
+            # 2026-10-01 起多了 include_prerelease 关键字（Poser 上游只发预发布版，必须用它）。
             if repo == runtime_deps.XXMI_REPO:
                 return self.xxmi_zip.as_uri(), "v-test", "xxmi.zip", ""
+            if repo == runtime_deps.POSER_REPO:
+                return self.poser_zip.as_uri(), "v-test", "poser.zip", ""
             return self.efmi_zip.as_uri(), "v-test", "efmi.zip", ""
 
         def fake_extract(url, asset_name, target, byte_progress=None, index=1, total=1,
@@ -50,6 +57,7 @@ class RuntimeDepsTests(unittest.TestCase):
                 "xxmi.zip": self.xxmi_zip,
                 "XXMI-PACKAGE-v-test.zip": self.xxmi_libs_zip,
                 "efmi.zip": self.efmi_zip,
+                "poser.zip": self.poser_zip,
             }
             dependencies.extract_archive(mapping[asset_name], target, strip_root=True)
 
@@ -83,7 +91,7 @@ class RuntimeDepsTests(unittest.TestCase):
             runtime_deps._download_extract = original_extract
             runtime_deps._release_info = original_release
             runtime_deps._asset_url = original_asset
-        self.assertEqual([r.key for r in results], ["XXMI", "XXMI-Libs", "EFMI"])
+        self.assertEqual([r.key for r in results], ["XXMI", "XXMI-Libs", "EFMI", "Poser"])
         self.assertTrue(self.config.xxmi_launcher.endswith("XXMI Launcher.exe"))
         efmi_root = self.config.builtin_runtime_path / "XXMI" / "EFMI"
         self.assertTrue((efmi_root / "Core" / "EFMI" / "main.ini").is_file())
@@ -92,6 +100,8 @@ class RuntimeDepsTests(unittest.TestCase):
         self.assertTrue(report["XXMI"]["present"])
         self.assertTrue(report["XXMI-Libs"]["present"])
         self.assertTrue(report["EFMI"]["present"])
+        # Poser：安装包下到 runtime\poser 之后 present 必须为真（供依赖页显示）
+        self.assertTrue(report["Poser"]["present"])
 
 
 if __name__ == "__main__":

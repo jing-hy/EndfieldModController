@@ -265,6 +265,36 @@ def releases_latest(
     return api_get(f"https://api.github.com/repos/{repo}/releases/latest", ttl=ttl)
 
 
+def releases_list(
+    repo: str,
+    *,
+    limit: int = 10,
+    include_prerelease: bool = True,
+    ttl: int = DEFAULT_TTL,
+) -> dict[str, Any]:
+    """列出 release 并返回筛选后的**第一个**（**能拿到预发布版**）。
+
+    为什么需要它（2026-10-01）：`/releases/latest`（API 与网页两条路线）都会
+    **跳过预发布版**，而 Endfield Poser 目前只发预发布（v0.4.92）—— 用
+    `releases_latest()` 永远查不到它，表现成"上游没有可用的 Release"。
+    这里走 API 列表接口（有 token 时 5000 次/小时，且共用 30 分钟磁盘缓存）；
+    draft 一律跳过；`include_prerelease=False` 时才把预发布过滤掉（过滤后为空
+    则退回全部候选，避免"只有预发布就报没有"）。
+    """
+    url = f"https://api.github.com/repos/{repo}/releases?per_page={max(1, min(int(limit), 100))}"
+    data = api_get(url, ttl=ttl)
+    if not isinstance(data, list):
+        raise GitHubError(f"{repo}: Release 列表格式异常")
+    candidates = [item for item in data if isinstance(item, dict) and not item.get("draft")]
+    if not include_prerelease:
+        stable = [item for item in candidates if not item.get("prerelease")]
+        if stable:
+            candidates = stable
+    if not candidates:
+        raise GitHubError(f"{repo} 还没有可用的 Release")
+    return candidates[0]
+
+
 def status() -> dict[str, Any]:
     """给界面/日志用：token 有没有、缓存多大。"""
     secret, source = token()

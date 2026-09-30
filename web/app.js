@@ -552,6 +552,7 @@ async function refreshPaths(config) {
   $('cfg-reshade_dll').value = config.reshade_dll || '';
   if ($('cfg-dlss5_dir')) $('cfg-dlss5_dir').value = config.dlss5_dir || '';
   if ($('cfg-secondary_motion_dir')) $('cfg-secondary_motion_dir').value = config.secondary_motion_dir || '';
+  if ($('cfg-poser_dir')) $('cfg-poser_dir').value = config.poser_dir || '';
   $('cfg-reshade_injection').value = config.reshade_injection || 'xxmi_extra';
   $('cfg-theme').value = config.theme === 'light' ? 'light' : 'dark';
   applyTheme(config.theme === 'light' ? 'light' : 'dark');
@@ -600,6 +601,7 @@ async function saveConfig() {
     reshade_dll: $('cfg-reshade_dll').value.trim(),
     dlss5_dir: $('cfg-dlss5_dir') ? $('cfg-dlss5_dir').value.trim() : '',
     secondary_motion_dir: $('cfg-secondary_motion_dir') ? $('cfg-secondary_motion_dir').value.trim() : '',
+    poser_dir: $('cfg-poser_dir') ? $('cfg-poser_dir').value.trim() : '',
     reshade_injection: $('cfg-reshade_injection').value,
     theme: $('cfg-theme').value,
     dependency_manifest: $('cfg-dependency_manifest').value.trim(),
@@ -682,6 +684,30 @@ async function refreshFromState() {
   }
   if ($('cfg-secondary_motion_injection')) {
     $('cfg-secondary_motion_injection').checked = s.config.secondary_motion_injection === true;
+  }
+  if ($('cfg-poser_injection')) {
+    $('cfg-poser_injection').checked = s.config.poser_injection !== false;
+  }
+  // Endfield Poser：状态汇总到设置页的状态窗（启动页只留滑块与按钮，遵循"启动页少放文字窗"的约定）
+  const poserStatus = s.poser_status || {};
+  if ($('poser-status')) {
+    const pv = poserStatus.proxies || {};
+    const plines = [
+      `安装包   : ${poserStatus.pack_ready ? (poserStatus.pack_version || '(版本未知)') : '未下载'}   ${poserStatus.pack_dir || ''}`,
+      `游戏内   : ${poserStatus.installed ? 'plugin\\poser.dll 已就位' : (poserStatus.parked ? '已按开关停用（可逆）' : '未安装')}`,
+      `loader   : ${poserStatus.loader_kind ? poserStatus.loader_kind + ' 版 proxy' : '不在位'}${poserStatus.proxy_owned ? '（安装记录归 Poser）' : ''}`,
+      `表情校准 : ${poserStatus.face_count || 0} 份    姿态库: ${poserStatus.pose_count || 0} 条`,
+    ];
+    for (const [pname, pinfo] of Object.entries(pv)) {
+      plines.push(`  ${pname}: ${pinfo.exists ? (pinfo.kind || '?') + ' proxy ' + pinfo.size + ' B' : '不在'} / 系统原版备份 ${pinfo.backup ? '有' : '无'}`);
+    }
+    if ((poserStatus.other_plugins || []).length) plines.push(`共存插件 : ${poserStatus.other_plugins.join(', ')}`);
+    if (poserStatus.record_consistent === false) plines.push('⚠ 安装记录与实际文件不一致（可能是手动更新过它）');
+    const pweb = poserStatus.web || {};
+    plines.push(`摆姿页   : ${pweb.reachable ? '已连接 127.0.0.1:18923' : (pweb.reason || '未连接')}`);
+    const ptail = poserStatus.log_tail || [];
+    if (ptail.length) plines.push('--- plugin\\poser_log.txt 末尾 ---', ...ptail.slice(-4));
+    $('poser-status').textContent = plines.join('\n');
   }
   if (!s.config.xxmi_launcher && s.detected_xxmi) {
     state.config.xxmi_launcher = s.detected_xxmi;
@@ -1486,6 +1512,51 @@ function bind() {
     };
   }
 
+  // Endfield Poser：打开它自己的摆姿页 / 读它的日志 / 开关（开关是文件级可逆操作，不是只写配置）
+  if ($('poser-webui-btn')) {
+    $('poser-webui-btn').onclick = async () => {
+      const r = await call('open_poser_web_ui');
+      logLine(r.ok ? `已打开 Poser 摆姿页：${r.url}` : `Poser 摆姿页: ${r.message || r.url}`);
+      setStatus(r.ok ? '已打开 Poser 摆姿页' : (r.message || '打开失败'));
+    };
+  }
+  if ($('poser-log-btn')) {
+    $('poser-log-btn').onclick = async () => {
+      const r = await call('poser_log_tail', 40);
+      logLine(`Poser 日志: ${r.path || '(未知路径)'}`);
+      for (const line of (r.lines || [])) logLine(`  ${line}`);
+      if (!r.ok) logLine(`⚠ ${r.message || '读取失败'}`);
+    };
+  }
+  const poserToggle = $('cfg-poser_injection');
+  if (poserToggle) {
+    poserToggle.onchange = async () => {
+      const enabled = poserToggle.checked;
+      setStatus(enabled ? '正在启用 Endfield Poser…' : '正在停用 Endfield Poser…');
+      try {
+        if (enabled) {
+          // 打开开关 = 要它在位：先补安装包与游戏目录里的文件，再让 dll 生效
+          const r = await call('poser_install');
+          for (const a of (r.actions || [])) logLine(`Poser: ${a}`);
+          for (const w of (r.warnings || [])) logLine(`⚠ Poser: ${w}`);
+          if (r.message) logLine(`⚠ Poser: ${r.message}`);
+          const st = await call('poser_status');
+          logLine(`Poser: ${st.installed ? 'plugin\\poser.dll 已就位' : '未就位'} | loader ${st.loader_kind || '不在位'} | 表情校准 ${st.face_count || 0} 份`);
+          setStatus(r.ok ? 'Endfield Poser 已启用' : (r.message || 'Poser 未就绪'));
+        } else {
+          const r = await call('set_poser_enabled', false);
+          logLine(r.ok ? `Poser: ${r.message}` : `⚠ Poser: ${r.message}`);
+          setStatus(r.ok ? 'Endfield Poser 已停用（下次进游戏不加载）' : (r.message || '停用失败'));
+        }
+      } catch (err) {
+        poserToggle.checked = !enabled;
+        logLine(`✗ Poser 切换失败: ${err.message || err}`);
+        setStatus(`Poser 切换失败: ${err.message || err}`);
+      }
+      await call('save_config', { poser_injection: poserToggle.checked });
+    };
+  }
+
   // 右上角：版本号 + 更新检测（对比 GitHub release 的 tag）
   // 项目链接（仓库 / issue / 发布页）只在这里解析一次，界面各处共用
   const appLinks = {};
@@ -1604,6 +1675,10 @@ function bind() {
       if (rs.note) lines.push(`   ${rs.note}`);
       lines.push(`乳摇插件     : 当前 ${sm.current || '?'}  →  最新 ${sm.latest || '?'}  ${sm.update_available ? '【有新版】' : ''}`);
       if (sm.asset) lines.push(`   ${sm.asset}  ${((sm.size || 0) / 1048576).toFixed(1)} MB  ${sm.published || ''}`);
+      const po = r.poser || {};
+      lines.push(`Endfield Poser: 当前 ${po.current || '未安装'}  →  最新 ${po.latest || '?'}  ${po.update_available ? '【有新版】' : ''}${po.prerelease ? '（预发布）' : ''}`);
+      if (po.asset) lines.push(`   ${po.asset}  ${((po.size || 0) / 1048576).toFixed(1)} MB  ${po.published || ''}`);
+      if (po.license) lines.push(`   上游许可 ${po.license}：只下载它的官方安装包，不随包分发`);
       const fd = d5.dlss5_feed || {};
       if (fd.latest) {
         lines.push(`DLSS5-Feeder : 当前 ${fd.current || '未安装'}  →  最新 ${fd.latest}  ${fd.update_available ? '【可更新】' : ''}`);
@@ -1619,7 +1694,7 @@ function bind() {
     // 一键装齐所有"不随包分发"的组件（含随包资产展开 + XXMI/EFMI + DLSS5 组件 + 乳摇）
     if ($('update-all-btn')) {
       $('update-all-btn').onclick = async () => {
-        if (!await showConfirm('将自动安装/更新所有组件：\n\n· 随包资产展开（DLSS 运行库、DLSS5 组件包）\n· XXMI Launcher / XXMI 库 / EFMI\n· ReShade 底座、DLSS5-Feeder、iMMERSE shader\n· 乳摇插件\n\n需要联网，继续？')) return;
+        if (!await showConfirm('将自动安装/更新所有组件：\n\n· 随包资产展开（DLSS 运行库、DLSS5 组件包）\n· XXMI Launcher / XXMI 库 / EFMI\n· ReShade 底座、DLSS5-Feeder、iMMERSE shader\n· 乳摇插件\n· Endfield Poser（摆姿 / MMD，从官方 Release 下载，上游 AGPL-3.0）\n\n需要联网，继续？')) return;
         setStatus('正在一键安装/更新全部组件…');
         await startFullUpdate(false, $('update-status'));
         setStatus('全部组件处理完成');

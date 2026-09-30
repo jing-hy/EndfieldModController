@@ -2,7 +2,7 @@
 
 《明日方舟：终末地》的一站式 Mod 管理器：把 **DLSS5 神经渲染 + 第一人称视角 + 服装 Mod（EFMI）** 以及 **乳摇（SecondaryMotion）** 统一到一次「一键启动」里，并自动维护各项注入与初始化自检。
 
-Windows 桌面程序（Python + PyWebview），单文件 exe，**零配置启动即用**。当前版本 **0.4.0**。
+Windows 桌面程序（Python + PyWebview），单文件 exe，**零配置启动即用**。当前版本 **0.5.0**。
 
 > 本程序**只做编排与自检**：注入由 XXMI Launcher 完成，服装 Mod 由 EFMI 加载，神经渲染与第一人称是挂在同一个 ReShade 底座下的 addon。
 > 它**不改游戏本体文件**，也不内置任何 Mod —— Mod 都是你自己放进来的。
@@ -25,6 +25,7 @@ Windows 桌面程序（Python + PyWebview），单文件 exe，**零配置启动
 | **诊断与日志** | 启动日志、崩溃监视、一键导出诊断 zip（含日志、注入状态、Windows 事件） |
 | **更新** | 检查/下载新版并自更新（下载后校验 sha256，退出后由脚本替换并重启）；组件（XXMI / EFMI / 乳摇）也能单独更新 |
 | **下载兜底** | 内置轻量加速：慢/抖时临时并发分块，直连不通时临时换镜像线路 —— 按需启用、用完即放，不装证书、不改系统 |
+| **摆姿 / MMD 播放（Endfield Poser）** | 从它的官方 Release 下载安装包，调用**它自己的安装向导**把文件装进游戏目录（不随包分发、不改它的包）；开关只改文件名（可逆）；状态与日志在设置页，摆姿用它自带的页面 `http://127.0.0.1:18923` |
 
 ### 注入链（同一进程内同时生效）
 
@@ -37,6 +38,7 @@ Windows 桌面程序（Python + PyWebview），单文件 exe，**零配置启动
   └─ reshade-shaders\                   → DLSS5_Feed.fx、iMMERSE、ReShade 标准头
 服装 Mod 引擎  EFMI\d3d11.dll
 乳摇注入       游戏目录的 d3dcompiler_47.dll / vulkan-1.dll（代理）+ plugin\sbm.dll
+摆姿 / MMD     同一个 d3dcompiler_47.dll 代理（加载 plugin 下所有 dll）+ plugin\poser.dll
 ```
 
 XXMI Launcher 启动游戏时按「注入库」注入上表里的 DLL，注入库由本程序维护，启动页的开关就是它的快捷切换。
@@ -127,6 +129,20 @@ run.bat --cli    :: 不开界面，直接打印当前状态 JSON（调试用）
 把游戏目录里的第三方注入物（loader proxy、插件数据、残留 ReShade 痕迹）**先备份再移走**，备份在 `runtime\game_backup\<时间戳>\`（含 `manifest.json` 与还原所需的文件），随时可还原。
 净化前会做内容级判定：**内容不像 ReShade/loader 载荷的 DLL 不会被误移走**（例如游戏自带或他方放的正版 `d3d12.dll`）。
 
+### Endfield Poser（摆姿 / MMD 播放，可选）
+
+启动页第 5 个滑块就是它。装什么、怎么装都由**它自己的安装向导**决定，本程序只做三件事：
+
+1. **下载**：从它的官方 Release 取 `Endfield-Poser-v<版本>-win64.zip`（约 6.9 MB，Release 自带 sha256 校验），解压到 `runtime\poser\`；
+2. **安装**：调它包内的 `tools\deploy.ps1 -GameDir <游戏目录> -Action Install`，由向导把 `plugin\poser.dll` 与 `d3dcompiler_47.dll`（proxy）写进游戏目录，并复制 37 份角色表情校准。**本程序不直接写这两个文件** —— 向导自带校验、原子写、失败回滚与安装记录（`plugin\poser-install.json`）；
+3. **开关**：关掉只把 `plugin\poser.dll` 改名为 `plugin\poser.dll.endfieldmodcontroller.disabled`（loader 只扫 `*.dll`，所以立刻不生效），**不动 proxy、不动其它插件**；要真正移除文件请用「卸载」（走向导的 Uninstall）。
+
+游戏内：按 **L** 开面板、**P** 冻结/解冻、按住 **Alt** 取光标、`Ctrl+F5/F6/F7/F8` 播放/暂停/停止/回首帧。它还有一个独立摆姿页 `http://127.0.0.1:18923`（游戏运行时用浏览器打开；启动页有「打开摆姿页（Poser）」按钮，设置页「启动与诊断」里有「打开 Poser 日志」可直接看 `plugin\poser_log.txt`）。首次进游戏需要在游戏内确认它的《用户协议》，未确认前那个页面只给只读状态。
+
+**它和乳摇（SecondaryMotion）能共存**，因为两者用的是同一套注入机制：游戏目录里的 `d3dcompiler_47.dll` proxy 会把 `plugin\` 下所有 `*.dll` 加载进游戏进程。因此卸载其中一方时，只要另一方还在，proxy 会被保留（上游向导与我们自己的乳摇卸载逻辑都是这么做的）。
+
+> 上游是 **AGPL-3.0**，本程序**不随包分发**它的二进制，只从官方 Release 下载并调用它自己的安装向导；使用前请确认其协议与鹰角官方创作限制。
+
 ---
 
 ## 四、目录结构
@@ -141,6 +157,7 @@ run.bat --cli    :: 不开界面，直接打印当前状态 JSON（调试用）
    │                            / *.addon64 / nvngx_*.dll / reshade-shaders / dlss5-feed.cfg）
    ├─ reshade/                  控制器自己的 addon 与 actions.tsv
    ├─ secondary_motion/         乳摇工具（可选）
+   ├─ poser/                    Endfield Poser 安装包（从官方 Release 下载，不随包分发）
    ├─ game_backup/<时间戳>/      游戏目录净化备份（可还原）
    ├─ backups/                  引擎目录、配置等的历史备份
    ├─ logs/                     日志与诊断包（logs/bundles/*.zip 是崩溃包）
@@ -222,6 +239,7 @@ python -m endfieldmodcontroller --cli   :: 打印状态 JSON
 | `api.py` | 暴露给前端的接口层（pywebview `js_api`）；构造必须保持"快"，重活放后台预热 |
 | `initialize.py` | 初始化自检（ReShade.ini 重建并**保留所有段**、DLSS5 shader/preset/运动矢量、游戏目录运行库、Mod 冲突检测） |
 | `secondary_motion.py` | 乳摇：状态、注入、模板实例化、`settings.json`（游戏数据目录） |
+| `poser.py` | Endfield Poser（摆姿 / MMD）：状态、安装包下载、调**它自己的**安装向导、开关（重命名 dll）、只读读它的摆姿页 |
 | `dependencies.py` / `runtime_deps.py` | 依赖清单、下载与解压（逐文件原子替换）、XXMI/Libs/EFMI 安装 |
 | `dlss5_fetcher.py` / `reshade_integration.py` | DLSS5 组件、ReShade 集成与游戏目录注入审计 |
 | `game_clean.py` | 游戏目录净化/还原（备份式、内容级判定、越界拒绝） |
@@ -293,6 +311,7 @@ python scripts\upload_release_assets.py  :: 上传两个附件（大文件走直
 | [iMMERSE](https://github.com/martymcmodding/iMMERSE)（Marty's Mods） | ReShade 后处理链（Launchpad 等） | MIT |
 | DLSS 5 Feed（`dlss5-feed.addon64`） | 给 DLSS5 喂颜色/运动矢量/深度 | 见其说明（无公开仓库，随包分发） |
 | [ShakingBreastManager / SecondaryMotion](https://github.com/Sp1cHless/Arknights-Endfield-Plugin-Secondary-bodyphysics) | 乳摇 | 见上游仓库 |
+| [Endfield Poser](https://github.com/OedoSoldier/Endfield-Poser)（`honxi1/Endfield-Poser` 的功能分支） | 摆姿 / MMD 播放（可选） | **AGPL-3.0** —— **不随包分发**，只从它的官方 Release 下载并调用它自己的安装向导 |
 | NVIDIA NGX 运行库（`nvngx_dlss.dll` / `nvngx_dlssnr.dll`） | DLSS 与神经渲染运行库 | NVIDIA 版权，随包仅为免去手动下载 |
 
 **关于第一人称中文补丁（特别声明）**：随包分发的第一人称**中文**补丁由 **B站 up 主 Hirahido** 制作，
@@ -308,5 +327,5 @@ python scripts\upload_release_assets.py  :: 上传两个附件（大文件走直
 
 - 本程序**不是**官方工具，与鹰角网络 / Hypergryph 无关。
 - 使用 Mod 可能违反游戏用户协议，**风险由使用者自负**；请自行确认你所在环境的规则。
-- 本程序会读写游戏目录中的注入类文件（`d3d12.dll` / `d3dcompiler_47.dll` / `vulkan-1.dll` / `plugin\sbm.dll` / `SecondaryMotion\` 等），但一律先备份、且提供一键还原；**不会**修改游戏本体、资源与存档。
+- 本程序会读写游戏目录中的注入类文件（`d3d12.dll` / `d3dcompiler_47.dll` / `vulkan-1.dll` / `plugin\sbm.dll` / `plugin\poser.dll` / `plugin\poses\` / `plugin\mmd\` / `SecondaryMotion\` 等），但一律先备份、且提供一键还原；**不会**修改游戏本体、资源与存档。
 - 第三方组件由其原作者维护，出问题请先到对应仓库反馈；本程序的集成问题欢迎开 issue。

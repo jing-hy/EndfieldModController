@@ -106,6 +106,12 @@ class AppConfig:
     # 留空 = 用 proxy 替换方式（老路子，会和 ReShade/EFMI 抢 D3D 链路）；
     # 填了短路径（如 D:\\zmdmod\\SBM\\sbm.dll）= 由 XXMI 注入，游戏目录不换任何系统 DLL。
     secondary_motion_dll: str = ""
+    # Endfield Poser（摆姿 / MMD 播放插件）安装包目录，留空 = <主路径>/runtime/poser。
+    # 包本体不随我们分发（上游 AGPL-3.0），由依赖页/一键启动从官方 Release 下载到这里。
+    poser_dir: str = ""
+    # 启动前自动补齐 Poser 的注入（d3dcompiler_47 proxy + plugin\poser.dll）。
+    # 默认 True —— 与 DLSS5 / EFMI / 乳摇三个组件一致：装不上就报可读原因，不静默。
+    poser_injection: bool = True
     theme: str = "light"
     last_tab: str = "library"
     inject_reshade_ui: bool = True
@@ -200,14 +206,20 @@ class AppConfig:
                     self.secondary_motion_dir = guess
                     filled.append("secondary_motion_dir")
 
-        # ③ DLSS5 底座 DLL：永远指向内嵌 dlss5
+        # ③ Endfield Poser 安装包：默认落在 runtime/poser（由依赖页/一键启动下载）
+        if not self.poser_dir.strip():
+            if (self.runtime_path / "poser" / "tools" / "deploy.ps1").is_file():
+                self.poser_dir = "runtime/poser"
+                filled.append("poser_dir")
+
+        # ④ DLSS5 底座 DLL：永远指向内嵌 dlss5
         if not self.reshade_dll.strip():
             candidate = self.dlss5_path / "d3d12.dll"
             if candidate.is_file():
                 self.reshade_dll = "runtime/dlss5/d3d12.dll"
                 filled.append("reshade_dll")
 
-        # ④ 官方启动器 / 3DMigoto loader：自动探测（搜不到就留空，由调用方提示手填）
+        # ⑤ 官方启动器 / 3DMigoto loader：自动探测（搜不到就留空，由调用方提示手填）
         if deep and not self.official_launcher.strip():
             guess = auto_detect_official_launcher()
             if guess:
@@ -390,6 +402,19 @@ class AppConfig:
     def secondary_motion_tool_dir(self) -> Path | None:
         exe = self.secondary_motion_exe
         return exe.parent if exe is not None else None
+
+    # ---------------------------------------------------------------
+    # Endfield Poser（摆姿 / MMD 播放插件）
+    # ---------------------------------------------------------------
+    @property
+    def poser_path(self) -> Path:
+        """Poser 安装包目录：默认 `<主路径>/runtime/poser`。
+
+        包本体不随我们分发（上游 AGPL-3.0），由依赖页 / 一键启动从官方 Release
+        下载到这里；它自己的安装向导再把这几个文件复制进游戏目录。
+        """
+        value = self.poser_dir.strip()
+        return self.resolve_path(value) if value else self.runtime_path / "poser"
 
     @property
     def reshade_runtime_path(self) -> Path:

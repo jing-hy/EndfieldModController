@@ -309,7 +309,7 @@ class EndfieldModControllerApi:
             return {"pending": False, "error": str(exc)}
 
     def get_state(self) -> dict[str, Any]:
-        from . import diagnostics, secondary_motion
+        from . import diagnostics, poser, secondary_motion
 
         # 留痕：用来判断前端是否真的完成了初始化（界面空白时先看这几行有没有）
         diagnostics.log_event(self.config, "UI 调用 get_state()", category="ui")
@@ -345,6 +345,8 @@ class EndfieldModControllerApi:
                 },
             },
             "secondary_motion_status": secondary_motion.status(self.config),
+            # Endfield Poser（摆姿 / MMD 播放插件）：状态 + 它自带摆姿页的只读状态
+            "poser_status": poser.status(self.config),
         }
     def save_config(self, data: dict[str, Any]) -> dict[str, Any]:
         self._invalidate_mods()
@@ -578,13 +580,14 @@ class EndfieldModControllerApi:
         except Exception:  # noqa: BLE001
             est += 1
         if self.config.use_builtin_runtime:
-            est += 3                                  # XXMI / XXMI-Libs / EFMI
+            est += 4                                  # XXMI / XXMI-Libs / EFMI / Poser
         est += len(dlss5_fetcher.COMPONENTS)          # ReShade 底座 / DLSS5-Feeder / iMMERSE
         try:
             est += len(dependencies.load_manifest(self.config.dependency_manifest_path)) or 1
         except Exception:  # noqa: BLE001
             est += 1
         est += 1                                      # 乳摇（第三方工具）
+        est += 1                                      # Endfield Poser（第三方插件）
         return max(est, 1)
 
     def start_full_update(self, dry_run: bool = False) -> dict[str, Any]:
@@ -774,6 +777,38 @@ class EndfieldModControllerApi:
                     else:
                         results.append(SimpleNamespace(key="secondary_motion", status="已是最新",
                                                        message=f"v{current or '?'}"))
+                    # Endfield Poser（摆姿 / MMD 播放）：与乳摇同一条更新流程、共用上面
+                    # 那次 check_updates 结果（不重复联网）。这一步只负责把安装包下到
+                    # runtime\poser；游戏目录里的文件由启动时的自检调它自己的安装向导补齐。
+                    try:
+                        from . import poser as poser_mod
+
+                        pp = ureport.get("poser") or {}
+                        current_p = str(pp.get("current") or "")
+                        latest_p = str(pp.get("latest") or "")
+                        need_install_p = not current_p
+                        need_update_p = bool(current_p and latest_p and pp.get("update_available"))
+                        if need_install_p or need_update_p:
+                            if dry_run:
+                                results.append(SimpleNamespace(
+                                    key="poser",
+                                    status="待安装" if need_install_p else "可更新",
+                                    message=(f"未安装 → {latest_p}" if need_install_p
+                                             else f"{current_p} → {latest_p}")))
+                            elif not getattr(self.config, "poser_injection", True):
+                                results.append(SimpleNamespace(key="poser", status="跳过",
+                                                               message="启动页已关闭该组件"))
+                            else:
+                                outcome = poser_mod.ensure_pack(self.config)
+                                results.append(SimpleNamespace(
+                                    key="poser",
+                                    status="已安装" if outcome.get("ok") else "失败",
+                                    message=str(outcome.get("message") or outcome.get("version") or "")))
+                        else:
+                            results.append(SimpleNamespace(key="poser", status="已是最新",
+                                                           message=latest_p or current_p or "?"))
+                    except Exception as exc:  # noqa: BLE001
+                        results.append(SimpleNamespace(key="poser", status="跳过", message=str(exc)))
                 except Exception as exc:  # noqa: BLE001
                     from types import SimpleNamespace as _NS
 
@@ -1043,6 +1078,71 @@ class EndfieldModControllerApi:
 
         launcher._append_log(self.config, "启动乳摇管理器 requested from UI")
         return secondary_motion.launch_manager(self.config)
+
+    # ------------------------------------------------------------------
+    # Endfield Poser（摆姿 / MMD 播放插件，第三方工具，本程序只做集成）
+    #   上游 AGPL-3.0：我们只下载它的官方安装包并调用它自己的安装向导，
+    #   不随包分发其二进制；摆姿与播放仍然用它自己的面板 / 摆姿页。
+    # ------------------------------------------------------------------
+    def poser_status(self) -> dict[str, Any]:
+        from . import poser
+
+        return poser.status(self.config)
+
+    def poser_install(self) -> dict[str, Any]:
+        """装/修：先确保安装包就位（下载走与 XXMI 同一条链路），再调它的安装向导。"""
+        from . import poser
+
+        launcher._append_log(self.config, "安装/修复 Endfield Poser requested from UI")
+        pack = poser.ensure_pack(self.config, log=lambda message: launcher._append_log(self.config, message))
+        if not pack.get("ok") and not pack.get("status"):
+            return pack
+        result = poser.ensure_injection(
+            self.config, log=lambda message: launcher._append_log(self.config, message)
+        )
+        result["pack"] = pack
+        return result
+
+    def poser_uninstall(self) -> dict[str, Any]:
+        from . import poser
+
+        launcher._append_log(self.config, "卸载 Endfield Poser requested from UI")
+        return poser.remove_injection(
+            self.config, log=lambda message: launcher._append_log(self.config, message)
+        )
+
+    def set_poser_enabled(self, enabled: bool = True) -> dict[str, Any]:
+        """开关落地：重命名 `plugin\\poser.dll`（可逆、不动 proxy、不动其它插件）。"""
+        from . import poser
+
+        launcher._append_log(self.config, f"Endfield Poser 开关 → {bool(enabled)} requested from UI")
+        return poser.set_enabled(
+            self.config, bool(enabled), log=lambda message: launcher._append_log(self.config, message)
+        )
+
+    def open_poser_web_ui(self) -> dict[str, Any]:
+        """打开它自带的摆姿页（http://127.0.0.1:18923）——只读状态，不代它下写操作。"""
+        from . import poser
+
+        launcher._append_log(self.config, "打开 Poser 摆姿页 requested from UI")
+        return poser.open_web_ui(self.config)
+
+    def poser_log_tail(self, lines: int = 40) -> dict[str, Any]:
+        """给界面的「打开 Poser 日志」用：读游戏目录里的 plugin\\poser_log.txt。"""
+        from . import poser
+
+        game = poser.game_dir(self.config)
+        if game is None:
+            return {"ok": False, "message": "未定位到游戏目录", "lines": [], "path": ""}
+        path = game / "plugin" / poser.LOG_NAME
+        if not path.is_file():
+            return {"ok": False, "message": "还没有 Poser 日志（进过一次游戏才会有）",
+                    "lines": [], "path": str(path)}
+        try:
+            content = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError as exc:
+            return {"ok": False, "message": f"读取失败: {exc}", "lines": [], "path": str(path)}
+        return {"ok": True, "path": str(path), "lines": content[-max(1, int(lines)):], "message": ""}
 
     # ------------------------------------------------------------------
     # 初始化自检（一键启动时自动跑，也可手动触发）

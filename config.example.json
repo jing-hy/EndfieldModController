@@ -25,6 +25,8 @@
   "secondary_motion_dir": "",
   "secondary_motion_injection": true,
   "secondary_motion_dll": "",
+  "poser_dir": "",
+  "poser_injection": true,
   "theme": "light",
   "last_tab": "library",
   "inject_reshade_ui": true,

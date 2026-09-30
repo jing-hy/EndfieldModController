@@ -1102,6 +1102,59 @@ def _check_mod_conflicts(config: AppConfig, report: Report, log: Callable[[str],
         report.add("mod_conflicts", True, f"{len(staged)} 个 staging Mod，按资源 hash 比对无冲突")
 
 
+def _check_poser(config: AppConfig, report: Report, log: Callable[[str], None] | None) -> None:
+    """Endfield Poser（摆姿 / MMD 播放插件）自检。
+
+    与乳摇同一套注入机制（游戏目录 proxy + `plugin\\*.dll` 全量加载），区别在于它的
+    文件由**上游自己的安装向导**写入 —— 我们只下载安装包（`runtime\\poser`）再调向导，
+    所以这里只做四件事：报状态、缺了就补齐、开关真正落地、把可读原因交给用户。
+    """
+    from . import poser
+
+    if not getattr(config, "poser_injection", True):
+        # 开关关着 = 「进游戏不加载 Poser」。已经装了的**不停用不卸载**（用户可能是
+        # 临时关掉），但已经被开关停用过、又新装了 dll 的，按开关停用掉。
+        try:
+            state = poser.status(config, include_web=False)
+            if state.get("installed"):
+                result = poser.set_enabled(config, False, log=log)
+                if result.get("changed"):
+                    report.add("poser", True, "已按开关停用 Poser（重命名 plugin\\poser.dll，可逆）", fixed=True)
+                    report.action("停用 Poser（启动页开关已关闭）")
+                    return
+                report.add("poser", False, str(result.get("message") or "停用 Poser 失败"), manual=True)
+                return
+        except Exception as exc:  # noqa: BLE001
+            report.add("poser", False, f"停用 Poser 失败: {exc}", manual=True)
+            return
+        report.add("poser", True, "已在启动页关闭 Endfield Poser")
+        return
+
+    state = poser.status(config, include_web=False)
+    if not state.get("pack_ready"):
+        report.add(
+            "poser", False,
+            f"Endfield Poser 安装包未就位（{config.poser_path}）——"
+            "依赖页点「自动安装/更新」，或再点一次「一键启动」会自动下载",
+            manual=True,
+        )
+        return
+
+    result = poser.ensure_injection(config, log=log)
+    for action in result.get("actions", []):
+        report.action(f"Poser：{action}")
+    state = result.get("state") or poser.status(config, include_web=False)
+    if result.get("ok"):
+        detail = (f"plugin\\poser.dll + loader（{state.get('loader_kind') or '?'}）+ "
+                  f"角色表情校准 {state.get('face_count', 0)} 份")
+        others = state.get("other_plugins") or []
+        if others:
+            detail += f"；与 plugin 里的其它插件共存：{', '.join(others)}"
+        report.add("poser", True, detail, fixed=bool(result.get("actions")))
+        return
+    report.add("poser", False, str(result.get("message") or "Poser 注入准备失败"), manual=True)
+
+
 def _check_secondary_motion(config: AppConfig, report: Report, log: Callable[[str], None] | None) -> None:
     from . import secondary_motion
 
@@ -1217,6 +1270,11 @@ def ensure_all(config: AppConfig, log: Callable[[str], None] | None = None) -> d
     _check_controller(config, report, log)
     _check_staging(config, report, log)
     _check_mod_conflicts(config, report, log)
+    # Endfield Poser 必须在乳摇**之前**：它的 proxy 会加载 plugin 下所有 dll（含
+    # sbm.dll），而乳摇的 ensure_injection 看到"proxy 已经在位"就会跳过 —— 顺序反了
+    # 会先生成 sbm 版 loader，白多一次覆盖（两个 loader 都能加载对方的插件，但统一
+    # 用 Poser 那份更省事，它还带身份标记可自证）。
+    _check_poser(config, report, log)
     _check_secondary_motion(config, report, log)
 
     payload = report.to_dict()

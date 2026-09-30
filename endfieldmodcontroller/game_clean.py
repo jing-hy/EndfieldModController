@@ -34,6 +34,17 @@ BACKUP_DIR_NAME = "game_backup"
 MANIFEST_NAME = "manifest.json"
 # 插件在游戏目录里写的东西（原版不可能有）
 PLUGIN_DATA_DIRS = ("SecondaryMotion",)
+# Endfield Poser 在游戏目录里写的东西（原版同样不可能有）。2026-10-01 补：它的
+# `plugin\poser.dll` 会被上面的 plugin_payload 规则移走，但**安装记录、姿态库、
+# 表情校准、它自己的备份**都不是 .dll/.txt —— 不补这一段就会留下"记录说装了、
+# 文件却不在"的半状态，而且还原时也回不来。
+POSER_DATA_PATHS = (
+    "plugin/poser-install.json",
+    "plugin/poser-backups",
+    "plugin/poses",
+    "plugin/mmd",
+    "plugin/poser_layout.ini",
+)
 # ReShade 的痕迹（本方案承诺不写游戏目录，出现就是残留）
 RESHADE_MARKERS = ("d3d12.dll", "ReShade.ini", "ReShade.log", "ReShadePreset.ini", "reshade-shaders")
 # DLSS5 专属运行库：游戏原版**没有**这个文件
@@ -46,6 +57,7 @@ CATEGORY_LABELS = {
     "plugin_payload": "plugin/ 下会被注入的插件 DLL",
     "plugin_log": "插件日志 / 探针输出",
     "plugin_data": "插件在游戏目录写的数据目录",
+    "poser_data": "Endfield Poser 的数据（安装记录 / 姿态库 / 表情校准 / 它的备份）",
     "reshade": "ReShade 注入痕迹",
     "dlss5_lib": "DLSS5 专属运行库（游戏原版没有）",
     "nvngx_overridden": "被替换过的 NVIDIA 运行库",
@@ -173,6 +185,23 @@ def audit(config: AppConfig, *, log: Log = None) -> dict[str, Any]:
                 "plugin_data", name, str(path), is_dir=True, size=total,
                 detail="插件在游戏目录写的数据（characters/presets/logs/runtime）",
             ))
+    # ③-b Endfield Poser 的数据（安装记录 / 它的备份 / 姿态库 / 表情校准）
+    # 只移动不删除；还原时按 manifest 原样搬回（与其它分类同一条路径）。
+    for relative in POSER_DATA_PATHS:
+        path = game_dir / relative
+        if path.is_file():
+            findings.append(Finding(
+                "poser_data", relative, str(path), size=path.stat().st_size,
+                sha256=_sha256(path),
+                detail="Endfield Poser 写的文件（净化会先备份，可用「一键还原」搬回）",
+            ))
+        elif path.is_dir():
+            total = sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
+            findings.append(Finding(
+                "poser_data", relative, str(path), is_dir=True, size=total,
+                detail="Endfield Poser 的数据目录（姿态库 / 表情校准 / 安装备份）",
+            ))
+
     for name in RESHADE_MARKERS:
         path = game_dir / name
         if path.is_file():

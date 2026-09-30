@@ -50,6 +50,21 @@ def _is_proxy(path: Path) -> bool:
         return False
 
 
+def _other_plugin_dlls(game: Path) -> list[str]:
+    """`plugin\\` 下除 sbm.dll 之外的插件 DLL（例如 Endfield Poser 的 poser.dll）。
+
+    存在的意义：两套 loader 都会加载 plugin 下**所有** dll，所以卸载乳摇时若还有
+    别的插件在，就**不能**把 proxy 还原成系统原版（那会把对方一起废掉）。
+    """
+    try:
+        return sorted(
+            item.name for item in (game / "plugin").glob("*.dll")
+            if item.is_file() and item.name.lower() != PLUGIN_NAME.lower()
+        )
+    except OSError:
+        return []
+
+
 def status(config: AppConfig) -> dict[str, Any]:
     """工具 / 注入 / 运行时的当前状态，供 UI 显示。"""
     root = config.secondary_motion_root
@@ -67,6 +82,10 @@ def status(config: AppConfig) -> dict[str, Any]:
         "injected": False,
         "plugin_exists": False,
         "backup_ok": False,
+        # 谁在提供 loader（proxy）："sbm" / "poser" / ""。2026-10-01 起 Endfield Poser
+        # 也用同一套 proxy + `plugin\*.dll` 机制，两个插件可能共用同一份 proxy。
+        "loader_owner": "",
+        "other_plugins": [],
         "runtime": {},
         "log_tail": [],
     }
@@ -86,6 +105,14 @@ def status(config: AppConfig) -> dict[str, Any]:
         }
     result["injected"] = all(item["installed"] for item in result["proxies"].values())
     result["backup_ok"] = all(item["backup"] for item in result["proxies"].values())
+
+    # 谁在提供 loader：Endfield Poser 也用同一套 proxy + `plugin\*.dll` 机制，
+    # 两个插件可以共用一份 proxy（谁提供都能把对方的插件 DLL 加载起来）。
+    from . import reshade_integration
+
+    kind_fn = getattr(reshade_integration, "loader_kind", None)
+    result["loader_owner"] = kind_fn(game / PROXY_NAMES[0]) if callable(kind_fn) else ""
+    result["other_plugins"] = _other_plugin_dlls(game)
 
     plugin = game / "plugin" / PLUGIN_NAME
     result["plugin_exists"] = plugin.is_file()
@@ -373,9 +400,16 @@ def remove_injection(config: AppConfig, log: Callable[[str], None] | None = None
     if game is None:
         return {"ok": False, "message": "未定位到游戏目录", "actions": [], "warnings": []}
 
+    others = _other_plugin_dlls(game)
     for name in PROXY_NAMES:
         target = game / name
         backup = game / f"{name}.bak"
+        # 2026-10-01：**plugin 里还有别的插件时保留 loader**。两套 loader（sbm / Poser）
+        # 都会加载 `plugin\*.dll`，把 proxy 还原成系统原版等于把对方插件一起废掉；
+        # 上游 Poser 的卸载向导在同样情形下也是"keeping loader"。
+        if others:
+            actions.append(f"保留 loader {name}（plugin 里还有其它插件：{', '.join(others)}）")
+            continue
         # 2026-10-01 修（⑥）：**先恢复、后删除**，且两步各自独立 try —— 原先挤在
         # 同一个 try 里，`copy2` 失败就会留下"proxy 已删、原版未回"的半状态：
         # 游戏目录缺 d3dcompiler_47/vulkan-1，游戏直接起不来。

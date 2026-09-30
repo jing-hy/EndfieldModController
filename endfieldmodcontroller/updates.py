@@ -208,8 +208,32 @@ def component_versions(config: AppConfig) -> dict[str, Any]:
             "exists": bool(config.secondary_motion_exe),
             "repository": f"https://github.com/{SBM_REPO}",
         },
+        "poser": {
+            "name": "Endfield Poser (摆姿 / MMD 播放)",
+            "version": _poser_local_version(config),
+            "path": str(config.poser_path),
+            "exists": ((config.poser_path / "plugin" / "poser.dll").is_file()
+                       or (config.poser_path / "poser.dll").is_file()),
+            "repository": "https://github.com/OedoSoldier/Endfield-Poser",
+            "license": "AGPL-3.0",
+        },
     }
     return versions
+
+
+def _poser_local_version(config: AppConfig) -> str:
+    """Poser 安装包本地版本：读 runtime_deps 写的 marker（记录上游 tag）。"""
+    from .runtime_deps import MARKER_NAME
+
+    marker = config.poser_path / MARKER_NAME
+    if marker.is_file():
+        try:
+            data = json.loads(marker.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return ""
+        if isinstance(data, dict):
+            return str(data.get("version") or "")
+    return ""
 
 
 def _version_from_filename(directory: Path, prefix: str) -> str:
@@ -263,7 +287,7 @@ def _sbm_local_version(config: AppConfig) -> str:
 # ---------------------------------------------------------------------------
 def check_updates(config: AppConfig, log: Callable[[str], None] | None = None) -> dict[str, Any]:
     """查询各组件的最新可用版本（联网）。"""
-    report: dict[str, Any] = {"reshade": {}, "secondary_motion": {}, "errors": []}
+    report: dict[str, Any] = {"reshade": {}, "secondary_motion": {}, "poser": {}, "errors": []}
 
     # ReShade 官方最新版
     try:
@@ -326,9 +350,39 @@ def check_updates(config: AppConfig, log: Callable[[str], None] | None = None) -
     except Exception as exc:  # noqa: BLE001
         report["errors"].append(f"乳摇插件检查失败: {exc}")
 
+    # Endfield Poser（摆姿 / MMD 播放插件）：上游**只发预发布版**，所以必须走
+    # github.releases_list（/releases/latest 会跳过预发布，用它永远查不到 Poser）。
+    try:
+        from . import github, poser
+
+        release = github.releases_list(poser.REPO, include_prerelease=True)
+        assets = [asset for asset in (release.get("assets") or [])
+                  if "win64.zip" in str(asset.get("name") or "").lower()]
+        asset = max(assets, key=github.asset_sort_key) if assets else {}
+        local = _poser_local_version(config)
+        latest = str(release.get("tag_name") or "").lstrip("vV")
+        report["poser"] = {
+            "current": local.lstrip("vV"),
+            "latest": latest,
+            "update_available": bool(latest and local and _version_tuple(latest) > _version_tuple(local)),
+            "installed": not local,
+            "download_url": str(asset.get("browser_download_url") or ""),
+            "asset": str(asset.get("name") or ""),
+            "size": int(asset.get("size") or 0),
+            "tag": str(release.get("tag_name") or ""),
+            "published": str(release.get("published_at") or ""),
+            "prerelease": bool(release.get("prerelease")),
+            "notes": str(release.get("name") or "").strip(),
+            "license": "AGPL-3.0",
+            "repository": f"https://github.com/{poser.REPO}",
+        }
+    except Exception as exc:  # noqa: BLE001
+        report["errors"].append(f"Poser 检查失败: {exc}")
+
     _log(log, "更新检查完成: " + json.dumps({
         "reshade": report["reshade"].get("latest"),
         "secondary_motion": report["secondary_motion"].get("latest"),
+        "poser": report["poser"].get("latest"),
     }, ensure_ascii=False))
     return report
 
@@ -400,6 +454,32 @@ def update_secondary_motion(config: AppConfig, url: str = "", log: Callable[[str
         return {"ok": False, "message": f"下载失败: {exc}"}
     if result.get("ok"):
         result["note"] = "日志/Presets/角色数据已保留，旧版整体备份在旁边 _backup_* 目录。"
+    return result
+
+
+def update_poser(config: AppConfig, url: str = "", log: Callable[[str], None] | None = None) -> dict[str, Any]:
+    """下载 Endfield Poser 安装包并更新到数据目录，再补齐游戏目录里的文件。
+
+    分两步是刻意的：安装包只落在 `runtime\\poser`，**游戏目录一律交给它自己的安装
+    向导**（`tools\\deploy.ps1`），我们不直接写 proxy / poser.dll。
+    """
+    from . import poser
+
+    if url:
+        try:
+            with tempfile.TemporaryDirectory(prefix="mc-poser-") as tmp:
+                archive = download_file(url, Path(tmp) / "Endfield-Poser.zip", log=log, timeout=900)
+                result = poser.import_pack(config, archive, log=log)
+        except (urllib.error.URLError, OSError) as exc:
+            return {"ok": False, "message": f"下载失败: {exc}"}
+    else:
+        result = poser.ensure_pack(config, log=log, force=True)
+
+    if result.get("ok"):
+        injection = poser.ensure_injection(config, log=log)
+        result["install"] = injection
+        if not injection.get("ok"):
+            result["note"] = injection.get("message") or "安装包已更新，但游戏目录里的文件没装好"
     return result
 
 
