@@ -1,10 +1,21 @@
-# EndfieldModController
+<div align="center">
 
-《明日方舟：终末地》的一站式 Mod 管理器：把 **DLSS5 神经渲染 + 第一人称视角 + 服装 Mod（EFMI）+ 乳摇物理 + 摆姿 / MMD 播放**统一到一次「一键启动」里；运行环境从零自动装好，**零配置启动即用**。
+<h1>EndfieldModController</h1>
 
-Windows 桌面程序（Python + Pywebview），单文件 exe。当前版本 **0.6.1** —— [下载最新版](https://github.com/jing-hy/EndfieldModController/releases)
+<p>《明日方舟：终末地》的一站式 Mod 管理器：把 <b>DLSS5 神经渲染 + 第一人称视角 + 服装 Mod（EFMI）+ 乳摇物理 + 摆姿 / MMD 播放</b> 统一到一次「一键启动」里；运行环境从零自动装好，<b>零配置启动即用</b>。</p>
 
-> 📖 安装细节、目录结构、逐项故障排查、开发与发布流程 → **[详细文档](docs/README.detailed.md)**
+<p>
+  <a href="https://www.python.org/"><img alt="Python 3" src="https://img.shields.io/badge/Python-3-3776AB?logo=python&amp;logoColor=white"></a>
+  <a href="https://learn.microsoft.com/windows/"><img alt="Windows 10 / 11" src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078D6?logo=windows&amp;logoColor=white"></a>
+  <a href="https://github.com/jing-hy/EndfieldModController/releases"><img alt="最新版本" src="https://img.shields.io/github/v/release/jing-hy/EndfieldModController?label=Release&amp;color=f0b429&amp;logo=github"></a>
+  <a href="LICENSE"><img alt="MIT 许可" src="https://img.shields.io/github/license/jing-hy/EndfieldModController?label=License&amp;color=3DA639"></a>
+</p>
+
+<p>Windows 桌面程序（Python + Pywebview），单文件 exe。当前版本 <b>0.6.1</b> —— <a href="https://github.com/jing-hy/EndfieldModController/releases">下载最新版</a></p>
+
+<p>📖 安装细节、目录结构、逐项故障排查、开发与发布流程 → <b><a href="docs/README.detailed.md">详细文档</a></b></p>
+
+</div>
 
 ---
 
