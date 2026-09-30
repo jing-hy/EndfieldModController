@@ -618,6 +618,100 @@ def _nvngx_fingerprint(config: Any) -> list[str]:
     return lines
 
 
+def _xxmi_summary(config: Any) -> list[str]:
+    """XXMI 注入链摘要（**不含任何密钥内容**，只看配置写没写对、签名在不在）。
+
+    为什么要有（2026-09-30）：反馈者用**外部 XXMI** 时报"DLSS5 / 第一人称没注入进去"，
+    而诊断包里没有任何 XXMI 信息 —— 只能来回问他、没法定位。这里把关键字段一次收齐：
+    `active_importer` 是不是 EFMI（写错 importer 等于白写）、`extra_libraries` 里实际列了
+    哪些 DLL、文件在不在、`extra_libraries_signature` 与 `Security.user_signature` 的**长度**
+    （签名无效时 XXMI 会弹 Reset 并把注入列表清空 —— 这是"看着配好了却没注入"最常见的原因）。
+    """
+    lines = ["", "-- XXMI 注入链摘要（DLSS5 / ReShade 没生效时先看这里）--"]
+    from . import reshade_integration
+
+    launcher_path = config.xxmi_launcher_path
+    lines.append(f"XXMI Launcher  : {launcher_path or '(未配置)'}")
+    if launcher_path is None:
+        return lines
+    config_path = reshade_integration.xxmi_config_path(launcher_path)
+    lines.append(f"Config.json    : {config_path or '(找不到 —— XXMI 还没首次运行过？)'}")
+    if config_path is None or not Path(config_path).is_file():
+        return lines
+    try:
+        data = json.loads(Path(config_path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        lines.append(f"读取失败       : {exc}")
+        return lines
+    section = data.get("Config") or {}
+    lines.append(f"active_importer   : {section.get('active_importer')!r}")
+    lines.append(f"enabled_importers : {section.get('enabled_importers')!r}")
+    importers = data.get("Importers") or {}
+    lines.append(f"Importers 段      : {sorted(importers.keys())}")
+    importer = ((importers.get("EFMI") or {}).get("Importer") or {})
+    libs = [item.strip() for item in str(importer.get("extra_libraries") or "").splitlines() if item.strip()]
+    lines.append(f"EFMI.extra_libraries_enabled = {importer.get('extra_libraries_enabled')!r}")
+    lines.append(f"EFMI.extra_libraries（{len(libs)} 条）:")
+    for lib in libs:
+        lines.append(f"    {'存在' if Path(lib).is_file() else '**文件不存在**'}  {lib}")
+    lines.append(f"extra_libraries_signature 长度 = {len(str(importer.get('extra_libraries_signature') or ''))}")
+    lines.append(f"Security.user_signature 长度   = {len(str((data.get('Security') or {}).get('user_signature') or ''))}")
+    security_dir = Path(config_path).parent / "Resources" / "Security"
+    for name in ("private_key.der", "public_key.der"):
+        lines.append(f"{name}: {'存在' if (security_dir / name).is_file() else '缺失'}")
+    return lines
+
+
+def _shader_summary(config: Any) -> list[str]:
+    """DLSS5 shader 文件清单（关键几个）+ ReShade 的搜索路径与 preset 启用状态。
+
+    为什么要有（2026-09-30）：反馈者说"ReShade 面板里没有 DLSS5 / 第一人称的菜单"，
+    而他历史截图报过 `DLSS5_Feed.fx(60): could not open included file 'ReShade.fxh'`
+    —— 这类问题**只能靠"文件在不在、是不是 0 字节/被截断"来判**，日志里看不出来
+    （addon 那句 `technique MISSING` 在**能用的环境**里启动头几秒也会出现，不是判据）。
+    **只看存在与字节数**，不读内容。
+    """
+    from .initialize import DLSS5_SHADER_FILES
+
+    lines = ["", "-- DLSS5 shader 文件清单（面板里没有 DLSS5 / 第一人称菜单时看这里）--"]
+    root = config.dlss5_path / "reshade-shaders"
+    for relative in DLSS5_SHADER_FILES:
+        # ⚠ relative 自带 "Shaders" / "iMMERSE" 前缀，root 只到 reshade-shaders，所以要用全量
+        # （第一版写成 relative[1:] 少了一层，8 个文件全被误报"缺失" —— 靠导包读回才发现）
+        path = root.joinpath(*relative)
+        if path.is_file():
+            size = path.stat().st_size
+            flag = "**0 字节！**" if size == 0 else "存在"
+            lines.append(f"{flag}  {size:>8,} B  {'/'.join(relative)}")
+        else:
+            lines.append(f"**缺失**  {'/'.join(relative)}")
+    immer = root / "Shaders" / "iMMERSE"
+    try:
+        files = sorted(p for p in immer.iterdir() if p.suffix.lower() == ".fx")
+    except OSError:
+        files = []
+    lines.append(f"iMMERSE 目录: {len(files)} 个 .fx" + ("（目录不存在）" if not files else ""))
+    for path in files:
+        lines.append(f"    {path.stat().st_size:>8,} B  {path.name}")
+    textures = root / "Textures"
+    try:
+        count = sum(1 for p in textures.iterdir() if p.is_file())
+    except OSError:
+        count = 0
+    lines.append(f"Textures 目录: {count} 个文件")
+    ini = root.parent / "ReShade.ini"
+    if ini.is_file():
+        for line in ini.read_text(encoding="utf-8", errors="replace").splitlines():
+            if line.startswith(("EffectSearchPaths=", "TextureSearchPaths=", "PresetPath=")):
+                lines.append(f"ReShade.ini {line}")
+    preset = root.parent / "ReShadePreset.ini"
+    if preset.is_file():
+        for line in preset.read_text(encoding="utf-8", errors="replace").splitlines():
+            if line.startswith(("Techniques=", "TechniqueSorting=", "EffectSorting=")):
+                lines.append(f"Preset {line[:180]}")
+    return lines
+
+
 def create_diagnostic_bundle(config: Any, *, game_dir: Path | None = None, note: str = "manual") -> Path:
     """Create a zip with logs and lightweight context files (no game binaries)."""
     _capture_windows_events(config)
@@ -640,6 +734,8 @@ def create_diagnostic_bundle(config: Any, *, game_dir: Path | None = None, note:
         f"game_dir={game_dir}",
     ]
     summary.extend(_nvngx_fingerprint(config))
+    summary.extend(_xxmi_summary(config))
+    summary.extend(_shader_summary(config))
 
     with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for path in sorted(target_dir.glob("*.log")):
