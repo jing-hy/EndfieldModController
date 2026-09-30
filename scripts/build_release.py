@@ -74,6 +74,42 @@ def read_version() -> str:
     return match.group(1)
 
 
+# 发版时**必须和 version.py 一起改**的地方（用户 2026-09-30 要求：
+# 「现在github的readme没更新，**以后每次推 release 的时候都要更新**」）。
+README_VERSION_SOURCES: tuple[tuple[str, str], ...] = (
+    ("README.md", r"当前版本\s*<b>([^<]+)</b>"),
+    ("docs/README.detailed.md", r"当前版本\s*\*\*([^*]+)\*\*"),
+)
+
+
+def check_readme_versions(version: str) -> None:
+    """卡住"改了 version.py 却忘了改 README"这件事。
+
+    我此前连着两版（v0.7.0 / v0.7.1）都只升了 `version.py`，两份 README 停在 0.6.1，
+    被用户点出来（README 是 GitHub 首页，用户一眼就能看到版本号对不对）。
+    与其指望记性，不如让**构建直接失败** —— 宁可现在停下，也别把不一致的版本推上去。
+    """
+    problems: list[str] = []
+    for relative, pattern in README_VERSION_SOURCES:
+        path = ROOT / relative
+        if not path.is_file():
+            problems.append(f"{relative}：文件不存在")
+            continue
+        match = re.search(pattern, path.read_text(encoding="utf-8"))
+        if not match:
+            problems.append(f"{relative}：找不到「当前版本 …」那一行")
+        elif match.group(1).strip() != version:
+            problems.append(
+                f"{relative}：写的是 {match.group(1).strip()}，而 version.py 是 {version}")
+    if problems:
+        print("!! 版本号不一致 —— 发版前这些地方要一起改：", flush=True)
+        for item in problems:
+            print(f"     {item}", flush=True)
+        raise SystemExit(1)
+    print(f"   版本号一致：{version}（version.py + {' + '.join(r for r, _ in README_VERSION_SOURCES)}）",
+          flush=True)
+
+
 def run(cmd: list[str], *, label: str) -> None:
     print(f"[build] {label} …", flush=True)
     started = time.time()
@@ -256,6 +292,7 @@ def main() -> int:
     args = sys.argv[1:]
     version = read_version()
     print(f"== 构建 EndfieldModController {version} ==", flush=True)
+    check_readme_versions(version)
     if "--skip-checks" not in args:
         static_checks()
     else:
