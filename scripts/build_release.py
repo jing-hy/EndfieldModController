@@ -3,7 +3,8 @@
 用法：
     python scripts/build_release.py                  # 正常构建（推荐）
     python scripts/build_release.py --skip-checks    # 跳过静态检查（只在明确知道原因时用）
-    python scripts/build_release.py --skip-modtest   # 不把最新版同步进测试目录
+    python scripts/build_release.py --skip-modtest   # 不同步进测试目录
+    python scripts/build_release.py --modtest-fake-old  # 测试目录改放伪旧版（测自更新用）
 
 产出（全部在 `dist\\`）：
 
@@ -12,9 +13,11 @@
     EndfieldModController-0.1.9-from-<版本>.exe    伪旧版（版本号 0.1.9、代码最新，用于测自更新）
     _old\\                                         上一代及更早的带版本号副本（自动归置）
 
-最后一步还会把最新版 exe 同步进**测试目录** `..\\modtest\\EndfieldModController.exe`：
-控制器 / 游戏 / XXMI 正在运行就**跳过、不杀进程**（等他退出后重跑本脚本），
-只替换 exe，`config.json` / `runtime\\` / `library\\` / `assets\\` 一律不碰。`--skip-modtest` 可关掉。
+最后一步会把**一份** exe 同步进**测试目录** `..\\modtest\\`：**先清掉那里原有的 `*.exe`**，
+再放最新版（带 `--modtest-fake-old` 则改放伪旧版，用来测自更新）—— 用户要求「以后都要把 modtest
+里的原来的 exe 去掉，如果我没说就直接放最新版」。控制器 / 游戏 / XXMI 正在运行就**跳过、不杀进程**
+（等他退出后重跑本脚本）；除 exe 外什么都不动（`config.json` / `runtime\\` / `library\\` / `assets\\`）。
+`--skip-modtest` 可整步关掉。
 
 静态检查（任一失败即中止，**不会**产出半成品）：
 
@@ -199,12 +202,18 @@ def _running_processes() -> list[str]:
     return sorted({line.strip() for line in result.stdout.splitlines() if line.strip()})
 
 
-def sync_to_modtest(latest: Path) -> None:
-    """把最新版 exe 同步一份进测试目录（`<工作区父目录>\\modtest`）。
+def sync_to_modtest(source: Path, *, artifact: str = "latest") -> None:
+    """把**一份** exe 同步进测试目录（`<工作区父目录>\\modtest`）。
 
-    用户 2026-09-30：「**这个需要构建脚本自动处理**」—— 以前每次构建完都要他提醒我复制。
-    原则：① 程序/游戏**在跑就跳过，绝不为了替换去杀进程**；② 只替换 exe，
-    `config.json` / `runtime\\` / `library\\` / `assets\\` 一律不碰（assets 137 MB，删了要重下）。
+    用户 2026-09-30 的两条要求：
+    ① 「**这个需要构建脚本自动处理**」—— 以前每次构建完都要他提醒我复制；
+    ② 「以后都要把 modtest 里的**原来的 exe 去掉**，如果我没说就直接放**最新版**，
+        你这次帮我把**伪旧版**放进去」→ 所以这里**先清掉测试目录里所有 `*.exe`**，
+        再放指定的那一份：`artifact="latest"` → `EndfieldModController.exe`（默认）；
+        `artifact="fake-old"` → 保持伪旧版自己的文件名。
+
+    原则：程序/游戏**在跑就跳过，绝不为了替换去杀进程**；除 `*.exe` 之外什么都不动
+    （`config.json` / `runtime\\` / `library\\` / `assets\\` 一律不碰，assets 137 MB 删了要重下）。
     """
     if not MODTEST_DIR.is_dir():
         print(f"      跳过：没有测试目录 {MODTEST_DIR}", flush=True)
@@ -214,21 +223,32 @@ def sync_to_modtest(latest: Path) -> None:
         print(f"      跳过：{', '.join(running)} 正在运行 —— 不替换、也不杀进程；"
               f"等他退出后重跑本脚本即可", flush=True)
         return
-    target = MODTEST_DIR / f"{APP_NAME}.exe"
-    before = sha256_of(target) if target.is_file() else ""
-    shutil.copy2(latest, target)
+
+    # ① 先清掉原来的 exe（删除类动作：先打印清单，删完**回读**确认）
+    stale = sorted(MODTEST_DIR.glob("*.exe"))
+    if stale:
+        print(f"      清掉原有 exe（{len(stale)} 个）：{', '.join(p.name for p in stale)}", flush=True)
+        for path in stale:
+            try:
+                path.unlink()
+            except OSError as exc:
+                print(f"          !! 删不掉 {path.name}: {exc}", flush=True)
+        left = sorted(p.name for p in MODTEST_DIR.glob("*.exe"))
+        if left:
+            print(f"          !! 仍有残留（可能被占用）：{', '.join(left)}", flush=True)
+    else:
+        print("      测试目录里原本没有 exe", flush=True)
+
+    # ② 放指定的那一份
+    target = MODTEST_DIR / (f"{APP_NAME}.exe" if artifact == "latest" else source.name)
+    shutil.copy2(source, target)
     after = sha256_of(target)
-    ok = after == sha256_of(latest)
+    ok = after == sha256_of(source)
     stamp = time.strftime("%H:%M:%S", time.localtime(target.stat().st_mtime))
-    print(f"      {target}  {target.stat().st_size:,} B  {stamp}", flush=True)
+    print(f"      放入（{artifact}）：{target.name}  {target.stat().st_size:,} B  {stamp}", flush=True)
     print(f"          sha256={after[:20]}…  与 dist 核对={'一致' if ok else '!! 不一致'}", flush=True)
-    if before and before != after:
-        print(f"          （已替换旧版 sha256={before[:20]}…）", flush=True)
-    elif before:
-        print("          （内容与原来完全相同）", flush=True)
-    others = sorted(p.name for p in MODTEST_DIR.glob("*.exe") if p.name != target.name)
-    if others:
-        print(f"      注意：测试目录里另有 {'、'.join(others)}（未动）", flush=True)
+    remaining = sorted(p.name for p in MODTEST_DIR.glob("*.exe"))
+    print(f"      现在测试目录里的 exe：{', '.join(remaining) or '(无)'}", flush=True)
 
 
 def main() -> int:
@@ -259,11 +279,17 @@ def main() -> int:
     print("[5/7] 把最新版放回 dist\\EndfieldModController.exe", flush=True)
     shutil.copy2(versioned, latest)
 
-    print("[6/7] 同步最新版到测试目录", flush=True)
+    print("[6/7] 同步测试产物到 modtest（先清掉原有的 exe）", flush=True)
     if "--skip-modtest" in args:
         print("      已按参数跳过（--skip-modtest）", flush=True)
+    elif "--modtest-fake-old" in args:
+        fake_old = DIST / f"{APP_NAME}-{FAKE_VERSION}-from-{version}.exe"
+        if fake_old.is_file():
+            sync_to_modtest(fake_old, artifact="fake-old")
+        else:
+            print(f"      !! 找不到伪旧版 {fake_old}，跳过", flush=True)
     else:
-        sync_to_modtest(latest)
+        sync_to_modtest(latest, artifact="latest")
 
     print("[7/7] 产物清单", flush=True)
     for item in (latest, versioned, DIST / f"{APP_NAME}-{FAKE_VERSION}-from-{version}.exe",
