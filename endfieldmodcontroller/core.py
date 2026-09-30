@@ -419,6 +419,17 @@ CHARACTER_ALIASES: list[tuple[str, tuple[str, ...]]] = [
 ]
 
 CHARACTERS_JSON = Path(__file__).with_name("characters.json")
+# 运行时更新的角色表（`<数据根>\runtime\_state\characters.json`，由 character_sync 从官网
+# 同步）。存在就优先用它 —— exe 是 onefile，包内那份解压在临时目录里，写不进去也不持久。
+CHARACTERS_OVERRIDE: Path | None = None
+
+
+def set_characters_override(path: Path | None) -> None:
+    """切换"更新版角色表"的位置并清缓存（character_sync 与 api 启动时各调一次）。"""
+    global CHARACTERS_OVERRIDE, _CHARACTER_ALIAS_CACHE
+    CHARACTERS_OVERRIDE = Path(path) if path else None
+    _CHARACTER_ALIAS_CACHE = None
+
 # 角色名出现在名称前多少个字符内，才认为它是这个 Mod 的"主体"，
 # 而不是括号说明文字里顺带提到的路人名（超过就降级为需要用户确认）。
 LEADING_NAME_LIMIT = 12
@@ -438,8 +449,9 @@ def load_character_aliases() -> list[tuple[str, tuple[str, ...]]]:
         return _CHARACTER_ALIAS_CACHE
 
     entries: list[tuple[str, tuple[str, ...]]] = []
+    source = CHARACTERS_OVERRIDE if (CHARACTERS_OVERRIDE and CHARACTERS_OVERRIDE.is_file()) else CHARACTERS_JSON
     try:
-        payload = json.loads(CHARACTERS_JSON.read_text(encoding="utf-8"))
+        payload = json.loads(source.read_text(encoding="utf-8"))
         for item in payload.get("characters", []):
             name = str(item.get("name", "")).strip()
             if not name:

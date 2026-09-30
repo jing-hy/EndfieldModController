@@ -67,7 +67,13 @@
       <div class="toolbar">
         <button id="scan-btn">重新扫描</button>
         <button id="prepare-btn" class="primary">生成控制器</button>
+        <button id="fix-all-mods-btn">一键修复所有 Mod（实验性）</button>
         <span class="hint">同角色自动互斥，选择自动保存。把 .zip 拖到页面任意处即可导入。</span>
+      </div>
+      <div class="hint" style="margin-bottom:8px">
+        修复用的是社区工具（B站 up 主 <b>可可HXL</b> 的《终末地Mod修复工具包》v1.5，<b>实验性</b>）：把 ini 里的资源槽位号适配当前游戏版本。
+        <b>每个 Mod 都会先整份备份</b>，卡片右下角「⋯」里可单独「回滚修复」。删除 = 移出库（进回收区，可找回）。
+        <span id="modfix-hint"></span>
       </div>
       <div id="library-status" class="hint"></div>
       <div id="mod-list" class="mod-groups"></div>
@@ -362,13 +368,22 @@
 
   <div id="crash-modal" class="modal hidden">
     <div class="modal-content" style="width:min(720px,92vw)">
-      <div class="modal-header"><h3>检测到终末地异常退出</h3></div>
-      <div class="hint">已自动把「控制器日志 + 终末地自己的日志 + 崩溃转储」收集并打包。把这个 zip 发到本项目的 issue 即可，里面已经包含定位所需的一切。</div>
+      <div class="modal-header"><h3 id="crash-modal-title">检测到终末地异常退出</h3></div>
+      <div class="hint" id="crash-modal-hint">已自动把「控制器日志 + 终末地自己的日志 + 崩溃转储」收集并打包。把这个 zip 发到本项目的 issue 即可，里面已经包含定位所需的一切。</div>
+      <div class="hint" id="crash-conflict-block" style="display:none">
+        <b>自检发现你的 Mods 里有资源冲突</b>：冲突的 Mod 同时生效会让游戏在加载过程中闪退。
+        建议先把下面冲突项里的其中一个取消勾选 → 点「生成控制器」→ 再进一次游戏；
+        这一步比先怀疑注入更容易验证。诊断包仍会照常生成，清理后还崩再发给我们。
+        <pre id="crash-conflict-detail" class="code-block" style="max-height:150px;margin-top:6px"></pre>
+      </div>
       <div class="path-row"><span>反馈地址：</span><a id="crash-issue-link" href="#" target="_blank" rel="noopener">加载中…</a><button id="crash-open-issue">打开 issue 页</button></div>
       <div class="path-row"><span>日志文件夹：</span><code id="crash-dir"></code><button id="crash-open-dir">打开</button></div>
       <div class="path-row"><span>崩溃包 zip：</span><code id="crash-zip"></code><button id="crash-open-zip">打开</button><button id="crash-copy-zip">复制路径</button></div>
       <pre id="crash-summary" class="code-block" style="max-height:200px"></pre>
-      <div class="modal-actions"><button id="crash-modal-close" class="primary">知道了</button></div>
+      <div class="modal-actions">
+        <button id="crash-goto-library" class="primary" style="display:none">去 Mod 库清理冲突</button>
+        <button id="crash-modal-close" class="primary">知道了</button>
+      </div>
     </div>
   </div>
   <div id="char-modal" class="modal hidden">

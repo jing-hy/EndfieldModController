@@ -216,6 +216,24 @@ input[type="text"] { width: 100%; }
 .mod-card .name { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mod-card .meta { color: var(--muted); font-size: 12px; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mod-card .warn { color: var(--danger); font-size: 12px; margin-top: 6px; }
+/* Mod 卡片右下角的「更多」（修复 / 回滚 / 移出库）—— 用户要求：每个 Mod 右下角给个入口 */
+.mod-card { position: relative; }
+.mod-card .mod-more {
+  position: absolute; right: 8px; bottom: 8px;
+  padding: 1px 10px 3px; font-size: 15px; line-height: 1.4; border-radius: 8px;
+  background: color-mix(in srgb, var(--panel-2) 92%, transparent);
+}
+.mod-card .fixed-tag { color: var(--success); font-size: 12px; margin-top: 4px; }
+/* 卡片「⋯」点开的小菜单：**就地弹出**（用户要求不要弹窗），贴在按钮旁边 */
+.mod-menu {
+  position: fixed; z-index: 60; min-width: 172px;
+  display: flex; flex-direction: column; gap: 4px; padding: 6px;
+  background: var(--panel-strong); border: 1px solid var(--line-strong);
+  border-radius: 12px; box-shadow: var(--shadow);
+}
+.mod-menu .mod-menu-head { color: var(--muted); font-size: 11px; padding: 2px 8px 4px; }
+.mod-menu button { text-align: left; padding: 6px 10px; font-size: 13px; border-radius: 8px; border-color: transparent; }
+.mod-menu button:disabled { opacity: .45; }
 .mod-card label { flex-direction: row; align-items: center; gap: 8px; margin-top: 10px; font-weight: 500; color: var(--text); }
 
 .path-row { display: flex; gap: 10px; align-items: center; margin: 9px 0; }

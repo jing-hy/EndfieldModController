@@ -68,6 +68,28 @@ class EndfieldModControllerApi:
                 launcher._append_log(self.config, f"清理上次更新残留: {', '.join(removed)}")
         except Exception:  # noqa: BLE001
             pass
+        # 角色表：先接上"运行时更新版"（有就用），再在后台**非阻塞**地跟官网对一次
+        # （用户 2026-09-30 要求：「管理器要带最新角色名…每次启动后非阻塞检查」）。
+        # 24 小时内不重复请求；失败静默、绝不影响启动、更不会拖慢首屏。
+        try:
+            from . import character_sync, core
+
+            core.set_characters_override(character_sync.latest_path(self.config))
+            report = character_sync.sync(
+                self.config,
+                log=lambda message: launcher._append_log(self.config, message),
+            )
+            if report.get("changed"):
+                launcher._append_log(
+                    self.config,
+                    f"角色表已更新：新增 {len(report.get('added') or [])} 位，"
+                    f"当前共 {report.get('local_count')} 位（来源：官网）",
+                )
+        except Exception as exc:  # noqa: BLE001
+            try:
+                launcher._append_log(self.config, f"角色表检查跳过: {exc}")
+            except Exception:  # noqa: BLE001
+                pass
         self._warm_done = True
 
     # ------------------------------------------------------------------
@@ -88,6 +110,33 @@ class EndfieldModControllerApi:
         从头再来"。下载任务的清理交给它自己（worker 的 finally）。
         """
         self._mods_cache = None
+        self._modfix_cache = {}
+
+    def _enrich_modfix_state(self, payload: list[dict[str, Any]], mods: list[Any]) -> None:
+        """给 Mod 列表补上「修复 / 可回滚」状态（卡片右下角「更多」菜单要用）。
+
+        按 mod_id 缓存：`is_fixed()` 要扫 ini，每次 get_state 都重扫会拖慢界面；
+        缓存随 `_invalidate_mods()` 一起清空。
+        """
+        from . import modfix
+
+        cache = getattr(self, "_modfix_cache", None)
+        if cache is None:
+            cache = {}
+            self._modfix_cache = cache
+        for item, mod in zip(payload, mods):
+            info = cache.get(mod.id)
+            if info is None:
+                try:
+                    fixed = bool(modfix.is_fixed(mod.path)["fixed"])
+                except OSError:
+                    fixed = False
+                info = {
+                    "fixed": fixed,
+                    "can_rollback": bool(modfix.list_backups(self.config, mod.id)),
+                }
+                cache[mod.id] = info
+            item.update(info)
 
     def log_frontend_error(self, message: str) -> dict[str, Any]:
         """接收前端 JS 错误，写进控制器日志（前端崩了也能在后端看到原因）。"""
@@ -152,6 +201,16 @@ class EndfieldModControllerApi:
         from . import crashwatch
 
         return crashwatch.watch_state()
+
+    def prelaunch_risks(self) -> dict[str, Any]:
+        """一键启动前的风险检查：这套 Mod 会不会崩（静态冲突 + 崩溃记忆）。
+
+        前端在「一键启动」里、**拉起 XXMI 之前**调它；有风险就弹确认框说明是什么
+        冲突、由用户决定"仍然启动 / 先去清理"（用户 2026-09-30 要求）。
+        """
+        from . import crashwatch
+
+        return crashwatch.prelaunch_risks(self.config)
 
     def collect_crash_report(self) -> dict[str, Any]:
         """立刻收集一次崩溃现场并写成报告（不等游戏退出）。"""
@@ -218,8 +277,10 @@ class EndfieldModControllerApi:
             local = updates_mod._sbm_local_version(self.config)
             report["manifest"]["secondary_motion"] = {
                 "display": "ShakingBreastManager（次级运动插件）",
-                "status": (f"v{local} 已安装" if state["manager_exists"]
-                           else "未安装（点上方「自动安装/更新」会从官方仓库拉取并装好）"),
+                # 版本号可能读不到（工具目录没配 / 文件被删）→ 别渲染成「v 已安装」
+                "status": (f"v{local} 已安装" if (state["manager_exists"] and local)
+                           else ("已安装（版本号读不到）" if state["manager_exists"]
+                                 else "未安装（点上方「自动安装/更新」会从官方仓库拉取并装好）")),
                 "present": bool(state["manager_exists"]),
                 "required": False,
                 "source": "GitHub Sp1cHless/Arknights-Endfield-Plugin-Secondary-bodyphysics",
@@ -314,6 +375,8 @@ class EndfieldModControllerApi:
         # 留痕：用来判断前端是否真的完成了初始化（界面空白时先看这几行有没有）
         diagnostics.log_event(self.config, "UI 调用 get_state()", category="ui")
         mods = self._mods()
+        mods_payload = [m.to_dict(include_actions=False) for m in mods]
+        self._enrich_modfix_state(mods_payload, mods)
         # **不扫盘**：本方法跑在 GUI 线程上，扫盘会把窗口渲染一起冻住（详见
         # reshade_integration.detect_game_dir 的注释）。从零启动时这里返回 None，
         # 后台预热完成后前端会自动再刷一次，那时就能经 official_launcher 推断出来。
@@ -321,7 +384,7 @@ class EndfieldModControllerApi:
         render_api = reshade_integration.detect_render_api(game_dir) if game_dir is not None else "unknown"
         return {
             "config": self.config.to_dict(),
-            "mods": [m.to_dict(include_actions=False) for m in mods],
+            "mods": mods_payload,
             "dependency_report": self._dependency_report(),
             "render_api": render_api,
             "controller_ready": (self.config.controller_dir / "controller.ini").is_file(),
@@ -347,6 +410,8 @@ class EndfieldModControllerApi:
             "secondary_motion_status": secondary_motion.status(self.config),
             # Endfield Poser（摆姿 / MMD 播放插件）：状态 + 它自带摆姿页的只读状态
             "poser_status": poser.status(self.config),
+            # Mod 修复工具是否就位（库页用它提示"找不到工具"的原因）
+            "modfix_status": self.modfix_status(),
         }
     def save_config(self, data: dict[str, Any]) -> dict[str, Any]:
         self._invalidate_mods()
@@ -1143,6 +1208,137 @@ class EndfieldModControllerApi:
         except OSError as exc:
             return {"ok": False, "message": f"读取失败: {exc}", "lines": [], "path": str(path)}
         return {"ok": True, "path": str(path), "lines": content[-max(1, int(lines)):], "message": ""}
+
+    # ------------------------------------------------------------------
+    # Mod 修复 / 回滚 / 移出库（**实验性**）
+    #   工具来源：B站 up 主「可可HXL」《终末地Mod修复工具包》v1.5
+    #   （`Endfield_PS-T_DrawSection_Fix_v2.1.exe`，随包分发，见 modfix.py 顶部说明）
+    #   约定：一律"先整份备份再动手"，并提供一键回滚；删除只是移出库（进回收区）。
+    # ------------------------------------------------------------------
+    def modfix_status(self) -> dict[str, Any]:
+        from . import modfix
+
+        return {"tool": modfix.tool_status(self.config)}
+
+    def mod_more_info(self, mod_id: str) -> dict[str, Any]:
+        """「更多」菜单要显示的信息：修过没、能不能回滚、修复工具在不在。"""
+        from . import modfix
+
+        mod = next((m for m in self._mods() if m.id == mod_id), None)
+        if mod is None:
+            return {"ok": False, "message": "找不到这个 Mod（可能已被移出库，刷新一下）"}
+        state = modfix.is_fixed(mod.path)
+        backups = modfix.list_backups(self.config, mod_id)
+        return {
+            "ok": True, "id": mod_id, "name": mod.name,
+            "fixed": state["fixed"], "fixed_files": state["files"],
+            "can_rollback": bool(backups), "backup_count": len(backups),
+            "last_backup": str(backups[0].get("at_text") or "") if backups else "",
+            "tool": modfix.tool_status(self.config),
+        }
+
+    def fix_mod(self, mod_id: str) -> dict[str, Any]:
+        """修复一个 Mod：临时目录里跑工具（先整份备份，可回滚）。"""
+        from . import modfix
+
+        mod = next((m for m in self._mods() if m.id == mod_id), None)
+        if mod is None:
+            return {"ok": False, "message": "找不到这个 Mod"}
+        launcher._append_log(self.config, f"修复 Mod（实验性）: {mod.name}")
+        result = modfix.fix_mod(
+            self.config, mod.id, mod.path,
+            log=lambda message: launcher._append_log(self.config, message),
+        )
+        self._invalidate_mods()
+        return result
+
+    def rollback_mod(self, mod_id: str) -> dict[str, Any]:
+        """一键回滚：用最近一次修复前的备份把这个 Mod 还原回去。"""
+        from . import modfix
+
+        launcher._append_log(self.config, f"回滚 Mod 修复: {mod_id}")
+        result = modfix.rollback_mod(
+            self.config, mod_id,
+            log=lambda message: launcher._append_log(self.config, message),
+        )
+        self._invalidate_mods()
+        return result
+
+    def delete_mod(self, mod_id: str) -> dict[str, Any]:
+        """把 Mod 移出库（进 `runtime\\backups\\mod-trash`，可手动找回），并从勾选里去掉。"""
+        from . import modfix
+
+        mod = next((m for m in self._mods() if m.id == mod_id), None)
+        if mod is None:
+            return {"ok": False, "message": "找不到这个 Mod"}
+        launcher._append_log(self.config, f"移出 Mod 库: {mod.name}")
+        result = modfix.delete_mod(
+            self.config, mod.path,
+            log=lambda message: launcher._append_log(self.config, message),
+        )
+        if result.get("ok"):
+            try:
+                selected = list(self.config.selected_mods or [])
+                if mod_id in selected:
+                    self.config.selected_mods = [x for x in selected if x != mod_id]
+                    self.config.save()
+            except OSError:
+                pass
+        self._invalidate_mods()
+        return result
+
+    def fix_all_mods(self, only_unfixed: bool = True) -> dict[str, Any]:
+        """一键修复所有：**后台线程**逐个修（每个都走同一套隔离流程），可轮询进度。
+
+        同步跑会让 pywebview 的界面卡住（29 个 Mod × 复制+跑工具），所以放后台，
+        前端用 `fix_all_progress()` 轮询。
+        """
+        from . import modfix
+
+        mods = [m for m in self._mods() if not m.is_dependency and m.kind in {"character", "unknown"}]
+        task = getattr(self, "_modfix_task", None)
+        if task is None:
+            task = {"running": False, "current": 0, "total": 0, "name": "",
+                    "results": [], "message": "", "ok": None}
+            self._modfix_task = task
+        if task.get("running"):
+            return {"ok": True, "already": True, "message": "已经在修了", **task}
+        if not mods:
+            return {"ok": True, "started": False, "total": 0, "message": "库里没有可修复的 Mod"}
+
+        task.update({"running": True, "current": 0, "total": len(mods), "name": "",
+                     "results": [], "message": "开始修复…", "ok": None})
+        launcher._append_log(self.config, f"一键修复所有 Mod（实验性）: {len(mods)} 个")
+
+        def worker() -> None:
+            def progress(index: int, total: int, name: str) -> None:
+                task.update({"current": index, "total": total, "name": name})
+
+            try:
+                result = modfix.fix_all(
+                    self.config, mods,
+                    log=lambda message: launcher._append_log(self.config, message),
+                    progress=progress, skip_if_fixed=only_unfixed,
+                )
+                task["results"] = result.get("results") or []
+                task["message"] = str(result.get("message") or "")
+                task["ok"] = bool(result.get("ok"))
+            except Exception as exc:  # noqa: BLE001
+                task["message"] = f"失败: {exc}"
+                task["ok"] = False
+            finally:
+                task["running"] = False
+                task["current"] = task.get("total", 0)
+                self._invalidate_mods()
+
+        threading.Thread(target=worker, name="emc-modfix", daemon=True).start()
+        return {"ok": True, "started": True, "total": len(mods),
+                "message": f"已开始修复 {len(mods)} 个 Mod（后台进行，可继续用界面）"}
+
+    def fix_all_progress(self) -> dict[str, Any]:
+        """一键修复的进度（前端轮询）。"""
+        task = getattr(self, "_modfix_task", None) or {}
+        return dict(task)
 
     # ------------------------------------------------------------------
     # 初始化自检（一键启动时自动跑，也可手动触发）

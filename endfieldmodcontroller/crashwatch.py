@@ -147,6 +147,168 @@ def is_crash(evidence: dict[str, Any]) -> bool:
     return bool(evidence.get("player_log_crash"))
 
 
+# ---------------------------------------------------------------------------
+# 崩溃归因：Mod 冲突 vs 其它（用户要求弹窗要区分）
+# ---------------------------------------------------------------------------
+def classify_cause(config: AppConfig, evidence: dict[str, Any], *,
+                   started_at: float | None = None) -> dict[str, Any]:
+    """给这次退出定性：``mod_conflict`` / ``crash`` / ``exit``。
+
+    「确定是 Mod 冲突」的判据：**自检明确记录过** Mods 资源冲突
+    （`initialize._check_mod_conflicts` 落盘到 `runtime\\_state\\mod_conflicts.json`），
+    而且这次确实崩了 —— 结论来自自检，不是我们猜的；只有"这次游戏启动前后不久"的
+    那份记录才算数（默认 6 小时窗口，够覆盖一轮玩）。
+    """
+    from . import diagnostics
+
+    crashed = is_crash(evidence)
+    state = diagnostics.mod_conflict_state(config)
+    conflicts = [str(item) for item in (state.get("conflicts") or [])] if state else []
+    has_conflict = bool(state) and state.get("ok") is False
+    fresh = True
+    if started_at and state.get("at"):
+        try:
+            fresh = float(state["at"]) >= float(started_at) - 6 * 3600
+        except (TypeError, ValueError):
+            fresh = True
+
+    if crashed and has_conflict and fresh:
+        return {
+            "kind": "mod_conflict",
+            "title": "这次崩溃很可能由 Mod 资源冲突引起",
+            "detail": str(state.get("detail") or ""),
+            "conflicts": conflicts,
+            "checked_at": str(state.get("at_text") or ""),
+            "crashed": True,
+        }
+    if crashed:
+        return {
+            "kind": "crash",
+            "title": "检测到终末地异常退出",
+            "detail": "",
+            "conflicts": [],
+            "checked_at": str(state.get("at_text") or "") if state else "",
+            "crashed": True,
+        }
+    return {
+        "kind": "exit",
+        "title": "终末地已退出（未检测到崩溃）",
+        "detail": "",
+        "conflicts": [],
+        "checked_at": "",
+        "crashed": False,
+    }
+
+
+# ---------------------------------------------------------------------------
+# 崩溃记忆：记住"哪套 Mod 组合崩过"，供一键启动前预警（用户 2026-09-30 要求）
+# ---------------------------------------------------------------------------
+CRASH_MEMORY_NAME = Path("_state") / "crash_memory.json"
+CRASH_MEMORY_LIMIT = 20
+_CONTROLLER_DIRS = frozenset({
+    "MC_Controller", "MC_Probe.ini", "DISABLED",
+    "EndfieldModControllerManaged", "ModeControllerManaged",
+})
+
+
+def crash_memory_path(config: AppConfig) -> Path:
+    return Path(config.runtime_path) / CRASH_MEMORY_NAME
+
+
+def staging_mods(config: AppConfig) -> list[str]:
+    """当前 staging（EFMI\\Mods）里"用户选的"那些 Mod 名字（排序，排掉控制器自己的东西）。"""
+    root = Path(config.staging_mods_path)
+    try:
+        items = sorted(root.iterdir())
+    except OSError:
+        return []
+    out: list[str] = []
+    for item in items:
+        if not item.is_dir() or item.name in _CONTROLLER_DIRS:
+            continue
+        if item.name.startswith("MC_Controller") or item.name.startswith("MC_Probe"):
+            continue
+        out.append(item.name)
+    return out
+
+
+def read_crash_memory(config: AppConfig) -> list[dict[str, Any]]:
+    import json
+
+    try:
+        data = json.loads(crash_memory_path(config).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    entries = data.get("entries") if isinstance(data, dict) else data
+    return [e for e in (entries or []) if isinstance(e, dict)]
+
+
+def remember_crash(config: AppConfig, *, kind: str, detail: str = "",
+                   mods: list[str] | None = None, at: float | None = None) -> dict[str, Any]:
+    """把"这次崩溃时跑的是哪套 Mod"记下来（只记崩溃，正常退出不记）。
+
+    同一套组合只留最近一次 —— 否则反复崩会把列表刷满、把别的组合挤掉。
+    """
+    import json
+
+    stamp = float(at or time.time())
+    entry = {
+        "at": int(stamp),
+        "at_text": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stamp)),
+        "kind": str(kind or "crash"),
+        "detail": str(detail or "")[:400],
+        "mods": sorted({str(m) for m in (staging_mods(config) if mods is None else mods)}),
+    }
+    entries = [e for e in read_crash_memory(config)
+               if sorted(str(x) for x in (e.get("mods") or [])) != entry["mods"]]
+    entries.insert(0, entry)
+    entries = entries[:CRASH_MEMORY_LIMIT]
+    path = crash_memory_path(config)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"entries": entries}, ensure_ascii=False, indent=2),
+                        encoding="utf-8", newline="\n")
+    except OSError:
+        pass
+    return entry
+
+
+def _same_combo(history: list[str], now: list[str]) -> bool:
+    """历史那套 Mod 与现在这套算不算"同一套"：互为子集，且两边都至少 2 个。
+
+    用子集而不是完全相等：用户常常只是多勾/少勾一个 —— 少一个照样会崩、
+    多一个也逃不掉那对冲突，所以两个方向都算命中；单 Mod 的组合不参与
+    （一个 Mod 自己崩通常是别的原因，提示了反而是噪音）。
+    """
+    a, b = {str(x) for x in history}, {str(x) for x in now}
+    if len(a) < 2 or len(b) < 2:
+        return False
+    return a <= b or b <= a
+
+
+def prelaunch_risks(config: AppConfig) -> dict[str, Any]:
+    """一键启动前的风险检查：这套 Mod 会不会崩（静态冲突 + 崩溃记忆）。
+
+    两个数据来源都是**已经算好的事实**，不是猜：
+      * 静态冲突 = 本次自检落盘的 `runtime\\_state\\mod_conflicts.json`（initialize 写）；
+      * 崩溃记忆 = 过去真的崩过的 Mod 组合（`crash_memory.json`）。
+    """
+    from . import diagnostics
+
+    state = diagnostics.mod_conflict_state(config)
+    conflicts = [str(x) for x in (state.get("conflicts") or [])] if state.get("ok") is False else []
+    mods = staging_mods(config)
+    memories = [e for e in read_crash_memory(config)
+                if _same_combo(list(e.get("mods") or []), mods)]
+    return {
+        "blocking": bool(conflicts or memories),
+        "conflicts": conflicts,
+        "memories": memories[:3],
+        "mods": mods,
+        "checked_at": str(state.get("at_text") or ""),
+    }
+
+
 def _normal_exit_marker() -> bool:
     """Player.log 尾部是否有 Unity 的正常退出统计。
 
@@ -329,6 +491,7 @@ def collect_evidence(config: AppConfig, *, started_at: float | None = None,
         "player_log_tail": [],
         "game_errors": _extract_game_errors(config),
     }
+    evidence["cause"] = classify_cause(config, evidence, started_at=started_at)
     if started_at:
         evidence["process"]["started_at"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(started_at))
     if exit_time:
@@ -481,6 +644,34 @@ def make_bundle(config: AppConfig, evidence: dict[str, Any] | None = None,
     # ④ 环境信息
     (bundle_dir / "environment.txt").write_text(_environment_text(config), encoding="utf-8")
 
+    # ④-b DLSS5 现场 + 崩溃归因
+    #   * `dlss5-feed.log` 是"神经渲染到底有没有出帧、卡在哪一步"的直接证据；
+    #     2026-09-30 一个反馈的包里缺它，只能靠 addon 的 fileVersion 反推，绕了一大圈。
+    #   * `cause.json` 让前端弹窗知道该走"Mod 冲突"那套文案，还是普通崩溃文案。
+    import json as _json
+
+    try:
+        dlss5_dir = Path(config.dlss5_path)
+        for name in ("dlss5-feed.log", "dlss5-feed.cfg", "ReShade.ini", "ReShadePreset.ini"):
+            src = dlss5_dir / name
+            if src.is_file() and src.stat().st_size <= 8 * 1024 * 1024:
+                shutil.copy2(src, bundle_dir / name)
+    except OSError:
+        pass
+    cause = evidence.get("cause") or classify_cause(config, evidence)
+    try:
+        (bundle_dir / "cause.json").write_text(
+            _json.dumps(cause, ensure_ascii=False, indent=2), encoding="utf-8")
+    except (OSError, ValueError):
+        pass
+    # 崩溃记忆：记下"这次崩的时候跑的是哪套 Mod"，一键启动前就能预警（用户 2026-09-30 要求）
+    if str(cause.get("kind")) in {"crash", "mod_conflict"}:
+        try:
+            remember_crash(config, kind=str(cause.get("kind")),
+                           detail=str(cause.get("detail") or ""), mods=staging_mods(config))
+        except Exception:  # noqa: BLE001 —— 记忆写失败不该影响崩溃包本身
+            pass
+
     # ⑤ 打包
     zip_path = bundles_root(config) / f"crash-{ts}.zip"
     try:
@@ -496,6 +687,7 @@ def make_bundle(config: AppConfig, evidence: dict[str, Any] | None = None,
         "zip": str(zip_path) if ok_zip else "",
         "game_logs": game_logs,
         "crashed": is_crash(evidence),
+        "cause": cause,
         "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
     _log(config, f"崩溃包已生成: {zip_path.name if ok_zip else bundle_dir.name}（含终末地日志 {len(game_logs)} 份）")
@@ -516,11 +708,23 @@ def latest_bundle(config: AppConfig) -> dict[str, Any]:
     if not zips:
         return {}
     latest = zips[0]
+    cause: dict[str, Any] = {}
+    cause_file = latest.with_suffix("") / "cause.json"
+    if cause_file.is_file():
+        import json as _json
+
+        try:
+            loaded = _json.loads(cause_file.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                cause = loaded
+        except (OSError, ValueError):
+            cause = {}
     return {
         "zip": str(latest),
         "dir": str(latest.with_suffix("")),
         "created_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(latest.stat().st_mtime)),
         "size_mb": round(latest.stat().st_size / 1048576, 2),
+        "cause": cause,
     }
 
 
@@ -544,6 +748,14 @@ def _render_report(evidence: dict[str, Any]) -> str:
     else:
         verdict = "未发现崩溃迹象（无卸载统计、无 uploadCrash，请人工确认）"
     out.append(f"崩溃判定  : {verdict}")
+    cause = e.get("cause") or {}
+    if cause:
+        kind_text = {"mod_conflict": "Mod 资源冲突（自检记录）",
+                     "crash": "其它原因（看下面的崩溃栈与模块列表）",
+                     "exit": "未崩溃"}.get(str(cause.get("kind")), str(cause.get("kind")))
+        out.append(f"归因      : {kind_text}" + (f" —— {cause.get('detail')}" if cause.get("detail") else ""))
+        if cause.get("checked_at"):
+            out.append(f"            自检时间 {cause.get('checked_at')}")
     out.append("")
     out.append("── 注入快照 ──")
     out.append(f"  游戏目录 : {inj.get('game_dir')}")

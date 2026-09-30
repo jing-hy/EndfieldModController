@@ -124,6 +124,92 @@ def manifest_entries(config: AppConfig) -> list[tuple[str, Path, str, dict[str, 
     return list(iter_assets(config))
 
 
+# ---------------------------------------------------------------------------
+# 随包组件基线校验（2026-09-30 加）
+# ---------------------------------------------------------------------------
+# 「DLSS5-Feeder」是在线组件（不随包、由 dlss5_fetcher 安装），所以它的基线写在这里。
+# ⚠ 2026-09-30 实测更正：**0.1.0（76,800 B）与 1.18.0-beta.1（332,800 B）在终末地上都能
+# 正常出帧**（modtest 实测：1.18 从 13:19 跑到 13:22、frame 7200、35 fps、NGX 310.8），
+# 所以"与随包不同"**只是差异提示，不是故障判定** —— 别再写"1.18 不会出帧"这种断言
+# （此前 README 与自检文案都这么写，是错的）。真不出帧时要看 dlss5-feed.log 与面板 NR 帧。
+FEED_NAME = "dlss5-feed.addon64"
+FEED_BASELINE_SIZE = 76_800
+FEED_BASELINE_SHA256 = "6ea59b3237ed9f1e2bdc6e258518347ccb7e03dfdc2f96fc08addc8974527dad"
+
+
+def baseline_mismatches(config: AppConfig, *, check_hash: bool = False) -> list[dict[str, Any]]:
+    """随包组件与「实测可用基线」的差异列表（供启动自检告警）。
+
+    判据一律用**文件大小 +（可选）sha256**，**不要**用崩溃日志里模块的 `size`
+    ——那是 SizeOfImage（内存映像），2026-09-30 我拿它当文件大小用，误判过一整轮。
+    """
+    target_root = Path(config.dlss5_path)
+    mismatches: list[dict[str, Any]] = []
+
+    for group, _root, name, entry in manifest_entries(config):
+        expected = int(entry.get("size") or 0)
+        want_sha = str(entry.get("sha256") or "")
+        path = target_root / name
+        if not path.is_file():
+            mismatches.append({
+                "name": name, "group": group, "kind": "missing",
+                "expected": expected, "actual": 0,
+                "message": f"{name} 不在 runtime\\dlss5（随包基线 {expected:,} 字节）",
+            })
+            continue
+        actual = path.stat().st_size
+        if expected and actual != expected:
+            mismatches.append({
+                "name": name, "group": group, "kind": "size",
+                "expected": expected, "actual": actual,
+                "message": (f"{name} 是 {actual:,} 字节，随包基线 {expected:,} 字节 —— "
+                            f"可能被别的整合包替换或手动升级过"),
+            })
+            continue
+        if check_hash and want_sha:
+            got = sha256_file(path)
+            if got and got.lower() != want_sha.lower():
+                mismatches.append({
+                    "name": name, "group": group, "kind": "hash",
+                    "expected": expected, "actual": actual,
+                    "message": f"{name} 大小对但内容与基线不一致（sha256 不符）",
+                })
+
+    feed = target_root / FEED_NAME
+    if feed.is_file():
+        size = feed.stat().st_size
+        if size != FEED_BASELINE_SIZE:
+            mismatches.append({
+                "name": FEED_NAME, "group": "online", "kind": "size",
+                "expected": FEED_BASELINE_SIZE, "actual": size,
+                "message": (f"{FEED_NAME} 与随包的版本不同（当前 {size:,} B，随包 {FEED_BASELINE_SIZE:,} B 的 0.1.0）—— "
+                            f"它是在线组件，「一键安装/更新全部组件」本来就会装上游最新版，"
+                            f"实测 1.18.0-beta.1（332,800 B）在终末地上也能正常出帧，所以这条只是提示差异；"
+                            f"真的不出帧时再看 runtime\\dlss5\\dlss5-feed.log 与面板里的「成功NR帧」"),
+            })
+        elif check_hash:
+            got = sha256_file(feed)
+            if got and got.lower() != FEED_BASELINE_SHA256:
+                mismatches.append({
+                    "name": FEED_NAME, "group": "online", "kind": "hash",
+                    "expected": FEED_BASELINE_SIZE, "actual": size,
+                    "message": f"{FEED_NAME} 大小对但内容被改过（sha256 与随包基线不一致）",
+                })
+    return mismatches
+
+
+def baseline_summary(config: AppConfig, *, check_hash: bool = False) -> dict[str, Any]:
+    """给自检 / 界面用的一行式摘要。"""
+    mismatches = baseline_mismatches(config, check_hash=check_hash)
+    total = len(manifest_entries(config)) + 1      # +1 = dlss5-feed.addon64
+    return {
+        "ok": not mismatches,
+        "total": total,
+        "mismatches": mismatches,
+        "detail": "；".join(item["message"] for item in mismatches),
+    }
+
+
 def sha256_file(path: Path, progress: Callable[[int, int], None] | None = None) -> str:
     """复用 fsutil 的那一份实现（这里只保留对外签名与 progress 回调语义）。"""
     from . import fsutil

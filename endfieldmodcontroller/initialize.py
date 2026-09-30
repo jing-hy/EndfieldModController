@@ -1043,6 +1043,27 @@ def _mod_conflict_summary(config: AppConfig, mods_dir: Path, names: list[str]) -
     return problems
 
 
+def _check_bundled_versions(config: AppConfig, report: Report, log: Callable[[str], None] | None) -> None:
+    """随包组件基线校验：`runtime\\dlss5` 里那几个文件是不是「我们实测可用的那一版」。
+
+    为什么要有这一项（2026-09-30 一个 issue 的教训）：玩家很容易拿别处的「DLSS5 整合包」
+    覆盖 `runtime\\dlss5\\`，其中 `dlss5-feed.addon64` 升到 1.18 之后在终末地上**不会出帧**，
+    还会引出很难查的崩溃。这里**只提示、不自动覆盖**用户文件（他的东西他做主）。
+    """
+    from . import runtime_assets
+
+    try:
+        summary = runtime_assets.baseline_summary(config)
+    except Exception as exc:  # noqa: BLE001
+        report.add("bundled_versions", False, f"随包组件基线校验失败: {exc}", manual=True)
+        return
+    if summary["ok"]:
+        report.add("bundled_versions", True, f"随包组件与基线一致（{summary['total']} 项）")
+        return
+    report.add("bundled_versions", False, str(summary["detail"]), manual=True)
+    report.action("随包组件与基线不一致（见上）：把 runtime\\dlss5 改名备份后重跑「一键启动」会重新展开随包版本")
+
+
 def _check_mod_conflicts(config: AppConfig, report: Report, log: Callable[[str], None] | None) -> None:
     """检测 EFMI\\Mods 里的 Mod 冲突。
 
@@ -1095,8 +1116,18 @@ def _check_mod_conflicts(config: AppConfig, report: Report, log: Callable[[str],
         shown = ", ".join(manual[:4]) + ("…" if len(manual) > 4 else "")
         problems.append(f"Mods 里有 {len(manual)} 个非控制器生成的目录（手动放的）: {shown}")
 
+    detail = "；".join(problems)
+    # 留痕：崩溃监视要用它判断"这次崩溃是不是 Mod 冲突造成的" —— 是的话弹窗要走
+    # 另一套文案与按钮（用户 2026-09-30 要求「确定是 mod 冲突要区别于其他崩溃情况」）。
+    try:
+        from . import diagnostics
+
+        diagnostics.record_mod_conflicts(config, ok=not problems, detail=detail, conflicts=problems)
+    except Exception:  # noqa: BLE001
+        pass
+
     if problems:
-        report.add("mod_conflicts", False, "；".join(problems), manual=True)
+        report.add("mod_conflicts", False, detail, manual=True)
         report.action("检测到 Mods 冲突（见上），请在 Mod 库页重新「生成控制器」清理")
     else:
         report.add("mod_conflicts", True, f"{len(staged)} 个 staging Mod，按资源 hash 比对无冲突")
@@ -1267,6 +1298,7 @@ def ensure_all(config: AppConfig, log: Callable[[str], None] | None = None) -> d
     _check_dlss5_shaders(config, report, log)
     _check_dlss5_preset(config, report, log)
     _check_game_libs(config, report, log)
+    _check_bundled_versions(config, report, log)
     _check_controller(config, report, log)
     _check_staging(config, report, log)
     _check_mod_conflicts(config, report, log)

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "group": "modfix",
+  "notes": "B站 up 主「可可HXL」的《终末地Mod修复工具包》v1.5 —— Endfield_PS-T_DrawSection_Fix_v2.1.exe（58 KB，控制台程序）。它把 d3dx.ini 里 checktextureoverride = ps-tN 的 N 右移一位（实测 ps-t3→ps-t1、ps-t20→ps-t10，ps-t0 跳过），适配游戏版本更新后翻倍的资源槽位编号，并写一行 '; PS-T DRAW-SECTION SHIFT -1 APPLIED v2.1' 作为已修标记。随包分发，运行时会复制到 runtime\\modfix\\。按上游教程要求，使用必须在临时目录里跑（不能在 Mods 或 Mod 库目录里留下 _ps_t_draw_fix_backup_* 与日志）。实验性：改前自动备份、可一键回滚。",
+  "compression": "none",
+  "files": {
+    "Endfield_PS-T_DrawSection_Fix_v2.1.exe": {
+      "size": 58368,
+      "sha256": "30928d92028f016f5b66e74c77ae19a3f1ed34da0c1091906f1a5ec7dd663016",
+      "origin": "Endfield PS-T DrawSection Fix v2.1 by 可可HXL (bilibili)"
+    }
+  }
+}

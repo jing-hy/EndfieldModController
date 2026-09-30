@@ -252,10 +252,12 @@ function renderMods() {
         <div class="name">${escapeHtml(mod.name)}</div>
         <div class="meta">${escapeHtml(mod.kind)} · id=${escapeHtml(mod.id)}</div>
         ${needConfirm ? '<div class="meta" style="color:#d98a1f;cursor:pointer" data-char-pick="' + escapeHtml(mod.id) + '">⚠ 角色待确认 —— 点此选择</div>' : ''}
+        ${mod.fixed ? '<div class="fixed-tag">✓ 已修复过（可在「⋯」里回滚）</div>' : ''}
         <label class="switch">
           <input type="checkbox" data-mod-toggle value="${escapeHtml(mod.id)}" ${checked ? 'checked' : ''} ${dependency ? 'disabled' : ''}>
           <span class="slider"></span>
         </label>
+        <button class="mod-more" data-mod-more="${escapeHtml(mod.id)}" title="更多：修复（实验性）/ 回滚 / 移出库">⋯</button>
       `;
       grid.appendChild(card);
     }
@@ -284,8 +286,159 @@ function renderMods() {
       saveSelection();
     };
   });
+  // 卡片右下角「⋯」：**鼠标移上去就出就地菜单**（用户要求：放上去就要出工具栏，不是点击才出）
+  root.querySelectorAll('button[data-mod-more]').forEach(btn => {
+    const open = () => {
+      cancelModMenuClose();
+      openModMenu(btn.dataset.modMore, btn);
+    };
+    btn.onmouseenter = open;
+    btn.onclick = (event) => {          // 触摸屏 / 键盘也能用
+      event.preventDefault();
+      event.stopPropagation();
+      open();
+    };
+    btn.onmouseleave = () => scheduleModMenuClose();
+  });
   $('library-status').textContent = `已发现 ${state.mods.length} 个 Mod，按角色分组显示`;
+  // 修复工具没就位时**当场说清**（否则用户点「修复」只会拿到一句报错，还得猜为什么）
+  if ($('modfix-hint')) {
+    call('modfix_status').then((r) => {
+      const tool = (r && r.tool) || {};
+      $('modfix-hint').textContent = tool.ready
+        ? `｜修复工具已就位：${tool.version}`
+        : '｜⚠ 修复工具未就位：「修复」会失败 —— 把 exe 放到 <数据根>\\runtime\\modfix\\，'
+          + '或重新展开随包资产（assets\\modfix 或 Release 里的 assets-bundle.zip）';
+    }).catch(() => {});
+  }
   loadCovers();
+}
+
+// ── Mod 卡片「⋯」：就地弹出的小菜单（修复 / 回滚 / 打开目录 / 移出库） ──────
+// 用户要求：**放上去出菜单，而不是出个弹窗**。菜单贴在按钮右下角，点空白/Esc/滚动收起。
+// 修复流程见后端 modfix.py：临时目录里跑社区工具（不在库/Mods 里留备份与日志）、
+// 改前整份备份、可单独回滚。工具来自 B站 up 主 可可HXL（v1.5，不开源、实验性）。
+function closeModMenus() {
+  clearTimeout(__modMenuTimer);
+  document.querySelectorAll('.mod-menu').forEach(el => el.remove());
+}
+
+// 鼠标从按钮挪到菜单上时会短暂离开按钮 —— 延时收起，避免"手一抖菜单就没了"
+let __modMenuTimer = null;
+function scheduleModMenuClose(delay = 220) {
+  clearTimeout(__modMenuTimer);
+  __modMenuTimer = setTimeout(() => closeModMenus(), delay);
+}
+function cancelModMenuClose() {
+  clearTimeout(__modMenuTimer);
+}
+
+function openModMenu(modId, anchorEl) {
+  const existing = document.querySelector('.mod-menu');
+  if (existing && existing.dataset.modMenu === modId) return;   // 已经是这个菜单，别重建（否则 hover 时闪）
+  closeModMenus();
+  const mod = state.mods.find(item => item.id === modId);
+  if (!mod) return;
+
+  const menu = document.createElement('div');
+  menu.className = 'mod-menu';
+  menu.dataset.modMenu = modId;
+  const tags = [];
+  if (mod.fixed) tags.push('已修复过');
+  if (mod.can_rollback) tags.push('可回滚');
+  menu.innerHTML = `
+    <div class="mod-menu-head">${escapeHtml(tags.length ? tags.join(' · ') : '未修复过')}</div>
+    <button data-act="fix">修复（实验性）</button>
+    <button data-act="rollback" ${mod.can_rollback ? '' : 'disabled'}>回滚修复</button>
+    <button data-act="open">打开所在文件夹</button>
+    <button data-act="delete">移出 Mod 库</button>
+  `;
+  document.body.appendChild(menu);
+  // 鼠标停在菜单上时不要收起（从按钮移到菜单中间有个缝）
+  menu.onmouseenter = cancelModMenuClose;
+  menu.onmouseleave = () => scheduleModMenuClose();
+
+  // 贴着按钮放：默认向右下展开，贴到窗口边缘就往上/往左收
+  const rect = anchorEl.getBoundingClientRect();
+  const width = menu.offsetWidth || 172;
+  const height = menu.offsetHeight || 150;
+  let left = rect.right - width;
+  if (left < 8) left = 8;
+  if (left + width > window.innerWidth - 8) left = window.innerWidth - width - 8;
+  let top = rect.bottom + 6;
+  if (top + height > window.innerHeight - 8) top = Math.max(8, rect.top - height - 6);
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+
+  menu.querySelectorAll('button').forEach(btn => {
+    btn.onclick = (event) => {
+      event.stopPropagation();
+      const act = btn.dataset.act;
+      closeModMenus();
+      if (act === 'open') { call('open_path_in_explorer', mod.path || ''); return; }
+      if (act === 'fix') return doFixMod(modId, mod.name);
+      if (act === 'rollback') return doRollbackMod(modId, mod.name);
+      if (act === 'delete') return doDeleteMod(modId, mod.name);
+    };
+  });
+}
+
+// 点空白 / 按 Esc / 滚动 → 收起（只注册一次）
+document.addEventListener('click', (event) => {
+  if (event.target.closest('.mod-menu') || event.target.closest('[data-mod-more]')) return;
+  closeModMenus();
+});
+document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeModMenus(); });
+window.addEventListener('scroll', () => closeModMenus(), true);
+
+async function doFixMod(modId, name) {
+  if (!await showModalDialog({
+    title: '修复这个 Mod（实验性）',
+    message: '会把 ini 里的资源槽位号适配当前游戏版本：\n'
+      + '· 先在临时目录里跑工具，不会在 Mod 库或 Mods 里留下备份与日志\n'
+      + '· 修复前会「整份备份」这个 Mod，随时能回滚\n'
+      + '· 工具来自 B站 up 主 可可HXL（v1.5），它不开源、判据未经完整验证\n\n继续修复？',
+    okText: '开始修复', cancelText: '先不修',
+  })) return;
+  setStatus('正在修复…');
+  const r = await call('fix_mod', modId);
+  for (const line of (r.tool_log || [])) logLine(`修复工具: ${line}`);
+  logLine(r.ok
+    ? (r.skipped ? `已跳过: ${r.message}`
+      : `修复完成: 改动 ${r.changed_count} 个文件${r.marked ? '（已带修复标记）' : '（没匹配到需修的内容）'}`)
+    : `✗ 修复失败: ${r.message || '未知错误'}`);
+  setStatus(r.ok ? '修复完成' : `修复失败: ${r.message || ''}`);
+  await refreshFromState();
+}
+
+async function doRollbackMod(modId, name) {
+  if (!await showModalDialog({
+    title: '回滚这个 Mod 的修复',
+    message: `会用最近一次修复前的备份还原「${name}」：\n`
+      + '· 还原后这个 Mod 回到修复之前的状态\n'
+      + '· 备份用过一次就会被清掉（每个 Mod 最多留 3 份）\n\n继续？',
+    okText: '回滚', cancelText: '算了',
+  })) return;
+  const r = await call('rollback_mod', modId);
+  logLine(r.ok
+    ? `已回滚: 还原 ${(r.changed || []).length} 项（备份时间 ${r.restored_from}）`
+    : `✗ 回滚失败: ${r.message}`);
+  setStatus(r.ok ? '已回滚' : `回滚失败: ${r.message || ''}`);
+  await refreshFromState();
+}
+
+async function doDeleteMod(modId, name) {
+  if (!await showModalDialog({
+    title: '把这个 Mod 移出库',
+    message: `「${name}」会从 Mod 库里移走（不是真删）：\n`
+      + '· 移到 runtime\\backups\\mod-trash\\<时间戳>\\，需要时可自己拿回来\n'
+      + '· 勾选里也会一并去掉\n\n继续？',
+    okText: '移出库', cancelText: '算了',
+  })) return;
+  const r = await call('delete_mod', modId);
+  logLine(r.ok ? `已移出库: ${r.moved_to}` : `✗ 移出失败: ${r.message}`);
+  setStatus(r.ok ? '已移出 Mod 库' : `移出失败: ${r.message || ''}`);
+  await refreshFromState();
 }
 
 function updateGroupHeader(block, groupKey) {
@@ -1301,6 +1454,46 @@ function bind() {
           .join('\n');
       }
 
+      // ①-b 启动前的 Mod 冲突风险确认（用户 2026-09-30 要求）：
+      //   自检发现资源冲突、或**这套组合以前崩过**（崩溃记忆）→ 先说清是什么冲突，
+      //   再由用户决定「仍然启动 / 先去清理」。判据全是算好的事实，不是猜。
+      //   ⚠ 本弹窗用 textContent 纯文本渲染，不要写 markdown 记号（会原样显示星号）。
+      const risks = await call('prelaunch_risks');
+      if (risks && risks.blocking) {
+        const rl = ['这套 Mod 组合有崩溃风险，建议先处理再启动：', ''];
+        if ((risks.conflicts || []).length) {
+          rl.push('【资源冲突】自检发现这些 Mod 覆盖同一批游戏资源：');
+          for (const c of risks.conflicts) rl.push(`· ${c}`);
+          rl.push('');
+        }
+        if ((risks.memories || []).length) {
+          rl.push('【崩溃记忆】这套组合（或它的一部分）以前崩过：');
+          for (const m of risks.memories) {
+            rl.push(`· ${m.at_text || ''}　判定：${m.kind === 'mod_conflict' ? 'Mod 资源冲突' : '其它崩溃'}`);
+            if ((m.mods || []).length) rl.push(`　当时的 Mod：${m.mods.join('、')}`);
+          }
+          rl.push('');
+        }
+        rl.push('建议：到「Mod 库」页把冲突项取消勾选一个 → 点「生成控制器」→ 再启动。');
+        rl.push('也可以选择仍然启动 —— 但游戏有可能在加载过程中闪退。');
+        // 按钮层级（用户 2026-09-30 要求：「发现 mod 冲突风险应该先去清理才是右边的橙色主选项」）：
+        //   主选项 = 右侧 primary（橙色）= 去清理，而且默认聚焦在它上面（安全侧）；
+        //   次要 = 左侧 = 仍然启动。返回值 true 表示"去清理"。
+        const goClean = await showModalDialog({
+          title: '启动前发现 Mod 冲突风险',
+          message: rl.join('\n'),
+          okText: '先去清理，不启动',
+          cancelText: '仍然启动',
+        });
+        logLine(`   风险确认：${goClean ? '你选择先去清理' : '你选择仍然启动'}`);
+        if (goClean) {
+          setStatus('已取消启动（先处理 Mod 冲突）');
+          logLine('   已取消启动 —— 处理完冲突再点「一键启动」即可');
+          showTab('library');
+          return { needsSecondStart: false, gameReason: '已取消：启动前检测到 Mod 冲突风险' };
+        }
+      }
+
       logLine('② 拉起 XXMI Launcher，请在它的界面里点 Start 启动游戏');
       const launched = await call('launch_official_gui');
       logLine(`   ${launched.message || 'XXMI Launcher 已打开'}`);
@@ -1509,6 +1702,41 @@ function bind() {
         setStatus(`乳摇切换失败: ${err.message || err}`);
       }
       await call('save_config', { secondary_motion_injection: sbmToggle.checked });
+    };
+  }
+
+  // 一键修复所有 Mod（实验性）：后台逐个修，前端轮询进度
+  if ($('fix-all-mods-btn')) {
+    $('fix-all-mods-btn').onclick = async () => {
+      if (!await showModalDialog({
+        title: '一键修复所有 Mod（实验性）',
+        message: '会对库里每个 Mod 跑一次社区修复工具（B站 up 主 可可HXL，v1.5）：\n'
+          + '· 每个 Mod 都会先整份备份，可单独「回滚修复」\n'
+          + '· 修复在临时目录里进行，不会在 Mod 库或 Mods 里留备份与日志\n'
+          + '· 已经修过的默认跳过\n'
+          + '· 修完进游戏按 F10 刷新即可\n\n开始吗？',
+        okText: '开始修复', cancelText: '先不修',
+      })) return;
+      const r = await call('fix_all_mods', true);
+      logLine(`一键修复: ${r.message || ''}`);
+      setStatus(r.message || '已开始修复…');
+      if (!r.started && !r.already) { await refreshFromState(); return; }
+      const timer = setInterval(async () => {
+        let p = {};
+        try { p = await call('fix_all_progress'); } catch (err) { return; }
+        if ($('library-status')) {
+          $('library-status').textContent = `修复中 ${p.current || 0}/${p.total || 0}：${p.name || ''}`;
+        }
+        if (!p.running) {
+          clearInterval(timer);
+          logLine(`一键修复完成: ${p.message || ''}`);
+          for (const item of (p.results || []).filter(x => !x.ok)) {
+            logLine(`  ✗ ${item.name}: ${item.message}`);
+          }
+          setStatus('一键修复完成');
+          await refreshFromState();
+        }
+      }, 1500);
     };
   }
 
@@ -1956,14 +2184,46 @@ function startCrashPolling() {
 function showCrashModal(bundle) {
   const modal = $('crash-modal');
   if (!modal) return;
+  const cause = bundle.cause || {};
+  const isConflict = cause.kind === 'mod_conflict';
+  // 标题/说明/按钮按**归因**切换：确定是 Mod 冲突就走另一套（用户要求区分开）
+  if ($('crash-modal-title')) $('crash-modal-title').textContent = cause.title || '检测到终末地异常退出';
+  if ($('crash-modal-hint')) {
+    $('crash-modal-hint').textContent = isConflict
+      ? '自检记录到 Mod 资源冲突，游戏随后在加载过程中退出。建议先清冲突（这一步最可能一步解决），诊断包仍会照常生成。'
+      : '已自动把「控制器日志 + 终末地自己的日志 + 崩溃转储」收集并打包。把这个 zip 发到本项目的 issue 即可，里面已经包含定位所需的一切。';
+  }
+  if ($('crash-conflict-block')) {
+    $('crash-conflict-block').style.display = isConflict ? '' : 'none';
+    if ($('crash-conflict-detail')) {
+      const list = (cause.conflicts || []).filter(Boolean);
+      $('crash-conflict-detail').textContent = list.length
+        ? list.join('\n')
+        : (cause.detail || '（这次自检没留下细节：到 Mod 库页点一次「生成控制器」会重新检查）');
+    }
+  }
+  const gotoLibrary = $('crash-goto-library');
+  if (gotoLibrary) {
+    gotoLibrary.style.display = isConflict ? '' : 'none';
+    gotoLibrary.onclick = () => { modal.classList.add('hidden'); showTab('library'); };
+  }
+  if ($('crash-modal-close')) {
+    // 冲突时把主按钮让给「去 Mod 库清理冲突」，关闭按钮降为次要
+    $('crash-modal-close').className = isConflict ? '' : 'primary';
+    $('crash-modal-close').textContent = isConflict ? '先看看，稍后自己处理' : '知道了';
+  }
   $('crash-dir').textContent = bundle.dir || '(无)';
   $('crash-zip').textContent = bundle.zip || '(未打包成功，请直接压缩上面的文件夹)';
   const lines = [
     `时间      : ${bundle.created_at || '-'}`,
     `崩溃判定  : ${bundle.crashed ? 'CrashSight 记录到异常' : '未检测到崩溃记录（可能是正常退出）'}`,
+    `归因      : ${cause.kind === 'mod_conflict'
+      ? 'Mod 资源冲突（自检记录）'
+      : (bundle.crashed ? '其它原因（看包里的 controller-crash-report.log）' : '未崩溃')}`,
     `收进包的终末地日志 (${(bundle.game_logs || []).length} 份):`,
     ...(bundle.game_logs || []).slice(0, 12).map((n) => `   ${n}`),
     '',
+    '包里还带了 dlss5-feed.log / ReShade.ini（DLSS5 现场）与 cause.json（归因）。',
     '反馈建议：把 zip 里的内容贴到 GitHub issue，或直接发给作者。',
   ];
   $('crash-summary').textContent = lines.join('\n');

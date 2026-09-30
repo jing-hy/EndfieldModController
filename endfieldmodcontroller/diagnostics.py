@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import json
 import os
 import platform
 import subprocess
@@ -524,6 +525,50 @@ def start_process_monitor(config: Any, *, game_dir: Path | None = None, image_na
         return True
 
 
+# ---------------------------------------------------------------------------
+# 自检结论留痕：Mod 资源冲突（崩溃归因要用它）
+# ---------------------------------------------------------------------------
+MOD_CONFLICT_STATE_NAME = Path("_state") / "mod_conflicts.json"
+
+
+def mod_conflict_state_path(config: Any) -> Path:
+    return Path(config.runtime_path) / MOD_CONFLICT_STATE_NAME
+
+
+def record_mod_conflicts(config: Any, *, ok: bool, detail: str = "",
+                         conflicts: list[str] | None = None) -> None:
+    """把**本次自检**的 Mod 冲突结论落盘。
+
+    为什么要落盘（2026-09-30）：崩溃监视跑在另一个线程（且常在用户下次开程序时才
+    收集现场），它要判断"这次崩溃是不是 Mod 冲突造成的"，只能靠这份留痕 —— 否则
+    弹窗只能笼统地说"异常退出"，用户不知道该先去清 Mod 还是去查注入。
+    """
+    payload = {
+        "at": int(time.time()),
+        "at_text": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "ok": bool(ok),
+        "detail": str(detail or ""),
+        "conflicts": [str(item) for item in (conflicts or [])],
+    }
+    path = mod_conflict_state_path(config)
+    try:
+        from . import fsutil
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fsutil.write_text_atomic(path, json.dumps(payload, ensure_ascii=False, indent=2), newline="\n")
+    except (OSError, ValueError):
+        pass
+
+
+def mod_conflict_state(config: Any) -> dict[str, Any]:
+    """读回最近一次自检的 Mod 冲突结论（没写过就返回 {}）。"""
+    try:
+        data = json.loads(mod_conflict_state_path(config).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def _safe_zip_write(archive: zipfile.ZipFile, path: Path, arcname: str, *, max_bytes: int = 8 * 1024 * 1024) -> None:
     try:
         if not path.is_file() or path.stat().st_size > max_bytes:
@@ -566,6 +611,18 @@ def create_diagnostic_bundle(config: Any, *, game_dir: Path | None = None, note:
                 _safe_zip_write(archive, game_dir / name, f"game/{name}")
         for name in ("ReShade.ini", "d3dx.ini", "d3dx_user.ini", "inject_order.txt", "actions.tsv", "user_ini_path.txt", "loader_debug.log", "mc_bootstrap.log", "mc_bootstrap.dll", "d3d11_log.txt", "endfieldmodcontroller.addon.log"):
             _safe_zip_write(archive, loader_dir / name, f"loader/{name}")
+        # DLSS5 现场：`dlss5-feed.log` 是判断"神经渲染有没有出帧、卡在哪一步"的关键证据。
+        # 2026-09-30 有一个 issue 就因为它没被收进包里，导致只能靠猜（那条反馈最终是
+        # 靠 dlss5-feed.addon64 的 fileVersion 才对上线索）。
+        dlss5_dir = Path(config.dlss5_path)
+        for name in ("dlss5-feed.log", "dlss5-feed.cfg", "ReShade.ini", "ReShadePreset.ini", "ReShade.log"):
+            _safe_zip_write(archive, dlss5_dir / name, f"dlss5/{name}")
+        state = mod_conflict_state(config)
+        if state:
+            try:
+                archive.writestr("mod_conflicts.json", json.dumps(state, ensure_ascii=False, indent=2))
+            except (OSError, ValueError):
+                pass
         if config_path.is_file():
             _safe_zip_write(archive, config_path, "config.json")
         archive.writestr("summary.txt", "\n".join(summary) + "\n")
