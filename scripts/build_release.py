@@ -1,8 +1,9 @@
-"""构建流程的唯一入口：静态检查 → 构建最新版 → 带版本号副本 → 伪旧版 → 归置旧版。
+"""构建流程的唯一入口：静态检查 → 构建最新版 → 带版本号副本 → 伪旧版 → 归置旧版 → 同步测试目录。
 
 用法：
     python scripts/build_release.py                  # 正常构建（推荐）
     python scripts/build_release.py --skip-checks    # 跳过静态检查（只在明确知道原因时用）
+    python scripts/build_release.py --skip-modtest   # 不把最新版同步进测试目录
 
 产出（全部在 `dist\\`）：
 
@@ -10,6 +11,10 @@
     EndfieldModController-<版本>.exe               带版本号副本（本地留档，不上传）
     EndfieldModController-0.1.9-from-<版本>.exe    伪旧版（版本号 0.1.9、代码最新，用于测自更新）
     _old\\                                         上一代及更早的带版本号副本（自动归置）
+
+最后一步还会把最新版 exe 同步进**测试目录** `..\\modtest\\EndfieldModController.exe`：
+控制器 / 游戏 / XXMI 正在运行就**跳过、不杀进程**（等他退出后重跑本脚本），
+只替换 exe，`config.json` / `runtime\\` / `library\\` / `assets\\` 一律不碰。`--skip-modtest` 可关掉。
 
 静态检查（任一失败即中止，**不会**产出半成品）：
 
@@ -35,6 +40,11 @@ OLD_DIR = DIST / "_old"
 VERSION_PY = ROOT / "endfieldmodcontroller" / "version.py"
 APP_NAME = "EndfieldModController"
 FAKE_VERSION = "0.1.9"
+# 测试目录：默认是工作区**旁边**的 modtest（D:\zmdmod\modtest）。构建完自动把最新版 exe
+# 同步进去（用户 2026-09-30：「这个需要构建脚本自动处理」—— 以前每次都要他提醒我复制）。
+MODTEST_DIR = ROOT.parent / "modtest"
+# 这几个进程在跑 = "控制器/游戏/XXMI 正开着"：此时**不替换 exe、也不杀进程**，等他自己退出。
+GUARD_PROCESSES = ("Endfield", "XXMI Launcher", "EndfieldModController")
 
 
 def _fix_console() -> None:
@@ -71,7 +81,7 @@ def run(cmd: list[str], *, label: str) -> None:
 
 
 def static_checks() -> None:
-    print("[1/6] 静态检查", flush=True)
+    print("[1/7] 静态检查", flush=True)
     # ① Python 语法/编译
     modules = sorted((ROOT / "endfieldmodcontroller").glob("*.py"))
     result = subprocess.run(
@@ -171,6 +181,56 @@ def build_fake_old(version: str) -> None:
     print(f"      伪旧版：dist\\{name} + 根目录同名副本", flush=True)
 
 
+def _running_processes() -> list[str]:
+    """返回正在运行的、"会挡住替换"的进程名（没有则空列表）。"""
+    quoted = ",".join(f"'{name}'" for name in GUARD_PROCESSES)
+    script = (
+        f"Get-Process -Name {quoted} -ErrorAction SilentlyContinue "
+        "| Select-Object -ExpandProperty ProcessName"
+    )
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True, text=True, timeout=30,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []          # 查不到就当没在跑：后面拷完还有 sha256 核对兜底
+    return sorted({line.strip() for line in result.stdout.splitlines() if line.strip()})
+
+
+def sync_to_modtest(latest: Path) -> None:
+    """把最新版 exe 同步一份进测试目录（`<工作区父目录>\\modtest`）。
+
+    用户 2026-09-30：「**这个需要构建脚本自动处理**」—— 以前每次构建完都要他提醒我复制。
+    原则：① 程序/游戏**在跑就跳过，绝不为了替换去杀进程**；② 只替换 exe，
+    `config.json` / `runtime\\` / `library\\` / `assets\\` 一律不碰（assets 137 MB，删了要重下）。
+    """
+    if not MODTEST_DIR.is_dir():
+        print(f"      跳过：没有测试目录 {MODTEST_DIR}", flush=True)
+        return
+    running = _running_processes()
+    if running:
+        print(f"      跳过：{', '.join(running)} 正在运行 —— 不替换、也不杀进程；"
+              f"等他退出后重跑本脚本即可", flush=True)
+        return
+    target = MODTEST_DIR / f"{APP_NAME}.exe"
+    before = sha256_of(target) if target.is_file() else ""
+    shutil.copy2(latest, target)
+    after = sha256_of(target)
+    ok = after == sha256_of(latest)
+    stamp = time.strftime("%H:%M:%S", time.localtime(target.stat().st_mtime))
+    print(f"      {target}  {target.stat().st_size:,} B  {stamp}", flush=True)
+    print(f"          sha256={after[:20]}…  与 dist 核对={'一致' if ok else '!! 不一致'}", flush=True)
+    if before and before != after:
+        print(f"          （已替换旧版 sha256={before[:20]}…）", flush=True)
+    elif before:
+        print("          （内容与原来完全相同）", flush=True)
+    others = sorted(p.name for p in MODTEST_DIR.glob("*.exe") if p.name != target.name)
+    if others:
+        print(f"      注意：测试目录里另有 {'、'.join(others)}（未动）", flush=True)
+
+
 def main() -> int:
     _fix_console()
     args = sys.argv[1:]
@@ -179,13 +239,13 @@ def main() -> int:
     if "--skip-checks" not in args:
         static_checks()
     else:
-        print("[1/6] 已按参数跳过静态检查", flush=True)
+        print("[1/7] 已按参数跳过静态检查", flush=True)
 
-    print("[2/6] 归置历史产物（旧版 → dist\\_old）+ 清理非构建产物", flush=True)
+    print("[2/7] 归置历史产物（旧版 → dist\\_old）+ 清理非构建产物", flush=True)
     archive_old_exes(version)
     clean_dist_extras()
 
-    print("[3/6] 构建最新版", flush=True)
+    print("[3/7] 构建最新版", flush=True)
     run([sys.executable, "scripts/build_exe.py"], label="构建最新版")
     latest = DIST / f"{APP_NAME}.exe"
     if not latest.is_file():
@@ -193,13 +253,19 @@ def main() -> int:
     versioned = DIST / f"{APP_NAME}-{version}.exe"
     shutil.copy2(latest, versioned)
 
-    print("[4/6] 构建伪旧版", flush=True)
+    print("[4/7] 构建伪旧版", flush=True)
     build_fake_old(version)
 
-    print("[5/6] 把最新版放回 dist\\EndfieldModController.exe", flush=True)
+    print("[5/7] 把最新版放回 dist\\EndfieldModController.exe", flush=True)
     shutil.copy2(versioned, latest)
 
-    print("[6/6] 产物清单", flush=True)
+    print("[6/7] 同步最新版到测试目录", flush=True)
+    if "--skip-modtest" in args:
+        print("      已按参数跳过（--skip-modtest）", flush=True)
+    else:
+        sync_to_modtest(latest)
+
+    print("[7/7] 产物清单", flush=True)
     for item in (latest, versioned, DIST / f"{APP_NAME}-{FAKE_VERSION}-from-{version}.exe",
                  ROOT / f"{APP_NAME}-{FAKE_VERSION}-from-{version}.exe"):
         if item.is_file():
