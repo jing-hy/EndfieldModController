@@ -144,6 +144,21 @@ run.bat --cli    :: 不开界面，直接打印当前状态 JSON（调试用）
 
 > **关于"部署新版 nvngx"**：默认**关闭**。DLSS5 的神经渲染接口（`NVSDK_NGX_D3D12_EvaluateFeature_C`）住在 `nvngx_dlssnr.dll` 里，本程序会把它放在 `runtime\dlss5\` 供 addon 加载；游戏目录里那份 `nvngx_dlss.dll` 保持**游戏原版**即可。打开这个开关会额外用新版覆盖游戏目录（改前留 `*.game_original`），**可能影响游戏启动**，不确定就别开。
 
+### 公告与异常状态预警（发布入口）
+
+管理器会**联网读**仓库根目录的 `alerts.json`（走 `api.github.com` —— 比 raw 域名在国内可达得多），用来发布两类信息。改这个文件 push 即生效，**不用发版**：
+
+| level | 叫什么 | 行为 |
+| --- | --- | --- |
+| `info` / `warning` | **公告** | 管理器启动后弹一次，看完即记已读、下次不再弹。**不锁启动** —— 点掉就完事，不影响任何流程 |
+| `critical` | **异常状态预警**（如大规模封号） | **每点一次「一键启动」都弹**（不记已读、没有开关），前端**强制停留** `hold_seconds` 秒（倒计时期间按钮不可点），并且必须三选一：**还原配置**（右侧橙色主选项、默认聚焦）/ 保持配置但不启动 / 仍然启动 |
+
+字段：`id`（必填且唯一，用来记已读）、`title`、`body`（支持换行）、`url`（可选，详情链接）、`hold_seconds`（可选，覆盖顶层 `default_hold_seconds`；默认 10、上限 120）、`until`（可选 `YYYY-MM-DD`，过期后自动不再提示）。
+
+**「还原配置」具体做了什么**（都能撤销）：① 关掉全部注入开关（DLSS5 / 服装 Mod / 乳摇 / 摆姿）并按新开关重写 XXMI 注入库；② 走游戏目录净化，把第三方文件**先备份再移走** —— 也就是回到"纯原版可启动"的最安全状态。还原前的开关快照写在 `runtime\_state\alert_restore_point.json`；撤销接口 `undo_alert_safe_mode` 会把开关恢复原状，游戏目录文件用设置页「一键还原游戏本体」搬回。
+
+落地文件都在 `runtime\_state\`：`alerts_cache.json`（上次成功拉到的那份，断网时回退用它）、`alerts_seen.json`（已读公告 id）、`alert_restore_point.json`（还原点）。**拉取失败一律静默**，不影响启动、更不拖慢首屏。
+
 ### 游戏目录净化 / 还原
 
 把游戏目录里的第三方注入物（loader proxy、插件数据、残留 ReShade 痕迹）**先备份再移走**，备份在 `runtime\game_backup\<时间戳>\`（含 `manifest.json` 与还原所需的文件），随时可还原。

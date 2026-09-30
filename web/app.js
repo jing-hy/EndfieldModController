@@ -129,6 +129,91 @@ function showModalDialog({ title, message, okText = '确定', cancelText = '取�
   });
 }
 
+// ── 异常状态预警弹窗（用户 2026-09-30 要求）─────────────────────────────────
+// 与普通弹窗的三点不同，缺一不可：
+//   ① **不可关闭** —— 没有关闭按钮、点遮罩不关、Esc 不关，必须三选一；
+//   ② **强制停留** holdSeconds 秒（内容由仓库里的 alerts.json 配，默认 10）：倒计时期间
+//      所有按钮置灰不可点，读完才放行 —— 防止"看到就顺手点掉"；
+//   ③ **三个按钮**，按用户准则把推荐动作放**右侧橙色主按钮 + 默认聚焦**：
+//      左「仍然启动」（冒险项）／中「保持配置但不启动」／右「还原配置」（主选）。
+// resolve 出 'restore' | 'hold' | 'launch'。
+function showAlertGate({
+  title,
+  message,
+  holdSeconds = 10,
+  okText = '还原配置',
+  extraText = '保持配置但不启动',
+  cancelText = '仍然启动',
+}) {
+  return new Promise((resolve) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'modal';
+    wrap.innerHTML = '<div class="modal-content" style="width:min(620px,94vw)">'
+      + '<div class="modal-header"><h3></h3></div>'
+      + '<pre class="modal-body"></pre>'
+      + '<div class="modal-actions"></div></div>';
+    wrap.querySelector('h3').textContent = title;
+    wrap.querySelector('.modal-body').textContent = message;
+    const actions = wrap.querySelector('.modal-actions');
+    let settled = false;
+    let timer = null;
+    let blocked = true;
+    const buttons = [];
+    const finish = (value) => {
+      if (settled || blocked) return;
+      settled = true;
+      if (timer) clearInterval(timer);
+      document.removeEventListener('keydown', onKey, true);
+      wrap.remove();
+      resolve(value);
+    };
+    // 只拦自己这一层：多个弹窗叠着时别去影响下面那个（同 showModalDialog 的处理）
+    const isTop = () => {
+      const modals = document.querySelectorAll('.modal');
+      return modals.length > 0 && modals[modals.length - 1] === wrap;
+    };
+    const onKey = (event) => {
+      if (!isTop()) return;
+      if (event.key === 'Escape' || (event.key === 'Enter' && blocked)) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+    document.addEventListener('keydown', onKey, true);
+    const mk = (label, value, primary) => {
+      const btn = document.createElement('button');
+      btn.textContent = label;
+      if (primary) btn.className = 'primary';
+      btn.onclick = () => finish(value);
+      actions.appendChild(btn);
+      buttons.push({ btn, label });
+      return btn;
+    };
+    mk(cancelText, 'launch', false);        // 左：冒险项
+    mk(extraText, 'hold', false);           // 中：什么都不做
+    const ok = mk(okText, 'restore', true); // 右：推荐动作（橙色 primary）
+    const release = () => {
+      blocked = false;
+      buttons.forEach(({ btn, label }) => { btn.textContent = label; btn.disabled = false; });
+      ok.focus();
+    };
+    let left = Math.max(0, Math.floor(Number(holdSeconds) || 0));
+    if (left > 0) {
+      const tick = () => {
+        if (left <= 0) { release(); if (timer) clearInterval(timer); return; }
+        buttons.forEach(({ btn }) => { btn.disabled = true; });
+        ok.textContent = `${okText}（请先阅读，${left} 秒后可选）`;
+        left -= 1;
+      };
+      tick();
+      timer = setInterval(tick, 1000);
+    } else {
+      release();
+    }
+    document.body.appendChild(wrap);
+  });
+}
+
 const showAlert = (message, title = '提示') =>
   showModalDialog({ title, message, okText: '知道了', showCancel: false });
 
@@ -772,6 +857,9 @@ async function saveConfig() {
 async function refreshFromState() {
   const s = await call('get_state');
   state.config = s.config;
+  // 未读公告（info/warning）：由 boot() 弹一次，**不锁启动**、看完即走。
+  // 异常状态预警（critical）不走这里 —— 见 runOneClickLaunch 里的 prelaunch_alerts。
+  state.announcements = s.announcements || [];
   await refreshPaths(s.config);
   const injectUi = s.config.inject_reshade_ui !== false;
   if ($('cfg-inject-reshade-ui')) {
@@ -1436,6 +1524,47 @@ function bind() {
 
     const runOneClickLaunch = async () => {
       logLine('开始一键启动…');
+      // ①-0 异常状态预警（内容来自仓库里的 alerts.json，作者随时改、不用发版）
+      //   用户 2026-09-30 要求：「在按一键启动的时候如果是异常状态要**每次都弹**弹窗展示情况，
+      //   强制用户停留一定秒数（可在仓库配置，默认 10s），给出还原配置（主选项）、
+      //   保持配置但不启动、仍然启动」。所以这里不记已读、没有开关、且弹窗不可关闭。
+      try {
+        const gate = await call('prelaunch_alerts');
+        if (gate && gate.blocking) {
+          for (const a of (gate.alerts || [])) {
+            const hold = Math.max(0, Number(a.hold_seconds || gate.hold_seconds || 10));
+            const lines = [a.title || '异常状态', ''];
+            if (a.body) lines.push(a.body, '');
+            if (a.url) lines.push(`详情：${a.url}`, '');
+            lines.push('请先读完上面的内容，再做选择。');
+            const choice = await showAlertGate({
+              title: '⚠ 异常状态预警',
+              message: lines.join('\n'),
+              holdSeconds: hold,
+              okText: '还原配置（关注入 + 清理游戏目录）',
+              extraText: '保持配置但不启动',
+              cancelText: '仍然启动',
+            });
+            await call('alert_action', a.id, choice);
+            if (choice === 'restore') {
+              logLine('   预警确认：已按你的选择「还原配置」（注入开关全部关闭、游戏目录第三方文件已备份移走）');
+              logLine('   想恢复：设置页打开对应开关；游戏目录文件用「一键还原游戏本体」搬回');
+              setStatus('已还原配置：注入已关闭、游戏目录已清理');
+              if (a.url) { try { await call('open_external', a.url); } catch (err) { /* 忽略 */ } }
+              return { needsSecondStart: false, gameReason: '已取消：异常状态预警，用户选择还原配置' };
+            }
+            if (choice === 'hold') {
+              logLine('   预警确认：已按你的选择「保持配置但不启动」');
+              setStatus('已取消启动（保持当前配置）');
+              return { needsSecondStart: false, gameReason: '已取消：异常状态预警，用户选择保持配置但不启动' };
+            }
+            logLine('   预警确认：你选择「仍然启动」');
+          }
+        }
+      } catch (err) {
+        // 预警本身出问题（网络等）**不能挡住启动** —— 但要在日志里留痕
+        logLine(`   异常状态检查失败（忽略，继续启动）: ${err.message || err}`);
+      }
       setStatus('正在初始化自检…');
       logLine('① 同步 XXMI 注入库 + 初始化自检（缺什么补什么）');
       const r = await call('prepare_launch');
@@ -2165,6 +2294,30 @@ async function boot() {
   }, 1200);
   // 角色识别不确定的 Mod：弹窗让用户选（延后一点，别和启动流程抢时间）
   setTimeout(() => { startCharacterCheck(); }, 1500);
+  // 公告（info/warning）：用于**重大信息发布**，但**不锁启动** —— 点掉就完事，不影响任何流程
+  // （强制确认那种是 critical 预警，只在点「一键启动」时弹）。错开上面的引导/更新询问，
+  // 免得几个弹窗叠在一起。同一条公告看完即记已读，下次启动不再弹。
+  setTimeout(async () => {
+    try {
+      const list = (state.announcements || []).slice();
+      for (const a of list) {
+        const lines = [a.title || '公告', ''];
+        if (a.body) lines.push(a.body, '');
+        if (a.url) lines.push(`详情：${a.url}`, '');
+        const openDetail = await showModalDialog({
+          title: '来自作者的公告',
+          message: lines.join('\n'),
+          okText: a.url ? '打开详情' : '我知道了',
+          cancelText: '关闭',
+        });
+        if (a.url && openDetail) {
+          try { await call('open_external', a.url); } catch (err) { /* 忽略 */ }
+        }
+        try { await call('announcements_seen', [a.id]); } catch (err) { /* 忽略 */ }
+      }
+      if (list.length) state.announcements = [];
+    } catch (err) { /* 忽略：公告失败绝不影响使用 */ }
+  }, 2500);
 }
 
 // ── 崩溃包提示：轮询后端，发现新的崩溃包就弹窗给出路径 ──

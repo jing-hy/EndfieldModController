@@ -39,6 +39,10 @@ class EndfieldModControllerApi:
         # 从零时才真扫，正好卡在 webview.start() 里。现在预热先等前端首屏就绪
         # （ui_ready()）再动手，最多等 15 秒。
         self._warm_done = False
+        # 未读的"公告"（info/warning）：后台预热拉到、由 get_state 带给前端弹一次。
+        # **异常状态预警（critical）不走这里** —— 它由 prelaunch_alerts() 在点「一键启动」时
+        # 现拉现弹（每次都弹、强制停留，用户 2026-09-30 要求）。
+        self._announcements: list[dict[str, Any]] = []
         self._ui_ready = threading.Event()
         threading.Thread(target=self._warm_up, name="mc-warm-up", daemon=True).start()
 
@@ -88,6 +92,29 @@ class EndfieldModControllerApi:
         except Exception as exc:  # noqa: BLE001
             try:
                 launcher._append_log(self.config, f"角色表检查跳过: {exc}")
+            except Exception:  # noqa: BLE001
+                pass
+        # 公告 / 异常状态预警：仓库里的 alerts.json（走 api.github.com，失败静默、不吃启动时间）。
+        # 这里只取**未读公告**（info/warning，弹一次、不锁启动）；critical 留给点「一键启动」时
+        # 由 prelaunch_alerts() 现拉现弹（每次都弹 + 强制停留）。
+        try:
+            from . import alerts
+
+            overview = alerts.overview(
+                self.config,
+                log=lambda message: launcher._append_log(self.config, message),
+            )
+            self._announcements = list(overview.get("announcements") or [])
+            critical = list(overview.get("critical") or [])
+            if self._announcements or critical:
+                launcher._append_log(
+                    self.config,
+                    f"公告检查：未读公告 {len(self._announcements)} 条"
+                    + (f"，异常状态预警 {len(critical)} 条（点「一键启动」时会强制确认）" if critical else ""),
+                )
+        except Exception as exc:  # noqa: BLE001
+            try:
+                launcher._append_log(self.config, f"公告检查跳过: {exc}")
             except Exception:  # noqa: BLE001
                 pass
         self._warm_done = True
@@ -211,6 +238,69 @@ class EndfieldModControllerApi:
         from . import crashwatch
 
         return crashwatch.prelaunch_risks(self.config)
+
+    # ------------------------------------------------------------------
+    # 公告 / 异常状态预警（仓库里的 alerts.json）
+    # ------------------------------------------------------------------
+    def prelaunch_alerts(self) -> dict[str, Any]:
+        """「一键启动」前的异常状态检查：有 critical 预警就必须强制确认。
+
+        与 `prelaunch_risks`（Mod 冲突）的分工：**本方法的数据来自仓库里的 `alerts.json`**
+        （作者随时改、不用发版），而且**每次点一键启动都返回**（不记已读、没有开关）；
+        前端会强制停留 `hold_seconds` 秒，并给三个选项：还原配置 / 保持配置但不启动 / 仍然启动。
+        """
+        from . import alerts
+
+        overview = alerts.overview(
+            self.config,
+            log=lambda message: launcher._append_log(self.config, message),
+        )
+        critical = list(overview.get("critical") or [])
+        return {
+            "blocking": bool(critical),
+            "alerts": critical,
+            "hold_seconds": int(overview.get("hold_seconds") or alerts.DEFAULT_HOLD_SECONDS),
+        }
+
+    def alert_action(self, alert_id: str = "", action: str = "") -> dict[str, Any]:
+        """用户在异常状态弹窗里选的动作。
+
+        * `restore` = **还原配置**（主选项）：关掉所有注入开关 + 把游戏目录第三方文件备份移走；
+        * `hold` = 保持配置但不启动（什么都不动）；
+        * `launch` = 仍然启动（只留日志痕迹）。
+        """
+        from . import alerts
+
+        ident = str(alert_id or "").strip()
+        choice = str(action or "").strip().lower()
+        if choice == "restore":
+            result = alerts.safe_mode(
+                self.config, log=lambda message: launcher._append_log(self.config, message)
+            )
+            launcher._append_log(self.config, f"异常状态预警「{ident}」：用户选择「还原配置」")
+            return {"ok": bool(result.get("ok")), "action": "restore", "result": result}
+        if choice == "hold":
+            launcher._append_log(self.config, f"异常状态预警「{ident}」：用户选择「保持配置但不启动」")
+            return {"ok": True, "action": "hold"}
+        launcher._append_log(self.config, f"异常状态预警「{ident}」：用户选择「仍然启动」")
+        return {"ok": True, "action": "launch"}
+
+    def undo_alert_safe_mode(self) -> dict[str, Any]:
+        """撤销「还原配置」：把注入开关恢复成还原前的样子（游戏目录文件用「一键还原」搬回）。"""
+        from . import alerts
+
+        return alerts.undo_safe_mode(
+            self.config, log=lambda message: launcher._append_log(self.config, message)
+        )
+
+    def announcements_seen(self, ids: list[str] | None = None) -> dict[str, Any]:
+        """把弹过的公告标记为已读（**只对 info/warning 有意义**；critical 每次都要弹）。"""
+        from . import alerts
+
+        alerts.mark_seen(self.config, ids)
+        seen = {str(i) for i in (ids or [])}
+        self._announcements = [a for a in self._announcements if str(a.get("id")) not in seen]
+        return {"ok": True, "remaining": len(self._announcements)}
 
     def collect_crash_report(self) -> dict[str, Any]:
         """立刻收集一次崩溃现场并写成报告（不等游戏退出）。"""
@@ -412,6 +502,9 @@ class EndfieldModControllerApi:
             "poser_status": poser.status(self.config),
             # Mod 修复工具是否就位（库页用它提示"找不到工具"的原因）
             "modfix_status": self.modfix_status(),
+            # 未读的公告（info/warning）：前端首屏就绪后弹一次，**不锁启动**。
+            # 异常状态预警（critical）不在这里 —— 见 prelaunch_alerts()。
+            "announcements": list(self._announcements),
         }
     def save_config(self, data: dict[str, Any]) -> dict[str, Any]:
         self._invalidate_mods()
