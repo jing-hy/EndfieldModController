@@ -214,6 +214,44 @@ function showAlertGate({
   });
 }
 
+// ── 公告（info/warning）：重大信息发布用，**不锁启动** ───────────────────────
+// ⚠ 必须"跟着数据走"：公告是**后端后台线程**拉的（要等首屏就绪 + 一次 IO），
+//   实测通常晚于 boot() 里的固定定时器 —— 2026-09-30 出过"后端日志说拿到了 1 条、
+//   界面却没弹"（那次只在 boot 里 setTimeout 检查一次，检查时数据还没到）。
+//   所以改成每次 refreshFromState() 之后都调一次本函数，内部幂等（弹过的不再弹）。
+let __announcementsBusy = false;
+const __announcementsShown = new Set();
+async function maybeShowAnnouncements() {
+  if (__announcementsBusy) return;
+  const list = (state.announcements || []).filter((a) => a && a.id && !__announcementsShown.has(a.id));
+  if (!list.length) return;
+  __announcementsBusy = true;
+  try {
+    for (const a of list) {
+      __announcementsShown.add(a.id);
+      const lines = [a.title || '公告', ''];
+      if (a.body) lines.push(a.body, '');
+      if (a.url) lines.push(`详情：${a.url}`, '');
+      const openDetail = await showModalDialog({
+        title: '来自作者的公告',
+        message: lines.join('\n'),
+        okText: a.url ? '打开详情' : '我知道了',
+        cancelText: '关闭',
+      });
+      if (a.url && openDetail) {
+        try { await call('open_external', a.url); } catch (err) { /* 忽略 */ }
+      }
+      // 记已读：同一条公告下次启动不再弹（critical 预警不在此列，它每次都弹）
+      try { await call('announcements_seen', [a.id]); } catch (err) { /* 忽略 */ }
+    }
+    state.announcements = [];
+  } catch (err) {
+    /* 忽略：公告失败绝不影响使用 */
+  } finally {
+    __announcementsBusy = false;
+  }
+}
+
 const showAlert = (message, title = '提示') =>
   showModalDialog({ title, message, okText: '知道了', showCancel: false });
 
@@ -860,6 +898,9 @@ async function refreshFromState() {
   // 未读公告（info/warning）：由 boot() 弹一次，**不锁启动**、看完即走。
   // 异常状态预警（critical）不走这里 —— 见 runOneClickLaunch 里的 prelaunch_alerts。
   state.announcements = s.announcements || [];
+  // 公告"跟着数据走"：后端预热线程常在首屏之后才把公告填上来，所以每次刷新都检查一次
+  // （maybeShowAnnouncements 幂等：弹过、记过已读的不会再弹）。
+  setTimeout(() => { maybeShowAnnouncements(); }, 400);
   await refreshPaths(s.config);
   const injectUi = s.config.inject_reshade_ui !== false;
   if ($('cfg-inject-reshade-ui')) {
@@ -2294,30 +2335,10 @@ async function boot() {
   }, 1200);
   // 角色识别不确定的 Mod：弹窗让用户选（延后一点，别和启动流程抢时间）
   setTimeout(() => { startCharacterCheck(); }, 1500);
-  // 公告（info/warning）：用于**重大信息发布**，但**不锁启动** —— 点掉就完事，不影响任何流程
-  // （强制确认那种是 critical 预警，只在点「一键启动」时弹）。错开上面的引导/更新询问，
-  // 免得几个弹窗叠在一起。同一条公告看完即记已读，下次启动不再弹。
-  setTimeout(async () => {
-    try {
-      const list = (state.announcements || []).slice();
-      for (const a of list) {
-        const lines = [a.title || '公告', ''];
-        if (a.body) lines.push(a.body, '');
-        if (a.url) lines.push(`详情：${a.url}`, '');
-        const openDetail = await showModalDialog({
-          title: '来自作者的公告',
-          message: lines.join('\n'),
-          okText: a.url ? '打开详情' : '我知道了',
-          cancelText: '关闭',
-        });
-        if (a.url && openDetail) {
-          try { await call('open_external', a.url); } catch (err) { /* 忽略 */ }
-        }
-        try { await call('announcements_seen', [a.id]); } catch (err) { /* 忽略 */ }
-      }
-      if (list.length) state.announcements = [];
-    } catch (err) { /* 忽略：公告失败绝不影响使用 */ }
-  }, 2500);
+  // 公告：稍后再检查一次。公告是**后台线程**拉的（通常首屏之后 1~3 秒才到），
+  // 所以不能只在一个固定时刻看一次；refreshFromState 里也会调同一个函数（幂等）。
+  // 这里保留一个延迟入口，顺便错开引导(1.2s)/更新询问(1.5s)/角色识别(1.5s) 的弹窗。
+  setTimeout(() => { maybeShowAnnouncements(); }, 2500);
 }
 
 // ── 崩溃包提示：轮询后端，发现新的崩溃包就弹窗给出路径 ──
