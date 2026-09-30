@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/app_256.png" width="132" alt="EndfieldModController">
+</p>
+
 # EndfieldModController
 
 《明日方舟：终末地》的一站式 Mod 管理器：把 **DLSS5 神经渲染 + 第一人称视角 + 服装 Mod（EFMI）+ 乳摇物理 + 摆姿 / MMD 播放**统一到一次「一键启动」里；运行环境从零自动装好，**零配置启动即用**。
