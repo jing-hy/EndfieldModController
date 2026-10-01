@@ -106,16 +106,28 @@ Windows 桌面程序（Python + PyWebview），单文件 exe，**零配置启动
 ### DLSS5「成功 NR 帧 = 0」时先看这里
 
 自检里有一项 `dlss5:nr_binding`（读**最近一次**运行的 `runtime\dlss5\ReShade.log`，只认最后一次，
-不拿历史成功记录充数）：
+不拿历史成功记录充数）。
 
-* 日志里出现 `NR upscaling is not applicable: the game's DLSS already renders at output resolution`
-  → **游戏内超分档位是「原生 / DLAA」**：DLSS5 的神经渲染是"重建更高的分辨率"，游戏已经按原生
-  输出，NR 没有放大任务 → NGX 直接拒绝创建 feature（面板 `成功NR帧 0` / `最新NR NGX结果 0xBAD00001`）。
-  **动作**：游戏「设置 → 画面」把超分辨率档位改成**质量 / 平衡 / 性能**（任一）。这既不是装坏了、
-  也不用重装。2026-10-01 一份真实反馈就是这个原因。
-* 只有 `NR feature create failed with 0xbad00001`（没有上面那句）→ 往运行库/驱动方向查：先确认
-  `runtime\dlss5` 里的 nvngx 运行库没被别的整合包换过（`bundled_versions` 自检会报），再考虑更新驱动。
-* 若是第三方 NGX 注入器（OptiScaler）截走 NGX，程序会**自动备份移走**它（见上表「NGX 冲突自动处理」）。
+**先排除三个"看着像原因、其实不是"的**（2026-10-01 逐一验证过）：
+
+* ❌ `NR upscaling is not applicable: the game's DLSS already renders at output resolution`
+  —— 这**只是一条 INFO**，DLAA / 原生档位下必然出现，而 DLSS5 在那种情况下**照常出帧**
+  （日志里 `created inline NR resources 3840x2160 -> 3840x2160 (native)` 与
+  `inline feature 18 evaluation succeeded` 是同时成立的）。别据此让用户去改超分档位 ——
+  2026-10-01 我就在这里判错过一次，被用户当场纠正（他原话：「我用的 dlaa 也能正常使用」）。
+* ❌ 驱动版本：同版本驱动（`32.0.16.1714`）的另一台机器上就是正常的。
+* ❌ 运行库：`nvngx_dlssnr.dll` 与随包基线 sha256 一致、`signed DLSSNR 310.8.0 D3D12 runtime
+  initialized` 也打过 —— 说明它**初始化成功了**。
+
+**真正的失败信号**是 `feature 18 create failed with 0xbad00001`（面板表现为 `成功NR帧 0` /
+`最新NR NGX结果 0xBAD00001` / `超分: 请求ON｜活动OFF`）。能确认的是：运行库初始化过、NR 资源也
+建好了，**只有 NGX 拒绝创建 feature**。排查顺序（按可能性）：
+
+1. **显存预算**：把游戏分辨率 / 渲染比例调低一档再进（8 GB 显存的笔记本尤其值得试）；
+2. **虚拟显示适配器**：关掉 ToDesk / 向日葵 / 模拟器这类虚拟显示适配器与其它占显存的程序；
+3. 仍不行 → 把 `ReShade.log` 里 `feature 18 create failed` **前后 20 行**发出来。
+
+若是第三方 NGX 注入器（OptiScaler）截走 NGX，程序会**自动备份移走**它（见上表「NGX 冲突自动处理」）。
 
 ### 注入链（同一进程内同时生效）
 ```text

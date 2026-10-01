@@ -163,12 +163,13 @@ def test_ensure_xxmi_game_folder_logs_when_game_dir_unknown(tmp_path, monkeypatc
     assert logs and any("XXMI 游戏目录" in line for line in logs)
 
 
-def test_nr_binding_check_explains_native_dlss(tmp_path):
-    """游戏内超分选成"原生/DLAA"时，DLSS5 的 NR 永远绑不上 —— 自检要说清并给动作。
+def test_nr_binding_check_flags_create_failure_only(tmp_path):
+    """NR 失败判据 = `feature 18 create failed`；**原生/DLAA 那条 INFO 不能当失败**。
 
-    真实反馈（2026-10-01，v0.8.0）：面板 `成功NR帧 0` / `0xBAD00001`，
-    `ReShade.log` 原文 `NR upscaling is not applicable: the game's DLSS already renders at
-    output resolution`。
+    2026-10-01 我在这里判错过一次：把 `NR upscaling is not applicable` 当成"档位是原生所以
+    不出帧"，用户直接纠正「**我用的 dlaa 也能正常使用**」—— 本机日志确实是
+    `created inline NR resources 3840x2160 -> 3840x2160 (native)` 与
+    `inline feature 18 evaluation succeeded` 同时成立。
     """
     from endfieldmodcontroller import initialize
 
@@ -180,29 +181,44 @@ def test_nr_binding_check_explains_native_dlss(tmp_path):
         builtin_runtime_dir=str(tmp_path / "runtime" / "builtin"),
     )
     log = dlss5 / "ReShade.log"
-    log.write_text(
-        "Initializing crosire's ReShade version '6.8.0'\n"
-        "DLSS5 Generic: NR upscaling is not applicable: the game's DLSS already renders at "
-        "output resolution (2560x1440 vs output 2560x1440 (native))\n"
-        "DLSS5 Generic: NR feature create failed with 0xbad00001\n",
-        encoding="utf-8",
-    )
-    report = initialize.Report()
-    initialize._check_dlss5_nr_binding(config, report, None)
-    check = next(c for c in report.to_dict()["checks"] if c["key"] == "dlss5:nr_binding")
-    assert check["ok"] is False
-    assert "原生" in check["message"] and "质量" in check["message"]
 
-    # 老日志里的失败不许拿来吓人：只看最后一次运行
+    def check() -> dict:
+        report = initialize.Report()
+        initialize._check_dlss5_nr_binding(config, report, None)
+        return next(c for c in report.to_dict()["checks"] if c["key"] == "dlss5:nr_binding")
+
+    # ① 原生/DLAA + 成功（就是本机的情形）→ 必须判为正常
     log.write_text(
-        "Initializing crosire's ReShade\nNR feature create failed with 0xbad00001\n"
-        "Initializing crosire's ReShade\nDLSS5 Generic: feature ready: 2560x1440\n",
+        "Initializing crosire's ReShade\n"
+        "DLSS5 Generic: NR upscaling is not applicable: the game's DLSS already renders at "
+        "output resolution (3840x2160 vs output 3840x2160 (native))\n"
+        "DLSS5 Generic: created inline NR resources 3840x2160 -> 3840x2160 (native) format=28\n"
+        "DLSS5 Generic: inline feature 18 evaluation succeeded (count=60, NR input 3840x2160)\n",
         encoding="utf-8",
     )
-    report = initialize.Report()
-    initialize._check_dlss5_nr_binding(config, report, None)
-    check = next(c for c in report.to_dict()["checks"] if c["key"] == "dlss5:nr_binding")
-    assert check["ok"] is True, check
+    result = check()
+    assert result["ok"] is True, result
+
+    # ② 真正失败：feature 18 create failed → 报出来，且文案里明确排除"档位/驱动"这两个错误方向
+    log.write_text(
+        "Initializing crosire's ReShade\n"
+        "DLSS5 Generic: signed DLSSNR 310.8.0 D3D12 runtime initialized\n"
+        "DLSS5 Generic: created inline NR resources 2560x1440 -> 2560x1440 (native) format=28\n"
+        "ERROR | DLSS5 Generic: feature 18 create failed with 0xbad00001\n",
+        encoding="utf-8",
+    )
+    result = check()
+    assert result["ok"] is False
+    assert "0xbad00001" in result["message"]
+    assert "不是" in result["message"] and "档位" in result["message"]
+
+    # ③ 老日志里的失败不许拿来吓人：只看最后一次运行
+    log.write_text(
+        "Initializing crosire's ReShade\nfeature 18 create failed with 0xbad00001\n"
+        "Initializing crosire's ReShade\ninline feature 18 evaluation succeeded (count=1)\n",
+        encoding="utf-8",
+    )
+    assert check()["ok"] is True
 
 
 def test_xxmi_launcher_falls_back_to_builtin(tmp_path):

@@ -642,6 +642,13 @@ def _check_dlss5_nr_binding(config: AppConfig, report: Report,
 
     判据只认**最近一次运行**的日志（以最后一个 `Initializing crosire's ReShade` 为界），
     没证据就不报 —— 不许拿上一次运行的结果吓人。
+
+    ⚠️ **判据修正（2026-10-01 当天我在这里判错过一次，别再犯）**：`NR upscaling is not
+    applicable: the game's DLSS already renders at output resolution` **只是一条 INFO**，
+    DLAA / 原生档位下必然出现 —— 而 DLSS5 在那种情况下**照样正常工作**（用户原话：
+    「我用的 dlaa 也能正常使用」；本机日志里 `created inline NR resources 3840x2160 ->
+    3840x2160 (native)` 与 `inline feature 18 evaluation succeeded` 同时成立）。
+    所以这句**绝不能**当失败判据；真正的失败信号是 `feature 18 create failed`。
     """
     if not getattr(config, "dlss5_addon_enabled", True):
         report.add("dlss5:nr_binding", True, "DLSS5 已在启动页关闭（跳过 NR 绑定检查）")
@@ -659,32 +666,24 @@ def _check_dlss5_nr_binding(config: AppConfig, report: Report,
     marker = "Initializing crosire's ReShade"
     last = text.rfind(marker)
     recent = text[last:] if last >= 0 else text
-    if "NR upscaling is not applicable" in recent:
+    if "evaluation succeeded" in recent or "feature ready" in recent:
+        report.add("dlss5:nr_binding", True, "上次进游戏时 DLSS5 的 NR 正常出帧（面板「成功NR帧」应当有数）")
+        return
+    if "feature 18 create failed" in recent or "NR feature create failed" in recent:
         report.add(
             "dlss5:nr_binding",
             False,
-            "上次进游戏时 DLSS5 的神经渲染**没生效**：游戏里超分档位是「原生 / DLAA」"
-            "（日志原文 `NR upscaling is not applicable: the game's DLSS already renders at "
-            "output resolution`），NR 没有放大任务 → NGX 拒绝创建（面板显示 `成功NR帧 0` / "
-            "`0xBAD00001`）。**动作**：进游戏 →「设置 → 画面」把超分辨率档位改成 "
-            "**质量 / 平衡 / 性能**（任一，别用原生/DLAA），再进游戏看面板的「成功 NR 帧」"
-            "是否开始增长。",
+            "上次进游戏时 DLSS5 的 NR **没建起来**（日志：`feature 18 create failed with "
+            "0xbad00001`）—— 注意这**不是**游戏内超分档位的问题（原生 / DLAA 下 DLSS5 一样"
+            "能正常出帧），也**不是**运行库或驱动的问题（同驱动 + 同运行库的机器上就是正常的）。"
+            "日志里能确认的是：运行库初始化成功（`signed DLSSNR 310.8.0 D3D12 runtime "
+            "initialized`）、NR 资源也建好了（`created inline NR resources …`），**只有 NGX "
+            "拒绝创建 feature**。按可能性先试：① 把游戏分辨率 / 渲染比例调低一档再进（显存预算，"
+            "8 GB 显存的笔记本尤其值得试）；② 关掉 ToDesk / 模拟器这类**虚拟显示适配器**和其它"
+            "占显存的程序再进；③ 仍不行就把 `ReShade.log` 里 `feature 18 create failed` 前后"
+            "20 行发出来。",
             manual=True,
         )
-        return
-    if "NR feature create failed with 0xbad00001" in recent:
-        report.add(
-            "dlss5:nr_binding",
-            False,
-            "上次进游戏时 NR 特性创建失败（`0xbad00001`）且不是分辨率档位问题 —— "
-            "多半是运行库/驱动这一层：先确认 `runtime\\dlss5` 里的 nvngx 运行库没被其它"
-            "整合包换过（自检的 bundled_versions 会报），再考虑更新显卡驱动；"
-            "把 `ReShade.log` 里 `NR feature` 前后 20 行发出来更快。",
-            manual=True,
-        )
-        return
-    if "feature ready" in recent:
-        report.add("dlss5:nr_binding", True, "上次进游戏时 DLSS5 的 NR 已就绪（面板「成功NR帧」应当有数）")
         return
     report.add("dlss5:nr_binding", True, "上次运行的日志里没有 NR 失败记录")
 
