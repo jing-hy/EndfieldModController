@@ -175,3 +175,188 @@ def open_dir(config: AppConfig) -> dict[str, Any]:
     except OSError as exc:
         return {"ok": False, "message": f"创建目录失败：{exc}"}
     return {"ok": True, "path": str(root)}
+
+
+# ---------------------------------------------------------------------------
+# 一键配置：让 Magpie 的**默认 profile** 直接使用 DLSSNR（= 游戏内 DLSS5 的那一类）
+# ---------------------------------------------------------------------------
+# 用户原话：「**我需要一键配置**，我刚才进去看大力喜鹊（Magpie）的时候**连 dlss5 在哪都没找到**」
+# 以及「**是一键启动的时候自动配置**」。
+#
+# 为什么他找不到：Magpie 界面上**没有叫 "DLSS5" 的效果** —— 它叫 **DLSSNR**
+# （`DLSSNR\DLSSNR_AI_Filter`，参数名 style / intensity / 局部色调 / 局部结构 / 皮肤结构 /
+# 界面修正，与游戏内 DLSS5 面板几乎一一对应）。所以"一键配置" = 我们替他把默认 profile
+# 选成 DLSSNR。
+#
+# **安全边界（很重要）**：
+# * 只改它**自己已经生成**的 `config.json`（便携 `<exe>/config/v4e/`，否则
+#   `%LOCALAPPDATA%\Magpie\config\v4e\`）—— **我们绝不凭空造整份配置**（字段太多，
+#   猜错会毁掉他的设置）；
+# * **Magpie 正在运行时不写** —— 它退出时会按内存里的状态整份写回，会把我们的改动冲掉
+#   （和 XXMI 那次"启动按钮消失"是同一个教训）；
+# * 写前备份一份 `.mc.bak`、**写后回读校验**、对不上就从备份回滚；
+# * **幂等**：已经是 DLSSNR 就什么都不做。
+# * ⚠️ 改了别人的配置属于"动外部对象"，界面上要能看见我们改了什么、以及怎么撤销。
+DLSSNR_MODE_NAME = "DLSSNR"
+# 参数取自上游 `presets/ScalingModes-v0.6.5-experimental.json` 的 DLSSNR 组（默认值）
+DLSSNR_EFFECTS = [
+    {
+        "name": "DLSSNR\\DLSSNR_AI_Filter",
+        "parameters": {
+            "style": 0,
+            "intensity": 1,
+            "residualSaturation": 1,
+            "residualLightness": 1,
+            "shadowStructureMultiplier": 1,
+            "reflectionGlowMultiplier": 1,
+            "localToneStrength": 1,
+            "localStructureStrength": 1,
+            "skinStructureStrength": -1,
+            "useAutoMask": 0,
+            "uiCorrection": 0,
+            "motionVectorQuality": 2,
+        },
+    }
+]
+DLSSNR_MODE = {"name": DLSSNR_MODE_NAME, "effects": DLSSNR_EFFECTS}
+
+
+def config_path(config: AppConfig) -> Path | None:
+    """Magpie 的 `config.json` 在哪（**只管找，不创建**）。
+
+    路径规则照它的源码 `src/Magpie/ConfigLocations.h`：便携模式 = `<exe目录>/config/v4e/`，
+    否则 = `%LOCALAPPDATA%/Magpie/config/v4e/`。
+    """
+    candidates: list[Path] = []
+    exe = exe_path(config)
+    if exe is not None:
+        candidates.append(exe.parent / "config" / "v4e" / "config.json")
+        candidates.append(exe.parent / "config" / "config.json")      # 旧版布局
+    local = os.environ.get("LOCALAPPDATA") or ""
+    if local:
+        candidates.append(Path(local) / "Magpie" / "config" / "v4e" / "config.json")
+        candidates.append(Path(local) / "Magpie" / "config" / "v4" / "config.json")
+    for path in candidates:
+        if path.is_file():
+            return path
+    return None
+
+
+def running() -> bool:
+    """Magpie 是否正在运行（在跑就不能改它的配置）。"""
+    try:
+        import subprocess
+
+        out = subprocess.run(
+            ["tasklist", "/FI", "IMAGENAME eq Magpie.exe", "/FO", "CSV", "/NH"],
+            capture_output=True, text=True, timeout=8,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        return "magpie.exe" in (out.stdout or "").lower()
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _dlssnr_index(data: Any) -> int | None:
+    """DLSSNR 在顶层 `scalingModes` 数组里的索引。
+
+    ⚠️ **`profile.scalingMode` 存的是这个数组的整数索引**，不是名字、也不是内嵌对象 ——
+    证据是它自己的序列化代码：写出 `writer.Key("scalingMode"); writer.Int(profile.scalingMode);`、
+    读入 `JsonHelper::ReadInt(profileObj, "scalingMode", profile.scalingMode);`
+    （2026-10-01 读 `src/Magpie/AppSettings.cpp` 确认；我第一版按"字符串/对象"写是**错的**，
+    那种值它读不出来，等于没配）。
+    """
+    modes = data.get("scalingModes") if isinstance(data, dict) else None
+    if not isinstance(modes, list):
+        return None
+    for i, mode in enumerate(modes):
+        if isinstance(mode, dict) and str(mode.get("name") or "").strip().lower() == DLSSNR_MODE_NAME.lower():
+            return i
+    return None
+
+
+def _ensure_dlssnr_mode(data: dict) -> int:
+    """拿到 DLSSNR 的索引；他配置里没有（被删过）就**照它自己的格式补一条**。"""
+    index = _dlssnr_index(data)
+    if index is not None:
+        return index
+    modes = data.get("scalingModes")
+    if not isinstance(modes, list):
+        modes = []
+        data["scalingModes"] = modes
+    modes.append(json.loads(json.dumps(DLSSNR_MODE)))   # 深拷贝，别让调用方改到常量
+    return len(modes) - 1
+
+
+def ensure_configured(config: AppConfig, *, log: Log = None) -> dict[str, Any]:
+    """一键启动时把 Magpie 配好（让默认 profile 用 DLSSNR）。**幂等、可回滚。**"""
+    from . import fsutil
+
+    def note(message: str) -> None:
+        if callable(log):
+            log(message)
+
+    if not getattr(config, "magpie_enabled", False):
+        return {"ok": True, "changed": False, "reason": "disabled"}
+    if not installed(config):
+        return {"ok": True, "changed": False, "reason": "not_installed"}
+
+    path = config_path(config)
+    if path is None:
+        return {
+            "ok": True, "changed": False, "reason": "no_config_yet",
+            "message": "Magpie 还没生成过配置 —— 先打开它一次（它会自己写出 config.json），"
+                       "之后每次「一键启动」都会自动帮你把默认模式设成 DLSSNR（也就是这里的 DLSS5 那一类）。",
+        }
+    if running():
+        return {
+            "ok": False, "changed": False, "reason": "magpie_running",
+            "message": "Magpie 正在运行，先退出它再改配置 —— 否则它退出时会整份写回、把改动冲掉。",
+        }
+
+    try:
+        import json
+
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return {"ok": False, "changed": False, "reason": "read_failed", "message": f"读配置失败：{exc}"}
+    profiles = data.get("profiles") if isinstance(data, dict) else None
+    if not isinstance(profiles, list) or not profiles or not isinstance(profiles[0], dict):
+        return {"ok": False, "changed": False, "reason": "unknown_schema",
+                "message": f"配置结构不认识（{path} 里没有 profiles[0]）—— 不改它。"}
+    current = profiles[0].get("scalingMode")
+    target_index = _ensure_dlssnr_mode(data)
+    if current == target_index:
+        return {"ok": True, "changed": False, "reason": "already", "message": "Magpie 默认模式已经是 DLSSNR。"}
+
+    backup = path.with_name(path.name + ".mc.bak")
+    try:
+        if not backup.is_file():          # 只锁存一次，别把好备份覆盖成"改过之后"的
+            import shutil
+
+            shutil.copy2(path, backup)
+        # **写整数索引**（它就是这么存的 —— 见 `_dlssnr_index` 的注释）
+        profiles[0]["scalingMode"] = int(target_index)
+        fsutil.write_text_atomic(path, json.dumps(data, ensure_ascii=False, indent=2), newline="\n")
+        # 回读校验；对不上就回滚
+        check = json.loads(path.read_text(encoding="utf-8"))
+        ok = (check.get("profiles") or [{}])[0].get("scalingMode") == target_index
+        if not ok:
+            raise ValueError("回读校验失败")
+    except Exception as exc:  # noqa: BLE001
+        try:
+            if backup.is_file():
+                import shutil
+
+                shutil.copy2(backup, path)
+        except OSError:
+            pass
+        return {"ok": False, "changed": False, "reason": "write_failed",
+                "message": f"写 Magpie 配置失败（已尝试回滚）：{exc}"}
+    note(f"Magpie 已自动配置：默认模式 → DLSSNR（改动前的配置备份在 {backup.name}）")
+    return {
+        "ok": True, "changed": True, "reason": "configured",
+        "backup": str(backup),
+        "message": "已把 Magpie 的默认模式设成 DLSSNR（= 这里的 DLSS5 那一类）。"
+                   "打开 Magpie 选好终末地窗口、按它 Home 页显示的快捷键就会生效。",
+    }

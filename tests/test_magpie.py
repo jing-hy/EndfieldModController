@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -179,3 +180,91 @@ class MagpieApiTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MagpieAutoConfigureTests(unittest.TestCase):
+    """**一键启动时自动配置 Magpie**（用户：「我需要一键配置…是一键启动的时候自动配置」）。
+
+    ⚠️ **这些测试必须把 `config_path` 打桩到临时文件** —— 本机 `%LOCALAPPDATA%/Magpie/config/v4e/config.json`
+    是**用户的真实配置**，我第一版自测直接跑 `ensure_configured()` 就把它改掉了
+    （把整数索引写成了字符串，等于没配）。教训见 lesson：测试碰真实环境 = 事故。
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory(prefix="mc-magpie-cfg-")
+        self.root = Path(self.tmp.name)
+        self.config = _config(self.root, magpie_enabled=True)
+        root = self.config.magpie_path
+        root.mkdir(parents=True, exist_ok=True)
+        (root / magpie.EXE_NAME).write_bytes(b"MZ")          # 假装已下载
+        self.cfg_file = root / "config" / "v4e" / "config.json"
+        self.cfg_file.parent.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _patch(self, *, running: bool = False):
+        return mock.patch.multiple(
+            magpie,
+            config_path=mock.Mock(return_value=self.cfg_file),
+            running=mock.Mock(return_value=running),
+        )
+
+    def _write(self, data: dict) -> None:
+        self.cfg_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def test_writes_integer_index_not_name(self) -> None:
+        """**核心**：`scalingMode` 必须是 `scalingModes` 里的**整数索引**（源码 writer.Int/ReadInt）。"""
+        self._write({
+            "scalingModes": [{"name": "Lanczos"}, {"name": "FSR"}, {"name": "DLSSNR"}],
+            "profiles": [{"scalingMode": 0}, {"name": "game", "pathRule": "Endfield.exe"}],
+        })
+        with self._patch():
+            result = magpie.ensure_configured(self.config)
+        self.assertTrue(result["changed"], result)
+        saved = json.loads(self.cfg_file.read_text(encoding="utf-8"))
+        self.assertEqual(saved["profiles"][0]["scalingMode"], 2, "要写整数索引，不是 'DLSSNR' 字符串")
+        self.assertEqual(saved["profiles"][1]["name"], "game", "别的 profile 不许动")
+        self.assertTrue((self.cfg_file.parent / (self.cfg_file.name + ".mc.bak")).is_file(), "写前要备份")
+
+    def test_adds_mode_when_missing(self) -> None:
+        self._write({"scalingModes": [{"name": "Lanczos"}], "profiles": [{"scalingMode": 0}]})
+        with self._patch():
+            result = magpie.ensure_configured(self.config)
+        self.assertTrue(result["changed"], result)
+        saved = json.loads(self.cfg_file.read_text(encoding="utf-8"))
+        self.assertEqual(saved["profiles"][0]["scalingMode"], 1)
+        self.assertEqual(saved["scalingModes"][1]["name"], "DLSSNR")
+        self.assertIn("DLSSNR", saved["scalingModes"][1]["effects"][0]["name"])
+
+    def test_idempotent(self) -> None:
+        self._write({"scalingModes": [{"name": "DLSSNR"}], "profiles": [{"scalingMode": 0}]})
+        with self._patch():
+            result = magpie.ensure_configured(self.config)
+        self.assertFalse(result["changed"])
+        self.assertEqual(result["reason"], "already")
+
+    def test_refuses_while_magpie_running(self) -> None:
+        self._write({"scalingModes": [{"name": "DLSSNR"}], "profiles": [{"scalingMode": 1}]})
+        with self._patch(running=True):
+            result = magpie.ensure_configured(self.config)
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["reason"], "magpie_running")
+        saved = json.loads(self.cfg_file.read_text(encoding="utf-8"))
+        self.assertEqual(saved["profiles"][0]["scalingMode"], 1, "在跑就不能改，否则会被它整份写回")
+
+    def test_no_config_yet_is_not_an_error(self) -> None:
+        """用户还没打开过 Magpie → **我们不凭空造整份配置**，只给引导。"""
+        with mock.patch.multiple(magpie, config_path=mock.Mock(return_value=None),
+                                 running=mock.Mock(return_value=False)):
+            result = magpie.ensure_configured(self.config)
+        self.assertTrue(result["ok"])
+        self.assertFalse(result["changed"])
+        self.assertEqual(result["reason"], "no_config_yet")
+        self.assertIn("先打开它一次", result["message"])
+
+    def test_skips_when_disabled_or_not_installed(self) -> None:
+        off = _config(self.root / "off")
+        self.assertEqual(magpie.ensure_configured(off)["reason"], "disabled")
+        not_installed = _config(self.root / "ni", magpie_enabled=True)
+        self.assertEqual(magpie.ensure_configured(not_installed)["reason"], "not_installed")

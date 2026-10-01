@@ -1002,6 +1002,23 @@ def ensure_injections(config: AppConfig) -> dict[str, Any]:
     actions.extend(report.get("actions", []))
     warnings.extend(report.get("warnings", []))
 
+    # ⑨ **Magpie 可选扩展的"一键配置"**（用户 2026-10-01 原话：「**我需要一键配置**，
+    #    我刚才进去看大力喜鹊（Magpie）的时候**连 dlss5 在哪都没找到**」＋「**是一键启动的
+    #    时候自动配置**」）。Magpie 界面上**没有叫 "DLSS5" 的效果**，它叫 **DLSSNR**
+    #    （参数名与游戏内 DLSS5 面板几乎一致）—— 所以这里替他把默认 profile 选成 DLSSNR。
+    #    `ensure_configured()` 自己保证：只在开关打开且已下载、Magpie 没在跑、且它**自己已经
+    #    生成过 config.json** 时才动手；写前备份、写后回读校验、失败回滚、幂等。
+    try:
+        from . import magpie
+
+        configured = magpie.ensure_configured(config, log=lambda message: _append_log(config, message))
+        if configured.get("changed"):
+            actions.append(str(configured.get("message") or "已自动配置 Magpie"))
+        elif configured.get("ok") is False:
+            warnings.append(f"Magpie 配置: {configured.get('message')}")
+    except Exception as exc:  # noqa: BLE001
+        warnings.append(f"Magpie 自动配置失败: {exc}")
+
     for action in actions:
         _append_log(config, f"注入自检: {action}")
     # ⚠ **失败原因也必须落进日志文件**（rules：批处理失败原因不能只写在内存里）。
