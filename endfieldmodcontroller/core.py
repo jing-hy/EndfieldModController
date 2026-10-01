@@ -255,7 +255,13 @@ def _namespace_from_ini_path(ini_path: Path, mods_root: Path) -> str:
         rel = ini_path.resolve().relative_to(mods_root.resolve())
     except ValueError:
         rel = ini_path.name
-    return "\\mods\\" + str(rel).replace("/", "\\")
+    # ⚠️ **必须整体小写**（2026-10-01 现场实测定案）：3DMigoto 内部把变量名规范化成小写 ——
+    # 它自己往 `d3dx_user.ini` 里落盘的就是
+    # `$\mods\mc_佩丽卡_佩丽卡-ol装_linyoude\0.ini\coat`（全小写）。
+    # 我们原先照磁盘上的目录名原样拼（`MC_佩丽卡_佩丽卡-OL装_linyoude`），于是**写进去的是
+    # 另一个变量**：同一时刻 `[Present]` 段明明在执行（`$controller_action` 被复位成 0、
+    # `$mc_state_N` 也被写了），但 Mod 的变量**一点没动** → 用户看到的"面板点了、外观不变"。
+    return ("\\mods\\" + str(rel).replace("/", "\\")).lower()
 
 
 # ---------------------------------------------------------------------------
@@ -1503,6 +1509,16 @@ def generate_controller_mod(
                 for target, values in zip(action.targets, action.option_values):
                     if index < len(values):
                         lines.append(f"            {target} = {values[index]}")
+                # **写完立刻读回**（探针，2026-10-01）：存进我们自己的命名空间（`[Constants]`
+                # 里声明成 persist），游戏退出后 `d3dx_user.ini` 里就能看到"写的那个变量"到底
+                # 变成了什么：
+                #   * 值 = 刚设的值 → 变量写对了（问题在 Mod 侧或别处）；
+                #   * 值 ≠ 刚设的值（常见是 0）→ **我们写的是"影子变量"**（命名空间/大小写不对）。
+                # ⚠️ **必须放在这个 `if` 块内**：3DMigoto 会丢弃 `[Present]` 段里 `if` 块**之外**
+                #    的裸语句 —— 第一版探针就放在块外，`d3dx_user.ini` 里永远是 `-999`。
+                _probe = (action.targets or [None])[0]
+                if _probe:
+                    lines.append(f"            $mc_probe_v{action.wire_id} = {_probe}")
                 lines.append("        endif")
         lines.append(f"        $mc_state_{action.wire_id} = $controller_value")
         if action.run_command:
