@@ -546,3 +546,45 @@ class StateIndexValidationTests(unittest.TestCase):
         self.assertIsNone(valid_state_index("3", ["0", "1", "2"]))
         # 没有档位定义的项（纯命令）不做范围限制
         self.assertEqual(valid_state_index("7", []), "7")
+
+
+class ControllerIniSyntaxTests(unittest.TestCase):
+    """生成的 `controller.ini` 必须是 **3DMigoto 认的条件语法**。
+
+    2026-10-01 事故：`[Present]` 里"设置 Mod 变量"那一段用了 **`elif`**（Python 语法，
+    3DMigoto/EFMI 的关键字只有 `if` / `else if` / `else` / `endif`）—— 现场现象是
+    「Mod 自己的按键能换装（它改的就是同一个变量），但从面板点完全没反应，
+    而 `$mc_state_N` 又确实被写了」。改成**每个档位一个独立的 `if`** 之后才对得上。
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory(prefix="mc-panel-syntax-")
+        self.root = Path(self.tmp.name)
+        self.mod_dir = self.root / "DemoMod"
+        self.mod_dir.mkdir(parents=True)
+        (self.mod_dir / "mod.ini").write_text(MOD_INI, encoding="utf-8")
+        self.controller = self.root / "MC_Controller"
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_no_elif_in_generated_ini(self) -> None:
+        from endfieldmodcontroller import core as mc_core
+
+        staged = mc_core._make_mod_info(self.mod_dir, self.mod_dir, "演示", "character", {}, self.mod_dir.parent)
+        mc_core.generate_controller_mod([staged], self.controller)
+        text = (self.controller / "controller.ini").read_text(encoding="utf-8")
+        self.assertNotIn("elif", text, "`elif` 不是 3DMigoto 的条件关键字 —— 会让设置 Mod 变量那一段失效")
+        # 每个档位都必须是**独立的 if ... endif**，不能出现 `else if X == N` 这种连写
+        for index in range(4):
+            self.assertNotIn(f"elif $controller_value == {index}", text)
+
+    def test_probe_lines_are_emitted(self) -> None:
+        """探针：把每个动作目标变量的当前值读回我们自己的命名空间，落盘可查。"""
+        from endfieldmodcontroller import core as mc_core
+
+        staged = mc_core._make_mod_info(self.mod_dir, self.mod_dir, "演示", "character", {}, self.mod_dir.parent)
+        mc_core.generate_controller_mod([staged], self.controller)
+        text = (self.controller / "controller.ini").read_text(encoding="utf-8")
+        self.assertIn("global persist $mc_probe_v", text, "[Constants] 里要声明成 persist 才能落盘")
+        self.assertIn("$mc_probe_v1 = ", text, "应当生成探针语句（判定我们到底写没写进 Mod 的变量）")

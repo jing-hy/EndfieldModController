@@ -1431,6 +1431,11 @@ def generate_controller_mod(
     ]
     for action in actions:
         lines.append(f"global persist $mc_state_{action.wire_id} = 0")
+    # 探针变量（见下方 `[Present]` 末尾）：`-999` = 从来没被赋值过 ——
+    # 如果游戏跑完一轮后 `d3dx_user.ini` 里这些值还是 -999，说明 `[Present]` 那段根本没执行。
+    for action in actions:
+        if action.targets:
+            lines.append(f"global persist $mc_probe_v{action.wire_id} = -999")
     lines.extend([
         "",
         "; Synthetic key protocol: Ctrl+Alt+Shift+F13..F24",
@@ -1487,19 +1492,39 @@ def generate_controller_mod(
         lines.append(f"    if $controller_action == {action.wire_id}")
         if action.targets and action.option_values:
             for index in range(len(action.values)):
-                branch = "if" if index == 0 else "elif"
-                lines.append(f"        {branch} $controller_value == {index}")
+                # ⚠️ **每个档位一个独立的 `if`，绝不用 `elif`**（2026-10-01 定案）：
+                # 现场现象是「Mod 自己的按键能换装（它改的就是同一个变量），但从面板点
+                # 就完全没反应，而 `$mc_state_N` 又确实被写了」—— 说明"设置 Mod 变量"
+                # 这一段没执行。3DMigoto/EFMI 的 ini 条件语法是
+                # `if` / `else if` / `else` / `endif`，**`elif` 是 Python 语法、不是它的关键字**
+                # （本文件 1289 行那段"清理 Mod 里 elif"的逻辑也印证了这点）。
+                # 嵌套 if 在任何解析器下都合法，所以这里不赌。
+                lines.append(f"        if $controller_value == {index}")
                 for target, values in zip(action.targets, action.option_values):
                     if index < len(values):
                         lines.append(f"            {target} = {values[index]}")
-            lines.append("        endif")
+                lines.append("        endif")
         lines.append(f"        $mc_state_{action.wire_id} = $controller_value")
         if action.run_command:
             lines.append(f"        run = {action.run_command_full or action.run_command}")
         lines.append("        $controller_action = 0")
         lines.append("    endif")
 
-    lines += ["endif", ""]
+    lines.append("endif")
+    # ── 运行时探针（2026-10-01 加，专治"面板点了但 Mod 变量没变"这类问题）──────
+    # 把每个动作的**目标变量的当前值读回来**，存进我们自己的命名空间（`[Constants]` 里
+    # 声明成 persist）→ 游戏退出时 `d3dx_user.ini` 里就能看到
+    # `$\mc_controller\mc_probe_v<wire_id> = ?`：
+    #   * 值 = 面板刚设的那个值 → **我们确实写进了 Mod 的变量**（问题在别处）；
+    #   * 值 = -999（从没被赋值）→ **这段根本没执行**（语法/加载问题）；
+    #   * 值一直是 0 而 Mod 自己的按键能让外观变化 → **我们写的是"影子变量"**（命名空间不对）。
+    # 三种情况一次进出游戏即可区分，比反复猜快得多。
+    lines.append("")
+    for action in actions:
+        target = (action.targets or [None])[0]
+        if target:
+            lines.append(f"$mc_probe_v{action.wire_id} = {target}")
+    lines.append("")
     controller_ini = "\n".join(lines)
     actions_manifest = {
         "controller_namespace": CONTROLLER_NAMESPACE,
