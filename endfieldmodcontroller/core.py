@@ -70,28 +70,6 @@ def safe_name(name: str) -> str:
     return name or uuid.uuid4().hex[:8]
 
 
-def valid_state_index(raw_state: Any, values: Sequence[str]) -> str | None:
-    """把 `d3dx_user.ini` 里读到的 `mc_state_N` 变成**合法的档位索引**，非法就返回 None。
-
-    `mc_state_N` 是我们自己写的档位索引，而 `d3dx_user.ini` 会长期保留历史值 ——
-    现场出现过 `mc_state_1 = 5`（那一项只有 `0,1` 两档），结果面板显示"第 5 档"。
-    合法区间是 `0 .. len(values)-1`；`values` 为空时不做限制（比如纯命令项）。
-    """
-    if raw_state is None:
-        return None
-    candidate = str(raw_state).strip()
-    if not candidate:
-        return None
-    if not values:
-        return candidate
-    if not candidate.lstrip("-").isdigit():
-        return None
-    index = int(candidate)
-    if 0 <= index < len(values):
-        return candidate
-    return None
-
-
 def tsv_cell(value: object) -> str:
     """Sanitize a value for a tab-separated actions file."""
     return str(value).replace("\t", " ").replace("\r", " ").replace("\n", " ")
@@ -255,13 +233,7 @@ def _namespace_from_ini_path(ini_path: Path, mods_root: Path) -> str:
         rel = ini_path.resolve().relative_to(mods_root.resolve())
     except ValueError:
         rel = ini_path.name
-    # ⚠️ **必须整体小写**（2026-10-01 现场实测定案）：3DMigoto 内部把变量名规范化成小写 ——
-    # 它自己往 `d3dx_user.ini` 里落盘的就是
-    # `$\mods\mc_佩丽卡_佩丽卡-ol装_linyoude\0.ini\coat`（全小写）。
-    # 我们原先照磁盘上的目录名原样拼（`MC_佩丽卡_佩丽卡-OL装_linyoude`），于是**写进去的是
-    # 另一个变量**：同一时刻 `[Present]` 段明明在执行（`$controller_action` 被复位成 0、
-    # `$mc_state_N` 也被写了），但 Mod 的变量**一点没动** → 用户看到的"面板点了、外观不变"。
-    return ("\\mods\\" + str(rel).replace("/", "\\")).lower()
+    return "\\mods\\" + str(rel).replace("/", "\\")
 
 
 # ---------------------------------------------------------------------------
@@ -1435,18 +1407,8 @@ def generate_controller_mod(
         "global persist $mc_last_wire = 0",
         "global persist $mc_last_value = 0",
     ]
-    # 诊断用（都与面板/键送达有关）
-    lines.extend([
-        "global persist $mc_keyprobe_manual = 0",
-        "global persist $mc_keyprobe_panel = 0",
-    ])
     for action in actions:
         lines.append(f"global persist $mc_state_{action.wire_id} = 0")
-    # 探针变量（见下方 `[Present]` 末尾）：`-999` = 从来没被赋值过 ——
-    # 如果游戏跑完一轮后 `d3dx_user.ini` 里这些值还是 -999，说明 `[Present]` 那段根本没执行。
-    for action in actions:
-        if action.targets:
-            lines.append(f"global persist $mc_probe_v{action.wire_id} = -999")
     lines.extend([
         "",
         "; Synthetic key protocol: Ctrl+Alt+Shift+F13..F24",
@@ -1455,39 +1417,19 @@ def generate_controller_mod(
         "; 用户实测「按开关外套会切第一人称 / 按切换头发开关了 DLSS5」就是这么来的。",
         "; F13 以上的键标准键盘上不存在，插件与游戏都不会绑。",
     ])
-    # ⚠️ **两种键名写法都绑**（2026-10-01）：3DMigoto 的键名表（上游 `vkeys.h` 的
-    # `VKMappings[]`）里 F 键写作 **`F13`**（**不带 `VK_` 前缀**），而 addon 侧发的是
-    # 系统 VK 码 0x7C..。为免在"它到底认不认 `VK_` 前缀"上来回猜，这里**同一动作绑两个
-    # 段**：一个写 `F13`、一个写 `VK_F13` —— 哪个被认都能触发。
     for digit in range(10):
         lines.extend([
             f"[KeyMC_Digit{digit}]",
-            f"key = ctrl alt shift F{13 + digit}",
-            f"run = CommandListMC_Digit{digit}",
-            f"[KeyMC_Digit{digit}_vk]",
             f"key = ctrl alt shift VK_F{13 + digit}",
             f"run = CommandListMC_Digit{digit}",
         ])
     lines.extend([
         "[KeyMC_Stage]",
-        "key = ctrl alt shift F23",
-        "run = CommandListMC_Stage",
-        "[KeyMC_Stage_vk]",
         "key = ctrl alt shift VK_F23",
         "run = CommandListMC_Stage",
         "[KeyMC_Commit]",
-        "key = ctrl alt shift F24",
-        "run = CommandListMC_Commit",
-        "[KeyMC_Commit_vk]",
         "key = ctrl alt shift VK_F24",
         "run = CommandListMC_Commit",
-        "",
-        "; ── 诊断键：用户**手工**按一次 Ctrl+Alt+Shift+F2，用来区分「键没送到」与「键名不认」──",
-        "[KeyMC_ProbeManual]",
-        "key = ctrl alt shift F2",
-        "run = CommandListMC_ProbeManual",
-        "[CommandListMC_ProbeManual]",
-        "$mc_keyprobe_manual = $mc_keyprobe_manual + 1",
         "",
     ])
     for digit in range(10):
@@ -1502,8 +1444,6 @@ def generate_controller_mod(
         "[CommandListMC_Commit]",
         "$mc_last_wire = $mc_pending_action",
         "$mc_last_value = $mc_input",
-        # 面板路径探针：这一行被执行 = **面板发的合成键真的到达了 EFMI**（哪怕后面写变量失败）
-        "$mc_keyprobe_panel = $mc_keyprobe_panel + 1",
     ])
     for action in actions:
         lines.extend([
@@ -1525,49 +1465,19 @@ def generate_controller_mod(
         lines.append(f"    if $controller_action == {action.wire_id}")
         if action.targets and action.option_values:
             for index in range(len(action.values)):
-                # ⚠️ **每个档位一个独立的 `if`，绝不用 `elif`**（2026-10-01 定案）：
-                # 现场现象是「Mod 自己的按键能换装（它改的就是同一个变量），但从面板点
-                # 就完全没反应，而 `$mc_state_N` 又确实被写了」—— 说明"设置 Mod 变量"
-                # 这一段没执行。3DMigoto/EFMI 的 ini 条件语法是
-                # `if` / `else if` / `else` / `endif`，**`elif` 是 Python 语法、不是它的关键字**
-                # （本文件 1289 行那段"清理 Mod 里 elif"的逻辑也印证了这点）。
-                # 嵌套 if 在任何解析器下都合法，所以这里不赌。
-                lines.append(f"        if $controller_value == {index}")
+                branch = "if" if index == 0 else "elif"
+                lines.append(f"        {branch} $controller_value == {index}")
                 for target, values in zip(action.targets, action.option_values):
                     if index < len(values):
                         lines.append(f"            {target} = {values[index]}")
-                # **写完立刻读回**（探针，2026-10-01）：存进我们自己的命名空间（`[Constants]`
-                # 里声明成 persist），游戏退出后 `d3dx_user.ini` 里就能看到"写的那个变量"到底
-                # 变成了什么：
-                #   * 值 = 刚设的值 → 变量写对了（问题在 Mod 侧或别处）；
-                #   * 值 ≠ 刚设的值（常见是 0）→ **我们写的是"影子变量"**（命名空间/大小写不对）。
-                # ⚠️ **必须放在这个 `if` 块内**：3DMigoto 会丢弃 `[Present]` 段里 `if` 块**之外**
-                #    的裸语句 —— 第一版探针就放在块外，`d3dx_user.ini` 里永远是 `-999`。
-                _probe = (action.targets or [None])[0]
-                if _probe:
-                    lines.append(f"            $mc_probe_v{action.wire_id} = {_probe}")
-                lines.append("        endif")
+            lines.append("        endif")
         lines.append(f"        $mc_state_{action.wire_id} = $controller_value")
         if action.run_command:
             lines.append(f"        run = {action.run_command_full or action.run_command}")
         lines.append("        $controller_action = 0")
         lines.append("    endif")
 
-    lines.append("endif")
-    # ── 运行时探针（2026-10-01 加，专治"面板点了但 Mod 变量没变"这类问题）──────
-    # 把每个动作的**目标变量的当前值读回来**，存进我们自己的命名空间（`[Constants]` 里
-    # 声明成 persist）→ 游戏退出时 `d3dx_user.ini` 里就能看到
-    # `$\mc_controller\mc_probe_v<wire_id> = ?`：
-    #   * 值 = 面板刚设的那个值 → **我们确实写进了 Mod 的变量**（问题在别处）；
-    #   * 值 = -999（从没被赋值）→ **这段根本没执行**（语法/加载问题）；
-    #   * 值一直是 0 而 Mod 自己的按键能让外观变化 → **我们写的是"影子变量"**（命名空间不对）。
-    # 三种情况一次进出游戏即可区分，比反复猜快得多。
-    lines.append("")
-    for action in actions:
-        target = (action.targets or [None])[0]
-        if target:
-            lines.append(f"$mc_probe_v{action.wire_id} = {target}")
-    lines.append("")
+    lines += ["endif", ""]
     controller_ini = "\n".join(lines)
     actions_manifest = {
         "controller_namespace": CONTROLLER_NAMESPACE,
@@ -1596,14 +1506,8 @@ def generate_controller_mod(
             current = ""
             if user_ini_path is not None:
                 raw_state = read_user_var(Path(user_ini_path), CONTROLLER_NAMESPACE, f"mc_state_{action.wire_id}")
-                # ⚠️ **必须校验范围**：`mc_state_N` 是我们自己写的**档位索引**，而
-                # `d3dx_user.ini` 是持久化文件、会留着历史脏值 —— 现场就出现过
-                # `mc_state_1 = 5`（那一项只有 `0,1` 两档），于是面板显示"第 5 档"。
-                # 合法的索引必须落在 `0 .. len(values)-1`。
                 if raw_state is not None:
-                    validated = valid_state_index(raw_state, action.values)
-                    if validated is not None:
-                        current = validated
+                    current = raw_state
                 elif action.namespace and action.var_name:
                     raw_current = read_user_var(Path(user_ini_path), action.namespace, action.var_name)
                     if raw_current is not None:
@@ -1613,9 +1517,7 @@ def generate_controller_mod(
                             except ValueError:
                                 current = "0" if action.values else ""
                         else:
-                            # 同样校验：不是合法档位就不当当前值用
-                            current = raw_current if (not action.values
-                                                     or raw_current in action.values) else ""
+                            current = raw_current
             row = [
                 action.id,
                 tsv_cell(action.label),
