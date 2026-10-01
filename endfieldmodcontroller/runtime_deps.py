@@ -329,13 +329,22 @@ def ensure_magpie(
         return BuiltinResult("Magpie", "skipped", "可选扩展未启用（不下载）", "", str(config.magpie_path))
 
     root = config.magpie_path
+    # ⚠️ 必须**主动报进度**：`byte_progress` 按设计只更新百分比、**不写日志行**
+    # （防刷屏），而"查版本"这一段原先完全不报 —— 用户实测反馈
+    # 「弹窗显示开始下载，但下载日志并没有」，就是因为这里一声不吭。
+    if progress:
+        progress(0, 1, "Magpie", "查询最新版本（预发布）…")
     url, tag, asset_name, digest = _latest_release_asset(
         MAGPIE_REPO, MAGPIE_ASSET_PATTERN, include_prerelease=True
     )
     if magpie.installed(config) and magpie.version(config) == tag:
+        if progress:
+            progress(1, 1, "Magpie", f"已是最新（{tag}），无需下载")
         return BuiltinResult("Magpie", "up_to_date", "already current", tag, str(root))
 
     root.mkdir(parents=True, exist_ok=True)
+    if progress:
+        progress(0, 1, "Magpie", f"开始下载 {tag}（主包约 467 MB）…")
     _download_extract(url, asset_name, root, byte_progress, 1, 1, "Magpie", expected_sha256=digest)
     if not magpie.installed(config):
         raise RuntimeError(
@@ -343,6 +352,8 @@ def ensure_magpie(
             f"{magpie.RELEASES_URL} 手动下载"
         )
     magpie.write_marker(config, {"version": tag, "asset": asset_name, "source": MAGPIE_REPO})
+    if progress:
+        progress(1, 1, "Magpie", f"下载并解压完成（{tag}）")
     return BuiltinResult("Magpie", "installed", "installed", tag, str(root))
 
 

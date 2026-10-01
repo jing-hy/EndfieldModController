@@ -1765,7 +1765,7 @@ class EndfieldModControllerApi:
             "total": 1,
             "percent": 0.0,
             "message": "正在下载 Magpie（主包约 467 MB）…",
-            "log": [],
+            "log": ["Magpie: 开始处理可选扩展（查询最新版本 → 下载 → 解压）"],
             "results": [],
         }
         progress, byte_progress, _bump = self._make_dep_progress()
@@ -1784,6 +1784,9 @@ class EndfieldModControllerApi:
                 launcher._append_log(self.config, f"Magpie 下载结果：{result.status} {result.message}")
             except Exception as exc:  # noqa: BLE001 - 失败要落日志（用户要求），不能只留在内存
                 self._dep_task["message"] = f"Magpie 下载失败：{exc}"
+                # **界面日志也要有**：用户实测反馈过"只弹了开始下载、日志里什么都没有"，
+                # 当时失败原因只写进了 launch.log，界面上看不出来。
+                self._dep_task["log"].append(f"Magpie 下载失败：{exc}")
                 launcher._append_log(self.config, f"WARN Magpie 下载失败: {exc}")
             finally:
                 self._dep_task["running"] = False

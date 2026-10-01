@@ -2354,6 +2354,13 @@ function bind() {
       const r = await call('set_magpie_enabled', enabled);
       if (r && r.message) { logLine('Magpie: ' + r.message); setStatus(r.message); }
       if (r && r.status) state.magpie = r.status;
+      if (r && r.downloading) {
+        // ⚠️ **必须接进依赖页那套轮询**，否则进度条与日志框都不会更新 ——
+        // 用户实测反馈「弹窗显示开始下载，但下载日志并没有」就是这个原因。
+        showTab('dependencies');
+        await refreshFromState();
+        await pollDependencyProgress($('dep-results'));
+      }
     } catch (err) {
       logLine('✗ Magpie 切换失败: ' + (err.message || err));
       setStatus('Magpie 切换失败: ' + (err.message || err));
