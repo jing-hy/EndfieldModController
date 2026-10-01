@@ -1,6 +1,8 @@
 {
   "library_dir": "library",
   "runtime_dir": "runtime",
+  "_mod_backup_dir_说明": "Mod 备份仓：只要库里出现新导入的 Mod，就自动打包成 zip 放进来。默认在数据根下的 mod-backup（与 library 平级、就在 exe 旁边）。这个文件夹**只增不减**：程序从不删除、不覆盖里面任何文件。想换盘就填别的路径；把它指向 Mod 库/中转目录之内会被拒绝（避免 zip 落进库）。",
+  "mod_backup_dir": "mod-backup",
   "builtin_runtime_dir": "runtime/builtin",
   "use_builtin_runtime": true,
   "staging_mods_dir": "runtime/builtin/XXMI/EFMI/Mods",

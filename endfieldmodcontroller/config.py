@@ -96,6 +96,10 @@ class AppConfig:
     # 也能直接指向工作区里的内嵌组件（见 autofill()）。
     library_dir: str = "library"
     runtime_dir: str = "runtime"
+    # **Mod 备份仓**（用户 2026-10-01 要求）：「在根目录下放一个文件夹做 mod 备份，这个
+    # 文件夹只增不减，只要见到新 mod，就打包 zip 放进去」。默认与 `library/` 平级、
+    # 就放在数据根下，用户一眼能看到、能自己拷到别处；程序**只往里加，从不删**。
+    mod_backup_dir: str = "mod-backup"
     builtin_runtime_dir: str = "runtime/builtin"
     use_builtin_runtime: bool = True
     staging_mods_dir: str = "runtime/builtin/XXMI/EFMI/Mods"

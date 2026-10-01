@@ -1302,6 +1302,18 @@ async function refreshFromState() {
       $('hotkey-panel-status').textContent = '⚠ 开关是开的，但面板还没写就位 —— 下次「一键启动」会重试。';
     }
   }
+  // Mod 备份仓：库里新见到的 Mod 会自动打包成 zip 放进去（只增不减，程序从不删它）
+  const backup = s.mod_backup || null;
+  if (backup) {
+    if ($('path-mod-backup')) $('path-mod-backup').textContent = backup.dir || '';
+    if ($('mod-backup-status')) {
+      const mb = ((backup.bytes || 0) / 1048576).toFixed(1);
+      let text = `已备份 ${backup.count || 0} 个 Mod（${mb} MB）· 只增不减，程序不会删除这里的文件`;
+      if (backup.pending) text += ` · 还有 ${backup.pending} 个待打包`;
+      if (backup.overlaps_library) text += ' · ⚠ 备份目录与 Mod 库重叠，已暂停备份（请到设置里改「Mod 备份目录」）';
+      $('mod-backup-status').textContent = text;
+    }
+  }
   const dlss5 = s.dlss5_status || {};
   const addonCfg = (s.component_addon_status || {}).config || {};
   if ($('cfg-dlss5-addon')) {
@@ -1983,6 +1995,18 @@ function bind() {
       state.config.reshade_panel_font = enabled;
       await call('save_config', { reshade_panel_font: enabled });
       setStatus(enabled ? '面板会使用系统中文字体' : '面板不再自动改 ReShade 字体');
+    };
+  }
+
+  if ($('mod-backup-open')) {
+    $('mod-backup-open').onclick = async () => {
+      try {
+        const result = await call('open_mod_backup_dir');
+        if (result && result.ok === false && result.message) setStatus(result.message);
+        else setStatus('已打开 Mod 备份文件夹');
+      } catch (err) {
+        setStatus('打开备份文件夹失败：' + (err && err.message ? err.message : err));
+      }
     };
   }
 

@@ -49,12 +49,86 @@ class EndfieldModControllerApi:
         # 现拉现弹（每次都弹、强制停留，用户 2026-09-30 要求）。
         self._announcements: list[dict[str, Any]] = []
         self._ui_ready = threading.Event()
+        # Mod 备份仓的后台状态（去重：同一时刻只跑一个打包任务）
+        self._modbackup_lock = threading.Lock()
+        self._modbackup_running = False
         threading.Thread(target=self._warm_up, name="mc-warm-up", daemon=True).start()
 
     def ui_ready(self) -> dict[str, Any]:
         """前端首屏渲染完成后调用：这时才允许后台开始全盘探测。"""
         self._ui_ready.set()
         return {"ok": True}
+
+    # ------------------------------------------------------------------
+    # Mod 备份仓（用户 2026-10-01 要求）
+    # ------------------------------------------------------------------
+    def _backup_new_mods(self, *, log: Any = None, background: bool = False) -> dict[str, Any]:
+        """把"库里还没备份过"的 Mod 打包进 `<数据根>\\mod-backup\\`。
+
+        用户原话：「在根目录下放一个文件夹做 mod 备份，这个文件夹**只增不减**，
+        **只要见到新 mod，就打包 zip 放进去**」。所以：只往里加、从不删、已有备份跳过。
+        `background=True` 时另起线程（扫描之后顺带触发，不挡界面）。
+        """
+        from . import modbackup
+
+        def _note(message: str) -> None:
+            launcher._append_log(self.config, message)
+            if callable(log):
+                log(message)
+
+        if background:
+            def worker() -> None:
+                try:
+                    self._backup_new_mods()
+                except Exception:  # noqa: BLE001
+                    pass
+
+            threading.Thread(target=worker, name="mc-mod-backup", daemon=True).start()
+            return {"ok": True, "queued": True}
+
+        with self._modbackup_lock:
+            if self._modbackup_running:
+                return {"ok": True, "skipped": True, "reason": "已有备份任务在跑"}
+            self._modbackup_running = True
+        try:
+            state = modbackup.status(self.config)
+            if state.get("overlaps_library"):
+                _note(f"WARN Mod 备份：备份目录与 Mod 库/中转目录重叠，已跳过（{state['dir']}）")
+                return {"ok": False, "reason": "backup_dir_overlaps_library", **state}
+            mods = self._mods()
+            result = modbackup.backup_all(self.config, mods, log=_note)
+            if result.get("created"):
+                total_mb = sum(Path(p).stat().st_size for p in result["created"] if Path(p).is_file()) / 1048576
+                _note(f"Mod 备份：新增 {len(result['created'])} 个 zip（{total_mb:.1f} MB）→ {result['dir']}")
+            if result.get("failed"):
+                _note(f"WARN Mod 备份：{len(result['failed'])} 个打包失败（见上）")
+            return {"ok": not result.get("failed"), **result}
+        finally:
+            with self._modbackup_lock:
+                self._modbackup_running = False
+
+    def mod_backup_status(self) -> dict[str, Any]:
+        """备份仓现状（设置页显示）。"""
+        from . import modbackup
+
+        data = modbackup.status(self.config)
+        data["running"] = self._modbackup_running
+        try:
+            data["pending"] = len(modbackup.pending(self.config, self._mods()))
+        except Exception:  # noqa: BLE001
+            data["pending"] = 0
+        return data
+
+    def open_mod_backup_dir(self) -> dict[str, Any]:
+        """打开备份文件夹（不存在就先建出来，免得点了没反应）。"""
+        from . import modbackup
+
+        target = modbackup.backup_dir(self.config)
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            return {"ok": False, "message": f"创建备份目录失败：{exc}"}
+        return self.open_path_in_explorer(str(target))
 
     def _warm_up(self) -> None:
         """后台预热：全盘探测 + 清理上次自更新残留。**别把重活挪回 __init__。**"""
@@ -120,6 +194,17 @@ class EndfieldModControllerApi:
         except Exception as exc:  # noqa: BLE001
             try:
                 launcher._append_log(self.config, f"乳摇数据检查跳过: {exc}")
+            except Exception:  # noqa: BLE001
+                pass
+        # Mod 备份仓（用户 2026-10-01 要求）：「在根目录下放一个文件夹做 mod 备份，
+        # 这个文件夹只增不减，**只要见到新 mod，就打包 zip 放进去**」。
+        # 放在预热线程里 = 不卡首屏；逐个 Mod 打包、失败只记一笔（大库第一次会跑一会儿，
+        # 但界面全程可用）。已经有备份的 Mod 会直接跳过，所以之后的启动是毫秒级。
+        try:
+            self._backup_new_mods(log=lambda message: launcher._append_log(self.config, message))
+        except Exception as exc:  # noqa: BLE001
+            try:
+                launcher._append_log(self.config, f"Mod 备份跳过: {exc}")
             except Exception:  # noqa: BLE001
                 pass
         # 公告 / 异常状态预警：仓库里的 alerts.json（走 api.github.com，失败静默、不吃启动时间）。
@@ -739,6 +824,8 @@ class EndfieldModControllerApi:
             # 统一面板的现状（前端用它显示「整合 Mod 快捷键」滑块是否真的生效）。
             # 判据在 reshade_integration.panel_status —— 单一实现，别在这儿另写一套。
             "hotkey_panel": reshade_integration.panel_status(self.config),
+            # Mod 备份仓现状（设置页显示"备份了几个、占多大、还差几个"）
+            "mod_backup": self.mod_backup_status(),
             "reshade_addon_ready": (self.config.dlss5_path / reshade_integration.ADDON_NAME).is_file(),
             # 这三个探测**读缓存**，不在这里触发全盘扫描（否则加载页会被卡住十几秒）；
             # 缓存由后台预热线程填好，前端看到 warming=True 时会再刷新一次。
@@ -853,6 +940,12 @@ class EndfieldModControllerApi:
         self._invalidate_mods()
         mods = self._mods()
         diagnostics.log_event(self.config, f"UI 调用 scan() -> {len(mods)} 个 Mod", category="ui")
+        # 「只要见到新 mod，就打包 zip 放进备份仓」—— 扫描是"见到新 Mod"最自然的时机；
+        # 打包放到后台线程，界面照常返回（已有备份的会直接跳过，通常是毫秒级）。
+        try:
+            self._backup_new_mods(background=True)
+        except Exception:  # noqa: BLE001
+            pass
         return {
             "mods": [m.to_dict(include_actions=False) for m in mods],
             "dependency_report": self._dependency_report(),
