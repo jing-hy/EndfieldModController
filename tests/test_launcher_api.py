@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from endfieldmodcontroller import core, launcher
+from endfieldmodcontroller import core, launcher, reshade_integration
 from endfieldmodcontroller.api import EndfieldModControllerApi
 from endfieldmodcontroller.config import AppConfig
 
@@ -64,8 +64,15 @@ $cape = 0,1
         result = launcher.prepare_reshade_runtime(self.config, controller)
         reshade_dir = Path(result["reshade_dir"])
         self.assertTrue((reshade_dir / "ReShade.ini").is_file())
-        self.assertTrue((reshade_dir / "actions.tsv").is_file())
-        self.assertTrue((reshade_dir / "user_ini_path.txt").is_file())
+        # ⚠ 2026-10-01：统一面板**不再**写进 `runtime\reshade\Addons\`（ReShade 只搜
+        #   d3d12.dll 所在目录，那份文件永远加载不了）—— 现在落在 dlss5 base 目录。
+        panel_dir = Path(result["panel_dir"])
+        self.assertEqual(panel_dir, self.config.dlss5_path)
+        self.assertTrue((panel_dir / "actions.tsv").is_file())
+        self.assertTrue((panel_dir / "user_ini_path.txt").is_file())
+        if reshade_integration.built_addon_path() is not None:
+            self.assertTrue((panel_dir / reshade_integration.ADDON_NAME).is_file())
+            self.assertFalse((self.config.reshade_runtime_path / "Addons" / "endfieldmodcontroller.addon").is_file())
 
     def test_launch_preview_without_controller(self) -> None:
         result = launcher.launch(self.config, dry_run=True)

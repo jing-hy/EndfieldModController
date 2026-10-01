@@ -1,14 +1,23 @@
-// ModeController ReShade add-on PoC
+// EndfieldModController ReShade add-on —— 统一 Mod 控制面板
 //
-// This add-on draws the unified mod control UI using ReShade's ImGui overlay.
-// It does not inject itself and it does not write into the game directory.
-// The external app prepares:
-//   - actions.tsv              (action list for this overlay)
-//   - user_ini_path.txt        (path to EFMI's d3dx_user.ini)
+// 用户 2026-10-01 的需求原话：「做统一面板，**需要注入到 reshade**，ui 尽量做好一点，
+// **开关式的就用滑块**，**要标明原快捷键**，**要自动识别那个变量的名称，推测含义**」。
 //
-// On an action click the add-on writes the generated controller action queue
-// into d3dx_user.ini and sends F10 so EFMI reloads and the controller mod runs.
-
+// 外部程序（控制器）负责把这几样东西放进 ReShade 的 base 目录
+// （= d3d12.dll 所在处；xxmi_extra 注入方式下就是 `<数据根>\runtime\dlss5`）：
+//
+//   endfieldmodcontroller.addon64   本文件编译出来的面板
+//   actions.tsv                     动作清单（含推测含义 / 原快捷键 / 角色分组）
+//   user_ini_path.txt               EFMI 的 d3dx_user.ini 路径
+//   panel_info.txt                  面板状态（是否已接管 / 生成时间）
+//
+// 操作路径：点/拖控件 → 发合成键 `Ctrl+Alt+Shift+F<wire>`（数字键逐位）+ F11 暂存 +
+// F12 提交 → EFMI 里 controller.ini 的 `[KeyMC_*]` 把它变成 `$mc_state_N` →
+// `[Present]` 段按 `$controller_action` 写回 Mod 自己的变量（`$ear` 之类），立刻生效。
+//
+// ⚠ 面板**只能**待在这儿：ReShade 6.8 的日志写死了它只搜 `d3d12.dll` 所在目录
+//   （`Searching for add-ons (*.addon, *.addon64) in '<base>'`）。放到别处 = 用户按
+//   原来的键被锁了、新面板却不存在 —— 2026-10-01 出过这个事故，别再犯。
 #include <Windows.h>
 
 #define ImTextureID ImU64
@@ -21,6 +30,7 @@
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -32,15 +42,19 @@
 
 namespace fs = std::filesystem;
 
+// ---------------------------------------------------------------------------
+// 数据
+// ---------------------------------------------------------------------------
+
 struct ActionEntry
 {
     int id = 0;
     std::string label;
-    std::string kind;
+    std::string kind;            // toggle | cycle | command
     std::string mod_name;
     std::vector<std::string> values;
     std::string description;
-    std::string current_value;
+    std::string current;
     std::string namespace_name;
     std::string var_name;
     std::string section;
@@ -49,17 +63,39 @@ struct ActionEntry
     int wire_id = 0;
     bool send_index = true;
     bool merged = false;
+    // 2026-10-01 新增列（Python 侧 core.generate_controller_mod 写入）
+    std::string hint;            // 推测含义（中文；推不出时是变量名的英文短语）
+    std::string key_label;       // 原快捷键可读写法（`VK_LEFT` → `←`）
+    std::string char_group;      // 角色/分组，面板按它分栏
+    std::string condition;       // 生效条件（例如「仅佩丽卡」）
 };
+
 static std::vector<ActionEntry> g_actions;
 static std::recursive_mutex g_actions_mutex;
 static fs::path g_base_path;
 static fs::path g_user_ini_path;
 static bool g_paths_loaded = false;
-static std::map<int, std::string> g_selected_values;
-static std::map<int, bool> g_toggle_states;
+static std::map<int, int> g_selected_index;      // action id -> 当前档位（用户改过之后）
+static bool g_takeover = false;
+static std::string g_generated;
+static int g_expected_actions = 0;
 static std::mutex g_log_mutex;
+static bool g_cjk_checked = false;
+static bool g_cjk_ok = false;
+
 static void addon_log(const std::string &message);
 static fs::path addon_log_path();
+
+// 中文字形检测：ReShade 默认字体（ProggyClean）只有 ASCII，装不了中文含义。
+// 检测不到就整体降级成英文标签 —— **面板永远要能读**，不能因为字体变成一堆方块。
+static const char *T(const char *zh, const char *en)
+{
+    return g_cjk_ok ? zh : en;
+}
+
+// ---------------------------------------------------------------------------
+// 日志 / 路径
+// ---------------------------------------------------------------------------
 
 static fs::path get_base_path()
 {
@@ -131,18 +167,50 @@ static std::vector<std::string> split(const std::string &text, char delimiter)
     return parts;
 }
 
+// ---------------------------------------------------------------------------
+// 载入清单
+// ---------------------------------------------------------------------------
+
 static void load_actions()
 {
     std::lock_guard<std::recursive_mutex> lock(g_actions_mutex);
     g_actions.clear();
-    g_selected_values.clear();
-    g_toggle_states.clear();
+    g_selected_index.clear();
+    g_takeover = false;
+    g_expected_actions = 0;
+    g_generated.clear();
+
+    // 面板状态（控制器每次部署时写）
+    const fs::path info_path = g_base_path / L"panel_info.txt";
+    std::ifstream info_file(info_path);
+    if (info_file.is_open())
+    {
+        std::string line;
+        while (std::getline(info_file, line))
+        {
+            const std::string text = trim(line);
+            const auto eq = text.find('=');
+            if (eq == std::string::npos)
+                continue;
+            const std::string key = trim(text.substr(0, eq));
+            const std::string value = trim(text.substr(eq + 1));
+            if (key == "takeover")
+                g_takeover = (value == "1" || value == "true");
+            else if (key == "actions")
+                g_expected_actions = std::atoi(value.c_str());
+            else if (key == "generated")
+                g_generated = value;
+        }
+    }
 
     const fs::path actions_path = g_base_path / L"actions.tsv";
     addon_log("load_actions: " + actions_path.string());
     std::ifstream file(actions_path);
     if (!file.is_open())
+    {
+        addon_log("load_actions: actions.tsv 打不开");
         return;
+    }
 
     std::string line;
     bool header = true;
@@ -174,7 +242,7 @@ static void load_actions()
         entry.mod_name = trim(fields[3]);
         entry.values = split(trim(fields[4]), ',');
         if (fields.size() > 5) entry.description = trim(fields[5]);
-        if (fields.size() > 6) entry.current_value = trim(fields[6]);
+        if (fields.size() > 6) entry.current = trim(fields[6]);
         if (fields.size() > 7) entry.namespace_name = trim(fields[7]);
         if (fields.size() > 8) entry.var_name = trim(fields[8]);
         if (fields.size() > 9) entry.section = trim(fields[9]);
@@ -195,17 +263,42 @@ static void load_actions()
             const std::string merged = trim(fields[14]);
             entry.merged = (merged == "1" || merged == "true" || merged == "yes");
         }
+        // ↓ 只追加、不重排：旧版 actions.tsv 没有这几列也不会错位
+        if (fields.size() > 15) entry.hint = trim(fields[15]);
+        if (fields.size() > 16) entry.key_label = trim(fields[16]);
+        if (fields.size() > 17) entry.char_group = trim(fields[17]);
+        if (fields.size() > 18) entry.condition = trim(fields[18]);
+
+        if (entry.kind.empty())
+            entry.kind = "toggle";
         g_actions.push_back(std::move(entry));
     }
-    addon_log("load_actions: loaded " + std::to_string(g_actions.size()) + " actions");
+
+    // 用清单里的 current 初始化滑块位置（current 是**档位序号**）
+    for (const auto &action : g_actions)
+    {
+        int index = 0;
+        if (!action.current.empty())
+        {
+            try { index = std::stoi(action.current); }
+            catch (...) { index = 0; }
+        }
+        if (!action.values.empty())
+            index = std::max(0, std::min(index, static_cast<int>(action.values.size()) - 1));
+        g_selected_index[action.id] = index;
+    }
+
+    addon_log("load_actions: loaded " + std::to_string(g_actions.size()) + " actions, takeover="
+              + (g_takeover ? "1" : "0") + ", generated=" + g_generated);
 }
+
 static void load_paths()
 {
     std::lock_guard<std::recursive_mutex> lock(g_actions_mutex);
     g_paths_loaded = false;
     g_user_ini_path.clear();
 
-    // External app can set this env var; it is the least fragile option.
+    // 外部程序可以设这个环境变量（最不容易出错的方式）
     wchar_t env_buf[32768];
     const DWORD env_len = GetEnvironmentVariableW(L"MODECONTROLLER_USER_INI", env_buf, ARRAYSIZE(env_buf));
     if (env_len > 0 && env_len < ARRAYSIZE(env_buf))
@@ -231,90 +324,13 @@ static void load_paths()
     }
     else
     {
-        addon_log("load_paths: user_ini_path.txt missing or empty");
+        addon_log("load_paths: user_ini_path.txt 是空的");
     }
 }
 
-static bool write_user_var(const std::string &namespace_name, const std::string &var_name, const std::string &value)
-{
-    if (!g_paths_loaded || g_user_ini_path.empty())
-        return false;
-
-    std::vector<std::string> lines;
-    {
-        std::ifstream file(g_user_ini_path);
-        std::string line;
-        while (std::getline(file, line))
-            lines.push_back(line);
-    }
-
-    const std::string target_key = "$\\" + namespace_name + "\\" + var_name;
-    const std::string target_line = target_key + " = " + value;
-    bool replaced = false;
-    bool in_constants = false;
-    std::vector<std::string> out;
-    out.reserve(lines.size() + 2);
-    for (const auto &line : lines)
-    {
-        const std::string stripped = trim(line);
-        if (!stripped.empty() && stripped.front() == '[' && stripped.back() == ']')
-        {
-            in_constants = _stricmp(stripped.c_str(), "[Constants]") == 0;
-            out.push_back(line);
-            continue;
-        }
-        if (in_constants && !stripped.empty() && stripped.front() == '$')
-        {
-            const auto eq = stripped.find('=');
-            if (eq != std::string::npos)
-            {
-                std::string key = trim(stripped.substr(0, eq));
-                if (_stricmp(key.c_str(), target_key.c_str()) == 0)
-                {
-                    out.push_back(target_line);
-                    replaced = true;
-                    continue;
-                }
-            }
-        }
-        out.push_back(line);
-    }
-    if (!replaced)
-    {
-        std::vector<std::string> inserted;
-        bool did_insert = false;
-        for (const auto &line : out)
-        {
-            inserted.push_back(line);
-            if (!did_insert && _stricmp(trim(line).c_str(), "[Constants]") == 0)
-            {
-                inserted.push_back(target_line);
-                did_insert = true;
-            }
-        }
-        if (!did_insert)
-        {
-            inserted.push_back("");
-            inserted.push_back("[Constants]");
-            inserted.push_back(target_line);
-        }
-        out = std::move(inserted);
-    }
-
-    const fs::path tmp_path = g_user_ini_path.wstring() + L".mc.tmp";
-    {
-        std::ofstream file(tmp_path, std::ios::binary | std::ios::trunc);
-        if (!file.is_open())
-            return false;
-        for (const auto &line : out)
-            file << line << "\r\n";
-    }
-    std::error_code ec;
-    fs::rename(tmp_path, g_user_ini_path, ec);
-    if (ec)
-        return false;
-    return true;
-}
+// ---------------------------------------------------------------------------
+// 合成键协议（沿用既有实现；改的是 UI，不是协议）
+// ---------------------------------------------------------------------------
 
 static std::mutex g_key_mutex;
 
@@ -357,29 +373,17 @@ static void send_action_keys(int wire_id, int value_index)
     for (const char ch : wire)
         if (ch >= '0' && ch <= '9')
             send_digit_key(ch - '0');
-    send_key_combo(VK_F11); // stage action id
+    send_key_combo(VK_F11); // 暂存动作号
     for (const char ch : value)
         if (ch >= '0' && ch <= '9')
             send_digit_key(ch - '0');
-    send_key_combo(VK_F12); // commit action + value
+    send_key_combo(VK_F12); // 提交动作号 + 档位
 }
 
-static void queue_action(reshade::api::effect_runtime *runtime, const ActionEntry &action, const std::string &value)
+static void queue_action(reshade::api::effect_runtime *runtime, const ActionEntry &action, int value_index)
 {
-    addon_log("queue_action: id=" + std::to_string(action.id) + " wire=" + std::to_string(action.wire_id) + " value=" + (value.empty() ? "0" : value));
-
-    int value_index = 0;
-    if (action.send_index)
-    {
-        try { value_index = std::stoi(value.empty() ? "0" : value); }
-        catch (...) { value_index = 0; }
-    }
-    else
-    {
-        const auto it = std::find(action.values.begin(), action.values.end(), value);
-        if (it != action.values.end())
-            value_index = static_cast<int>(std::distance(action.values.begin(), it));
-    }
+    addon_log("queue_action: id=" + std::to_string(action.id) + " wire=" + std::to_string(action.wire_id)
+              + " value=" + std::to_string(value_index));
 
     if (runtime != nullptr)
         runtime->open_overlay(false, reshade::api::input_source::keyboard);
@@ -395,139 +399,131 @@ static void queue_action(reshade::api::effect_runtime *runtime, const ActionEntr
     }).detach();
 }
 
-static std::string action_preview_value(const ActionEntry &action)
+// ---------------------------------------------------------------------------
+// 绘制
+// ---------------------------------------------------------------------------
+
+static void check_cjk_font()
 {
-    const auto it = g_selected_values.find(action.id);
-    if (it != g_selected_values.end())
+    if (g_cjk_checked)
+        return;
+    g_cjk_checked = true;
+    ImFont *font = ImGui::GetFont();
+    if (font == nullptr)
+    {
+        g_cjk_ok = false;
+        addon_log("font: GetFont() == null → 用英文标签");
+        return;
+    }
+    // 「中」「耳」两个字都在 = 字体带中文
+    g_cjk_ok = font->IsGlyphInFont(0x4E2D) && font->IsGlyphInFont(0x8033);
+    addon_log(std::string("font: cjk glyphs = ") + (g_cjk_ok ? "yes" : "no"));
+}
+
+static std::string action_title(const ActionEntry &action)
+{
+    if (!action.hint.empty())
+        return action.hint;
+    if (!action.var_name.empty())
+        return "$" + action.var_name;
+    if (!action.label.empty())
+        return action.label;
+    return std::string(T("动作 ", "action ")) + std::to_string(action.id);
+}
+
+static int current_index(const ActionEntry &action)
+{
+    const auto it = g_selected_index.find(action.id);
+    if (it != g_selected_index.end())
         return it->second;
-    if (!action.current_value.empty())
-        return action.current_value;
-    if (!action.values.empty())
-        return action.values.front();
-    return "1";
+    int index = 0;
+    if (!action.current.empty())
+    {
+        try { index = std::stoi(action.current); }
+        catch (...) { index = 0; }
+    }
+    return index;
+}
+
+static std::string detail_line(const ActionEntry &action)
+{
+    std::string text;
+    if (!action.var_name.empty())
+        text += std::string(T("变量 ", "var ")) + "$" + action.var_name;
+    if (!action.key_label.empty())
+    {
+        if (!text.empty())
+            text += "   ";
+        text += std::string(T("原键 ", "key ")) + action.key_label;
+    }
+    if (!action.condition.empty())
+    {
+        if (!text.empty())
+            text += "   ";
+        text += std::string(T("条件 ", "only when ")) + action.condition;
+    }
+    if (text.empty() && !action.section.empty())
+        text = action.section;
+    return text;
 }
 
 static void draw_action_control(reshade::api::effect_runtime *runtime, const ActionEntry &action)
 {
     ImGui::PushID(action.id);
-    ImGui::TextUnformatted(action.label.c_str());
-    if (!action.description.empty())
-        ImGui::TextDisabled("%s", action.description.c_str());
 
-    if (action.kind == "command")
+    const int count = static_cast<int>(action.values.size());
+    const bool is_command = (action.kind == "command" || count == 0);
+
+    if (ImGui::BeginTable("row", 2, ImGuiTableFlags_SizingFixedFit, ImVec2(0.0f, 0.0f), 0.0f))
     {
-        if (ImGui::Button(u8"执行", ImVec2(120, 0)))
-            queue_action(runtime, action, "0");
-    }
-    else if (action.kind == "cycle" && !action.values.empty())
-    {
-        const std::string current = action_preview_value(action);
-        int current_index = 0;
-        for (int i = 0; i < static_cast<int>(action.values.size()); ++i)
+        ImGui::TableSetupColumn("name", ImGuiTableColumnFlags_WidthStretch, 0.0f, 0);
+        ImGui::TableSetupColumn("control", ImGuiTableColumnFlags_WidthFixed, 300.0f, 0);
+        ImGui::TableNextRow(0, 0.0f);
+
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted(action_title(action).c_str());
+        const std::string detail = detail_line(action);
+        if (!detail.empty())
+            ImGui::TextDisabled("%s", detail.c_str());
+
+        ImGui::TableNextColumn();
+        if (is_command)
         {
-            if (action.values[static_cast<size_t>(i)] == current)
+            if (ImGui::Button(T("执行", "Run"), ImVec2(150.0f, 0.0f)))
+                queue_action(runtime, action, 0);
+        }
+        else
+        {
+            int index = current_index(action);
+            const bool as_switch = (count == 2);
+            // 「开关式的就用滑块」：两档 → 滑块两端写"关/开"；多档 → 滑块上显示当前档位名
+            const std::string format = as_switch
+                ? std::string(T("关 ——— 开", "off ——— on"))
+                : (index >= 0 && index < count ? action.values[static_cast<size_t>(index)] : std::string("%d"));
+
+            ImGui::SetNextItemWidth(200.0f);
+            if (ImGui::SliderInt("##value", &index, 0, std::max(0, count - 1), format.c_str(), ImGuiSliderFlags_None))
             {
-                current_index = i;
-                break;
+                g_selected_index[action.id] = index;
+                queue_action(runtime, action, index);
             }
+            ImGui::SameLine();
+            if (as_switch)
+                ImGui::TextDisabled("%s", index != 0 ? T("已开", "ON") : T("已关", "OFF"));
+            else
+                ImGui::TextDisabled("%d/%d", index + 1, count);
         }
 
-        const char *preview = action.values[static_cast<size_t>(current_index)].c_str();
-        ImGui::SetNextItemWidth(280.0f);
-        if (ImGui::BeginCombo("##value", preview))
-        {
-            for (int i = 0; i < static_cast<int>(action.values.size()); ++i)
-            {
-                const bool selected = (i == current_index);
-                ImGui::PushID(i);
-                if (ImGui::Selectable(action.values[static_cast<size_t>(i)].c_str(), selected))
-                {
-                    g_selected_values[action.id] = action.values[static_cast<size_t>(i)];
-                    queue_action(runtime, action, std::to_string(i));
-                }
-                if (selected)
-                    ImGui::SetItemDefaultFocus();
-                ImGui::PopID();
-            }
-            ImGui::EndCombo();
-        }
-    }
-    else
-    {
-        bool checked = false;
-        const auto state_it = g_toggle_states.find(action.id);
-        if (state_it != g_toggle_states.end())
-            checked = state_it->second;
-        else if (!action.current_value.empty())
-            checked = (action.current_value != "0");
-        else if (!action.values.empty())
-            checked = (action.values.front() != "0");
-
-        if (ImGui::Checkbox(u8"启用", &checked))
-        {
-            g_toggle_states[action.id] = checked;
-            queue_action(runtime, action, checked ? "1" : "0");
-        }
+        ImGui::EndTable();
     }
 
-    if (!action.namespace_name.empty() || !action.var_name.empty())
-        ImGui::TextDisabled(u8"变量: %s / %s", action.namespace_name.c_str(), action.var_name.c_str());
-    if (!action.section.empty())
-        ImGui::TextDisabled(u8"来源: %s", action.section.c_str());
-    if (!action.run_command.empty())
-        ImGui::TextDisabled(u8"命令: %s", action.run_command.c_str());
-    if (!action.original_keys.empty())
-        ImGui::TextDisabled(u8"原快捷键: %s", action.original_keys.c_str());
-
-    ImGui::Separator();
-    ImGui::PopID();
-}
-
-static std::string action_prefix(const ActionEntry &action)
-{
-    std::string label = action.label;
-    const auto bracket = label.find(" (");
-    if (bracket != std::string::npos)
-        label = label.substr(0, bracket);
-    label = trim(label);
-    while (!label.empty() && (std::isdigit(static_cast<unsigned char>(label.back())) || label.back() == ' '))
-        label.pop_back();
-    label = trim(label);
-    if (label.size() < 3)
-        return "";
-    return label;
-}
-
-static void draw_prefix_menu(reshade::api::effect_runtime *runtime, const std::string &prefix, const std::vector<const ActionEntry *> &actions)
-{
-    ImGui::PushID(prefix.c_str());
-    ImGui::SetNextItemWidth(320.0f);
-    if (ImGui::BeginCombo(prefix.c_str(), u8"选择..."))
-    {
-        for (const ActionEntry *action : actions)
-        {
-            if (action->values.empty())
-            {
-                const std::string label = action->label;
-                if (ImGui::Selectable(label.c_str(), false))
-                    queue_action(runtime, *action, "0");
-                continue;
-            }
-            for (int index = 0; index < static_cast<int>(action->values.size()); ++index)
-            {
-                const std::string label = action->label + " = " + action->values[static_cast<size_t>(index)];
-                if (ImGui::Selectable(label.c_str(), false))
-                    queue_action(runtime, *action, std::to_string(index));
-            }
-        }
-        ImGui::EndCombo();
-    }
     ImGui::PopID();
 }
 
 static void draw_overlay(reshade::api::effect_runtime *runtime)
 {
     runtime->block_input_next_frame();
+    check_cjk_font();
 
     static bool overlay_logged = false;
     if (!overlay_logged)
@@ -536,60 +532,74 @@ static void draw_overlay(reshade::api::effect_runtime *runtime)
         addon_log("draw_overlay first frame");
     }
 
-    if (!g_paths_loaded)
-    {
-        ImGui::TextWrapped(u8"正在等待 ModeController 外部程序准备路径...");
-        if (ImGui::Button(u8"重新加载"))
-        {
-            load_paths();
-            load_actions();
-        }
-        return;
-    }
-
     std::lock_guard<std::recursive_mutex> lock(g_actions_mutex);
-    if (g_actions.empty())
-    {
-        ImGui::TextWrapped(u8"没有可用操作，请先在外部 ModeController 中生成控制器。");
-        if (ImGui::Button(u8"重新加载"))
-            load_actions();
-        return;
-    }
 
-    ImGui::TextUnformatted(u8"统一 Mod 控制");
+    ImGui::TextUnformatted(T("统一 Mod 控制", "Unified Mod Control"));
     ImGui::SameLine();
-    if (ImGui::SmallButton(u8"刷新"))
+    if (ImGui::SmallButton(T("刷新", "Reload")))
     {
         load_paths();
         load_actions();
     }
+
+    if (!g_paths_loaded)
+        ImGui::TextDisabled("%s", T("（未找到 d3dx_user.ini 路径：先运行控制器的一键启动）",
+                                    "(user_ini_path.txt missing: run the launcher once)"));
+    else
+        ImGui::TextDisabled("%s", g_takeover
+            ? T("已接管：Mod 自带的按键被锁住，操作都在这个面板里",
+                "Takeover ON: the mods' own hotkeys are locked; use this panel")
+            : T("未接管：Mod 自带的按键照常生效（这个面板只是对照表）",
+                "Takeover OFF: mods keep their own hotkeys (panel is read-only info)"));
+    if (!g_generated.empty() || g_expected_actions > 0)
+    {
+        ImGui::TextDisabled("%s%zu %s%s", T("清单 ", "actions "), g_actions.size(),
+                            T(" 项 · 生成于 ", " · generated "), g_generated.c_str());
+    }
+
     ImGui::Separator();
 
-    std::map<std::string, std::vector<const ActionEntry *>> groups;
-    for (const auto &action : g_actions)
-        groups[action.mod_name].push_back(&action);
-
-    for (const auto &group : groups)
+    if (g_actions.empty())
     {
-        std::string group_description;
-        for (const ActionEntry *action : group.second)
-        {
-            if (!action->description.empty())
-            {
-                group_description = action->description;
-                break;
-            }
-        }
+        ImGui::TextWrapped("%s", T("没有可用操作。请先在控制器里勾选 Mod 并点「生成控制器」/「一键启动」。",
+                                   "No actions yet. Select mods and run 'Prepare'/'One-click launch' first."));
+        return;
+    }
 
+    if (!g_cjk_ok)
+        ImGui::TextDisabled("%s", T("", "Font has no CJK glyphs: showing English labels."));
+
+    // 角色 → Mod → 动作
+    std::map<std::string, std::map<std::string, std::vector<const ActionEntry *>>> tree;
+    for (const auto &action : g_actions)
+    {
+        const std::string group = action.char_group.empty()
+            ? std::string(T("未分类", "Ungrouped"))
+            : action.char_group;
+        tree[group][action.mod_name].push_back(&action);
+    }
+
+    for (const auto &group : tree)
+    {
         if (!ImGui::CollapsingHeader(group.first.c_str(), ImGuiTreeNodeFlags_DefaultOpen))
             continue;
-        if (!group_description.empty())
-            ImGui::TextDisabled("%s", group_description.c_str());
 
-        for (const ActionEntry *action : group.second)
-            draw_action_control(runtime, *action);
+        for (const auto &mod : group.second)
+        {
+            ImGui::Indent(14.0f);
+            std::string header = mod.first;
+            if (!mod.second.empty() && !mod.second.front()->description.empty())
+                header += "  ·  " + mod.second.front()->description;
+            ImGui::TextDisabled("%s", header.c_str());
+            ImGui::Spacing();
+            for (const ActionEntry *action : mod.second)
+                draw_action_control(runtime, *action);
+            ImGui::Spacing();
+            ImGui::Unindent(14.0f);
+        }
     }
 }
+
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
 {
     switch (reason)

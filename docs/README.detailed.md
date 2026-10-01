@@ -5,7 +5,7 @@
 
 《明日方舟：终末地》的一站式 Mod 管理器：把 **DLSS5 神经渲染 + 第一人称视角 + 服装 Mod（EFMI）** 以及 **乳摇（SecondaryMotion）** 统一到一次「一键启动」里，并自动维护各项注入与初始化自检。
 
-Windows 桌面程序（Python + PyWebview），单文件 exe，**零配置启动即用**。当前版本 **0.8.0**。
+Windows 桌面程序（Python + PyWebview），单文件 exe，**零配置启动即用**。当前版本 **0.9.0**。
 
 > 💬 **QQ 群：1045239747**（加群验证答案 `jing_hy`）—— 不方便用 GitHub 或想直接问，都可以在群里发诊断包；记得附上现象。
 
@@ -33,12 +33,56 @@ Windows 桌面程序（Python + PyWebview），单文件 exe，**零配置启动
 | **游戏目录净化 / 还原** | 把第三方注入物**先备份再移走**（`runtime/game_backup/…`），随时一键还原；被移走的系统模块会自动从 System32 补回。**认识的不只是我们自己的注入**：第三方注入器（例如 OptiScaler 用 `winhttp.dll` 顶替系统模块）同样会被识别并移走，连它的 `OptiScaler.ini` / `.log` 一起（2026-10-01 起） |
 | **诊断与日志** | 启动日志、崩溃监视、一键导出诊断 zip（含日志、注入状态、Windows 事件、**DLSS5 现场 `dlss5-feed.log`**） |
 | **崩溃归因** | 崩溃包会带 `cause.json`：**自检记录过 Mod 资源冲突时，弹窗专门提示去清冲突**（区别于其它崩溃，主按钮直接跳到 Mod 库）；同时自检会校验 `runtime\dlss5` 里的随包组件是否被别的整合包换过 |
-| **启动前风险确认** | 一键启动在**拉起 XXMI 之前**先查"这套 Mod 会不会崩"：① 自检的资源冲突；② **崩溃记忆**（`runtime\_state\crash_memory.json`，记下每次崩溃时的 Mod 组合）。有风险就弹窗说清是什么冲突，由你选「仍然启动」/「先去清理，不启动」。**右侧橙色主按钮是「一键关闭其中一个（自行选择）」** → 接着弹出的窗口里**每组冲突一个下拉框**，选好要保留的那个、点一下就会取消勾选其余的并重新生成控制器（只改勾选，不动你的 Mod 文件） |
+| **启动前风险确认（只提示）** | 一键启动在**拉起 XXMI 之前**先查"这套 Mod 会不会崩"：① 自检的资源冲突；② **崩溃记忆**（`runtime\_state\crash_memory.json`，记下每次崩溃时的 Mod 组合）。有风险就弹窗说清是什么冲突，由你选「**先去清理，不启动**」（右侧橙色主按钮、默认聚焦）/「仍然启动」。**这里只做提示**：程序不会替你改勾选 —— 需要一键处理时去下面的「皮肤冲突自动处理」 |
+| **统一 Mod 控制面板（整合 Mod 快捷键）** | 启动页「整合 Mod 快捷键」打开后：把各 Mod 自带的按键**锁住**（staging 副本里的 `key=` 统一改写成 `VK_F24`），操作改到**游戏内的 ReShade 面板**（自研 addon，进游戏按 `Home` → **ModeController** 页）。面板按**角色 → Mod** 分栏，开关一律用**滑块**，每一项都标出 `变量名`、`推测含义`（从 ini 的 mesh 注释 / 变量名 / 词汇表推出来的中文）、`原快捷键`、生效条件。**面板装不上就不锁键**（没开 ReShade 注入 / 底座缺失 / addon 文件丢失时会在界面上说明原因），避免"键锁死了、入口却不存在"。关闭这个开关 = 完全恢复原样 |
+| **皮肤冲突自动处理（崩溃后）** | 终末地因为**皮肤（Mod）资源冲突**崩掉、且崩溃归因判定为 Mod 冲突时，崩溃弹窗里给「**一键关闭其中一个（自行选择）**」→ 点它先关掉原弹窗，再弹「选择要保留的 Mod」：**每组冲突一个下拉框**（默认保留第一个），点「保留所选并重新生成控制器」就会自动取消勾选其余那些并重跑一次生成控制器。**只改勾选，绝不动你的 Mod 文件**；库里定位不到的组（手动放进 Mods 的）只提示、不硬处理 |
 | **Mod 修复 / 回滚 / 移出库（实验性）** | Mod 卡片**右下角「⋯」**：用社区修复工具（**B站 up 主 可可HXL**《终末地Mod修复工具包》v1.5）把 ini 里的资源槽位号适配当前游戏版本；**改前整份备份、可一键回滚**；删除 = 移出库（进 `runtime\backups\mod-trash`，可找回）。库页顶部还有**「一键修复所有 Mod」**（后台跑、已修过的跳过） |
 | **角色表跟官网** | 角色识别用的表**每次启动后在后台非阻塞**地跟官网干员页对一次（24 小时内不重复请求）：官网上了新干员就自动更新到 `<数据根>\runtime\_state\characters.json`（**不改随包那份、社区简称不丢**）；也可手工跑 `python scripts\fetch_characters.py` 核对/更新 |
 | **更新** | 检查/下载新版并自更新（下载后校验 sha256，退出后由脚本替换并重启）；组件（XXMI / EFMI / 乳摇）也能单独更新 |
 | **下载兜底** | 内置轻量加速：慢/抖时临时并发分块，直连不通时临时换镜像线路 —— 按需启用、用完即放，不装证书、不改系统 |
 | **摆姿 / MMD 播放（Endfield Poser）** | 从它的官方 Release 下载安装包，调用**它自己的安装向导**把文件装进游戏目录（不随包分发、不改它的包）；开关只改文件名（可逆）；状态与日志在设置页，摆姿用它自带的页面 `http://127.0.0.1:18923` |
+
+### 统一 Mod 控制面板（整合 Mod 快捷键）细节
+
+**开关**：启动页最后一行「整合 Mod 快捷键」（config 字段 `hotkey_takeover`，默认 **false**）。
+打开后做两件事，缺一不可：
+
+1. **锁键** —— staging 副本（`EFMI\Mods\MC_*`）里每个 `[Key*]` 段的 `key =` 统一改写成
+   `no_modifiers VK_F24`（原始文件与库里的文件**从不改动**，`runtime\backups\hotkey_patch\`
+   留着一份原始备份）；
+2. **注入面板** —— 把自研 ReShade addon 与动作清单放进 **ReShade 真正会读的目录**。
+   这一点以前错过：ReShade 6.8 的日志写死了它只搜 `d3d12.dll` 所在目录
+   （`Searching for add-ons (*.addon, *.addon64) in '<base>'`），所以 xxmi_extra 注入方式下
+   正确位置是 `<数据根>\runtime\dlss5\`。面板文件：
+
+   | 文件 | 作用 |
+   | --- | --- |
+   | `endfieldmodcontroller.addon64` | 面板本体（随 exe 打包，`assets\addon\` 里那份） |
+   | `actions.tsv` | 动作清单（每行一个开关；`hint`/`key_label`/`char_group`/`condition` 是 2026-10-01 追加的 4 列） |
+   | `user_ini_path.txt` | EFMI 的 `d3dx_user.ini` 路径（面板据此显示状态） |
+   | `panel_info.txt` | 面板状态：`takeover` / `actions` / `generated` |
+   | `modecontroller.addon.log` | 面板自己的日志（加载、字体检测、每次发键） |
+
+**操作协议**：面板里点/拖一个控件 → 用 `SendInput` 发合成键 `Ctrl+Alt+Shift+F<wire 的每一位>`
+→ `F11` 暂存动作号 → 再发档位数字 → `F12` 提交 → `MC_Controller\controller.ini` 的
+`[KeyMC_*]` 把它变成 `$mc_state_N` → `[Present]` 段按 `$controller_action` 把值写回 Mod 自己的
+变量（`$ear` 之类）→ 立刻生效。
+
+**"推测含义"是怎么来的**（`endfieldmodcontroller/hotkey_hints.py` +
+`hotkey_hints.json`，后者由 `scripts\gen_hotkey_hints.py` 扫 Mod 目录生成、可手工增删）：
+① 变量名命中词表（`ear → 耳羽`）；② 变量名拆词后命中（`draw_component_0_zfy_head_horns → 头/角`）；
+③ ini 里引用该变量的 `if` 块附近的 `; [mesh:…]` 注释 / `Resource-*` 名字命中词表
+（佩丽卡的 `$ear` 旁边就写着 `hair_ear_copy`）；④ section 名（`KeyToggleUI → 控制菜单`）；
+⑤ 都推不出时**不编造中文**，退回变量名清洗后的英文短语（`head horns`）。
+
+**中文显示**：ReShade 默认字体（ProggyClean）没有中文字形。打开这个开关时，如果
+`ReShade.ini` 的 `[STYLE] Font` 还是空的，程序会自动指向系统中文字体（`msyh.ttc` 等，
+写前备份 `.bak-before-panel-font`；config 字段 `reshade_panel_font` 可关掉）。
+真的拿不到中文字形时，面板**自动改用英文标签**（写入 `modecontroller.addon.log`）。
+
+**安全底线**：`launcher.resolve_hotkey_takeover()` 会先确认"ReShade 注入开着 + 底座在位 +
+面板文件齐 + 写盘成功"，**任何一条不满足就返回 False，绝不去锁用户的按键** —— 2026-10-01
+出过"键被改死、面板却不存在"的事故，这条是防止它重演的闸门。
 
 ### 注入链（同一进程内同时生效）
 

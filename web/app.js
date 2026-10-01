@@ -155,11 +155,14 @@ function showModalDialog({ title, message, okText = '确定', cancelText = '取�
 }
 
 // ── 「选择要保留的 Mod」弹窗（用户 2026-10-01 要求）────────────────────────
-// 场景：**确定是皮肤（Mod）冲突**时（启动前风险弹窗 / 崩溃归因弹窗）给一个选项
-// 「一键关闭其中一个（自行选择）」→ 点了之后**先关掉原弹窗**，再弹这一个：
+// 场景：**确定是皮肤（Mod）冲突**时给一个选项「一键关闭其中一个（自行选择）」→
+// 点了之后**先关掉原弹窗**，再弹这一个：
 //   · **每组冲突一个下拉框**，选你要保留的那个（同组其余会被取消勾选）；
 //   · 只改**勾选**，绝不动 Mod 库（不删除、不移动文件）；
 //   · 确认后自动跑一次「生成控制器」，让 staging 立刻变干净。
+// ⚠ 入口**只在崩溃归因弹窗**（终末地因为皮肤冲突崩了）里 —— 用户 2026-10-01 明确：
+//   「我说的自选保留一个 mod 应该在终末地崩溃而且是皮肤冲突导致的那里，**启动时那个
+//     只做提示**，不需要只保留一个这个按钮」。
 // 返回值：后端结果对象（成功）或 false（取消）。
 async function showConflictResolveModal() {
   let groups = [];
@@ -1278,6 +1281,27 @@ async function refreshFromState() {
   if ($('cfg-inject-reshade-ui')) {
     $('cfg-inject-reshade-ui').checked = injectUi;
   }
+  if ($('cfg-reshade-panel-font')) {
+    $('cfg-reshade-panel-font').checked = s.config.reshade_panel_font !== false;
+  }
+  // 「整合 Mod 快捷键」滑块 + 面板现状：后端 panel_status 是唯一判据，别在前端另写一套。
+  if ($('cfg-unified-hotkeys')) {
+    $('cfg-unified-hotkeys').checked = s.config.hotkey_takeover === true;
+  }
+  const panel = s.hotkey_panel || null;
+  if ($('hotkey-panel-status') && panel) {
+    if (s.config.hotkey_takeover !== true) {
+      $('hotkey-panel-status').textContent = panel.addon_present
+        ? `面板已就位（${panel.base_dir}）；当前未接管，Mod 自带按键照常生效。`
+        : '';
+    } else if (!panel.possible) {
+      $('hotkey-panel-status').textContent = `⚠ 面板不可用：${panel.reason}。已保持 Mod 自带按键不被锁死。`;
+    } else if (panel.ready) {
+      $('hotkey-panel-status').textContent = `面板已注入 ReShade（${panel.base_dir}）。进游戏按 Home 打开。`;
+    } else {
+      $('hotkey-panel-status').textContent = '⚠ 开关是开的，但面板还没写就位 —— 下次「一键启动」会重试。';
+    }
+  }
   const dlss5 = s.dlss5_status || {};
   const addonCfg = (s.component_addon_status || {}).config || {};
   if ($('cfg-dlss5-addon')) {
@@ -1940,6 +1964,46 @@ function bind() {
       setStatus(enabled ? 'ReShade 控制面板已开启' : 'ReShade 控制面板已关闭');
     };
   }
+  if ($('cfg-reshade-panel-font')) {
+    $('cfg-reshade-panel-font').onchange = async () => {
+      const enabled = $('cfg-reshade-panel-font').checked;
+      state.config.reshade_panel_font = enabled;
+      await call('save_config', { reshade_panel_font: enabled });
+      setStatus(enabled ? '面板会使用系统中文字体' : '面板不再自动改 ReShade 字体');
+    };
+  }
+
+  // ── 「整合 Mod 快捷键」：一个开关同时做两件事（锁 Mod 按键 + 注入 ReShade 面板）──
+  // 后端 set_hotkey_takeover 会把面板铺好并回报"实际能不能用"；不能用时如实提示，
+  // 而且启动链路不会锁键 —— 不允许出现"键锁死了、面板却不存在"（2026-10-01 事故）。
+  if ($('cfg-unified-hotkeys')) {
+    $('cfg-unified-hotkeys').onchange = async () => {
+      const toggle = $('cfg-unified-hotkeys');
+      const enabled = toggle.checked;
+      toggle.disabled = true;
+      try {
+        const result = await call('set_hotkey_takeover', enabled);
+        state.config.hotkey_takeover = enabled;
+        setStatus(result.message || (enabled ? '整合 Mod 快捷键已打开' : '整合 Mod 快捷键已关闭'));
+        if ($('hotkey-panel-status')) {
+          $('hotkey-panel-status').textContent = !enabled
+            ? ''
+            : (result.possible
+              ? `面板已就位（${(result.panel || {}).base_dir || ''}）。进游戏按 Home 打开。`
+              : `⚠ 面板不可用：${result.reason}。已保持 Mod 自带按键不被锁死。`);
+        }
+        if (enabled && result.possible && !result.game_running) {
+          // 重新生成控制器会重写 staging，刷新一下库/状态，避免界面显示旧状态
+          await refreshFromState().catch(() => {});
+        }
+      } catch (err) {
+        toggle.checked = !enabled;
+        setStatus('切换失败：' + (err && err.message ? err.message : err));
+      } finally {
+        toggle.disabled = false;
+      }
+    };
+  }
 
   // 日志窗的 detectLogLevel / logLine / paintLog 定义在文件顶部（顶层），
   // 这里不再重复定义 —— 重复会在 bind() 作用域内遮蔽顶层版本，
@@ -2088,32 +2152,26 @@ function bind() {
         }
         rl.push('建议：到「Mod 库」页把冲突项取消勾选一个 → 点「生成控制器」→ 再启动。');
         rl.push('也可以选择仍然启动 —— 但游戏有可能在加载过程中闪退。');
-        // 按钮层级（用户 2026-09-30 要求：「发现 mod 冲突风险应该先去清理才是右边的橙色主选项」；
-        // 2026-10-01 他又加了更直接的一档：「弹窗加个选项，一键关闭其中一个（自行选择）」）：
-        //   最右 primary（橙色，默认聚焦）= 一键关闭其中一个（进"选择要保留的"弹窗）
-        //   中间 = 先去清理，不启动（原来的主选，只是不动手，改用去库页）
+        rl.push('');
+        rl.push('（这里只做提示。如果进游戏后真的因为皮肤冲突崩了，崩溃弹窗里可以直接一键处理。）');
+        // 按钮层级（用户 2026-09-30：「发现 mod 冲突风险应该先去清理才是右边的橙色主选项」）：
+        //   最右 primary（橙色，默认聚焦）= 先去清理，不启动
         //   最左 = 仍然启动（冒险项）
+        // ⚠ 2026-10-01 用户明确要求**这里只做提示**：「我说的自选保留一个 mod 应该在终末地
+        //   崩溃而且是皮肤冲突导致的那里，**启动时那个只做提示，不需要只保留一个这个按钮**」
+        //   —— 所以这个弹窗里不再有「一键关闭其中一个」，那个入口只在崩溃归因弹窗里。
         const choice = await showModalDialog({
           title: '启动前发现 Mod 冲突风险',
           message: rl.join('\n'),
-          okText: '一键关闭其中一个（自行选择）',
-          extraButtons: [{ text: '先去清理，不启动', value: 'clean' }],
+          okText: '先去清理，不启动',
           cancelText: '仍然启动',
         });
-        if (choice === 'clean') {
+        if (choice === true) {
           logLine('   风险确认：你选择先去清理');
           setStatus('已取消启动（先处理 Mod 冲突）');
           logLine('   已取消启动 —— 处理完冲突再点「一键启动」即可');
           showTab('library');
           return { needsSecondStart: false, gameReason: '已取消：启动前检测到 Mod 冲突风险' };
-        }
-        if (choice === true) {
-          logLine('   风险确认：你选择先关掉其中一个（进"选择要保留的 Mod"）');
-          setStatus('请选择要保留的 Mod');
-          await showConflictResolveModal();
-          setStatus('已取消启动（冲突处理完之后再点一键启动）');
-          logLine('   已取消启动 —— 冲突处理完再点「一键启动」即可');
-          return { needsSecondStart: false, gameReason: '已取消：处理 Mod 冲突' };
         }
         logLine('   风险确认：你选择仍然启动');
       }

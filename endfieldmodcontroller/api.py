@@ -281,10 +281,70 @@ class EndfieldModControllerApi:
 
         前端在「一键启动」里、**拉起 XXMI 之前**调它；有风险就弹确认框说明是什么
         冲突、由用户决定"仍然启动 / 先去清理"（用户 2026-09-30 要求）。
+
+        ⚠ 先做一次 :meth:`_prune_missing_selection`：用户手动删掉库里的文件之后，
+        勾选里会留下"找不到的旧 id"，界面上显示"选中 0 个"却还在报冲突风险
+        （2026-10-01 反馈的 bug）。
         """
         from . import crashwatch
 
+        self._prune_missing_selection()
         return crashwatch.prelaunch_risks(self.config)
+
+    def _prune_missing_selection(self) -> list[str]:
+        """把"库里已经没有了、但还留在勾选里"的 Mod 清出去，返回被清掉的 id。
+
+        为什么必须有（用户 2026-10-01 原话：「如果手动删 mod 库中文件，会导致 mod 库
+        选中 0 个，但是启动提示崩溃风险」）：`selected_mods` 是**上次**的勾选快照，库里
+        的文件被人手动删了就再也对不上；界面按扫描结果渲染 → 显示"选中 0 个"，可
+        `runtime\\_state\\mod_conflicts.json` 里还躺着上一次算的冲突 → 启动前照样弹窗。
+
+        代价说明：只改**勾选**与控制器自己的 staging 产物，**绝不碰 Mod 库**（数据安全红线）。
+        """
+        # ⚠ 必须先丢掉 Mod 列表缓存：`self._mods()` 是按扫描结果缓存的，用户手动删库
+        #   文件不会让它失效 —— 拿旧缓存比对等于什么都没清（这正是这个 bug 隐蔽的地方）。
+        self._invalidate_mods()
+        try:
+            existing = {mod.id for mod in self._mods()}
+        except Exception:  # noqa: BLE001 - 扫描失败就当没有可清理的
+            return []
+        current = [str(item) for item in (self.config.selected_mods or [])]
+        kept = [item for item in current if item in existing]
+        dropped = [item for item in current if item not in existing]
+        if not dropped:
+            return []
+        self.config.selected_mods = kept
+        try:
+            self.config.save()
+        except (OSError, ValueError):
+            pass
+        launcher._append_log(
+            self.config,
+            f"勾选清理：Mod 库里有 {len(dropped)} 个勾选项已经不存在（文件被删/改名）"
+            f"→ 已从勾选里去掉；剩余 {len(kept)} 个",
+        )
+        # 旧的冲突结论不再对应当前这套 Mod → 作废，否则会被当成"仍然有风险"
+        try:
+            diagnostics.mod_conflict_state_path(self.config).unlink()
+        except OSError:
+            pass
+        # staging 必须跟选择对齐：库里的文件被删了，可 `MC_<它>` 还在 Mods 里 —— 那份
+        # 产物照样会被 EFMI 加载，于是"界面上没这个 Mod、游戏里却还在"。
+        try:
+            activation.stage_and_prepare(
+                self.config.library_path,
+                self.config.staging_mods_path,
+                self.config.runtime_path,
+                selected_ids=kept,
+            )
+            launcher._append_log(
+                self.config,
+                "已按剩下的勾选重建 staging（未勾选时清空；Mod 库未动）",
+            )
+        except Exception as exc:  # noqa: BLE001
+            launcher._append_log(self.config, f"重建 staging 失败（已跳过）: {exc}")
+        self._invalidate_mods()
+        return dropped
 
     def conflict_groups(self) -> dict[str, Any]:
         """当前 Mod 资源冲突的**结构化**列表（每组含涉及的 Mod 名与库内 id）。
@@ -292,16 +352,25 @@ class EndfieldModControllerApi:
         给前端「选择要保留的 Mod」弹窗用 —— 用户 2026-10-01 要求：「如果确定是皮肤冲突
         导致崩溃，弹窗加个选项，一键关闭其中一个（自行选择）… 再弹一个，选择要保留的，
         在冲突的中间下拉框选择要保留的，**每组冲突单独下拉框**」。
-        数据来自最近一次自检落盘的 `runtime\\_state\\mod_conflicts.json`（已算好的事实）。
-        """
-        from . import crashwatch
 
-        report = crashwatch.prelaunch_risks(self.config)
+        数据直接取最近一次自检落盘的 `runtime\\_state\\mod_conflicts.json`（已算好的事实）
+        —— 这是**用户主动处理**冲突的入口，不该像"启动前提示"那样按当前 staging 过滤：
+        进 Mod 库页点一次「生成控制器」就会刷新这份结论。
+        """
+        return self._conflict_state_report()
+
+    def _conflict_state_report(self) -> dict[str, Any]:
+        """读回最近一次自检的冲突结论（自检没写过就返回空）。"""
+        state = diagnostics.mod_conflict_state(self.config)
+        conflicts = [str(item) for item in (state.get("conflicts") or [])]
+        groups = [g for g in (state.get("groups") or []) if isinstance(g, dict)]
+        if state.get("ok") is not False:
+            conflicts, groups = [], []
         return {
             "ok": True,
-            "groups": report.get("groups") or [],
-            "conflicts": report.get("conflicts") or [],
-            "checked_at": report.get("checked_at") or "",
+            "groups": groups,
+            "conflicts": conflicts,
+            "checked_at": str(state.get("at_text") or ""),
         }
 
     def resolve_mod_conflicts(self, keep: list[str] | None = None) -> dict[str, Any]:
@@ -312,9 +381,7 @@ class EndfieldModControllerApi:
         （数据安全红线）；改完立刻跑一次 `prepare()` 把 staging 清干净，否则用户进游戏还是撞。
         """
         keep_ids = {str(item) for item in (keep or []) if str(item)}
-        from . import crashwatch
-
-        report = crashwatch.prelaunch_risks(self.config)
+        report = self._conflict_state_report()
         involved: list[str] = []
         for group in report.get("groups") or []:
             for entry in group.get("mods") or []:
@@ -622,7 +689,10 @@ class EndfieldModControllerApi:
             "dependency_report": self._dependency_report(),
             "render_api": render_api,
             "controller_ready": (self.config.controller_dir / "controller.ini").is_file(),
-            "reshade_addon_ready": (self.config.reshade_runtime_path / "Addons" / "endfieldmodcontroller.addon").is_file(),
+            # 统一面板的现状（前端用它显示「整合 Mod 快捷键」滑块是否真的生效）。
+            # 判据在 reshade_integration.panel_status —— 单一实现，别在这儿另写一套。
+            "hotkey_panel": reshade_integration.panel_status(self.config),
+            "reshade_addon_ready": (self.config.dlss5_path / reshade_integration.ADDON_NAME).is_file(),
             # 这三个探测**读缓存**，不在这里触发全盘扫描（否则加载页会被卡住十几秒）；
             # 缓存由后台预热线程填好，前端看到 warming=True 时会再刷新一次。
             # 有"已下载但没安装"的更新包时，前端启动后会问用户要不要现在装
@@ -662,6 +732,70 @@ class EndfieldModControllerApi:
         self.config.ensure_dirs()
         self.config.save()
         return {"ok": True, "config": self.config.to_dict()}
+
+    def set_hotkey_takeover(self, enabled: bool) -> dict[str, Any]:
+        """启动页「整合 Mod 快捷键」滑块的后端。
+
+        用户 2026-10-01 原话：「开了要锁 mod 快捷键，注入 reshade」—— 一个开关两件事，
+        所以这里一次做完：① 落盘开关；② 把统一面板部署进 ReShade 会读的目录；
+        ③ 若游戏没在跑，顺手重新生成控制器（让"锁键"立刻在 staging 里生效）。
+        面板用不了时**如实返回 possible=False**，并且启动链路不会锁键 —— 不允许出现
+        "键锁死了、面板却不存在"这种把功能改没的情况。
+        """
+        self.config.hotkey_takeover = bool(enabled)
+        self.config.save()
+        deploy = reshade_integration.deploy_panel(
+            self.config,
+            self.config.controller_dir,
+            log=lambda message: launcher._append_log(self.config, message),
+        )
+        if enabled:
+            # 面板里的中文要靠 ReShade 加载中文字体（默认字体只有 ASCII）
+            reshade_integration.ensure_panel_font(
+                self.config, log=lambda message: launcher._append_log(self.config, message)
+            )
+        status = reshade_integration.panel_status(self.config)
+
+        reprepared = False
+        running = False
+        try:
+            running = bool(self.game_running().get("running"))
+        except Exception:  # noqa: BLE001
+            running = False
+        # 开着要立刻锁键，**关掉也要立刻把原键还原** —— staging 里的 `MC_*` 是上一轮被
+        # 改写成 `VK_F24` 的副本，不重新生成的话"关掉开关"这件事在游戏里并不生效
+        # （2026-10-01 自测发现：关掉后 staging 里仍是 F24）。
+        if status["possible"] and not running:
+            try:
+                self.prepare()
+                reprepared = True
+            except Exception as exc:  # noqa: BLE001
+                launcher._append_log(self.config, f"切换整合 Mod 快捷键后重新生成控制器失败: {exc}")
+
+        if not enabled:
+            message = ("已关闭：Mod 自带的按键已还原，照常生效"
+                       if reprepared else "已关闭：退出游戏后点「一键启动」即恢复原按键")
+        elif not status["possible"]:
+            message = f"面板用不了（{status['reason']}）—— 已保持 Mod 自带的按键不被锁死"
+        elif running:
+            message = "已打开：退出游戏后点「一键启动」，Mod 按键会被锁住、改用游戏内面板（按 Home 打开）"
+        elif reprepared:
+            message = "已打开：Mod 自带按键已锁住，进游戏后按 Home 打开统一面板操作"
+        else:
+            message = "已打开：下次「一键启动」时锁住 Mod 自带按键并注入面板"
+
+        return {
+            "ok": True,
+            "enabled": bool(enabled),
+            "possible": bool(status["possible"]),
+            "ready": bool(status["ready"]),
+            "reason": status["reason"],
+            "panel": status,
+            "warnings": deploy.get("warnings", []),
+            "reprepared": reprepared,
+            "game_running": running,
+            "message": message,
+        }
 
     # ------------------------------------------------------------------
     # library / activation

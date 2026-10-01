@@ -3,6 +3,7 @@
 用法：
     python scripts/build_release.py                  # 正常构建（推荐）
     python scripts/build_release.py --skip-checks    # 跳过静态检查（只在明确知道原因时用）
+    python scripts/build_release.py --skip-addon     # 不重编 ReShade 面板（沿用上次产物）
     python scripts/build_release.py --skip-modtest   # 不同步进测试目录
     python scripts/build_release.py --modtest-fake-old  # 测试目录改放伪旧版（测自更新用）
 
@@ -204,7 +205,7 @@ def build_fake_old(version: str) -> None:
     VERSION_PY.write_text(original.replace(f'__version__ = "{version}"', f'__version__ = "{FAKE_VERSION}"'),
                           encoding="utf-8", newline="\n")
     try:
-        run([sys.executable, "scripts/build_exe.py"], label=f"构建伪旧版（{FAKE_VERSION}）")
+        run([sys.executable, "scripts/build_exe.py", "--skip-addon"], label=f"构建伪旧版（{FAKE_VERSION}）")
     finally:
         VERSION_PY.write_text(original, encoding="utf-8", newline="\n")
         restored = read_version()
@@ -293,6 +294,14 @@ def main() -> int:
     version = read_version()
     print(f"== 构建 EndfieldModController {version} ==", flush=True)
     check_readme_versions(version)
+
+    # [0] 先编译统一控制面板（ReShade addon）：它要随进 exe，构建晚于它就等于带了旧面板。
+    if "--skip-addon" in args:
+        print("[0/7] 已按参数跳过面板编译（--skip-addon）", flush=True)
+    else:
+        print("[0/7] 编译统一控制面板（ReShade addon）", flush=True)
+        run([sys.executable, "scripts/build_addon.py"], label="编译 ReShade 面板")
+
     if "--skip-checks" not in args:
         static_checks()
     else:
@@ -303,7 +312,7 @@ def main() -> int:
     clean_dist_extras()
 
     print("[3/7] 构建最新版", flush=True)
-    run([sys.executable, "scripts/build_exe.py"], label="构建最新版")
+    run([sys.executable, "scripts/build_exe.py", "--skip-addon"], label="构建最新版")
     latest = DIST / f"{APP_NAME}.exe"
     if not latest.is_file():
         raise SystemExit("!! 没找到 dist/EndfieldModController.exe")

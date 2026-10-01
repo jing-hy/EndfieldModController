@@ -10,7 +10,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from . import activation
 from . import core
@@ -283,31 +283,89 @@ def _ensure_reshade_disabled_addons(game_dir: Path) -> None:
     ini_path.write_text(chr(10).join(out) + chr(10), encoding="utf-8")
 
 
+def resolve_hotkey_takeover(
+    config: AppConfig,
+    controller_dir: Path,
+    *,
+    log: Callable[[str], None] | None = None,
+) -> bool:
+    """「整合 Mod 快捷键」到底能不能接管？能就先把面板铺好，再返回 True。
+
+    用户 2026-10-01 的需求是「开了要**锁 mod 快捷键**，**注入 reshade**」——这两件事
+    必须绑在一起做：先把面板放进 ReShade 真正会读的目录（见
+    `reshade_integration.panel_base_dirs` 的说明），确认这条路可用之后，**才**允许把
+    Mod 自己的热键改写成 `VK_F24`。反过来（钥匙收了、门没有）就是 2026-10-01 那次
+    事故：用户的按键全失效、面板却不存在。
+
+    所以这里的返回值就是 `stage_and_prepare(hotkey_takeover=...)` 该用的值：
+    配置开着但面板不可用时**返回 False**，并在启动日志里写清原因。
+    """
+    enabled = bool(getattr(config, "hotkey_takeover", False))
+    if not enabled:
+        return False
+
+    def note(message: str) -> None:
+        _append_log(config, message)
+        if log is not None:
+            log(message)
+
+    possible, reason = reshade_integration.takeover_possible(config)
+    result = reshade_integration.deploy_panel(config, Path(controller_dir), log=note)
+    for warning in result.get("warnings", []):
+        note(f"WARN 统一面板: {warning}")
+    # 面板里的中文要靠 ReShade 加载一个中文字体（默认字体只有 ASCII）
+    font = reshade_integration.ensure_panel_font(config, log=note)
+    if font.get("reason") and not font.get("changed"):
+        note(f"面板字体: {font['reason']}")
+    if not possible:
+        note(f"整合 Mod 快捷键已打开，但面板用不了（{reason}）→ **本次不改写 Mod 热键**，原按键继续可用")
+        return False
+    if not result.get("deployed"):
+        note("整合 Mod 快捷键已打开，但面板文件一个都没写成功 → **本次不改写 Mod 热键**")
+        return False
+    note(
+        "整合 Mod 快捷键已接管: 面板已就位 "
+        + "、".join(result.get("deployed", [])[:2])
+        + "；Mod 自带按键将被锁住（游戏内按 Home 打开 ReShade 面板操作）"
+    )
+    return True
+
+
 def prepare_reshade_runtime(config: AppConfig, controller_dir: Path) -> dict[str, Any]:
-    """Prepare runtime/reshade without writing anything into the game dir."""
+    """Prepare the ReShade base directory without writing anything into the game dir.
+
+    ⚠ 2026-10-01 修正：面板必须写到 **ReShade 自己的 base 目录**（`d3d12.dll` 所在处
+    = `dlss5`；ReShade 日志写死了 `Searching for add-ons ... in '<base>'`）。旧实现
+    写到 `runtime\\reshade\\Addons\\`，那份文件永远不会被加载 —— 见
+    `reshade_integration` 模块头的说明。
+    """
     reshade_dir = config.reshade_runtime_path
-    addons_dir = reshade_dir / "Addons"
-    addons_dir.mkdir(parents=True, exist_ok=True)
+    reshade_dir.mkdir(parents=True, exist_ok=True)
     (reshade_dir / "reshade-shaders" / "Shaders").mkdir(parents=True, exist_ok=True)
     (reshade_dir / "reshade-shaders" / "Textures").mkdir(parents=True, exist_ok=True)
 
-    built_addon = _built_addon_path()
-    installed_addon = addons_dir / "endfieldmodcontroller.addon"
-    if getattr(config, "inject_reshade_ui", True):
-        if built_addon and built_addon.resolve() != installed_addon.resolve():
-            shutil.copy2(built_addon, installed_addon)
-    else:
-        disabled_addon = installed_addon.with_name(installed_addon.name + ".disabled")
-        if installed_addon.is_file():
-            if disabled_addon.exists():
-                disabled_addon.unlink()
-            installed_addon.rename(disabled_addon)
+    # 面板的实际落点（base = dlss5，能定位到游戏目录时再补一份）
+    result = reshade_integration.deploy_panel(config, Path(controller_dir))
+    base = config.dlss5_path
+    installed_addon = base / reshade_integration.ADDON_NAME
+    if not getattr(config, "inject_reshade_ui", True):
+        # 用户明确不要面板：把它挪开（可逆），但**整合 Mod 快捷键**要面板才能用 ——
+        # 那种情况下 `resolve_hotkey_takeover` 会拒绝接管，不会出现"锁了键没面板"。
+        for name in (reshade_integration.ADDON_NAME,) + reshade_integration.LEGACY_ADDON_NAMES:
+            target = base / name
+            if target.is_file():
+                disabled = target.with_name(target.name + ".disabled")
+                try:
+                    if disabled.exists():
+                        disabled.unlink()
+                    target.rename(disabled)
+                except OSError:
+                    pass
 
-    actions_tsv = controller_dir / "actions.tsv"
-    if actions_tsv.is_file():
-        shutil.copy2(actions_tsv, reshade_dir / "actions.tsv")
-    (reshade_dir / "user_ini_path.txt").write_text(str(config.user_ini_path), encoding="utf-8", newline="\n")
-
+    actions_tsv = base / "actions.tsv"
+    # `runtime\reshade\ReShade.ini` 不是 ReShade 真正读的那份（它读 dlss5 里的），
+    # 但 initialize._rebuild_ini 会把它当"[endfield-enhancer] 段的历史来源"之一，
+    # 所以照旧写一份，保持既有行为。
     ini_text = "\n".join([
         "[ADDON]",
         "AddonPath=Addons",
@@ -318,12 +376,18 @@ def prepare_reshade_runtime(config: AppConfig, controller_dir: Path) -> dict[str
         "PresetPath=ReShadePreset.ini",
         "",
     ])
-    (reshade_dir / "ReShade.ini").write_text(ini_text, encoding="utf-8", newline="\n")
+    try:
+        (reshade_dir / "ReShade.ini").write_text(ini_text, encoding="utf-8", newline="\n")
+    except OSError as exc:
+        _append_log(config, f"写入 runtime\\reshade\\ReShade.ini 失败（忽略）: {exc}")
+
     return {
         "reshade_dir": str(reshade_dir),
+        "panel_dir": str(base),
         "addon": str(installed_addon) if installed_addon.is_file() else "",
-        "actions_tsv": str(reshade_dir / "actions.tsv"),
+        "actions_tsv": str(actions_tsv) if actions_tsv.is_file() else "",
         "user_ini_path": str(config.user_ini_path),
+        "deploy": result,
     }
 
 
@@ -1363,8 +1427,13 @@ def launch_official_gui(config: AppConfig) -> dict[str, Any]:
                 config.staging_mods_path,
                 config.runtime_path,
                 selected_ids=config.selected_mods,
-                hotkey_takeover=bool(getattr(config, "hotkey_takeover", False)),
+                hotkey_takeover=resolve_hotkey_takeover(config, config.controller_dir),
                 allow_same_character=bool(getattr(config, "allow_same_character_mods", False)),
+            )
+            # 每次 staging 之后都刷新一次面板与动作清单（面板读的是 base 目录里的
+            # actions.tsv —— 不刷新的话它显示的是上一轮选中的 Mod）。
+            reshade_integration.deploy_panel(
+                config, config.controller_dir, log=lambda m: _append_log(config, m)
             )
         except Exception as exc:  # noqa: BLE001
             _append_log(config, f"暂存所选 mod 失败: {exc}")
@@ -1584,7 +1653,7 @@ def launch(
             config.staging_mods_path,
             config.runtime_path,
             selected_ids=config.selected_mods,
-            hotkey_takeover=bool(getattr(config, "hotkey_takeover", False)),
+            hotkey_takeover=resolve_hotkey_takeover(config, config.controller_dir),
             allow_same_character=bool(getattr(config, "allow_same_character_mods", False)),
         )
 
@@ -2061,30 +2130,30 @@ def launch_migoto_loader(
         config.runtime_path,
         selected_ids=config.selected_mods,
         user_ini_path=user_ini,
-        hotkey_takeover=bool(getattr(config, "hotkey_takeover", False)),
+        hotkey_takeover=resolve_hotkey_takeover(config, config.controller_dir, log=lambda m: _append_log(config, m)),
         allow_same_character=bool(getattr(config, "allow_same_character_mods", False)),
     )
     controller_dir = Path(result["controller_dir"])
 
-    # Prepare ReShade beside the injected EFMI d3d11.dll.  ReShade uses its own
-    # module directory as base path, so actions.tsv and user_ini_path.txt must
-    # live here rather than in the game directory.
+    # 统一面板（如果有）落到 ReShade 真正会读的 base 目录 —— 见
+    # reshade_integration 模块头对 ReShade 日志的引用。
+    panel = reshade_integration.deploy_panel(config, controller_dir, log=lambda m: _append_log(config, m))
+    for warning in panel.get("warnings", []):
+        warnings.append(f"统一面板: {warning}")
     built_addon = _built_addon_path()
-    addons_dir = loader_dir / "Addons"
-    addons_dir.mkdir(parents=True, exist_ok=True)
-    installed_addon = addons_dir / "endfieldmodcontroller.addon"
-    if getattr(config, "inject_reshade_ui", True):
-        if built_addon is not None:
-            shutil.copy2(built_addon, installed_addon)
-    else:
-        disabled_addon = installed_addon.with_name(installed_addon.name + ".disabled")
-        if installed_addon.is_file():
-            if disabled_addon.exists():
-                disabled_addon.unlink()
-            installed_addon.rename(disabled_addon)
+    installed_addon = config.dlss5_path / reshade_integration.ADDON_NAME
     actions_tsv = controller_dir / "actions.tsv"
-    if actions_tsv.is_file():
-        shutil.copy2(actions_tsv, loader_dir / "actions.tsv")
+    # legacy 路线（ReShade 从 loader 目录加载）以前是往 `<loader>\Addons\` 放的，
+    # 这里保留同一行为，只把文件名统一成 `endfieldmodcontroller.addon64`。
+    addons_dir = loader_dir / "Addons"
+    try:
+        addons_dir.mkdir(parents=True, exist_ok=True)
+        if getattr(config, "inject_reshade_ui", True) and built_addon is not None:
+            shutil.copy2(built_addon, addons_dir / reshade_integration.ADDON_NAME)
+        if actions_tsv.is_file():
+            shutil.copy2(actions_tsv, loader_dir / "actions.tsv")
+    except OSError as exc:
+        warnings.append(f"写入 loader 面板失败: {exc}")
     (loader_dir / "user_ini_path.txt").write_text(str(user_ini), encoding="utf-8")
     (loader_dir / "inject_order.txt").write_text("mc_bootstrap.dll" + chr(10), encoding="utf-8")
     reshade_ini = loader_dir / "ReShade.ini"
@@ -2141,10 +2210,13 @@ def launch_migoto_loader(
             except Exception as exc:  # noqa: BLE001
                 warnings.append(f"物理禁用冲突 addon 失败: {exc}")
             built_addon = _built_addon_path()
-            game_addon = game_dir / "endfieldmodcontroller.addon"
+            game_addon = game_dir / reshade_integration.ADDON_NAME
             if getattr(config, "inject_reshade_ui", True):
                 if built_addon is not None:
-                    shutil.copy2(built_addon, game_addon)
+                    try:
+                        shutil.copy2(built_addon, game_addon)
+                    except OSError as exc:
+                        warnings.append(f"写入面板到游戏目录失败: {exc}")
             else:
                 disabled_game_addon = game_addon.with_name(game_addon.name + ".disabled")
                 if game_addon.is_file():

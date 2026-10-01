@@ -1302,7 +1302,8 @@ def _check_mod_conflicts(config: AppConfig, report: Report, log: Callable[[str],
         from . import diagnostics
 
         diagnostics.record_mod_conflicts(config, ok=not problems, detail=detail,
-                                         conflicts=problems, groups=groups)
+                                         conflicts=problems, groups=groups,
+                                         mods=staged)
     except Exception:  # noqa: BLE001
         pass
 
@@ -1425,20 +1426,62 @@ def _check_controller(config: AppConfig, report: Report, log: Callable[[str], No
         report.add("controller", True, "未选择任何 Mod，跳过控制器生成（Mods 目录保持原样）")
         return
     try:
-        from . import activation
+        from . import activation, launcher
 
         result = activation.stage_and_prepare(
             config.library_path,
             config.staging_mods_path,
             config.runtime_path,
             selected_ids=config.selected_mods,
-            hotkey_takeover=bool(getattr(config, "hotkey_takeover", False)),
+            hotkey_takeover=launcher.resolve_hotkey_takeover(config, config.controller_dir, log=log),
             allow_same_character=bool(getattr(config, "allow_same_character_mods", False)),
         )
         report.add("controller", True, f"已重新生成控制器（staging {result.get('patch_count', 0)} 个 Mod）", fixed=True)
         report.action("重新生成控制器与 staging")
     except Exception as exc:  # noqa: BLE001
         report.add("controller", False, f"生成控制器失败: {exc}", manual=True)
+
+
+def _check_hotkey_panel(config: AppConfig, report: Report, log: Callable[[str], None] | None) -> None:
+    """「整合 Mod 快捷键」打开时，统一面板必须真的躺在 ReShade 会读的目录里。
+
+    用户 2026-10-01 的需求原话：「**开了要锁 mod 快捷键，注入 reshade**」—— 这两件事
+    必须绑在一起。所以这里不只检查，还**自动补齐**（能自动做的就别让用户手动）；
+    而面板根本用不了时（没开 ReShade 注入 / 底座缺失 / addon 文件丢了），启动链路
+    会拒绝锁键，这里如实报出来，而不是假装一切正常。
+    """
+    from . import reshade_integration
+
+    status = reshade_integration.panel_status(config)
+    if not getattr(config, "hotkey_takeover", False):
+        if status["addon_present"]:
+            report.add("hotkey_panel", True, "统一面板已就位（「整合 Mod 快捷键」未开启，Mod 自带按键照常生效）")
+        else:
+            report.add("hotkey_panel", True, "「整合 Mod 快捷键」未开启：不注入面板，Mod 自带按键直接生效")
+        return
+
+    if not status["possible"]:
+        report.add(
+            "hotkey_panel",
+            False,
+            f"「整合 Mod 快捷键」开着但面板用不了（{status['reason']}）→ 已保持 Mod 热键不被锁死",
+            manual=True,
+        )
+        return
+
+    result = reshade_integration.deploy_panel(config, config.controller_dir, log=log)
+    for warning in result.get("warnings", []):
+        report.add("hotkey_panel", False, f"面板部署: {warning}", manual=True)
+    refreshed = reshade_integration.panel_status(config)
+    if refreshed["ready"]:
+        report.add(
+            "hotkey_panel",
+            True,
+            "统一面板已注入 ReShade（游戏内按 Home 打开；Mod 自带按键已交给控制器接管）",
+            fixed=True,
+        )
+    else:
+        report.add("hotkey_panel", False, "统一面板缺失：面板或动作清单没写进 ReShade 目录", manual=True)
 
 
 def _check_staging(config: AppConfig, report: Report, log: Callable[[str], None] | None) -> None:
@@ -1452,14 +1495,14 @@ def _check_staging(config: AppConfig, report: Report, log: Callable[[str], None]
         report.add("staging", True, f"{len(existing)} 个 MC_ Mod 已 staging")
         return
     try:
-        from . import activation
+        from . import activation, launcher
 
         result = activation.stage_and_prepare(
             config.library_path,
             config.staging_mods_path,
             config.runtime_path,
             selected_ids=config.selected_mods,
-            hotkey_takeover=bool(getattr(config, "hotkey_takeover", False)),
+            hotkey_takeover=launcher.resolve_hotkey_takeover(config, config.controller_dir, log=log),
             allow_same_character=bool(getattr(config, "allow_same_character_mods", False)),
         )
         report.add("staging", True, f"已重新 staging {result.get('patch_count', 0)} 个 Mod", fixed=True)
@@ -1489,6 +1532,8 @@ def ensure_all(config: AppConfig, log: Callable[[str], None] | None = None) -> d
     _check_game_libs(config, report, log)
     _check_bundled_versions(config, report, log)
     _check_controller(config, report, log)
+    # 统一面板（整合 Mod 快捷键用）：必须在控制器生成之后 —— 它要读 actions.tsv
+    _check_hotkey_panel(config, report, log)
     _check_staging(config, report, log)
     _check_mod_conflicts(config, report, log)
     # Endfield Poser 必须在乳摇**之前**：它的 proxy 会加载 plugin 下所有 dll（含

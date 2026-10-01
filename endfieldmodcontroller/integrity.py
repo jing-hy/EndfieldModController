@@ -87,6 +87,18 @@ def check_integrity(config: AppConfig) -> dict:
     add("controller_ini", config.controller_dir / "controller.ini", (config.controller_dir / "controller.ini").is_file(), "controller.ini")
     add("controller_actions", config.controller_dir / "actions.tsv", (config.controller_dir / "actions.tsv").is_file(), "controller actions.tsv")
 
+    # 统一面板：只在「整合 Mod 快捷键」打开时才算必检项 —— 关着的时候没有它很正常
+    # （用户在设置里明确不要面板）。开着却没有面板 = 键会被锁死而入口不存在，
+    # 属于致命状态（2026-10-01 的事故），所以这里算 critical。
+    if getattr(config, "hotkey_takeover", False):
+        status = reshade_integration.panel_status(config)
+        add(
+            "hotkey_panel",
+            Path(status["addon"]),
+            bool(status["addon_present"] and status["actions_present"]),
+            "统一 Mod 控制面板（整合 Mod 快捷键已打开）",
+        )
+
     critical_failures = [check for check in checks if check.critical and not check.ok]
     return {
         "ok": not critical_failures,
@@ -135,9 +147,17 @@ def repair_integrity(config: AppConfig, log: Callable[[str], None] | None = None
         config.staging_mods_path,
         config.runtime_path,
         selected_ids=config.selected_mods,
-        hotkey_takeover=bool(getattr(config, "hotkey_takeover", False)),
+        # 「修复」这条链路必须与「一键启动」完全一致（issue #6 的教训）：
+        # 同样先确认面板可用再决定要不要锁 Mod 热键。
+        hotkey_takeover=launcher_mod.resolve_hotkey_takeover(config, config.controller_dir, log=note),
         allow_same_character=bool(getattr(config, "allow_same_character_mods", False)),
     )
+    try:
+        panel = reshade_integration.deploy_panel(config, config.controller_dir, log=note)
+        for warning in panel.get("warnings", []):
+            note(f"WARN 统一面板: {warning}")
+    except Exception as exc:  # noqa: BLE001
+        note(f"部署统一面板失败: {exc}")
 
     # ③ 随包资产（assets）+ DLSS5 目录内容 + ReShade.ini + 游戏目录运行库 + 乳摇/摆姿：
     #    这些全在 `initialize.ensure_all` 里，而它以前**只有「一键启动」会调**。

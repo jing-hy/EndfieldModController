@@ -22,10 +22,11 @@ def _resource_root() -> Path:
 
     与 `config.PROJECT_ROOT`（用户数据根 = exe 所在目录）不同：打包后 `web/` 是被
     `--add-data` 解压到 PyInstaller 临时目录里的，所以这里要看 `sys._MEIPASS`。
+    实现已收敛到 `config.resource_root()`（ReShade addon 的定位也用它）。
     """
-    if getattr(sys, "frozen", False):
-        return Path(getattr(sys, "_MEIPASS", None) or Path(sys.executable).resolve().parent)
-    return Path(__file__).resolve().parents[1]
+    from .config import resource_root
+
+    return resource_root()
 
 
 WEB_DIR = _resource_root() / "web"

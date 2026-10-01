@@ -227,6 +227,8 @@ def _process_lines(image_name: str, timeout: float = 4.0) -> list[str]:
 
 def log_runtime_snapshot(config: Any, game_dir: Path | None = None) -> None:
     """Log the files that commonly decide whether injection works."""
+    from . import reshade_integration
+
     try:
         runtime = Path(config.runtime_path)
         loader = config.migoto_loader_path
@@ -249,9 +251,16 @@ def log_runtime_snapshot(config: Any, game_dir: Path | None = None) -> None:
             loader_dir / "ReShade.ini",
             loader_dir / "endfieldmodcontroller.addon.log",
             loader_dir / "Addons" / "endfieldmodcontroller.addon",
+            loader_dir / "Addons" / reshade_integration.ADDON_NAME,
             runtime / "reshade" / "ReShade64.dll",
             runtime / "reshade" / "actions.tsv",
             runtime / "reshade" / "Addons" / "endfieldmodcontroller.addon",
+            # ⚠ 统一面板**真正生效**的位置 = ReShade 的 base 目录（d3d12.dll 所在处）：
+            #   诊断包必须带上它，才能回答"面板到底装了没有、ReShade 加载了没有"。
+            config.dlss5_path / reshade_integration.ADDON_NAME,
+            config.dlss5_path / "actions.tsv",
+            config.dlss5_path / "user_ini_path.txt",
+            config.dlss5_path / "modecontroller.addon.log",
         ]
         if game_dir is not None:
             candidate_files.extend([
@@ -537,7 +546,8 @@ def mod_conflict_state_path(config: Any) -> Path:
 
 def record_mod_conflicts(config: Any, *, ok: bool, detail: str = "",
                          conflicts: list[str] | None = None,
-                         groups: list[dict[str, Any]] | None = None) -> None:
+                         groups: list[dict[str, Any]] | None = None,
+                         mods: list[str] | None = None) -> None:
     """把**本次自检**的 Mod 冲突结论落盘。
 
     为什么要落盘（2026-09-30）：崩溃监视跑在另一个线程（且常在用户下次开程序时才
@@ -548,6 +558,10 @@ def record_mod_conflicts(config: Any, *, ok: bool, detail: str = "",
     前端「选择要保留的 Mod」弹窗用它渲染"每组一个下拉框"，选完调
     `api.resolve_mod_conflicts()` 自动取消勾选其余的那些。`conflicts`（字符串）保留，
     是为了兼容既有文案与诊断包。
+
+    `mods`（2026-10-01 修 bug 时新增）：**这份结论是对着哪一批 staged Mod 算出来的**。
+    "启动前风险确认"要靠它判断结论是否过期 —— 用户手动删了库里的文件后，选择会变成
+    空的，可这份 json 还留着上一次的冲突，于是"明明没选中任何 Mod 却提示崩溃风险"。
     """
     payload = {
         "at": int(time.time()),
@@ -556,6 +570,7 @@ def record_mod_conflicts(config: Any, *, ok: bool, detail: str = "",
         "detail": str(detail or ""),
         "conflicts": [str(item) for item in (conflicts or [])],
         "groups": [dict(item) for item in (groups or []) if isinstance(item, dict)],
+        "mods": sorted({str(item) for item in (mods or [])}),
     }
     path = mod_conflict_state_path(config)
     try:

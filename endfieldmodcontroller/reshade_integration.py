@@ -11,6 +11,17 @@ keeps a manifest so the operation is fully reversible:
 * ``user_ini_path.txt``
 
 Existing files with the same names are backed up first.
+
+⚠ **addon 必须放在 ReShade 自己的 base 目录**（2026-10-01 实测证据，见
+`lesson 0muovz4ap`）：ReShade 6.8 的日志写死了
+
+    Searching for add-ons (*.addon, *.addon64) in '<d3d12.dll 所在目录>'
+
+也就是**只搜 d3d12.dll 所在的那个目录**（xxmi_extra 方式下 = `<数据根>\\runtime\\dlss5`，
+它的日志原文就是 `loaded from '...\\runtime\\dlss5\\d3d12.dll'`）。此前代码把面板写进
+`runtime\\reshade\\Addons\\`、`runtime\\migoto\\Addons\\`，两处都不在搜索范围内 ——
+于是"键被改死了、面板却不存在"，用户的 Mod 快捷键全没了。所以本模块的部署目标是
+:func:`panel_base_dirs` 给出的目录（dlss5 优先，能定位到游戏目录时再补一份）。
 """
 from __future__ import annotations
 
@@ -18,29 +29,297 @@ import json
 import os
 import re
 import shutil
+import sys
+import time
 from pathlib import Path
 from typing import Any, Callable
 
-from .config import AppConfig
+from .config import AppConfig, resource_root
 
 MANIFEST_NAME = "existing_reshade_files.json"
 ADDON_NAME = "endfieldmodcontroller.addon64"
+# 我们自己写过的历史文件名（清理旧部署时用；不会碰别人的 addon）
+LEGACY_ADDON_NAMES = ("endfieldmodcontroller.addon", "EndfieldModController.addon")
 
 CONFLICTING_ADDON_NAMES = ("renodx-dlss.addon64", "renodx-dlss.addon", "renodx-dlss.addon64.disabled")
 
 
 
 def built_addon_path() -> Path | None:
-    root = Path(__file__).resolve().parents[1]
-    candidates = [
-        root / "dist" / "endfieldmodcontroller.addon",
-        root / "reshade_addon" / "build" / "endfieldmodcontroller.addon",
-        root / "reshade_addon" / "cmake-build" / "endfieldmodcontroller.addon",
-    ]
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate
+    """随包的自研 ReShade 面板（addon）在哪。
+
+    ① 资源根（打包后 = PyInstaller 的 `_MEIPASS`，源码 = 工作区）——
+       这是**唯一**在发布版里也能命中的位置（旧实现用
+       `Path(__file__).parents[1] / "dist"`，onefile 下永远返回 None，
+       部署那一步被静默跳过）；
+    ② 开发期的构建产物目录。找不到时**由调用方记日志**，绝不静默。
+    """
+    roots = [resource_root()]
+    if not getattr(sys, "frozen", False):
+        roots.append(Path(__file__).resolve().parents[1])
+    seen: set[str] = set()
+    for root in roots:
+        key = str(root).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        for candidate in (
+            root / "assets" / "addon" / ADDON_NAME,
+            root / ADDON_NAME,
+            root / "reshade_addon" / "build" / ADDON_NAME,
+            root / "reshade_addon" / "build" / "endfieldmodcontroller.addon",
+            root / "dist" / ADDON_NAME,
+            root / "dist" / "endfieldmodcontroller.addon",
+        ):
+            if candidate.is_file():
+                return candidate
     return None
+
+
+def panel_base_dirs(config: AppConfig) -> list[Path]:
+    """面板要落地的目录（按优先级）。
+
+    * **`xxmi_extra`（推荐方式）**：base = DLSS5 目录（`d3d12.dll` 的家），只装那儿一份
+      —— 游戏目录里既不需要、也不该多出文件（用户的规矩：不往游戏本体目录塞东西）。
+    * **`external`（用户自己在游戏目录装了 ReShade）**：base 就是游戏目录，那里也装一份。
+    * **`none`（不注入 ReShade）**：没有 base，**一个地方都不装**（面板也没法出现，
+      所以 `takeover_possible` 会拒绝锁键）。
+    """
+    injection = str(getattr(config, "reshade_injection", "") or "").lower()
+    if injection not in {"external", "xxmi_extra"}:
+        return []
+    dirs: list[Path] = [config.dlss5_path]
+    if injection == "external":
+        try:
+            game_dir = detect_game_dir(config, allow_scan=False)
+        except Exception:  # noqa: BLE001 - 探测失败不该拦住部署
+            game_dir = None
+        if game_dir is not None:
+            resolved = Path(game_dir)
+            if all(str(resolved).lower() != str(item).lower() for item in dirs):
+                dirs.append(resolved)
+    return dirs
+
+
+def takeover_possible(config: AppConfig) -> tuple[bool, str]:
+    """现在这套配置下，面板真的能出现在游戏里吗？（"锁键"必须先过这一关）
+
+    教训（2026-10-01）：把用户原本能用的东西改成"由我们中转"之前，必须先证明
+    中转件真的会被加载。所以只要有一条不满足，调用方就**不许**改写 Mod 热键。
+    """
+    injection = str(getattr(config, "reshade_injection", "") or "").lower()
+    if injection not in {"external", "xxmi_extra"}:
+        return False, "当前设置为「不注入 ReShade」，游戏里没有面板可供操作"
+    dll = config.reshade_dll_path
+    if dll is None or not Path(dll).is_file():
+        return False, "找不到 ReShade 底座 d3d12.dll"
+    if built_addon_path() is None:
+        return False, "随包的面板 addon 文件缺失（安装不完整）"
+    return True, ""
+
+
+def panel_status(config: AppConfig) -> dict[str, Any]:
+    """面板现状（自检 / 界面共用一套判据）。"""
+    base = config.dlss5_path
+    addon = base / ADDON_NAME
+    actions = base / "actions.tsv"
+    possible, reason = takeover_possible(config)
+    return {
+        "base_dir": str(base),
+        "addon": str(addon),
+        "addon_present": addon.is_file(),
+        "actions_present": actions.is_file(),
+        "built_addon": str(built_addon_path() or ""),
+        "possible": possible,
+        "reason": reason,
+        "ready": possible and addon.is_file() and actions.is_file(),
+    }
+
+
+def ensure_panel_font(config: AppConfig, *, log: Callable[[str], None] | None = None) -> dict[str, Any]:
+    """让 ReShade 用一个**带中文字形**的字体，否则面板里的中文全是方块。
+
+    ReShade 默认字体是内置的 `ProggyClean`（纯 ASCII）。ReShade 6.8 用的 ImGui 1.92 是
+    **动态字体**：字体文件里有字就能画出来，不需要预先声明字形范围 —— 所以只要把
+    `ReShade.ini` 的 `[STYLE] Font=` 指向系统里的中文字体（`C:\\Windows\\Fonts\\msyh.ttc`），
+    面板的中文含义就能正常显示（写前备份，且**只在原来为空时**才写，绝不覆盖用户的选择）。
+    """
+    if not getattr(config, "reshade_panel_font", True):
+        return {"changed": False, "reason": "面板字体开关已关闭"}
+    ini = config.dlss5_ini_path
+    if not ini.is_file():
+        return {"changed": False, "reason": f"没有 {ini}"}
+
+    font_dir = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
+    chosen: Path | None = None
+    for name in ("msyh.ttc", "msyhbd.ttc", "simhei.ttf", "Deng.ttf", "simsun.ttc"):
+        candidate = font_dir / name
+        if candidate.is_file():
+            chosen = candidate
+            break
+    if chosen is None:
+        return {"changed": False, "reason": "系统里找不到中文字体（msyh/simhei/…）"}
+
+    try:
+        text = ini.read_text(encoding="utf-8-sig", errors="replace")
+    except OSError as exc:
+        return {"changed": False, "reason": f"读取失败: {exc}"}
+
+    section = ""
+    lines = text.splitlines()
+    changed = False
+    out: list[str] = []
+    insert_at: int | None = None
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            if section == "style" and insert_at is None:
+                insert_at = len(out)
+            section = stripped[1:-1].strip().lower()
+            out.append(line)
+            continue
+        if section == "style":
+            match = re.match(r"^(\s*)Font\s*=\s*(.*)$", line, re.IGNORECASE)
+            if match and match.group(2).strip():
+                # 用户已经设过字体，尊重它（只要不是空值）
+                return {"changed": False, "reason": "ReShade 已配置自定义字体，未改动"}
+            if match:
+                out.append(f"{match.group(1)}Font={chosen}")
+                changed = True
+                continue
+        out.append(line)
+    if not changed:
+        if insert_at is None:
+            out.extend(["", "[STYLE]", f"Font={chosen}"])
+        else:
+            out.insert(insert_at, f"Font={chosen}")
+        changed = True
+
+    try:
+        backup = ini.with_name(ini.name + ".bak-before-panel-font")
+        if not backup.exists():
+            shutil.copy2(ini, backup)
+        ini.write_text("\n".join(out) + "\n", encoding="utf-8", newline="\r\n")
+        if log is not None:
+            log(f"统一面板字体: ReShade 字体已指向 {chosen.name}（备份 {backup.name}）")
+    except OSError as exc:
+        return {"changed": False, "reason": f"写入失败: {exc}"}
+    return {"changed": True, "font": str(chosen), "reason": ""}
+
+
+def cleanup_legacy_panels(config: AppConfig, *, log: Callable[[str], None] | None = None) -> list[str]:
+    """删掉以前放在错误目录里的那一份面板（只删我们自己命名的文件）。"""
+    removed: list[str] = []
+    stale_dirs = [config.reshade_runtime_path / "Addons", config.reshade_runtime_path]
+    for directory in stale_dirs:
+        for name in LEGACY_ADDON_NAMES + (ADDON_NAME,):
+            target = directory / name
+            if not target.is_file():
+                continue
+            # 别把新位置的文件删了（两个目录理论上不会重叠，防一手）
+            if any(
+                str(target).lower() == str(base / ADDON_NAME).lower()
+                for base in panel_base_dirs(config)
+            ):
+                continue
+            try:
+                target.unlink()
+                removed.append(str(target))
+                if log is not None:
+                    log(f"清理旧位置的面板: {target}")
+            except OSError as exc:
+                if log is not None:
+                    log(f"清理旧面板失败（忽略）: {target} -> {exc}")
+    return removed
+
+
+def deploy_panel(
+    config: AppConfig,
+    controller_dir: Path,
+    *,
+    log: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
+    """把统一面板装进 ReShade 会读的目录。
+
+    写三样东西到每个 base 目录：`endfieldmodcontroller.addon64`、`actions.tsv`、
+    `user_ini_path.txt`（addon 靠最后这个找到 `d3dx_user.ini`）。
+    任何一步失败都**记进结果与日志**，绝不静默跳过（这正是上次翻车的地方）。
+    """
+    addon_source = built_addon_path()
+    actions_source = Path(controller_dir) / "actions.tsv"
+    deployed: list[str] = []
+    warnings: list[str] = []
+
+    def note(message: str) -> None:
+        warnings.append(message)
+        if log is not None:
+            log(message)
+
+    if addon_source is None:
+        note("面板 addon 文件缺失：没有可部署的 endfieldmodcontroller.addon64")
+    if not actions_source.is_file():
+        note(f"动作清单缺失：{actions_source}（先跑一次「生成控制器」）")
+
+    cleanup_legacy_panels(config, log=log)
+
+    for base in panel_base_dirs(config):
+        try:
+            base.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            note(f"创建目录失败 {base}: {exc}")
+            continue
+        if addon_source is not None:
+            target = base / ADDON_NAME
+            try:
+                shutil.copy2(addon_source, target)
+                deployed.append(str(target))
+            except OSError as exc:
+                # 游戏/XXMI 正在运行时会占住这个文件；这不是致命错误，
+                # 但要留痕（下次一键启动会再试一遍）。
+                note(f"写入面板失败 {target}: {exc}")
+        if actions_source.is_file():
+            try:
+                shutil.copy2(actions_source, base / "actions.tsv")
+            except OSError as exc:
+                note(f"写入 actions.tsv 失败 {base}: {exc}")
+        try:
+            (base / "user_ini_path.txt").write_text(
+                str(config.user_ini_path), encoding="utf-8", newline="\n"
+            )
+        except OSError as exc:
+            note(f"写入 user_ini_path.txt 失败 {base}: {exc}")
+
+    possible, reason = takeover_possible(config)
+    takeover = bool(getattr(config, "hotkey_takeover", False)) and possible
+    action_count = 0
+    if actions_source.is_file():
+        try:
+            with actions_source.open(encoding="utf-8", errors="replace") as handle:
+                action_count = max(0, sum(1 for _ in handle) - 1)
+        except OSError:
+            action_count = 0
+    info_text = (
+        f"takeover={'1' if takeover else '0'}\n"
+        f"actions={action_count}\n"
+        f"generated={time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"base={config.dlss5_path}\n"
+    )
+    for base in panel_base_dirs(config):
+        try:
+            (base / "panel_info.txt").write_text(info_text, encoding="utf-8", newline="\n")
+        except OSError:
+            pass
+
+    return {
+        "addon_source": str(addon_source) if addon_source else "",
+        "base_dirs": [str(item) for item in panel_base_dirs(config)],
+        "deployed": deployed,
+        "warnings": warnings,
+        "possible": possible,
+        "reason": reason,
+        "takeover": takeover,
+        "action_count": action_count,
+    }
 
 
 def xxmi_config_path(launcher: Path) -> Path | None:

@@ -29,13 +29,16 @@ ROOT = Path(__file__).resolve().parents[1]
 ENTRY = ROOT / "scripts" / "exe_entry.py"
 APP_NAME = "EndfieldModController"
 
-# 只读资源：web 前端整目录 + 角色名表（含拼音别名）打进去。
-# ⚠ 角色表必须显式带上：它是 .json 数据文件，PyInstaller 只自动收 .py —— 少了它，
-# 发布版会退化成 core.CHARACTER_ALIASES 那 18 条内置兜底表（官网那 33 位与拼音别名
-# 全部失效，新 Mod 的自动归类随之变差）。2026-10-01 实测旧包内确实没有它。
+# 只读资源：web 前端整目录 + 角色名表（含拼音别名）+ 面板词表 + 自研 ReShade 面板。
+# ⚠ 这些 .json / .addon64 都是数据文件，PyInstaller 只自动收 .py —— 少一个，发布版就会
+# 悄悄退化成"内置兜底数据"（角色表踩过一次：exe 里没有 characters.json，33 位角色全没了）。
+# 面板也一样：没有它，「整合 Mod 快捷键」会因为"面板不存在"而拒绝锁键（这是对的，
+# 但用户会以为是开关坏了），所以它必须进包。
 ADD_DATA = [
     ("web", "web"),
     ("endfieldmodcontroller/characters.json", "endfieldmodcontroller"),
+    ("endfieldmodcontroller/hotkey_hints.json", "endfieldmodcontroller"),
+    ("assets/addon/endfieldmodcontroller.addon64", "assets/addon"),
 ]
 
 # 应用图标（多尺寸 ico，含 16/24/32/48/64/128/256）。放进 exe 后，
@@ -47,6 +50,19 @@ def main() -> int:
     args = list(sys.argv[1:])
     onefile = "--onedir" not in args
     keep_console = "--console" in args
+
+    # 面板必须在打之前就编好 —— 缺了它 exe 里就没有统一面板。
+    # （默认自动编；`--skip-addon` 只给"刚编过、确认没改源码"的场合用。）
+    if "--skip-addon" not in args:
+        addon_script = ROOT / "scripts" / "build_addon.py"
+        result = subprocess.run([sys.executable, str(addon_script)], cwd=str(ROOT))
+        if result.returncode != 0:
+            print("\n!! ReShade 面板编译失败（可加 --skip-addon 沿用上次产物）")
+            return result.returncode
+    for src, _dest in ADD_DATA:
+        if not (ROOT / src).exists():
+            print(f"!! 缺少随包资源：{src}")
+            return 1
 
     cmd = [
         sys.executable, "-m", "PyInstaller",

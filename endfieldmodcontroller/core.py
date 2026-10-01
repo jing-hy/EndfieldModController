@@ -27,6 +27,8 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any, Iterator, Sequence
 
+from . import hotkey_hints
+
 
 # ---------------------------------------------------------------------------
 # Exceptions
@@ -128,7 +130,7 @@ _KEY_RE = re.compile(r"^\s*key\s*=", re.IGNORECASE)
 _RUN_RE = re.compile(r"^\s*run\s*=\s*(.+?)\s*$", re.IGNORECASE)
 _TYPE_RE = re.compile(r"^\s*type\s*=\s*(\w+)\s*$", re.IGNORECASE)
 _CONDITION_RE = re.compile(r"^\s*condition\s*=\s*(.*?)\s*$", re.IGNORECASE)
-_VAR_ASSIGN_RE = re.compile(r"^\s*\$([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$")
+_VAR_ASSIGN_RE = re.compile(r"^\s*\$([A-Za-z_\\][A-Za-z0-9_\\]*)\s*=(?!=)\s*(.*?)\s*$")
 _CONST_RE = re.compile(
     r"^\s*(?P<flags>(?:(?:global|persist|locked|nopersist)\s+)*)\$(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*(?:=\s*(?P<value>.*?))?\s*$",
     re.IGNORECASE,
@@ -261,11 +263,19 @@ class Action:
     targets: list[str] = field(default_factory=list)
     option_values: list[list[str]] = field(default_factory=list)
     send_index: bool = False
+    # ── 统一面板用的展示字段（用户 2026-10-01：「要标明原快捷键，要自动识别那个
+    #    变量的名称，推测含义」）──────────────────────────────────────────────
+    hint: str = ""                              # 推测含义（中文，推不出就是空）
+    var_phrase: str = ""                        # 变量名清洗后的英文短语（中文推不出时的兜底）
+    key_label: str = ""                         # 原快捷键可读写法：`VK_LEFT` → `←`
+    char_group: str = "未分类"                  # 角色/分组，面板按它分栏
+    context_tokens: list[str] = field(default_factory=list)   # 推断用的网格/资源证据
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d["values"] = list(self.values)
         d["original_keys"] = list(self.original_keys)
+        d["context_tokens"] = list(self.context_tokens)
         return d
 
 
@@ -1006,6 +1016,26 @@ def namespaced_section_reference(section: str, namespace: str) -> str:
             return f"{prefix}\\{ns}\\{suffix}"
     return section
 
+def _enrich_action(action: Action, ini_lines: Sequence[str], var_names: Sequence[str]) -> Action:
+    """给一个动作补上统一面板要用的展示字段（推测含义 / 键位 / 证据）。
+
+    中文推不出时**不回退成编造的中文**，而是给出变量名清洗后的英文短语 ——
+    用户 2026-10-01 的原则是"那些滑块要真的有用，不要就做表面功夫"，标签同理：
+    宁可显示 `head horns` 也不要猜一个错的中文。
+    """
+    tokens: list[str] = []
+    for name in var_names:
+        for token in hotkey_hints.mesh_tokens("", name, limit=8, lines=ini_lines):
+            if token not in tokens:
+                tokens.append(token)
+    primary = var_names[0] if var_names else None
+    action.context_tokens = tokens
+    action.hint = hotkey_hints.hint_for(primary, section=action.section, tokens=tokens)
+    action.var_phrase = hotkey_hints.var_phrase(primary) if primary else ""
+    action.key_label = hotkey_hints.key_labels(action.original_keys)
+    return action
+
+
 def parse_mod_actions(mod_dir: Path, mods_root: Path) -> list[Action]:
     """Extract user-facing actions from every .ini inside *mod_dir*."""
     actions: list[Action] = []
@@ -1017,6 +1047,7 @@ def parse_mod_actions(mod_dir: Path, mods_root: Path) -> list[Action]:
             text = read_text(ini_path)
         except OSError:
             continue
+        ini_lines = text.splitlines()
         ini_rel = str(ini_path.relative_to(mod_dir)).replace("\\", "/")
         namespace = parse_namespace(text) or _namespace_from_ini_path(ini_path, mods_root)
         _, sections = split_ini(text)
@@ -1029,29 +1060,52 @@ def parse_mod_actions(mod_dir: Path, mods_root: Path) -> list[Action]:
             run_command = next((m.group(1).strip() for m in run_matches if m), None)
             type_match = next((m.group(1).strip().lower() for m in (_TYPE_RE.match(line) for line in sec.lines) if m), None)
             condition_match = next((m.group(1).strip() for m in (_CONDITION_RE.match(line) for line in sec.lines) if m), "")
-            var_assignments: list[tuple[str, list[str]]] = []
+            # `type = hold`（按住生效）不是开关，`post $x = ...` 是每帧复位的瞬时状态
+            # （庄方宜那套 KatModular 就有 `KeyMouseClick` / `KeyAlt` / `KeyW`）。
+            # 把它们收进"统一面板"会造出一堆按下去没意义的滑块 —— 一律跳过。
+            if type_match == "hold":
+                continue
+            var_assignments: list[tuple[str, str, str, list[str]]] = []   # (绝对名, 命名空间, 短名, 值)
             for line in sec.lines:
                 m = _VAR_ASSIGN_RE.match(line)
                 if m:
-                    var_name = m.group(1)
+                    raw_name = m.group(1)
                     raw_value = m.group(2).strip()
                     values = [v.strip() for v in raw_value.split(",") if v.strip()] if raw_value else []
-                    if values:
-                        var_assignments.append((var_name, values))
+                    if not values:
+                        continue
+                    # 变量可能是相对的 `$coat`，也可能是**带命名空间的绝对引用**
+                    # `$\FangyiVar\open`（KatModular 那一套全是这种写法，
+                    # 老正则不认反斜杠，整个 Mod 因此一个开关都解析不出来）。
+                    if "\\" in raw_name:
+                        ns_part, _, short = raw_name.rpartition("\\")
+                        own_ns = "\\" + ns_part.strip("\\")
+                    else:
+                        own_ns = namespace
+                        short = raw_name
+                    var_assignments.append((absolute_var(own_ns, short), own_ns, short, values))
 
             original_keys = [line.split("=", 1)[1].strip() for line in key_lines]
 
             if var_assignments and len(var_assignments) > 1:
-                option_values = [values for _, values in var_assignments]
+                option_values = [values for _, _, _, values in var_assignments]
                 option_count = len(option_values[0])
                 if option_count and all(len(values) == option_count for values in option_values):
-                    names = [name for name, _ in var_assignments]
-                    actions.append(Action(
+                    names = [short for _, _, short, _ in var_assignments]
+                    # 只有一个取值（例如庄方宜那两个 `ResetPanel1Pos` 段全是 `= 0`）时，
+                    # 它的语义是"按一下复位"而不是开关 —— 面板上给按钮，不给滑块。
+                    if option_count == 1:
+                        group_kind = "command"
+                    elif type_match == "cycle" or option_count > 1:
+                        group_kind = "cycle"
+                    else:
+                        group_kind = "toggle"
+                    actions.append(_enrich_action(Action(
                         id=stable_id(mod_id, ini_rel, sec.header, ",".join(names), run_command or ""),
                         mod_id=mod_id,
                         mod_name=mod_dir.name,
                         label=_group_action_label(sec.header, names, run_command),
-                        kind="cycle" if (type_match == "cycle" or option_count > 1) else "toggle",
+                        kind=group_kind,
                         ini_rel=ini_rel,
                         section=sec.header,
                         namespace=namespace,
@@ -1061,14 +1115,14 @@ def parse_mod_actions(mod_dir: Path, mods_root: Path) -> list[Action]:
                         original_keys=original_keys,
                         condition=condition_match,
                         source=str(ini_path),
-                        targets=[absolute_var(namespace, name) for name in names],
+                        targets=[target for target, _, _, _ in var_assignments],
                         option_values=[list(values) for values in option_values],
                         send_index=True,
-                    ))
+                    ), ini_lines, names))
                     continue
 
             if var_assignments:
-                for var_name, values in var_assignments:
+                for target, own_ns, var_name, values in var_assignments:
                     kind = "cycle" if (type_match == "cycle" or len(values) > 1) else "toggle"
                     if kind == "toggle":
                         if values == ["0"]:
@@ -1076,7 +1130,7 @@ def parse_mod_actions(mod_dir: Path, mods_root: Path) -> list[Action]:
                         elif len(values) == 1 and values[0] != "0":
                             values = ["0", values[0]]
                     label = _humanize_action_label(sec.header, var_name, run_command)
-                    actions.append(Action(
+                    actions.append(_enrich_action(Action(
                         id=stable_id(mod_id, ini_rel, sec.header, var_name, run_command or ""),
                         mod_id=mod_id,
                         mod_name=mod_dir.name,
@@ -1084,7 +1138,7 @@ def parse_mod_actions(mod_dir: Path, mods_root: Path) -> list[Action]:
                         kind=kind,
                         ini_rel=ini_rel,
                         section=sec.header,
-                        namespace=namespace,
+                        namespace=own_ns,
                         var_name=var_name,
                         values=values,
                         run_command=run_command,
@@ -1092,13 +1146,13 @@ def parse_mod_actions(mod_dir: Path, mods_root: Path) -> list[Action]:
                         original_keys=original_keys,
                         condition=condition_match,
                         source=str(ini_path),
-                        target_absolute=absolute_var(namespace, var_name),
-                        targets=[absolute_var(namespace, var_name)],
+                        target_absolute=target,
+                        targets=[target],
                         option_values=[list(values)],
                         send_index=True,
-                    ))
+                    ), ini_lines, [var_name]))
             elif run_command:
-                actions.append(Action(
+                actions.append(_enrich_action(Action(
                     id=stable_id(mod_id, ini_rel, sec.header, run_command),
                     mod_id=mod_id,
                     mod_name=mod_dir.name,
@@ -1113,7 +1167,7 @@ def parse_mod_actions(mod_dir: Path, mods_root: Path) -> list[Action]:
                     condition=condition_match,
                     source=str(ini_path),
                     send_index=True,
-                ))
+                ), ini_lines, []))
 
     actions.sort(key=lambda a: (a.mod_id, a.ini_rel, a.section, a.id))
     return actions
@@ -1326,6 +1380,9 @@ def generate_controller_mod(
         mod_descriptions[mod.id] = guess_mod_description(mod.name, mod.path)
         if mod.is_dependency:
             continue
+        # 角色/分组是面板分栏的依据（统一面板按"角色 → Mod → 部件"排布）
+        for action in mod.actions:
+            action.char_group = mod.group or "未分类"
         actions.extend(mod.actions)
 
     dedup: dict[str, Action] = {}
@@ -1435,6 +1492,9 @@ def generate_controller_mod(
             "id", "label", "kind", "mod_name", "values", "description",
             "current", "namespace", "var_name", "section", "run_command", "original_keys",
             "wire_id", "send_index", "merged",
+            # ↓ 2026-10-01 统一面板新增（**只追加、不动前 15 列**：ReShade addon 用
+            #   `fields.size() > N` 判断，新旧两版都能读同一份 actions.tsv）
+            "hint", "key_label", "char_group", "condition",
         ]
         tsv_lines = ["	".join(tsv_header)]
         for action in actions:
@@ -1470,6 +1530,10 @@ def generate_controller_mod(
                 str(action.wire_id),
                 "1" if action.send_index else "0",
                 "1" if len(action.targets) > 1 else "0",
+                tsv_cell(action.hint or action.var_phrase),
+                tsv_cell(action.key_label),
+                tsv_cell(action.char_group),
+                tsv_cell(action.condition or ""),
             ]
             tsv_lines.append("	".join(row))
         (controller_dir / "actions.tsv").write_text("\n".join(tsv_lines) + "\n", encoding="utf-8", newline="\n")

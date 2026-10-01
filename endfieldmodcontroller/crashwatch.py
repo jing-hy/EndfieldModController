@@ -292,15 +292,38 @@ def prelaunch_risks(config: AppConfig) -> dict[str, Any]:
     两个数据来源都是**已经算好的事实**，不是猜：
       * 静态冲突 = 本次自检落盘的 `runtime\\_state\\mod_conflicts.json`（initialize 写）；
       * 崩溃记忆 = 过去真的崩过的 Mod 组合（`crash_memory.json`）。
+
+    ⚠ 判据必须以**这次真的会被加载的那批 Mod** 为准（2026-10-01 修 bug）：
+    用户手动删掉库里的文件后，界面上已经是"选中 0 个"，可那份冲突 json 还留着上一次的
+    结论，于是启动时照样弹"崩溃风险"。所以这里两处收紧：
+      ① 当前 staging 里一个 Mod 都没有 → 直接没有风险（没有任何东西会被加载）；
+      ② 落盘结论**不是对着现在这批 staged Mod 算的** → 视为过期，不报。
     """
     from . import diagnostics
 
+    mods = staging_mods(config)
+    if not mods:
+        return {
+            "blocking": False,
+            "conflicts": [],
+            "groups": [],
+            "memories": [],
+            "mods": [],
+            "checked_at": "",
+            "note": "当前没有生效的 Mod（staging 为空），跳过冲突检查",
+        }
+
     state = diagnostics.mod_conflict_state(config)
-    conflicts = [str(x) for x in (state.get("conflicts") or [])] if state.get("ok") is False else []
+    fresh = state.get("ok") is False
+    recorded_mods = state.get("mods")
+    if fresh and isinstance(recorded_mods, list) and recorded_mods:
+        if sorted(str(x) for x in recorded_mods) != sorted(mods):
+            # 结论过期：那批 Mod 和现在这批不一样了（多半是库里的文件被删/换了）
+            fresh = False
+    conflicts = [str(x) for x in (state.get("conflicts") or [])] if fresh else []
     # 结构化冲突组（2026-10-01）：前端「选择要保留的 Mod」弹窗按"每组一个下拉框"渲染，
     # 选完调 `api.resolve_mod_conflicts()` 自动取消勾选其余的那些。
-    groups = [g for g in (state.get("groups") or []) if isinstance(g, dict)] if state.get("ok") is False else []
-    mods = staging_mods(config)
+    groups = [g for g in (state.get("groups") or []) if isinstance(g, dict)] if fresh else []
     memories = [e for e in read_crash_memory(config)
                 if _same_combo(list(e.get("mods") or []), mods)]
     return {
@@ -309,7 +332,7 @@ def prelaunch_risks(config: AppConfig) -> dict[str, Any]:
         "groups": groups,
         "memories": memories[:3],
         "mods": mods,
-        "checked_at": str(state.get("at_text") or ""),
+        "checked_at": str(state.get("at_text") or "") if fresh else "",
     }
 
 

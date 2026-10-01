@@ -154,6 +154,15 @@
           </div>
           <div class="switch-desc">摆姿 / MMD 播放插件：注入 <code>d3dcompiler_47</code> proxy ＋ <code>plugin\poser.dll</code>；游戏内按 <code>L</code> 开面板、按住 <code>Alt</code> 取光标。安装包从它的官方 Release 下载（上游 AGPL-3.0，不随包分发）</div>
         </div>
+        <div class="switch-item">
+          <div class="switch-row">
+            <span class="switch-name">整合 Mod 快捷键</span>
+            <label class="switch"><input type="checkbox" id="cfg-unified-hotkeys"><span class="slider"></span></label>
+          </div>
+          <div class="switch-desc">打开后：把各 Mod 自带的按键<b>锁住</b>，操作统一到游戏内的 ReShade 面板（进游戏按 <code>Home</code> → <b>ModeController</b> 页）。面板按角色分组、开关用滑块，每项都标出<b>变量名</b>、<b>推测含义</b>与<b>原快捷键</b>。<br>
+            不开就保持现在的样子：Mod 自带的快捷键与控制菜单直接生效。<b>面板装不上时不会锁键</b>（会在这里告诉你原因）。<br>
+            <span id="hotkey-panel-status" class="hint"></span></div>
+        </div>
       </div>
 
       <div class="toolbar">
@@ -286,6 +295,14 @@
         <div class="setting-row switch-row">
           <span class="setting-label" title="终末地自带 DLSS：喂帧组件（dlss5-feed）会与游戏自己的 DLSS 抢同一条 NGX 链路。开启时自检会自动把它停用（文件移到 runtime\dlss5\_disabled\，可逆）；关掉这个开关就会自动放回。">游戏自带 DLSS 时自动停用喂帧组件（可逆）</span>
           <label class="switch"><input type="checkbox" id="cfg-auto-disable-feed"><span class="slider"></span></label>
+        </div>
+        <div class="setting-row switch-row">
+          <span class="setting-label" title="把统一控制面板（自研 ReShade addon）放进 ReShade 真正读取的目录（d3d12.dll 所在处）。关掉后不注入面板；此时「整合 Mod 快捷键」会拒绝锁键，避免出现“键被锁了、面板却不存在”。">注入 ReShade 控制面板</span>
+          <label class="switch"><input type="checkbox" id="cfg-inject-reshade-ui" checked><span class="slider"></span></label>
+        </div>
+        <div class="setting-row switch-row">
+          <span class="setting-label" title="ReShade 默认字体只有 ASCII，面板里的中文含义会显示成方块。开启时（仅在 ReShade.ini 的 Font 还为空的情况下）自动指向系统中文字体，写前会备份。">面板使用中文字体（自动，可关）</span>
+          <label class="switch"><input type="checkbox" id="cfg-reshade-panel-font" checked><span class="slider"></span></label>
         </div>
       </div>
 

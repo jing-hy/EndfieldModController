@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from endfieldmodcontroller import core
+from endfieldmodcontroller import core, reshade_integration
 from endfieldmodcontroller.api import EndfieldModControllerApi
 from endfieldmodcontroller.config import AppConfig
 
@@ -71,9 +71,8 @@ $hat = 0,1
         original = (self.library / "陈" / "夏日" / "mod.ini").read_text(encoding="utf-8")
         self.assertIn("key = no_modifiers VK_9", original)
 
-        # Managed staging 保留 Mod 自带热键（2026-10-01 起默认**不再**改写为 VK_F24，
-        # 见 activation.stage_and_prepare：控制面板还没做好，先让 Mod 原键可用），
-        # 同时仍然生成控制器文件。
+        # Managed staging 保留 Mod 自带热键（`hotkey_takeover` 默认 false：面板没接管时
+        # 绝不锁用户的按键），同时仍然生成控制器文件。
         managed = api.config.managed_mods_path
         self.assertTrue(managed.is_dir())
         self.assertTrue((api.config.controller_dir / "controller.ini").is_file())
@@ -83,10 +82,15 @@ $hat = 0,1
         self.assertIn("[key", staged_text.lower())
         self.assertEqual(prepare["patch_count"], 0)
 
-        # ReShade add-on and action list are deployed outside the game dir.
-        self.assertTrue((api.config.reshade_runtime_path / "Addons" / "endfieldmodcontroller.addon").is_file())
-        self.assertTrue((api.config.reshade_runtime_path / "actions.tsv").is_file())
-        self.assertTrue((api.config.reshade_runtime_path / "user_ini_path.txt").is_file())
+        # ReShade add-on and action list are deployed outside the game dir —— 且必须落在
+        # **ReShade 真正会读的目录**：xxmi_extra 注入方式下就是 d3d12.dll 所在的 dlss5
+        # （2026-10-01 实测 ReShade.log：`Searching for add-ons ... in '<dlss5>'`）。
+        panel_dir = api.config.dlss5_path
+        self.assertTrue((panel_dir / "actions.tsv").is_file())
+        self.assertTrue((panel_dir / "user_ini_path.txt").is_file())
+        self.assertFalse((api.config.reshade_runtime_path / "Addons" / "endfieldmodcontroller.addon").is_file())
+        if reshade_integration.built_addon_path() is not None:
+            self.assertTrue((panel_dir / reshade_integration.ADDON_NAME).is_file())
 
         # Action queue can be written and read back.
         first = prepare and json.loads((api.config.controller_dir / "actions.json").read_text(encoding="utf-8"))["actions"][0]

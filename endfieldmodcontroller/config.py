@@ -28,6 +28,20 @@ DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config.json"
 DEFAULT_DATA_ROOT = PROJECT_ROOT / "runtime"
 
 
+def resource_root() -> Path:
+    """**只读资源根**（`web/`、随包 addon 等）—— 与数据根正好相反。
+
+    打包后 `--add-data` 的东西被解压到 PyInstaller 临时目录（`sys._MEIPASS`），
+    所以这里必须走 `_MEIPASS`；源码方式跑就是工作区根。
+    这是全项目**唯一**一份实现，`app._resource_root()` 与 ReShade addon 的定位都
+    复用它 —— 曾经因为两处各写一份，发布版里 addon 路径恒为 None（lesson
+    2026-10-01：onefile 下 `__file__` 派生路径必须单独验）。
+    """
+    if getattr(sys, "frozen", False):
+        return Path(getattr(sys, "_MEIPASS", None) or Path(sys.executable).resolve().parent)
+    return Path(__file__).resolve().parents[1]
+
+
 def _safe_save(cfg: "AppConfig", path: Path) -> bool:
     """保存配置，失败只记不抛 —— 配置目录只读（如装在 Program Files）不该让程序起不来。"""
     try:
@@ -117,12 +131,19 @@ class AppConfig:
     theme: str = "light"
     last_tab: str = "library"
     inject_reshade_ui: bool = True
-    # **是否接管 Mod 自带热键**（把每个 Mod 的 `[Key*]` 统一改写成 `VK_F24`，改由控制器
-    # 面板驱动）。2026-10-01 用户拍板：**控制面板还没做好，在此之前先恢复快捷键** ——
-    # 面板是我们自研的 ReShade addon（`EndfieldModController.addon`），它没随包、也没装进
-    # ReShade 真正读取的目录，导致"键被改死了、面板却不存在"，Mod 的按键与控制菜单全失效。
-    # 所以默认 False = 不动 Mod 的键，readme 里写的快捷键直接生效；等面板做好再打开。
+    # **「整合 Mod 快捷键」总开关**（2026-10-01 落地，取代旧的"面板还没做好"状态）。
+    # True = 把每个 Mod 的 `[Key*]` 统一改写成 `VK_F24`，操作改到游戏内的统一面板
+    # （自研 ReShade addon，按 Home 打开）—— 用户原话：「开了要锁 mod 快捷键，注入 reshade」。
+    # False（默认）= 完全维持原样：Mod 自带的快捷键与控制菜单直接生效。
+    # ⚠ 打开后**面板是必须存在的**：`launcher.resolve_hotkey_takeover` 会先确认面板真的
+    #   躺在 ReShade 会读的目录、且 ReShade 注入可用，否则拒绝锁键（2026-10-01 的事故
+    #   就是"键锁死了、面板却不存在"，见 lesson 0muovz4ap）。
     hotkey_takeover: bool = False
+    # **面板的中文字体**：ReShade 默认字体（ProggyClean）没有中文字形，面板里的中文含义
+    # 会显示成方块。True（默认）= 打开「整合 Mod 快捷键」时，若 `ReShade.ini` 的
+    # `[STYLE] Font=` 还是空的，就自动指向系统中文字体（`msyh.ttc` 等，写前备份）。
+    # ImGui 1.92（ReShade 6.8 用的那版）是**动态字体**，字体文件里有字就能画出来。
+    reshade_panel_font: bool = True
     # **强行关闭角色 Mod 互斥**（用户 2026-10-01 要求：「设置…拨钮…强行关闭角色 mod 互斥，
     # 这个可以禁用互斥功能，介绍写便于部分同角色但不冲突的 mod」）。
     # True = 勾选时不再自动取消同角色的其它 Mod，控制器生成时也不再按角色去重 ——
