@@ -93,7 +93,10 @@ class RuntimeDepsTests(unittest.TestCase):
             runtime_deps._download_extract = original_extract
             runtime_deps._release_info = original_release
             runtime_deps._asset_url = original_asset
-        self.assertEqual([r.key for r in results], ["XXMI", "XXMI-Libs", "EFMI", "Poser"])
+        # Magpie 是**可选扩展**（默认关，关着时 ensure_magpie 直接返回 skipped、不下载）——
+        # 它也会出现在结果里，但状态是 skipped，不算失败。
+        self.assertEqual([r.key for r in results], ["XXMI", "XXMI-Libs", "EFMI", "Poser", "Magpie"])
+        self.assertEqual(next(r for r in results if r.key == "Magpie").status, "skipped")
         self.assertTrue(self.config.xxmi_launcher.endswith("XXMI Launcher.exe"))
         efmi_root = self.config.builtin_runtime_path / "XXMI" / "EFMI"
         self.assertTrue((efmi_root / "Core" / "EFMI" / "main.ini").is_file())

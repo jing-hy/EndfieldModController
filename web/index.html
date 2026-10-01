@@ -108,6 +108,19 @@
         <button id="dep-check-btn">检查状态</button>
         <button id="dep-update-all-btn" class="primary">自动安装/更新</button>
       </div>
+      <div class="switch-item" id="magpie-card">
+        <div class="switch-row">
+          <span class="switch-name">Magpie Experimental（画面级 AI 效果器 · 可选扩展）</span>
+          <label class="switch"><input type="checkbox" id="cfg-magpie-enabled"><span class="slider"></span></label>
+        </div>
+        <div class="switch-desc">
+          抓窗口画面、自己做 DLSSNR / 超分 / 帧生成，<b>不碰游戏进程</b>，所以能和上面的游戏内 DLSS5 <b>叠加</b>（多层 NR），40 系机器也能用它的「RTX 40/50 社区兼容版」运行库。<br>
+          <b>效果不如游戏内 DLSS5</b>：它拿不到游戏引擎的原生运动矢量、深度、曝光，也没法把 UI 单独分出来 —— 动态画面可能有<b>鬼影</b>、<b>文字与 UI 会一起被处理</b>（原作者 README 明确写了）。<br>
+          来自 <a href="https://github.com/SAOG0721/Magpie" target="_blank" rel="noreferrer">SAOG0721/Magpie</a>（Blinue/Magpie 的非官方实验性 fork，<b>GPL-3.0</b>，<b>不随包分发</b>）。<br>
+          <b>主包约 467 MB</b>：<b>默认关闭，关着不会下载</b>；打开后才会去下载。
+        </div>
+        <div id="magpie-status" class="hint"></div>
+      </div>
       <div id="dep-status" class="hint"></div>
       <div class="progress-row"><progress id="dep-progress" max="100" value="0"></progress><span id="dep-progress-text" class="hint">0/0</span></div>
       <pre id="dep-log" class="dep-log" aria-live="polite">等待开始…（这里会显示下载线路尝试、断点续传、组件安装等详细过程）</pre>
@@ -124,7 +137,7 @@
             <span class="switch-name">DLSS5 神经渲染</span>
             <label class="switch"><input type="checkbox" id="cfg-dlss5-addon" checked><span class="slider"></span></label>
           </div>
-          <div class="switch-desc">RenoDX-DLSS5：把游戏自身的 DLSS 输出替换成 DLSS5 神经渲染</div>
+          <div class="switch-desc">RenoDX-DLSS5：把游戏自身的 DLSS 输出替换成 DLSS5 神经渲染（用游戏自己的运动矢量与深度，<b>这是效果最好的那一路</b>）。<br>下面那个可选的 <b>Magpie</b> 也能做 NR，但它是<b>画面级后处理、效果不如这里</b>，只适合叠加层数或 40 系机器凑合用。</div>
         </div>
         <div class="switch-item">
           <div class="switch-row">
@@ -163,11 +176,21 @@
             不开就保持现在的样子：Mod 自带的快捷键与控制菜单直接生效。<b>面板装不上时不会锁键</b>（会在这里告诉你原因）。<br>
             <span id="hotkey-panel-status" class="hint"></span></div>
         </div>
+        <div class="switch-item">
+          <div class="switch-row">
+            <span class="switch-name">Magpie（多层 NR · 可选扩展）</span>
+            <label class="switch"><input type="checkbox" id="cfg-magpie-launch" disabled><span class="slider"></span></label>
+          </div>
+          <div class="switch-desc">画面级 AI 效果器：抓窗口画面自己做 DLSSNR / 超分，可与上面的 DLSS5 <b>叠加</b>。
+            <b>效果不如游戏内 DLSS5</b>（没有原生运动矢量/深度、文字与 UI 会一起被处理，动态画面可能有鬼影）。<br>
+            <span id="magpie-launch-hint" class="hint">还没下载 —— <b>需要在依赖页把「Magpie Experimental」那个开关打开</b>（主包约 467 MB）。</span></div>
+        </div>
       </div>
 
       <div class="toolbar">
         <button id="sbm-launch-btn">启动插件界面（乳摇管理器）</button>
         <button id="poser-webui-btn">打开摆姿页（Poser）</button>
+        <button id="magpie-launch-btn">启动 Magpie（可选扩展）</button>
         <button id="prepare-launch-btn">生成控制器</button>
         <button id="integrity-btn">检查/修复完整性</button>
         <button id="game-inject-audit-btn">检查游戏目录注入</button>

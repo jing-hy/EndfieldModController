@@ -179,9 +179,22 @@ class AppConfig:
     # Endfield Poser（摆姿 / MMD 播放插件）安装包目录，留空 = <主路径>/runtime/poser。
     # 包本体不随我们分发（上游 AGPL-3.0），由依赖页/一键启动从官方 Release 下载到这里。
     poser_dir: str = ""
+    magpie_dir: str = "runtime/magpie"
     # 启动前自动补齐 Poser 的注入（d3dcompiler_47 proxy + plugin\poser.dll）。
     # 默认 True —— 与 DLSS5 / EFMI / 乳摇三个组件一致：装不上就报可读原因，不静默。
     poser_injection: bool = True
+
+    # ---------------------------------------------------------------
+    # Magpie Experimental（**可选的扩展功能**，画面级 AI 效果器）
+    # ---------------------------------------------------------------
+    # 用户 2026-10-01 要求：「做成拓展功能，在依赖上面加一个这个的开关，**默认关，关不下载**，
+    # 如果未下载，启动一栏这个就滑块变灰色，介绍加上需要在依赖页开启下载」。
+    # 它 = `SAOG0721/Magpie`（Blinue/Magpie 的非官方实验性 fork，**GPL-3.0**，只发预发布）：
+    # 抓窗口画面 → 用 DLSSNR / DLSS SR / XeSS / FSR / 帧生成做处理 → 全屏输出。
+    # **不碰游戏进程**，所以能与游戏内 DLSS5 叠加；但效果是"画面后处理"，
+    # **不如游戏内 DLSS5**（没有原生运动矢量/深度/UI 分离 → 会有鬼影、会影响文字与 UI）。
+    # 主包很大（≈467 MB）→ 默认关、关着时任何链路都不下载，只有用户主动去依赖页打开才下。
+    magpie_enabled: bool = False
     theme: str = "light"
     last_tab: str = "library"
     inject_reshade_ui: bool = True
@@ -590,6 +603,16 @@ class AppConfig:
     # ---------------------------------------------------------------
     # Endfield Poser（摆姿 / MMD 播放插件）
     # ---------------------------------------------------------------
+    @property
+    def magpie_path(self) -> Path:
+        """Magpie 解压目录：默认 `<主路径>/runtime/magpie`。
+
+        程序本体不随我们分发（上游 GPL-3.0、且是"非官方实验性"构建），由依赖页
+        从它自己的 Release 下载（**预发布**，必须走列表接口）后解压到这里。
+        """
+        value = self.magpie_dir.strip()
+        return self.resolve_path(value) if value else self.runtime_path / "magpie"
+
     @property
     def poser_path(self) -> Path:
         """Poser 安装包目录：默认 `<主路径>/runtime/poser`。

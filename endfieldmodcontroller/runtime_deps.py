@@ -29,6 +29,12 @@ EFMI_ASSET_PATTERN = "EFMI-PACKAGE"
 # 它不随包分发（AGPL-3.0），下载到这里之后由 poser.py 调它自己的安装向导写游戏目录。
 POSER_REPO = "OedoSoldier/Endfield-Poser"
 POSER_ASSET_PATTERN = "win64.zip"
+
+# Magpie Experimental（**可选扩展**，画面级 AI 效果器）：只有用户主动在依赖页打开
+# `magpie_enabled` 才会下载；它**只发预发布版**（/releases/latest 返回 404），
+# 所以和 Poser 一样必须 include_prerelease=True。主包约 467 MB。
+MAGPIE_REPO = "SAOG0721/Magpie"
+MAGPIE_ASSET_PATTERN = "Magpie-Experimental-x64.zip"
 MARKER_NAME = ".endfieldmodcontroller_builtin.json"
 
 
@@ -303,6 +309,43 @@ def ensure_poser(
     return BuiltinResult("Poser", "installed", "installed", version, str(root))
 
 
+def ensure_magpie(
+    config: AppConfig,
+    progress: Progress = None,
+    byte_progress: ByteProgress = None,
+) -> BuiltinResult:
+    """下载/更新 Magpie Experimental —— **可选扩展：开关关着时什么都不做**。
+
+    用户 2026-10-01 要求：「做成拓展功能，在依赖上面加一个这个的开关，**默认关，关不下载**」。
+    所以这里第一件事就是看开关：关着直接返回 `skipped`（这个状态算"通过"，
+    不会让一键启动报错，也**绝不会**偷偷下 467 MB）。
+
+    它只发预发布版（`/releases/latest` 404），必须 `include_prerelease=True`。
+    包解压到 `<主路径>/runtime/magpie`；**不碰游戏目录**（Magpie 是独立程序）。
+    """
+    from . import magpie
+
+    if not getattr(config, "magpie_enabled", False):
+        return BuiltinResult("Magpie", "skipped", "可选扩展未启用（不下载）", "", str(config.magpie_path))
+
+    root = config.magpie_path
+    url, tag, asset_name, digest = _latest_release_asset(
+        MAGPIE_REPO, MAGPIE_ASSET_PATTERN, include_prerelease=True
+    )
+    if magpie.installed(config) and magpie.version(config) == tag:
+        return BuiltinResult("Magpie", "up_to_date", "already current", tag, str(root))
+
+    root.mkdir(parents=True, exist_ok=True)
+    _download_extract(url, asset_name, root, byte_progress, 1, 1, "Magpie", expected_sha256=digest)
+    if not magpie.installed(config):
+        raise RuntimeError(
+            "解压后没找到 Magpie.exe —— 上游包结构可能变了，请到 "
+            f"{magpie.RELEASES_URL} 手动下载"
+        )
+    magpie.write_marker(config, {"version": tag, "asset": asset_name, "source": MAGPIE_REPO})
+    return BuiltinResult("Magpie", "installed", "installed", tag, str(root))
+
+
 def ensure_all(config: AppConfig, progress: Progress = None, byte_progress: ByteProgress = None) -> list[BuiltinResult]:
     """安装四个内置组件（XXMI / XXMI-Libs / EFMI / Endfield Poser）。
 
@@ -315,6 +358,8 @@ def ensure_all(config: AppConfig, progress: Progress = None, byte_progress: Byte
         ("XXMI-Libs", ensure_xxmi_libs, 1),
         ("EFMI", ensure_efmi, 2),
         ("Poser", ensure_poser, 3),
+        # Magpie 是**可选扩展**：开关默认关，关着时 ensure_magpie 直接返回 skipped
+        ("Magpie", ensure_magpie, 4),
     ]
     total = len(steps)
     ok_status = {"installed", "up_to_date", "skipped", "present"}
@@ -422,4 +467,35 @@ def builtin_report(config: AppConfig) -> dict[str, dict]:
             "version": _read_marker(config.poser_path).get("version", ""),
             "enabled": bool(config.poser_injection),
         },
+        "Magpie": {
+            "display": magpie_display(),
+            "source": "builtin",
+            "install_dir": str(config.magpie_path),
+            "present": _magpie_installed(config),
+            # 可选扩展：缺失本身不算问题（required=False）；只有开关开着且还没装时才 needed。
+            "required": False,
+            "needed": bool(getattr(config, "magpie_enabled", False)) and not _magpie_installed(config),
+            "status": ("已安装" if _magpie_installed(config)
+                       else ("缺失" if getattr(config, "magpie_enabled", False) else "未启用（可选）")),
+            "version": _magpie_version(config),
+            "enabled": bool(getattr(config, "magpie_enabled", False)),
+        },
     }
+
+
+def magpie_display() -> str:
+    from . import magpie
+
+    return magpie.DISPLAY
+
+
+def _magpie_installed(config: AppConfig) -> bool:
+    from . import magpie
+
+    return magpie.installed(config)
+
+
+def _magpie_version(config: AppConfig) -> str:
+    from . import magpie
+
+    return magpie.version(config)
