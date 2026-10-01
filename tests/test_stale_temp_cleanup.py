@@ -54,3 +54,37 @@ class StaleTempCleanupTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class EfmiEarlyIncludesTests(unittest.TestCase):
+    """EFMI 的 `d3dx.ini` 必须被纠正成"初始化阶段就加载 Mods"。
+
+    2026-10-01 根因：出厂默认 `skip_early_includes_load = 1`（配 `config_initialization_delay = 0`）
+    会让 Mods/ 下的 ini **在 DLL 初始化之后**才加载，而 `[Key*]` 的**按键注册只在初始化阶段发生**
+    ⇒ **所有按键一律不生效**（Mod 自己的键 + 面板发的合成键），可 `[Present]`/`[Constants]`
+    照常工作，所以现象是"注入正常、变量能读能写、但按什么都没反应"。
+    纠正函数原先挂在**已废弃**的 `launch_migoto_loader()` 上、从未执行 —— 这个测试防止它再脱钩。
+    """
+
+    def test_fixes_both_paired_switches(self) -> None:
+        from endfieldmodcontroller.launcher import ensure_efmi_early_includes
+
+        with tempfile.TemporaryDirectory(prefix="mc-efmi-early-") as tmp:
+            ini = Path(tmp) / "d3dx.ini"
+            ini.write_text(
+                "[System]\n"
+                "screen_width = 3840\n"
+                "config_initialization_delay = 0\n"
+                "skip_early_includes_load = 1\n"
+                "\n[Logging]\ndebug = 0\n",
+                encoding="utf-8",
+            )
+            self.assertTrue(ensure_efmi_early_includes(ini))
+            text = ini.read_text(encoding="utf-8")
+            self.assertIn("skip_early_includes_load = 0", text)
+            self.assertIn("config_initialization_delay = -1", text)
+            # 幂等：再跑一次不改动
+            self.assertFalse(ensure_efmi_early_includes(ini))
+            # 段落隔离：其它段里的同名键不该被动
+            ini.write_text("[Logging]\nskip_early_includes_load = 1\n[System]\nskip_early_includes_load = 0\n"
+                           "config_initialization_delay = -1\n", encoding="utf-8")
+            self.assertFalse(ensure_efmi_early_includes(ini))

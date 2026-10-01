@@ -526,3 +526,51 @@ class HintsFileTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class ControllerIniSyntaxTests(unittest.TestCase):
+    """生成的 `controller.ini` 必须是 **3DMigoto 认的条件语法**，而且 **if/endif 配平**。
+
+    2026-10-01 现场铁证（两个坑，都会让"面板点了游戏没反应"）：
+    ① **`elif` 不是 3DMigoto 的关键字**（只有 `if`/`else if`/`else`/`endif`）—— 那一行被丢弃后，
+       **它下面的赋值语句会变成"无条件执行"**：面板点「外套」发 value=0、`$mc_state_N` 也正确
+       记成 0，**但写进 Mod 变量的却是 1** → 点哪一档都没反应。
+    ② 改成"每个档位一个独立 `if`"时，**每个 `if` 都必须有自己的 `endif`**（漏了会让整个
+       `[Present]` 块结构错乱）。
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory(prefix="mc-panel-syntax-")
+        self.root = Path(self.tmp.name)
+        self.mod_dir = self.root / "DemoMod"
+        self.mod_dir.mkdir(parents=True)
+        (self.mod_dir / "mod.ini").write_text(MOD_INI, encoding="utf-8")
+        self.controller = self.root / "MC_Controller"
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _generate(self) -> str:
+        from endfieldmodcontroller import core as mc_core
+
+        staged = mc_core._make_mod_info(self.mod_dir, self.mod_dir, "演示", "character", {}, self.mod_dir.parent)
+        mc_core.generate_controller_mod([staged], self.controller)
+        return (self.controller / "controller.ini").read_text(encoding="utf-8")
+
+    def test_no_elif(self) -> None:
+        text = self._generate()
+        self.assertNotIn("elif", text, "`elif` 不是 3DMigoto 的条件关键字 —— 会让它下面的赋值变成无条件执行")
+
+    def test_if_endif_balanced(self) -> None:
+        import re as _re
+
+        text = self._generate()
+        ifs = len(_re.findall(r"(?m)^\s*if\s", text))
+        endifs = len(_re.findall(r"(?m)^\s*endif", text))
+        self.assertEqual(ifs, endifs, f"if 与 endif 必须配平（if={ifs}, endif={endifs}）")
+        self.assertGreater(ifs, 0)
+
+    def test_each_value_gets_its_own_if_block(self) -> None:
+        text = self._generate()
+        # 档位分支必须写成 `if ... == N` + 自己的 endif，而不是 if/elif 链
+        self.assertRegex(text, r"(?m)^\s*if \$controller_value == 0\s*$")
+        self.assertNotIn("else if $controller_value", text)

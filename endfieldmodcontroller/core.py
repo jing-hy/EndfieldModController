@@ -1407,6 +1407,16 @@ def generate_controller_mod(
         "global persist $mc_last_wire = 0",
         "global persist $mc_last_value = 0",
     ]
+    # **按键命中计数器（诊断用，2026-10-01）**：每个协议键各绑一个"记数"CommandList，
+    # 只要那个键被 EFMI 识别并触发，计数就 +1。这些变量是 persist，游戏退出后落在
+    # `d3dx_user.ini` 里 —— 于是"到底哪个键被认、哪个丢了"一目了然，不必依赖 EFMI 的日志
+    # （XXMI 这个版本的 EFMI 编不出来日志文件）。
+    for _d in range(10):
+        lines.append(f"global persist $mc_hit_F{13 + _d} = 0")
+    lines.extend([
+        "global persist $mc_hit_F23 = 0",
+        "global persist $mc_hit_F24 = 0",
+    ])
     for action in actions:
         lines.append(f"global persist $mc_state_{action.wire_id} = 0")
     lines.extend([
@@ -1431,6 +1441,33 @@ def generate_controller_mod(
         "key = ctrl alt shift VK_F24",
         "run = CommandListMC_Commit",
         "",
+    ])
+    # 诊断：同一批键各再绑一个"记数"段
+    for _d in range(10):
+        lines.extend([
+            f"[KeyMC_Hit{_d}]",
+            f"key = ctrl alt shift VK_F{13 + _d}",
+            f"run = CommandListMC_Hit{_d}",
+        ])
+    lines.extend([
+        "[KeyMC_Hit23]",
+        "key = ctrl alt shift VK_F23",
+        "run = CommandListMC_Hit23",
+        "[KeyMC_Hit24]",
+        "key = ctrl alt shift VK_F24",
+        "run = CommandListMC_Hit24",
+        "",
+    ])
+    for _d in range(10):
+        lines.extend([
+            f"[CommandListMC_Hit{_d}]",
+            f"$mc_hit_F{13 + _d} = $mc_hit_F{13 + _d} + 1",
+        ])
+    lines.extend([
+        "[CommandListMC_Hit23]",
+        "$mc_hit_F23 = $mc_hit_F23 + 1",
+        "[CommandListMC_Hit24]",
+        "$mc_hit_F24 = $mc_hit_F24 + 1",
     ])
     for digit in range(10):
         lines.extend([
@@ -1465,12 +1502,17 @@ def generate_controller_mod(
         lines.append(f"    if $controller_action == {action.wire_id}")
         if action.targets and action.option_values:
             for index in range(len(action.values)):
-                branch = "if" if index == 0 else "elif"
-                lines.append(f"        {branch} $controller_value == {index}")
+                # ⚠️ **绝不能用 `elif`**（2026-10-01 现场铁证）：3DMigoto 的条件关键字只有
+                # `if` / `else if` / `else` / `endif` —— `elif` 那一行会被丢弃，于是**它下面的
+                # 赋值语句变成"无条件执行"**。现场证据：面板点「外套」（value=0）时
+                # `$mc_state_2` 正确记录成 0，**但 `[Present]` 写进 Mod 变量的是 1** ——
+                # 因为 `coat = 1` 那行被无条件执行了，所以"点哪一档都没反应"。
+                # 改成**每个档位一个独立的 `if … endif`**（嵌套 if 在任何解析器下都合法）。
+                lines.append(f"        if $controller_value == {index}")
                 for target, values in zip(action.targets, action.option_values):
                     if index < len(values):
                         lines.append(f"            {target} = {values[index]}")
-            lines.append("        endif")
+                lines.append("        endif")      # 每个档位各自的 endif（不是一个 if/elif 链共用一个）
         lines.append(f"        $mc_state_{action.wire_id} = $controller_value")
         if action.run_command:
             lines.append(f"        run = {action.run_command_full or action.run_command}")

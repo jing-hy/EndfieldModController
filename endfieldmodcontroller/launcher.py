@@ -1830,6 +1830,25 @@ def launch(
         for warning in injection_report.get("warnings", []):
             _append_log(config, f"WARN 注入自检: {warning}")
 
+    # ⚠ **2026-10-01 根因修复：EFMI 的 `skip_early_includes_load` 必须为 0。**
+    #   EFMI 的 `d3dx.ini` 出厂默认是 `skip_early_includes_load = 1`（配套
+    #   `config_initialization_delay = 0`）：**Mods/ 下的 ini 不在 DLL 初始化阶段加载**。
+    #   而 `[Key*]` 段的**按键注册只发生在初始化阶段** ⇒
+    #   **所有按键一律不生效** —— Mod 自己的键、我们面板发的合成键，全都收不到；
+    #   可 `[Present]` / `[Constants]` 是**运行时**读取，所以照常工作。
+    #   于是现象是「注入正常、面板能开、变量能读能写、每帧探针还在涨，但按什么都没反应」，
+    #   极难往 ini 加载时机上想（2026-10-01 排查了整轮才定位，判据是
+    #   `$mc_probe_frames` 在涨而 `$mc_hit_F13..F24` 与 `mc_last_wire` 恒为 0）。
+    #   原先的纠正函数 `ensure_efmi_early_includes()` 挂在**已废弃**的
+    #   `launch_migoto_loader()` 上（该函数全库无人调用），所以从来没执行过。
+    if not dry_run:
+        try:
+            efmi_d3dx = Path(config.auto_detect_migoto_loader() or "") / "d3dx.ini"
+            if efmi_d3dx.is_file() and _has_efmi_core_config(efmi_d3dx) and ensure_efmi_early_includes(efmi_d3dx):
+                _append_log(config, "EFMI: 已改为初始化阶段加载 Mods（否则 [Key*] 按键全部不注册）")
+        except Exception as exc:  # noqa: BLE001 —— 纠正失败不能拦住启动
+            _append_log(config, f"WARN EFMI 提前加载纠正失败: {exc}")
+
     integrity_report = {"ok": True, "failures": []}
     if not dry_run:
         integrity_report = integrity.check_integrity(config)

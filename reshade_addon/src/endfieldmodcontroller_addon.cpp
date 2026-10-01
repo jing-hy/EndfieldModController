@@ -353,10 +353,15 @@ static void send_key_combo(WORD vk)
     up[3].ki.wVk = vk;
     up[3].ki.dwFlags = KEYEVENTF_KEYUP;
 
+    // ⚠️ 按下时长（2026-10-01 现场定案）：EFMI **每帧轮询** `GetAsyncKeyState` 读键，
+    // 而帧率会波动（装了 debug 日志时能掉到十几帧 → 一帧 70~100ms）。
+    // 原来只按下 70ms，**整帧被错过就丢一个数字位**，于是"动作号变成 0、面板看起来没反应"
+    // （现场：`mc_state_1 = 1` 说明有时是成功的，`mc_last_wire = 0` 说明有时动作号丢了）。
+    // 这里把按下保持到 160ms、键间隔 60ms —— 一次动作慢一点（约 0.9 秒），但**可靠**。
     SendInput(ARRAYSIZE(down), down, sizeof(INPUT));
-    Sleep(70);
+    Sleep(160);
     SendInput(ARRAYSIZE(up), up, sizeof(INPUT));
-    Sleep(20);
+    Sleep(60);
 }
 
 static void send_digit_key(int digit)
