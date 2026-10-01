@@ -1302,7 +1302,7 @@ async function refreshFromState() {
       $('hotkey-panel-status').textContent = '⚠ 开关是开的，但面板还没写就位 —— 下次「一键启动」会重试。';
     }
   }
-  // Mod 备份仓：库里新见到的 Mod 会自动打包成 zip 放进去（只增不减，程序从不删它）
+  // Mod 备份仓：库里新见到的 Mod 会自动整份复制进去（纯备份、不压缩；只增不减，程序从不删它）
   const backup = s.mod_backup || null;
   if (backup) {
     if ($('path-mod-backup')) $('path-mod-backup').textContent = backup.dir || '';

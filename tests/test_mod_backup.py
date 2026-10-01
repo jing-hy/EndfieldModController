@@ -1,18 +1,16 @@
-"""Mod 备份仓（用户 2026-10-01 要求：「在根目录下放一个文件夹做 mod 备份，这个文件夹
-**只增不减**，只要见到新 mod，就打包 zip 放进去」）。
+"""Mod 备份仓（用户 2026-10-01 要求）。
 
-要点：
-* 备份目录默认 = 数据根下的 `mod-backup\\`；
-* **只增不减** —— 没有任何删除/覆盖已有备份的路径；
-* 已有备份的 Mod 直接跳过（幂等，第二次是毫秒级）；
-* 备份目录与库/中转目录重叠时整体拒绝（否则 zip 会落进库里）。
+用户原话先是「在根目录下放一个文件夹做 mod 备份，这个文件夹**只增不减**，只要见到新
+mod，就**打包 zip** 放进去」，随后改成「**改成不要打包，纯备份**」——所以现在是
+**纯复制**：一个 Mod 一个文件夹，原样躺进备份仓。
+
+要点：默认 = 数据根下的 `mod-backup\\`；**只增不减**（没有任何删除/覆盖备份的路径）；
+已有备份直接跳过（幂等）；备份目录与库/中转目录重叠时整体拒绝。
 """
 from __future__ import annotations
 
-import json
 import tempfile
 import unittest
-import zipfile
 from pathlib import Path
 
 from endfieldmodcontroller import modbackup
@@ -41,26 +39,31 @@ class ModBackupTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.tmp.cleanup()
 
-    def _add_mod(self, name: str, extra_bytes: int = 64) -> None:
+    def _add_mod(self, name: str, extra_bytes: int = 64) -> Path:
         target = self.library / "佩丽卡" / name
         (target / "Textures").mkdir(parents=True, exist_ok=True)
         (target / "mod.ini").write_text(MOD_INI, encoding="utf-8")
         (target / "Textures" / "skin.dds").write_bytes(b"D" * extra_bytes)
+        return target
 
-    def test_new_mod_gets_zipped_into_backup_dir(self) -> None:
-        self._add_mod("Alice")
+    def test_new_mod_is_copied_into_backup_dir(self) -> None:
+        source = self._add_mod("Alice")
         result = self.api._backup_new_mods()
         self.assertTrue(result["created"], result)
         target_dir = modbackup.backup_dir(self.config)
         # 路径比较要注意 Windows 8.3 短名（ADMINI~1 vs Administrator）→ 用 samefile
         self.assertTrue(target_dir.samefile(self.root / "mod-backup"), str(target_dir))
-        zips = list(target_dir.glob("*.zip"))
-        self.assertEqual(len(zips), 1)
-        with zipfile.ZipFile(zips[0]) as archive:
-            names = archive.namelist()
-        self.assertTrue(any(name.startswith("Alice/") for name in names), names)
-        self.assertIn("Alice/mod.ini", names)
-        self.assertIn("Alice/Textures/skin.dds", names)
+        backup = target_dir / "Alice"
+        self.assertTrue(backup.is_dir(), "备份应该是一个目录（不打包）")
+        self.assertEqual(
+            (backup / "mod.ini").read_text(encoding="utf-8"),
+            (source / "mod.ini").read_text(encoding="utf-8"),
+        )
+        self.assertEqual((backup / "Textures" / "skin.dds").stat().st_size, 64)
+        # 不打包 = 备份仓里不该出现 zip
+        self.assertEqual(list(target_dir.glob("*.zip")), [])
+        # 复制中途的临时目录不能留下
+        self.assertEqual([p.name for p in target_dir.iterdir() if p.name.startswith("_copying_")], [])
 
     def test_second_run_is_idempotent(self) -> None:
         self._add_mod("Alice")
@@ -69,32 +72,43 @@ class ModBackupTests(unittest.TestCase):
         self.api._invalidate_mods()
         second = self.api._backup_new_mods()
         self.assertEqual(second["created"], [])
-        self.assertEqual(len(list(modbackup.backup_dir(self.config).glob("*.zip"))), 1)
+        target_dir = modbackup.backup_dir(self.config)
+        self.assertEqual(len([p for p in target_dir.iterdir() if p.is_dir()]), 1)
 
-    def test_zip_survives_source_removal_and_never_deleted(self) -> None:
-        """只增不减：源 Mod 删了、库空跑很多次，备份 zip 也必须在。"""
-        self._add_mod("Alice")
+    def test_backup_survives_source_removal_and_is_never_deleted(self) -> None:
+        """只增不减：源 Mod 删了、库空跑很多次，备份也必须在。"""
+        source = self._add_mod("Alice")
         self.api._backup_new_mods()
-        zips = list(modbackup.backup_dir(self.config).glob("*.zip"))
-        self.assertEqual(len(zips), 1)
-        # 手动删掉源目录（模拟用户清理库）
-        for child in sorted((self.library / "佩丽卡" / "Alice").rglob("*"), reverse=True):
+        backup = modbackup.backup_dir(self.config) / "Alice"
+        self.assertTrue(backup.is_dir())
+        for child in sorted(source.rglob("*"), reverse=True):
             child.unlink() if child.is_file() else child.rmdir()
-        (self.library / "佩丽卡" / "Alice").rmdir()
+        source.rmdir()
         self.api._invalidate_mods()
         for _ in range(3):
             self.api._backup_new_mods()
-        self.assertTrue(zips[0].is_file(), "备份 zip 被删了（违反只增不减）")
-        self.assertEqual(len(list(modbackup.backup_dir(self.config).glob("*.zip"))), 1)
+        self.assertTrue((backup / "mod.ini").is_file(), "备份被删了（违反只增不减）")
+        self.assertEqual(len([p for p in modbackup.backup_dir(self.config).iterdir() if p.is_dir()]), 1)
 
-    def test_broken_index_does_not_rezip(self) -> None:
+    def test_broken_index_does_not_recopy(self) -> None:
         self._add_mod("Alice")
         self.api._backup_new_mods()
         modbackup.index_path(self.config).write_text("{ 这不是 json", encoding="utf-8")
         self.api._invalidate_mods()
         result = self.api._backup_new_mods()
-        self.assertEqual(result["created"], [], "索引坏掉后重打了 zip（覆盖已有备份）")
-        self.assertEqual(len(list(modbackup.backup_dir(self.config).glob("*.zip"))), 1)
+        self.assertEqual(result["created"], [], "索引坏掉后重拷了（浪费磁盘、还可能覆盖）")
+
+    def test_legacy_zip_counts_as_backed_up(self) -> None:
+        """以前打包时代留下的 zip 也算"备份过"，不会再复制一份目录出来。"""
+        self._add_mod("Alice")
+        target_dir = modbackup.backup_dir(self.config)
+        target_dir.mkdir(parents=True, exist_ok=True)
+        (target_dir / "Alice.zip").write_bytes(b"PK\x03\x04old")
+        self.api._invalidate_mods()
+        result = self.api._backup_new_mods()
+        self.assertEqual(result["created"], [])
+        self.assertTrue((target_dir / "Alice.zip").is_file(), "旧 zip 不该被动")
+        self.assertFalse((target_dir / "Alice").is_dir())
 
     def test_backup_dir_inside_library_is_refused(self) -> None:
         config = AppConfig(
@@ -119,22 +133,22 @@ class ModBackupTests(unittest.TestCase):
         self.api._backup_new_mods()
         state = self.api.mod_backup_status()
         self.assertEqual(state["count"], 2)
+        self.assertEqual(state["folders"], 2)
         self.assertGreater(state["bytes"], 0)
         self.assertFalse(state["overlaps_library"])
         self.assertEqual(state["pending"], 0)
 
     def test_bad_mod_does_not_block_others(self) -> None:
-        """批量不要 fail-fast：一个 Mod 打包失败，其余照常备份。"""
+        """批量不要 fail-fast：一个 Mod 复制失败，其余照常备份。"""
         self._add_mod("Alice")
         self._add_mod("Bob")
         mods = self.api._mods()
-        missing = mods[0]
-        object.__setattr__(missing, "path", self.root / "does-not-exist")
+        object.__setattr__(mods[0], "path", self.root / "does-not-exist")
         result = modbackup.backup_all(self.config, mods)
         self.assertEqual(len(result["created"]), 1)
         self.assertEqual(len(result["failed"]), 1)
-        self.assertTrue((modbackup.backup_dir(self.config) / "Bob.zip").is_file()
-                        or (modbackup.backup_dir(self.config) / "Alice.zip").is_file())
+        folders = [p.name for p in modbackup.backup_dir(self.config).iterdir() if p.is_dir()]
+        self.assertEqual(len(folders), 1)
 
 
 if __name__ == "__main__":

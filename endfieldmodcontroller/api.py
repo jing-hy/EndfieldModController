@@ -63,10 +63,11 @@ class EndfieldModControllerApi:
     # Mod 备份仓（用户 2026-10-01 要求）
     # ------------------------------------------------------------------
     def _backup_new_mods(self, *, log: Any = None, background: bool = False) -> dict[str, Any]:
-        """把"库里还没备份过"的 Mod 打包进 `<数据根>\\mod-backup\\`。
+        """把"库里还没备份过"的 Mod **整份复制**进 `<数据根>\\mod-backup\\`（纯备份、不打包）。
 
         用户原话：「在根目录下放一个文件夹做 mod 备份，这个文件夹**只增不减**，
-        **只要见到新 mod，就打包 zip 放进去**」。所以：只往里加、从不删、已有备份跳过。
+        **只要见到新 mod，就打包 zip 放进去**」→ 随后改成「**改成不要打包，纯备份**」。
+        所以：只往里加、从不删、已有备份跳过。
         `background=True` 时另起线程（扫描之后顺带触发，不挡界面）。
         """
         from . import modbackup
@@ -99,7 +100,7 @@ class EndfieldModControllerApi:
             result = modbackup.backup_all(self.config, mods, log=_note)
             if result.get("created"):
                 total_mb = sum(Path(p).stat().st_size for p in result["created"] if Path(p).is_file()) / 1048576
-                _note(f"Mod 备份：新增 {len(result['created'])} 个 zip（{total_mb:.1f} MB）→ {result['dir']}")
+                _note(f"Mod 备份：新增 {len(result['created'])} 个 Mod 备份（{total_mb:.1f} MB）→ {result['dir']}")
             if result.get("failed"):
                 _note(f"WARN Mod 备份：{len(result['failed'])} 个打包失败（见上）")
             return {"ok": not result.get("failed"), **result}
@@ -197,7 +198,7 @@ class EndfieldModControllerApi:
             except Exception:  # noqa: BLE001
                 pass
         # Mod 备份仓（用户 2026-10-01 要求）：「在根目录下放一个文件夹做 mod 备份，
-        # 这个文件夹只增不减，**只要见到新 mod，就打包 zip 放进去**」。
+        # 这个文件夹只增不减，**只要见到新 mod，就（改成纯备份后）整份复制进去**」。
         # 放在预热线程里 = 不卡首屏；逐个 Mod 打包、失败只记一笔（大库第一次会跑一会儿，
         # 但界面全程可用）。已经有备份的 Mod 会直接跳过，所以之后的启动是毫秒级。
         try:
@@ -940,7 +941,7 @@ class EndfieldModControllerApi:
         self._invalidate_mods()
         mods = self._mods()
         diagnostics.log_event(self.config, f"UI 调用 scan() -> {len(mods)} 个 Mod", category="ui")
-        # 「只要见到新 mod，就打包 zip 放进备份仓」—— 扫描是"见到新 Mod"最自然的时机；
+        # 「只要见到新 mod，就备份进备份仓」—— 扫描是"见到新 Mod"最自然的时机；
         # 打包放到后台线程，界面照常返回（已有备份的会直接跳过，通常是毫秒级）。
         try:
             self._backup_new_mods(background=True)
