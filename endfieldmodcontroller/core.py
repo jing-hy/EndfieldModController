@@ -1435,6 +1435,11 @@ def generate_controller_mod(
         "global persist $mc_last_wire = 0",
         "global persist $mc_last_value = 0",
     ]
+    # 诊断用（都与面板/键送达有关）
+    lines.extend([
+        "global persist $mc_keyprobe_manual = 0",
+        "global persist $mc_keyprobe_panel = 0",
+    ])
     for action in actions:
         lines.append(f"global persist $mc_state_{action.wire_id} = 0")
     # 探针变量（见下方 `[Present]` 末尾）：`-999` = 从来没被赋值过 ——
@@ -1450,19 +1455,39 @@ def generate_controller_mod(
         "; 用户实测「按开关外套会切第一人称 / 按切换头发开关了 DLSS5」就是这么来的。",
         "; F13 以上的键标准键盘上不存在，插件与游戏都不会绑。",
     ])
+    # ⚠️ **两种键名写法都绑**（2026-10-01）：3DMigoto 的键名表（上游 `vkeys.h` 的
+    # `VKMappings[]`）里 F 键写作 **`F13`**（**不带 `VK_` 前缀**），而 addon 侧发的是
+    # 系统 VK 码 0x7C..。为免在"它到底认不认 `VK_` 前缀"上来回猜，这里**同一动作绑两个
+    # 段**：一个写 `F13`、一个写 `VK_F13` —— 哪个被认都能触发。
     for digit in range(10):
         lines.extend([
             f"[KeyMC_Digit{digit}]",
+            f"key = ctrl alt shift F{13 + digit}",
+            f"run = CommandListMC_Digit{digit}",
+            f"[KeyMC_Digit{digit}_vk]",
             f"key = ctrl alt shift VK_F{13 + digit}",
             f"run = CommandListMC_Digit{digit}",
         ])
     lines.extend([
         "[KeyMC_Stage]",
+        "key = ctrl alt shift F23",
+        "run = CommandListMC_Stage",
+        "[KeyMC_Stage_vk]",
         "key = ctrl alt shift VK_F23",
         "run = CommandListMC_Stage",
         "[KeyMC_Commit]",
+        "key = ctrl alt shift F24",
+        "run = CommandListMC_Commit",
+        "[KeyMC_Commit_vk]",
         "key = ctrl alt shift VK_F24",
         "run = CommandListMC_Commit",
+        "",
+        "; ── 诊断键：用户**手工**按一次 Ctrl+Alt+Shift+F2，用来区分「键没送到」与「键名不认」──",
+        "[KeyMC_ProbeManual]",
+        "key = ctrl alt shift F2",
+        "run = CommandListMC_ProbeManual",
+        "[CommandListMC_ProbeManual]",
+        "$mc_keyprobe_manual = $mc_keyprobe_manual + 1",
         "",
     ])
     for digit in range(10):
@@ -1477,6 +1502,8 @@ def generate_controller_mod(
         "[CommandListMC_Commit]",
         "$mc_last_wire = $mc_pending_action",
         "$mc_last_value = $mc_input",
+        # 面板路径探针：这一行被执行 = **面板发的合成键真的到达了 EFMI**（哪怕后面写变量失败）
+        "$mc_keyprobe_panel = $mc_keyprobe_panel + 1",
     ])
     for action in actions:
         lines.extend([
