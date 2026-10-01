@@ -1,4 +1,4 @@
-const state = { config: {}, mods: [], dependency_report: {}, selected: new Set(), lastPrepare: null };
+const state = { config: {}, mods: [], dependency_report: {}, selected: new Set(), lastPrepare: null, fileWatchdog: null };
 
 // 后端返回的字符串（Mod 名、角色名、分组、文件路径、错误信息）一律先转义再拼进 HTML。
 // 这些内容来自用户导入的 mod 包与下载的依赖清单 —— 直接拼模板等于把"包名"当代码执行，
@@ -249,6 +249,51 @@ async function maybeShowAnnouncements() {
     /* 忽略：公告失败绝不影响使用 */
   } finally {
     __announcementsBusy = false;
+  }
+}
+
+// ── 文件守护：关键文件被反复删掉（疑似杀毒软件）→ 建议加白名单 ──────────────
+// 用户 2026-10-01 要求：「加入对文件的检测，如果某一文件老是被删掉，要在启动的时候
+// 出个弹窗提醒用户，建议把某个文件夹加入杀毒软件白名单」；随后明确**挂到「一键启动」**
+// 这条流程上（打开管理器时不弹）。判据全在后端 filewatch.py（曾经就位过 + 连续两次
+// 启动都缺 + 同组还有别的文件在），这里只负责"弹一次 + 记已提醒"。
+// 唯一调用点：runOneClickLaunch() 里、prepare_launch 之前。
+let __fileWatchdogBusy = false;
+const __fileWatchdogShown = new Set();
+async function maybeShowFileWatchdog() {
+  if (__fileWatchdogBusy) return;
+  const info = state.fileWatchdog;
+  if (!info || !(info.items || []).length) return;
+  const fresh = info.items.filter((item) => item && item.key && !__fileWatchdogShown.has(item.key));
+  if (!fresh.length) return;
+  __fileWatchdogBusy = true;
+  try {
+    const lines = ['这些文件本来是在的，最近连续几次启动却不见了（补上以后又没了）：', ''];
+    for (const item of fresh) {
+      __fileWatchdogShown.add(item.key);
+      lines.push(`· ${item.label}　已缺 ${item.missing || 0} 次`);
+    }
+    if (info.note) lines.push('', info.note);
+    if ((info.dirs || []).length) {
+      lines.push('', '建议加入杀毒软件白名单的目录：');
+      for (const dir of info.dirs) lines.push(`　${dir}`);
+    }
+    lines.push('', '加完白名单后，点一次「一键启动」就会自动补回来。');
+    const openDir = await showModalDialog({
+      title: '有文件被反复删除',
+      message: lines.join('\n'),
+      okText: '打开目录加白名单',
+      cancelText: '知道了',
+    });
+    if (openDir && (info.dirs || []).length) {
+      try { await call('open_path_in_explorer', info.dirs[0]); } catch (err) { /* 忽略 */ }
+    }
+  } catch (err) {
+    /* 忽略：这个提醒坏掉绝不影响使用 */
+  } finally {
+    // 记已提醒（不管用户点了哪个按钮）：不然每次刷新界面都会再弹一遍
+    try { await call('file_watchdog_ack', fresh.map((item) => item.key)); } catch (err) { /* 忽略 */ }
+    __fileWatchdogBusy = false;
   }
 }
 
@@ -898,6 +943,12 @@ async function refreshFromState() {
   // 未读公告（info/warning）：由 boot() 弹一次，**不锁启动**、看完即走。
   // 异常状态预警（critical）不走这里 —— 见 runOneClickLaunch 里的 prelaunch_alerts。
   state.announcements = s.announcements || [];
+  // 关键文件被反复删掉（疑似杀毒软件隔离）：后端算好的提醒。
+  // ⚠ 这里**只存数据、不弹窗** —— 弹窗挂在「一键启动」里（用户 2026-10-01 决定：
+  //   「改到一键启动」）。理由：缺文件的后果只在你要启动游戏时才会发生，而且紧接着
+  //   就会自动补回来，"补了又被删"的现场在一键启动那一刻最清楚；平时打开管理器
+  //   只想看 Mod 库时不该被打断（后台仍会采样并在日志里留一行）。
+  state.fileWatchdog = s.file_watchdog || null;
   // 公告"跟着数据走"：后端预热线程常在首屏之后才把公告填上来，所以每次刷新都检查一次
   // （maybeShowAnnouncements 幂等：弹过、记过已读的不会再弹）。
   setTimeout(() => { maybeShowAnnouncements(); }, 400);
@@ -1433,6 +1484,10 @@ ${missing}
 
 是否自动修复？`)) return;
   setStatus('修复中...');
+  // 修复会真的去装组件 / 补随包资产（可能几百 MB），**必须让用户看到进度** ——
+  // 直接打开日志弹窗（它 1 秒轮询一次后端日志，"repair: ..." 每一步都会实时出现）。
+  // 2026-10-01：以前这里只写一句"修复中"，大下载时会让人以为界面卡死了。
+  if ($('log-modal').classList.contains('hidden')) openLog();
   const result = await call('repair_integrity');
   $('launch-status').textContent = JSON.stringify(result, null, 2);
   const ok = result.integrity && result.integrity.ok;
@@ -1606,6 +1661,15 @@ function bind() {
         // 预警本身出问题（网络等）**不能挡住启动** —— 但要在日志里留痕
         logLine(`   异常状态检查失败（忽略，继续启动）: ${err.message || err}`);
       }
+      // ①-a 文件守护：关键文件被反复删掉（多半是杀毒软件隔离）→ 提醒加白名单。
+      //   用户 2026-10-01 决定「改到一键启动」（原先挂在打开管理器时）。
+      //   时机特意放在自检补齐**之前**：紧接着 prepare_launch 就会把它补回来，
+      //   "补了又被删"的现场在这一刻最清楚；打开管理器时只采样 + 记一行日志，不弹窗。
+      try {
+        const snapshot = await call('get_state');
+        state.fileWatchdog = snapshot.file_watchdog || null;
+      } catch (err) { /* 拿不到就不弹，绝不能挡住启动 */ }
+      await maybeShowFileWatchdog();
       setStatus('正在初始化自检…');
       logLine('① 同步 XXMI 注入库 + 初始化自检（缺什么补什么）');
       const r = await call('prepare_launch');
@@ -2339,6 +2403,8 @@ async function boot() {
   // 所以不能只在一个固定时刻看一次；refreshFromState 里也会调同一个函数（幂等）。
   // 这里保留一个延迟入口，顺便错开引导(1.2s)/更新询问(1.5s)/角色识别(1.5s) 的弹窗。
   setTimeout(() => { maybeShowAnnouncements(); }, 2500);
+  // 注意：文件守护**不在启动时弹**（用户 2026-10-01 决定改到「一键启动」时弹），
+  // 所以这里没有它的兜底入口 —— 见 runOneClickLaunch() 里那一段。
 }
 
 // ── 崩溃包提示：轮询后端，发现新的崩溃包就弹窗给出路径 ──

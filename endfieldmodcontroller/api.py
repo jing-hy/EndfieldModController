@@ -117,6 +117,25 @@ class EndfieldModControllerApi:
                 launcher._append_log(self.config, f"公告检查跳过: {exc}")
             except Exception:  # noqa: BLE001
                 pass
+        # 文件守护：记下"关键文件这次在不在"（**每次启动只采样一次**）。连续几次启动都缺
+        # 就说明是被反复删掉的（多半是杀毒软件隔离），由 get_state 带给前端弹窗提醒。
+        # 纯存在性检查、毫秒级、不下载任何东西 —— 绝不拖慢启动。
+        try:
+            from . import filewatch
+
+            report = filewatch.scan(
+                self.config,
+                log=lambda message: launcher._append_log(self.config, message),
+            )
+            if not report.get("alert"):
+                launcher._append_log(
+                    self.config, f"文件守护: 盯了 {report.get('checked', 0)} 个关键文件，这次都在"
+                )
+        except Exception as exc:  # noqa: BLE001
+            try:
+                launcher._append_log(self.config, f"文件守护跳过: {exc}")
+            except Exception:  # noqa: BLE001
+                pass
         self._warm_done = True
 
     # ------------------------------------------------------------------
@@ -301,6 +320,30 @@ class EndfieldModControllerApi:
         seen = {str(i) for i in (ids or [])}
         self._announcements = [a for a in self._announcements if str(a.get("id")) not in seen]
         return {"ok": True, "remaining": len(self._announcements)}
+
+    def _file_watchdog(self) -> dict[str, Any] | None:
+        """关键文件被反复删掉时给前端的提醒（用户 2026-10-01 要求）。
+
+        **只读**：只做存在性判断 + 读历史计数，不下载、不补齐（补齐是自检的事）。
+        判定规则见 `filewatch` 模块开头；**弹窗挂在一键启动那条路上**（前端负责）。
+
+        这里顺手调一次 `filewatch.scan()`：它自带"**每个进程只真正采样一次**"的节流，
+        所以重复调用是空操作 —— 但能保证"刚打开管理器、后台预热还没跑完就点一键启动"
+        时也拿得到本进程的采样结果，而不是少算一次。
+        """
+        try:
+            from . import filewatch
+
+            filewatch.scan(self.config)
+            return filewatch.pending(self.config)
+        except Exception:  # noqa: BLE001 —— 提醒功能坏掉绝不能影响界面
+            return None
+
+    def file_watchdog_ack(self, keys: list[str] | None = None) -> dict[str, Any]:
+        """用户已经看过提醒 → 记下，避免下次启动重复弹同一件事。"""
+        from . import filewatch
+
+        return filewatch.ack(self.config, list(keys or []))
 
     def collect_crash_report(self) -> dict[str, Any]:
         """立刻收集一次崩溃现场并写成报告（不等游戏退出）。"""
@@ -505,6 +548,9 @@ class EndfieldModControllerApi:
             # 未读的公告（info/warning）：前端首屏就绪后弹一次，**不锁启动**。
             # 异常状态预警（critical）不在这里 —— 见 prelaunch_alerts()。
             "announcements": list(self._announcements),
+            # 关键文件被反复删掉（疑似杀毒软件）→ 前端弹窗建议加白名单（用户 2026-10-01 要求）。
+            # 只读、轻量（十来次存在性判断），不在这里触发任何补齐动作。
+            "file_watchdog": self._file_watchdog(),
         }
     def save_config(self, data: dict[str, Any]) -> dict[str, Any]:
         self._invalidate_mods()

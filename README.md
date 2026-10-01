@@ -11,7 +11,7 @@
   <a href="LICENSE"><img alt="MIT 许可" src="https://img.shields.io/github/license/jing-hy/EndfieldModController?label=License&amp;color=3DA639"></a>
 </p>
 
-<p>Windows 桌面程序（Python + Pywebview），单文件 exe。当前版本 <b>0.7.1</b> —— <a href="https://github.com/jing-hy/EndfieldModController/releases">下载最新版</a></p>
+<p>Windows 桌面程序（Python + Pywebview），单文件 exe。当前版本 <b>0.7.2</b> —— <a href="https://github.com/jing-hy/EndfieldModController/releases">下载最新版</a></p>
 
 <p>📖 安装细节、目录结构、逐项故障排查、开发与发布流程 → <b><a href="docs/README.detailed.md">详细文档</a></b></p>
 
@@ -33,6 +33,7 @@
 | **Mod 修复 / 回滚**（实验性） | 游戏版本更新后老 Mod 常需适配，在 Mod 卡片上就能一键修；**改前自动整份备份、可一键回滚** |
 | **游戏目录净化 / 还原** | 把第三方注入物**先备份再移走**，随时一键还原；被移走的系统模块会自动补回 |
 | **更新** | 程序本体与各组件都能检查、更新 |
+| **文件被反复删除会提醒你** | 关键组件被安全软件（Windows Defender / 360 / 火绒）隔离时，启动时会告诉你**是哪个文件、该把哪个目录加入白名单** |
 | **摆姿 / MMD 播放**（可选） | 集成 Endfield Poser，用它自带的页面摆姿势、放 MMD |
 
 ## 二、它是怎么工作的
@@ -92,6 +93,9 @@
 
 **Q：游戏版本更新后老 Mod 失效？**
 用 Mod 卡片「⋯」里的「**修复**」（实验性）——它会适配资源槽位号，**改前自动备份、可一键回滚**。
+
+**Q：自检或「修复」老是说某几个文件缺失，补上以后又缺？**
+多半是**安全软件把它们隔离了**（最常见的是 DLSS5 的 NR 运行库那种大文件）。程序每次启动都会记一次"这些关键文件在不在"，**连续几次发现同一个文件不见了时**，你**点「一键启动」就会先弹窗**告诉你**具体是哪个文件**、并把**该加入白名单的目录**列出来；加完白名单再点一次「一键启动」，缺的文件会自动补回来。
 
 **Q：我本来就有另一份装好 Mod 的 XXMI，想继续用它？**
 可以。在设置里把 XXMI 指到你那份、把 Mod 的中转目录也指到那份，并关掉"用内置运行环境"这一项 —— 之后程序既不会下载/更新自带那份，也不会改你填的路径。想换回来就反向操作。

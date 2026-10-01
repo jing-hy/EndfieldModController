@@ -593,6 +593,14 @@ def _environment_text(config: AppConfig) -> str:
         f"程序       : EndfieldModController",
         f"Python     : {sys.version.split()[0]} / {platform.platform()}",
     ]
+    # 设备型号 / 显卡与驱动（用户 2026-10-01 要求：日志包里要带上，好一眼判断
+    # "DLSS5 出不来"到底是机器不支持还是我们配错了）。读注册表，毫秒级、无子进程。
+    try:
+        from . import deviceinfo
+
+        lines.extend(line for line in deviceinfo.summary_lines() if line)
+    except Exception as exc:  # noqa: BLE001
+        lines.append(f"设备信息读取失败: {exc}")
     try:
         from . import updates
 

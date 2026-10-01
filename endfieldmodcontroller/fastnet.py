@@ -63,6 +63,12 @@ LINE_TIMEOUT_MULTI = 15
 LINE_FAIL_TTL = 5 * 60
 # 连续失败几次才把线路临时封掉
 LINE_FAIL_THRESHOLD = 2
+# **HTTPS 证书不匹配**的线路要封得久一点：它不是"网络抖动"，而是这个网络端对这条线路
+# 做了劫持/篡改（或镜像域名失配），同一网络里不会自愈，每次重试都必然失败。
+# 2026-10-01 issue #6 实证：反馈者那边 `https://ghproxy.net/` 返回的证书不含 ghproxy.net
+# （`Hostname mismatch`）—— 而我这边同一时刻实测它是 200 正常的，所以**不能因此删掉这条线路**，
+# 只能在他那种网络下快速跳过。
+LINE_CERT_FAIL_TTL = 30 * 60
 # 线路成绩缓存（下次优先用快的），只放几 KB，不常驻
 LINE_CACHE = "_net/lines.json"
 BASE_HEADERS = {"User-Agent": USER_AGENT, "Accept-Encoding": "identity"}
@@ -421,8 +427,12 @@ def _load_lines_cache() -> dict[str, Any]:
         return {}
 
 
-def _remember_line(name: str, ok: bool, mbps: float) -> None:
-    """记一条线路的成绩（几 KB 的 JSON，不常驻、可随时删）。"""
+def _remember_line(name: str, ok: bool, mbps: float, *, cert_error: bool = False) -> None:
+    """记一条线路的成绩（几 KB 的 JSON，不常驻、可随时删）。
+
+    cert_error=True 表示这次失败是 **HTTPS 证书不匹配**（不是超时/抖动）：那种失败是
+    确定性的，所以直接把失败计数顶到阈值，配合更长的冷却一次就跳过它。
+    """
     cache = _load_lines_cache()
     entry = cache.get(name) if isinstance(cache.get(name), dict) else {}
     if mbps > 0:
@@ -431,11 +441,17 @@ def _remember_line(name: str, ok: bool, mbps: float) -> None:
     if ok:
         entry["ok"] = True
         entry.pop("fail_at", None)
+        entry.pop("cert", None)
         entry["fails"] = 0        # 成功一次就把失败计数清零，避免历史失败累积成"永久封禁"
     else:
         entry["ok"] = False
         entry["fail_at"] = int(time.time())
-        entry["fails"] = int(entry.get("fails") or 0) + 1
+        if cert_error:
+            entry["cert"] = True
+            entry["fails"] = max(int(entry.get("fails") or 0) + 1, LINE_FAIL_THRESHOLD)
+        else:
+            entry.pop("cert", None)
+            entry["fails"] = int(entry.get("fails") or 0) + 1
     cache[name] = entry
     try:
         path = _cache_path()
@@ -472,15 +488,18 @@ def _line_blocked(name: str, cache: dict[str, Any]) -> bool:
     """某条线路是否要临时跳过。
 
     **只在连续失败达到阈值时才跳** —— 一次 DNS 抖动/超时不该把最快的那条线路封掉。
-    例外：**直连**的阈值是 1 —— 它失败通常是"这台机器根本连不上 GitHub"这种稳定事实，
-    再试一次只会白等一个探测超时（实测每次约 8 秒）。
+    例外：① **直连**的阈值是 1 —— 它失败通常是"这台机器根本连不上 GitHub"这种稳定事实，
+    再试一次只会白等一个探测超时（实测每次约 8 秒）；② **证书不匹配**的线路阈值也是 1、
+    冷却用 `LINE_CERT_FAIL_TTL`（见那里的注释）。
     """
     entry = cache.get(name) or {}
-    threshold = 1 if name == DIRECT.name else LINE_FAIL_THRESHOLD
+    cert = bool(entry.get("cert"))
+    threshold = 1 if (name == DIRECT.name or cert) else LINE_FAIL_THRESHOLD
     if int(entry.get("fails") or 0) < threshold:
         return False
     fail_at = int(entry.get("fail_at") or 0)
-    return bool(fail_at) and (time.time() - fail_at) < LINE_FAIL_TTL
+    ttl = LINE_CERT_FAIL_TTL if cert else LINE_FAIL_TTL
+    return bool(fail_at) and (time.time() - fail_at) < ttl
 
 
 def _mirrorable(url: str) -> bool:
@@ -572,12 +591,19 @@ def download(
         message = str(report.message)
         network_wide = ("getaddrinfo" in message or "Name or service not known" in message
                         or "No address associated" in message)
+        # **HTTPS 证书不匹配**：这条线路在这个网络下被劫持/域名失配，是确定性失败，
+        # 一次就该跳过（否则每次下载都要白试一遍）。2026-10-01 issue #6 实证。
+        cert_error = ("CERTIFICATE_VERIFY_FAILED" in message
+                      or "certificate verify failed" in message.lower())
         if network_wide:
             _log(log, f"（{line.name} 这次是网络/DNS 故障，不计入该线路的失败记录）")
         else:
-            _remember_line(line.name, False, 0.0)
+            _remember_line(line.name, False, 0.0, cert_error=cert_error)
         errors.append(f"{line.name}: {report.message}")
         _log(log, f"线路 {line.name} 失败：{report.message}")
+        if cert_error:
+            _log(log, f"（{line.name} 的 HTTPS 证书与你当前网络返回的不符 —— 常见于加速器/运营商"
+                      f"劫持镜像域名；已临时跳过这条线路，不影响其它线路）")
         # **不动 dest**：目标文件要么是上一次下载好的完整文件，要么是用户自己的
         # 文件 —— 一条线路失败不代表它该被删（2026-10-01 修：原实现会 unlink 它，
         # 等于"这条线路不通就把你已下好的东西删了"）。半成品始终在 work 文件里，

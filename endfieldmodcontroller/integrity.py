@@ -111,6 +111,24 @@ def repair_integrity(config: AppConfig, log: Callable[[str], None] | None = None
     else:
         note("当前使用外部 XXMI，缺失的 XXMI Libraries/EFMI 需要重新安装或切换为内置运行环境")
 
+    from . import launcher as launcher_mod
+
+    # ② **XXMI 的配置文件是它首次运行时才生成的** —— 刚从包里解压出来时并不存在。
+    #    不存在时下面所有写入（game_folder / extra_libraries / 签名）全部落空，用户看到
+    #    的就是「EFMI d3d11.dll（注入用）缺失」，而且**点多少次「修复」都不会好**
+    #    （2026-10-01 issue #6 实证：22:31~22:40 六次 repair 全是同一句
+    #     「写入 XXMI 注入库失败: 找不到 XXMI Launcher Config.json」）。
+    #    「一键启动」这条链路本来就有这一步（launcher.ensure_injections 的第一个动作），
+    #    但「修复」以前没有 —— 两条链路的自愈能力必须一致，否则界面上的「修复」是假的。
+    try:
+        boot = launcher_mod.bootstrap_xxmi_config(config)
+        if boot.get("created"):
+            note("XXMI 还没有配置文件（它首次运行才会生成）—— 已启动一次并生成")
+        elif not boot.get("ok") and boot.get("message"):
+            note(f"准备 XXMI 配置文件失败: {boot['message']}")
+    except Exception as exc:  # noqa: BLE001
+        note(f"准备 XXMI 配置文件失败: {exc}")
+
     note("重新生成控制器和 staging")
     activation.stage_and_prepare(
         config.library_path,
@@ -118,11 +136,25 @@ def repair_integrity(config: AppConfig, log: Callable[[str], None] | None = None
         config.runtime_path,
         selected_ids=config.selected_mods,
     )
+
+    # ③ 随包资产（assets）+ DLSS5 目录内容 + ReShade.ini + 游戏目录运行库 + 乳摇/摆姿：
+    #    这些全在 `initialize.ensure_all` 里，而它以前**只有「一键启动」会调**。
+    #    后果就是 issue #6 的另一半：「DLSS5 ReShade.ini（含 [endfield-enhancer] 段）缺失」
+    #    在「修复」里永远补不上（资产包没下下来时更是连来源都没有）。
+    try:
+        from . import initialize
+
+        report = initialize.ensure_all(config, log=note)
+        for action in report.get("actions") or []:
+            note(action)
+        for warning in report.get("warnings") or []:
+            note(f"WARN {warning}")
+    except Exception as exc:  # noqa: BLE001
+        note(f"补齐随包资产/运行时失败: {exc}")
+
     if config.dlss5_injection:
         note("重新写入 XXMI 注入库（DLSS5 d3d12.dll + EFMI d3d11.dll）")
         try:
-            from . import launcher as launcher_mod
-
             result = launcher_mod.configure_dlss5_injection(config, enabled=True)
             note("注入库: " + " + ".join(result.get("extra_libraries", [])))
         except Exception as exc:  # noqa: BLE001

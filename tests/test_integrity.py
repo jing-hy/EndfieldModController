@@ -3,8 +3,9 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from endfieldmodcontroller import integrity
+from endfieldmodcontroller import activation, integrity, runtime_deps
 from endfieldmodcontroller.config import AppConfig
 
 
@@ -67,6 +68,64 @@ class IntegrityTests(unittest.TestCase):
         report = integrity.check_integrity(self.config)
         self.assertFalse(report["ok"])
         self.assertTrue(any(item["key"] == "xxmi_libs_d3d11.dll" for item in report["failures"]))
+
+    def test_repair_reuses_the_launch_chain(self) -> None:
+        """「修复」必须和一键启动一样能自愈（2026-10-01 issue #6 的回归测试）。
+
+        那条 issue 里用户反复点「修复」，每次只拿到
+        「写入 XXMI 注入库失败: 找不到 XXMI Launcher Config.json」，界面停在
+        「修复后仍有缺失」—— 因为修复链路**既不做 bootstrap_xxmi_config（XXMI 配置是它
+        首次运行时才生成的），也不调 initialize.ensure_all（随包资产、ReShade.ini 都补不了）**。
+        这里把三条链路的调用顺序钉住。
+        """
+        calls: list[str] = []
+
+        def fake_bootstrap(config, **kwargs):
+            calls.append("bootstrap")
+            return {"ok": True, "created": True, "message": "已生成"}
+
+        def fake_initialize(config, **kwargs):
+            calls.append("initialize")
+            return {"actions": ["补齐 DLSS5 运行库"], "warnings": []}
+
+        def fake_configure(config, enabled=True):
+            calls.append("injection")
+            return {"extra_libraries": ["d3d12.dll"]}
+
+        from endfieldmodcontroller import initialize, launcher
+
+        with mock.patch.object(runtime_deps, "ensure_all", lambda config: []), \
+                mock.patch.object(activation, "stage_and_prepare", lambda *a, **k: None), \
+                mock.patch.object(launcher, "bootstrap_xxmi_config", fake_bootstrap), \
+                mock.patch.object(launcher, "configure_dlss5_injection", fake_configure), \
+                mock.patch.object(initialize, "ensure_all", fake_initialize):
+            result = integrity.repair_integrity(self.config)
+
+        self.assertIn("bootstrap", calls)
+        self.assertIn("initialize", calls)
+        self.assertIn("injection", calls)
+        self.assertLess(calls.index("bootstrap"), calls.index("injection"),
+                        "写注入库之前必须先让 XXMI 生成配置文件")
+        self.assertTrue(any("XXMI" in message for message in result["messages"]))
+
+    def test_repair_failure_of_injection_is_reported_not_swallowed(self) -> None:
+        """注入库写不进去时必须留在消息里（用户要能在界面上看到是哪一步失败）。"""
+        from endfieldmodcontroller import initialize, launcher
+
+        def boom(config, enabled=True):
+            raise RuntimeError("找不到 XXMI Launcher Config.json")
+
+        with mock.patch.object(runtime_deps, "ensure_all", lambda config: []), \
+                mock.patch.object(activation, "stage_and_prepare", lambda *a, **k: None), \
+                mock.patch.object(launcher, "bootstrap_xxmi_config",
+                                  lambda config, **k: {"ok": True, "created": False, "message": ""}), \
+                mock.patch.object(launcher, "configure_dlss5_injection", boom), \
+                mock.patch.object(initialize, "ensure_all",
+                                  lambda config, **k: {"actions": [], "warnings": []}):
+            result = integrity.repair_integrity(self.config)
+
+        self.assertTrue(any("找不到 XXMI Launcher Config.json" in message
+                            for message in result["messages"]), result["messages"])
 
 
 if __name__ == "__main__":

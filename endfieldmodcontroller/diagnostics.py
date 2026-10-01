@@ -736,6 +736,13 @@ def create_diagnostic_bundle(config: Any, *, game_dir: Path | None = None, note:
     summary.extend(_nvngx_fingerprint(config))
     summary.extend(_xxmi_summary(config))
     summary.extend(_shader_summary(config))
+    # 设备型号 / 显卡与驱动（用户 2026-10-01 要求）：判断"是不是显卡不支持"就靠这段。
+    try:
+        from . import deviceinfo
+
+        summary.extend(deviceinfo.summary_lines())
+    except Exception as exc:  # noqa: BLE001
+        summary.append(f"（设备信息读取失败: {exc}）")
 
     with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for path in sorted(target_dir.glob("*.log")):
