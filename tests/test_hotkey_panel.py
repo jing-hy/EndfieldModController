@@ -526,3 +526,23 @@ class HintsFileTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StateIndexValidationTests(unittest.TestCase):
+    """`mc_state_N` 的**脏值校验**（现场 `mc_state_1 = 5` 而该项只有 0/1 两档 → 面板显示"第 5 档"）。"""
+
+    def test_accepts_only_in_range(self) -> None:
+        from endfieldmodcontroller.core import valid_state_index
+
+        self.assertEqual(valid_state_index("1", ["0", "1"]), "1")
+        self.assertEqual(valid_state_index(" 0 ", ["0", "1"]), "0")
+        self.assertIsNone(valid_state_index("5", ["0", "1"]), "越界的旧值不能当档位用")
+        self.assertIsNone(valid_state_index("-1", ["0", "1"]))
+        self.assertIsNone(valid_state_index("DLSSNR", ["0", "1"]))
+        self.assertIsNone(valid_state_index("", ["0", "1"]))
+        self.assertIsNone(valid_state_index(None, ["0", "1"]))
+        # 多档：索引必须落在范围内
+        self.assertEqual(valid_state_index("2", ["0", "1", "2"]), "2")
+        self.assertIsNone(valid_state_index("3", ["0", "1", "2"]))
+        # 没有档位定义的项（纯命令）不做范围限制
+        self.assertEqual(valid_state_index("7", []), "7")

@@ -61,6 +61,40 @@ def _warn_already_running() -> None:
         pass
 
 
+def _cleanup_stale_mei_dirs(bases: list[str] | None = None) -> list[str]:
+    """删掉 `%TEMP%` 下**上次没删掉**的 `_MEI*` 目录，返回被删掉的目录名。
+
+    PyInstaller onefile 退出时会删自己的 `_MEIxxxxxx`；删不掉（子进程继承、杀软扫描等）
+    就弹 `Failed to remove temporary directory` 并把目录留在 `%TEMP%` 里越积越多。
+    这里在**下次启动时**补删：
+    * 只认 `_MEI` 开头的目录（PyInstaller 的命名），别的一律不碰；
+    * **跳过当前进程正在用的那个**（`sys._MEIPASS`）；
+    * 删不掉（正被别的进程用着）就**静默跳过**，下次启动再试 —— 绝不报错、绝不打扰用户。
+    """
+    import shutil
+    import tempfile
+
+    current = str(getattr(sys, "_MEIPASS", "") or "")
+    roots = bases if bases is not None else [
+        tempfile.gettempdir(), os.environ.get("TEMP", ""), os.environ.get("TMP", ""),
+    ]
+    removed: list[str] = []
+    for root in {r for r in roots if r}:
+        try:
+            entries = list(Path(root).glob("_MEI*"))
+        except OSError:
+            continue
+        for item in entries:
+            try:
+                if not item.is_dir() or str(item) == current:
+                    continue
+                shutil.rmtree(item)
+                removed.append(item.name)
+            except OSError:
+                continue
+    return removed
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     # 防多开：工具自身也只允许一个实例（用户要求「防多开」）
@@ -87,17 +121,29 @@ def main(argv: list[str] | None = None) -> int:
         print("pywebview is not installed. Run: pip install -r requirements.txt")
         return 1
 
-    # 诊断：onefile 的环境变量若被继承下来，PyInstaller 会认为本进程是"子进程"，进而
-    # 去校验一个可能早已不存在的父 PID（弹 `Security validation failure: invalid
-    # originating onefile parent process (PID not found)!` —— 只在**提权**运行时启用）。
-    # 自更新脚本启动新版本前已经清理过这些变量；这里只做留痕，方便下次一眼看出
-    # "是不是又被继承了"（2026-10-01）。
+    # **清理 onefile 的环境变量残留**（2026-10-01 用户实测到弹窗
+    # `Warning / Failed to remove temporary directory: …\Temp\_MEI0002b002`）：
+    # onefile 的启动器会把 `_MEIxxxx` / `_PYI_*` 塞进环境，**我们启动的所有子进程都会继承**；
+    # 子进程只要引用过那个临时目录，主进程退出时就删不掉它 —— 于是弹出上面那个 Warning。
+    # 两件事一起做：
+    # ① **从本进程环境里删掉这些键** → 之后启动的子进程不再继承（**一处修全部**，
+    #    25 个 subprocess 调用点不用逐个改；自更新脚本另有一份显式 `env=` 清理做双保险）。
+    #    Python 层找资源用的是 `sys._MEIPASS`，不依赖这两个环境变量，删除是安全的。
+    # ② **清掉以前没删掉、堆在 %TEMP% 里的 `_MEI*` 目录**（不是当前进程在用的那个；删不掉就跳过）。
     try:
         from . import launcher as _launcher
 
         leaked = sorted(k for k in os.environ if k.upper().startswith(("_MEI", "_PYI")))
+        for key in leaked:
+            os.environ.pop(key, None)
         if leaked:
-            _launcher._append_log(api.config, f"启动自检: 检测到 onefile 环境变量残留 {leaked}（可能影响重启后的启动）")
+            _launcher._append_log(api.config, f"启动自检: 已清理 onefile 环境变量残留 {leaked}")
+        stale = _cleanup_stale_mei_dirs()
+        if stale:
+            _launcher._append_log(
+                api.config,
+                f"启动自检: 清理了 {len(stale)} 个上次没删掉的 PyInstaller 临时目录（{', '.join(stale[:4])}…）",
+            )
     except Exception:  # noqa: BLE001
         pass
 

@@ -900,6 +900,15 @@ def start_watch(config: AppConfig, *, timeout: float = 6 * 3600.0,
             _WATCH["started_at"] = started
             _emit(f"崩溃监控: 已跟踪 {GAME_PROCESS} pid={pid}")
 
+            # 游戏起来了 → 按需打开 Magpie（用户要求"接管它的开关"）。
+            # 放在这里是因为这条链已经**只在「一键启动」**时才跑。
+            try:
+                from . import magpie
+
+                magpie.attach_to_game(config, log=_emit)
+            except Exception as exc:  # noqa: BLE001
+                _emit(f"Magpie 随游戏启动失败: {exc}")
+
             # ② 等进程退出
             while time.time() < deadline:
                 if not _process_ids():
@@ -908,6 +917,14 @@ def start_watch(config: AppConfig, *, timeout: float = 6 * 3600.0,
             exit_time = time.time()
             alive = exit_time - started
             _emit(f"崩溃监控: 游戏已退出（存活 {alive:.0f} 秒），正在收集现场…")
+
+            # 游戏退出 → 关掉**我们启动的**那个 Magpie（用户自己开的那个不动）
+            try:
+                from . import magpie
+
+                magpie.detach_from_game(config, log=_emit)
+            except Exception as exc:  # noqa: BLE001
+                _emit(f"Magpie 随游戏关闭失败: {exc}")
 
             # ③ 收集现场 + 写报告 + 打崩溃包
             time.sleep(3.0)   # 等崩溃报告落盘

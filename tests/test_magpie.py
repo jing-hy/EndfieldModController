@@ -268,3 +268,56 @@ class MagpieAutoConfigureTests(unittest.TestCase):
         self.assertEqual(magpie.ensure_configured(off)["reason"], "disabled")
         not_installed = _config(self.root / "ni", magpie_enabled=True)
         self.assertEqual(magpie.ensure_configured(not_installed)["reason"], "not_installed")
+
+
+class MagpieGameAttachTests(unittest.TestCase):
+    """**随游戏自动开关**（用户：「接管它的开关，在终末地开始运行的时候打开，终末地退出的时候关闭」）。"""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory(prefix="mc-magpie-attach-")
+        self.root = Path(self.tmp.name)
+        self.config = _config(self.root, magpie_enabled=True)
+        self.config.magpie_path.mkdir(parents=True, exist_ok=True)
+        (self.config.magpie_path / magpie.EXE_NAME).write_bytes(b"MZ")
+        magpie._ATTACHED_BY_US["started"] = False      # 模块级状态，逐条清干净
+
+    def tearDown(self) -> None:
+        magpie._ATTACHED_BY_US["started"] = False
+        self.tmp.cleanup()
+
+    def test_attach_launches_and_detach_closes(self) -> None:
+        with mock.patch.object(magpie, "running", return_value=False), \
+                mock.patch.object(magpie, "launch", return_value={"ok": True}) as mock_launch:
+            result = magpie.attach_to_game(self.config)
+        self.assertTrue(result["ok"])
+        mock_launch.assert_called_once()
+        self.assertTrue(magpie._ATTACHED_BY_US["started"])
+        with mock.patch.object(magpie.subprocess, "run") as mock_run:
+            closed = magpie.detach_from_game(self.config)
+        self.assertTrue(closed.get("closed"))
+        self.assertEqual(mock_run.call_args.args[0][:2], ["taskkill", "/IM"])
+        self.assertFalse(magpie._ATTACHED_BY_US["started"])
+
+    def test_attach_leaves_user_started_instance_alone(self) -> None:
+        """Magpie 本来就在跑（用户自己开的）→ 不重启、也不在退出时关它。"""
+        with mock.patch.object(magpie, "running", return_value=True), \
+                mock.patch.object(magpie, "launch") as mock_launch:
+            result = magpie.attach_to_game(self.config)
+        self.assertEqual(result["skipped"], "already_running")
+        mock_launch.assert_not_called()
+        with mock.patch.object(magpie.subprocess, "run") as mock_run:
+            closed = magpie.detach_from_game(self.config)
+        self.assertEqual(closed["skipped"], "not_started_by_us")
+        mock_run.assert_not_called()
+
+    def test_attach_skips_when_disabled_or_not_installed(self) -> None:
+        off = _config(self.root / "off")
+        self.assertEqual(magpie.attach_to_game(off)["skipped"], "disabled")
+        ni = _config(self.root / "ni", magpie_enabled=True)
+        self.assertEqual(magpie.attach_to_game(ni)["skipped"], "not_installed")
+
+    def test_detach_without_attach_does_nothing(self) -> None:
+        with mock.patch.object(magpie.subprocess, "run") as mock_run:
+            result = magpie.detach_from_game(self.config)
+        self.assertEqual(result["skipped"], "not_started_by_us")
+        mock_run.assert_not_called()

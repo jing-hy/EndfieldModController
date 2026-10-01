@@ -360,3 +360,50 @@ def ensure_configured(config: AppConfig, *, log: Log = None) -> dict[str, Any]:
         "message": "已把 Magpie 的默认模式设成 DLSSNR（= 这里的 DLSS5 那一类）。"
                    "打开 Magpie 选好终末地窗口、按它 Home 页显示的快捷键就会生效。",
     }
+
+
+# ---------------------------------------------------------------------------
+# 随游戏自动开关（用户 2026-10-01：「**需要的是你接管它的开关，在终末地开始运行的时候
+# 打开，终末地退出的时候关闭**」）
+# ---------------------------------------------------------------------------
+# 接在崩溃监控那条已有的游戏生命周期跟踪里（`crashwatch.start_watch()` 的"等进程出现 /
+# 等进程退出"两处），所以**只有走「一键启动」**才会自动开关 —— 这是刻意的：手动双击
+# XXMI 启动游戏时控制器并不知道，不该去动 Magpie。
+#
+# **只关我们自己启动的那个**：如果 attach 时 Magpie 已经在跑（用户自己开的），我们既不
+# 重启它、也不在游戏退出时关它 —— 免得误杀用户正在用的东西。
+_ATTACHED_BY_US: dict[str, bool] = {"started": False}
+
+
+def attach_to_game(config: AppConfig, *, log: Log = None) -> dict[str, Any]:
+    """终末地开始运行时：按需把 Magpie 打开。"""
+    if not getattr(config, "magpie_enabled", False):
+        return {"ok": True, "skipped": "disabled"}
+    if not installed(config):
+        return {"ok": True, "skipped": "not_installed"}
+    if running():
+        return {"ok": True, "skipped": "already_running",
+                "message": "Magpie 本来就在跑（你自己开的）—— 不动它，退出游戏时也不会替你关。"}
+    result = launch(config, log=log)
+    _ATTACHED_BY_US["started"] = bool(result.get("ok"))
+    if result.get("ok") and callable(log):
+        log("Magpie: 随游戏一起启动（游戏退出时会自动关闭）")
+    return result
+
+
+def detach_from_game(config: AppConfig, *, log: Log = None) -> dict[str, Any]:
+    """终末地退出后：把我们随游戏启动的 Magpie 关掉。"""
+    if not _ATTACHED_BY_US.get("started"):
+        return {"ok": True, "skipped": "not_started_by_us"}
+    _ATTACHED_BY_US["started"] = False
+    try:
+        subprocess.run(
+            ["taskkill", "/IM", EXE_NAME, "/F"],
+            capture_output=True, text=True, timeout=12,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "message": f"关闭 Magpie 失败：{exc}"}
+    if callable(log):
+        log("Magpie: 已随游戏退出关闭")
+    return {"ok": True, "closed": True}

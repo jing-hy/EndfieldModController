@@ -70,6 +70,28 @@ def safe_name(name: str) -> str:
     return name or uuid.uuid4().hex[:8]
 
 
+def valid_state_index(raw_state: Any, values: Sequence[str]) -> str | None:
+    """把 `d3dx_user.ini` 里读到的 `mc_state_N` 变成**合法的档位索引**，非法就返回 None。
+
+    `mc_state_N` 是我们自己写的档位索引，而 `d3dx_user.ini` 会长期保留历史值 ——
+    现场出现过 `mc_state_1 = 5`（那一项只有 `0,1` 两档），结果面板显示"第 5 档"。
+    合法区间是 `0 .. len(values)-1`；`values` 为空时不做限制（比如纯命令项）。
+    """
+    if raw_state is None:
+        return None
+    candidate = str(raw_state).strip()
+    if not candidate:
+        return None
+    if not values:
+        return candidate
+    if not candidate.lstrip("-").isdigit():
+        return None
+    index = int(candidate)
+    if 0 <= index < len(values):
+        return candidate
+    return None
+
+
 def tsv_cell(value: object) -> str:
     """Sanitize a value for a tab-separated actions file."""
     return str(value).replace("\t", " ").replace("\r", " ").replace("\n", " ")
@@ -1506,8 +1528,14 @@ def generate_controller_mod(
             current = ""
             if user_ini_path is not None:
                 raw_state = read_user_var(Path(user_ini_path), CONTROLLER_NAMESPACE, f"mc_state_{action.wire_id}")
+                # ⚠️ **必须校验范围**：`mc_state_N` 是我们自己写的**档位索引**，而
+                # `d3dx_user.ini` 是持久化文件、会留着历史脏值 —— 现场就出现过
+                # `mc_state_1 = 5`（那一项只有 `0,1` 两档），于是面板显示"第 5 档"。
+                # 合法的索引必须落在 `0 .. len(values)-1`。
                 if raw_state is not None:
-                    current = raw_state
+                    validated = valid_state_index(raw_state, action.values)
+                    if validated is not None:
+                        current = validated
                 elif action.namespace and action.var_name:
                     raw_current = read_user_var(Path(user_ini_path), action.namespace, action.var_name)
                     if raw_current is not None:
@@ -1517,7 +1545,9 @@ def generate_controller_mod(
                             except ValueError:
                                 current = "0" if action.values else ""
                         else:
-                            current = raw_current
+                            # 同样校验：不是合法档位就不当当前值用
+                            current = raw_current if (not action.values
+                                                     or raw_current in action.values) else ""
             row = [
                 action.id,
                 tsv_cell(action.label),
