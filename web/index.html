@@ -64,16 +64,21 @@
         </div>
         <div class="switch-desc">总开关：关闭后 EFMI 引擎不再注入，<b>所有</b>服装 Mod 都不生效（Mods 文件保持原样，随时可开回来）。</div>
       </div>
+      <div class="switch-item">
+        <div class="switch-row">
+          <span class="switch-name">强行关闭角色 Mod 互斥</span>
+          <label class="switch"><input type="checkbox" id="cfg-allow-same-character"><span class="slider"></span></label>
+        </div>
+        <div class="switch-desc">
+          便于<b>部分同角色但不冲突的 Mod</b>：开启后，勾选一个 Mod 不会再把同角色的其它 Mod 自动取消，生成控制器时也不再按角色去重。
+          <b>默认关闭</b> —— 同角色的两个 Mod 同时生效常常会让游戏崩，只在确认它们改的不是同一批资源时再打开。
+        </div>
+      </div>
       <div class="toolbar">
         <button id="scan-btn">重新扫描</button>
         <button id="prepare-btn" class="primary">生成控制器</button>
         <button id="fix-all-mods-btn">一键修复所有 Mod（实验性）</button>
-        <span class="hint">同角色自动互斥，选择自动保存。把 .zip 拖到页面任意处即可导入。</span>
-      </div>
-      <div class="hint" style="margin-bottom:8px">
-        修复用的是社区工具（B站 up 主 <b>可可HXL</b> 的《终末地Mod修复工具包》v1.5，<b>实验性</b>）：把 ini 里的资源槽位号适配当前游戏版本。
-        <b>每个 Mod 都会先整份备份</b>，卡片右下角「⋯」里可单独「回滚修复」。删除 = 移出库（进回收区，可找回）。
-        <span id="modfix-hint"></span>
+        <span class="hint" id="mutual-hint">同角色自动互斥，选择自动保存。把 .zip / .7z / .rar 拖到页面任意处即可导入。</span>
       </div>
       <div id="library-status" class="hint"></div>
       <div id="mod-list" class="mod-groups"></div>
@@ -147,9 +152,11 @@
 
     <section class="panel" id="tab-settings">
       <div class="settings-head">
+        <button id="settings-export-diagnostics-btn" class="primary">一键导出诊断包</button>
         <button id="init-check-btn" class="primary">一键检测全部</button>
         <button id="game-restore-btn">一键还原游戏本体</button>
-        <span class="hint">淡色只读项是按「主路径」自动推导的，不用填；其余项可直接输入，留空即自动。</span>
+        <span class="hint">淡色只读项是按「主路径」自动推导的，不用填；其余项可直接输入，留空即自动。<br>
+          出问题时先点「一键导出诊断包」：导出后会告诉你把包发到哪里（GitHub issue 或 QQ 群），记得<b>附上现象</b>。</span>
       </div>
 
       <div class="settings-group">
@@ -359,24 +366,48 @@
       </ul>
       <h3>反馈与源码</h3>
       <ul>
-        <li>项目地址：<a id="about-repo-link" href="#" target="_blank" rel="noopener">加载中…</a><button data-open-url="repo">打开</button></li>
-        <li><b>问题反馈</b>（报错、游戏崩溃、Mod 不生效都发这里，崩溃时请附上程序生成的 zip）：<a id="about-issues-link" href="#" target="_blank" rel="noopener">加载中…</a><button data-open-url="issues">打开</button></li>
-        <li>版本发布（下载新版 exe / 便携包）：<a id="about-releases-link" href="#" target="_blank" rel="noopener">加载中…</a><button data-open-url="releases">打开</button></li>
+        <li>项目地址：<a id="about-repo-link" class="ext-link" href="#" target="_blank" rel="noopener">加载中…</a></li>
+        <li><b>问题反馈</b>（报错、游戏崩溃、Mod 不生效都发这里，崩溃时请附上程序生成的 zip + 现象）：<a id="about-issues-link" class="ext-link" href="#" target="_blank" rel="noopener">加载中…</a></li>
+        <li><b>QQ 群</b>：<code>1045239747</code>（加群验证答案：<code>jing_hy</code>）—— 不方便用 GitHub / 想直接问，都可以在群里发诊断包；群里发时同样<b>附上现象</b>。</li>
+        <li>版本发布（下载新版 exe / 便携包）：<a id="about-releases-link" class="ext-link" href="#" target="_blank" rel="noopener">加载中…</a></li>
       </ul>
     </section>
   </main>
 
+  <div id="feedback-modal" class="modal hidden">
+    <div class="modal-content" style="width:min(660px,92vw)">
+      <div class="modal-header"><h3 id="feedback-modal-title">诊断包已导出 —— 请这样反馈</h3></div>
+      <div class="hint">
+        把这份 zip 发给我们，并<b>附上现象</b>：什么时候出现的、你点了什么、屏幕上看到什么（报错原文/截图）。
+        包里已经有控制器日志、终末地自己的日志、设备与显卡信息、注入快照，<b>不用另外贴日志</b>。
+      </div>
+      <div class="path-row"><span>诊断包：</span><code id="feedback-zip"></code></div>
+      <div class="toolbar">
+        <button id="feedback-open-zip">打开所在文件夹</button>
+        <button id="feedback-copy-zip">复制路径</button>
+      </div>
+      <div class="path-row"><span>方式一 · GitHub issue：</span><a id="feedback-issue-link" class="ext-link" href="#" target="_blank" rel="noopener">加载中…</a></div>
+      <div class="path-row"><span>方式二 · QQ 群：</span><code id="feedback-qq">1045239747</code>
+        <span class="hint">加群验证答案：<b id="feedback-qq-answer">jing_hy</b></span>
+        <button id="feedback-copy-qq">复制群号</button></div>
+      <div class="modal-actions">
+        <button id="feedback-modal-close" class="primary">知道了</button>
+      </div>
+    </div>
+  </div>
+
   <div id="crash-modal" class="modal hidden">
     <div class="modal-content" style="width:min(720px,92vw)">
       <div class="modal-header"><h3 id="crash-modal-title">检测到终末地异常退出</h3></div>
-      <div class="hint" id="crash-modal-hint">已自动把「控制器日志 + 终末地自己的日志 + 崩溃转储」收集并打包。把这个 zip 发到本项目的 issue 即可，里面已经包含定位所需的一切。</div>
+      <div class="hint" id="crash-modal-hint">已自动把「控制器日志 + 终末地自己的日志 + 崩溃转储」收集并打包。把这个 zip 发到本项目的 issue 或 QQ 群即可，里面已经包含定位所需的一切（记得<b>附上现象</b>：崩溃前你在做什么）。</div>
       <div class="hint" id="crash-conflict-block" style="display:none">
         <b>自检发现你的 Mods 里有资源冲突</b>：冲突的 Mod 同时生效会让游戏在加载过程中闪退。
         建议先把下面冲突项里的其中一个取消勾选 → 点「生成控制器」→ 再进一次游戏；
         这一步比先怀疑注入更容易验证。诊断包仍会照常生成，清理后还崩再发给我们。
         <pre id="crash-conflict-detail" class="code-block" style="max-height:150px;margin-top:6px"></pre>
       </div>
-      <div class="path-row"><span>反馈地址：</span><a id="crash-issue-link" href="#" target="_blank" rel="noopener">加载中…</a><button id="crash-open-issue">打开 issue 页</button></div>
+      <div class="path-row"><span>反馈地址：</span><a id="crash-issue-link" class="ext-link" href="#" target="_blank" rel="noopener">加载中…</a></div>
+      <div class="path-row"><span>QQ 群：</span><code id="crash-qq">1045239747</code><span class="hint">加群验证答案：<b>jing_hy</b></span><button id="crash-copy-qq">复制群号</button></div>
       <div class="path-row"><span>日志文件夹：</span><code id="crash-dir"></code><button id="crash-open-dir">打开</button></div>
       <div class="path-row"><span>崩溃包 zip：</span><code id="crash-zip"></code><button id="crash-open-zip">打开</button><button id="crash-copy-zip">复制路径</button></div>
       <pre id="crash-summary" class="code-block" style="max-height:200px"></pre>
@@ -393,11 +424,29 @@
         下面这些 Mod 从名字里看不出属于哪个角色（或者同时出现了好几个角色名）。
         角色识别错会让「同角色互斥」失效 —— 两个同角色 Mod 同时生效会导致游戏崩溃，
         所以麻烦你确认一下。选完会记进该 Mod 的 <code>mod.meta.json</code>，以后就不会再问。
+        下拉里预选的是<b>预识别</b>结果（按"和哪个角色相关字数最多"猜的），仍需你确认。
       </div>
       <div id="char-pending-list" style="max-height:46vh;overflow:auto;margin:10px 0"></div>
       <div class="modal-actions">
         <button id="char-modal-skip">稍后再说</button>
-        <button id="char-modal-save" class="primary">保存</button>
+        <button id="char-modal-save" class="primary">保存角色归属</button>
+      </div>
+    </div>
+  </div>
+  <div id="char-assign-modal" class="modal hidden">
+    <div class="modal-content" style="width:min(520px,92vw)">
+      <div class="modal-header"><h3>更换 Mod 归属</h3></div>
+      <div class="hint">
+        手动指定「<b id="char-assign-name"></b>」属于哪个角色。保存后会写进该 Mod 的
+        <code>mod.meta.json</code>，卡片的角色分组与「同角色互斥」都会按它来。
+        当前归属：<b id="char-assign-current"></b>。
+      </div>
+      <div style="margin:12px 0">
+        <select id="char-assign-select" style="min-width:280px"></select>
+      </div>
+      <div class="modal-actions">
+        <button id="char-assign-cancel">取消</button>
+        <button id="char-assign-save" class="primary">保存角色归属</button>
       </div>
     </div>
   </div>
@@ -416,12 +465,12 @@
     </div>
   </div>
 
-  <!-- 拖入提示：把 .zip 拖进窗口、还没松手时显示（只在 Mod 库页生效） -->
+  <!-- 拖入提示：把压缩包拖进窗口、还没松手时显示（只在 Mod 库页生效） -->
   <div id="drop-hint" class="drop-hint hidden">
     <div class="drop-hint-inner">
       <div class="drop-hint-arrow">⬇</div>
       <div class="drop-hint-title" id="drop-hint-msg">松开即可导入 Mod</div>
-      <div class="drop-hint-sub">支持 .zip：自动解压进 Mod 库，并尝试识别角色归属</div>
+      <div class="drop-hint-sub">支持 .zip / .7z / .rar：自动解压进 Mod 库，并尝试识别角色归属</div>
     </div>
   </div>
 

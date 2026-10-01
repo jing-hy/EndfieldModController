@@ -213,14 +213,69 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
         pass
 
 
+def _aliases_of(item: dict[str, Any]) -> list[str]:
+    return [str(a).strip() for a in (item.get("aliases") or []) if str(a).strip()]
+
+
+def combine_tables(primary: dict[str, Any], secondary: dict[str, Any]) -> dict[str, Any]:
+    """把两张角色表按角色合并，**aliases 取并集**（primary 的字段优先）。
+
+    为什么要合并（2026-10-01 用户要求「中文拼音也要自动识别」）：拼音别名是
+    `scripts/gen_character_pinyin.py` 固化进**随包表**的，而运行时优先读的是
+    `<数据根>\\runtime\\_state\\characters.json`（启动时从官网同步来的那份）。
+    老用户升级前就已经有运行时表了 —— 直接以它为准会把随包表里的拼音别名**整份丢掉**，
+    于是"拼音识别"在他们的机器上等于没做。两边合并后：官网的 codename 与随包的拼音都在。
+    """
+    if not primary.get("characters"):
+        return secondary
+    if not secondary.get("characters"):
+        return primary
+
+    by_name = {str(i.get("name") or "").strip(): i for i in secondary["characters"]}
+    by_code = {str(i.get("codename") or "").strip().lower(): i
+               for i in secondary["characters"] if str(i.get("codename") or "").strip()}
+
+    merged: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in primary["characters"]:
+        entry = dict(item)
+        name = str(entry.get("name") or "").strip()
+        seen.add(name)
+        other = by_name.get(name)
+        if other is None:
+            code = str(entry.get("codename") or "").strip().lower()
+            other = by_code.get(code) if code else None
+        if other is not None:
+            entry["aliases"] = list(dict.fromkeys(_aliases_of(entry) + _aliases_of(other)))
+        merged.append(entry)
+
+    for item in secondary["characters"]:
+        name = str(item.get("name") or "").strip()
+        if name and name not in seen:
+            merged.append(dict(item))
+
+    payload = dict(secondary)
+    payload.update({"characters": merged})
+    # primary（随包表）里的元信息若有更新，保留其来源标注
+    for key in ("source",):
+        if primary.get(key):
+            payload[key] = primary[key]
+    return payload
+
+
 def _load_local(config: Any) -> dict[str, Any]:
-    """本地表：优先用运行时更新过的那份，其次用随包那份（core.CHARACTERS_JSON）。"""
+    """本地表：**随包表与运行时表合并**（别名取并集）。
+
+    只取运行时那份会让随包表里的拼音别名失效；只取随包那份又会丢掉官网同步来的
+    新角色 —— 所以两张表都要。
+    """
     from . import core
 
+    bundled = _read_json(core.CHARACTERS_JSON)
     updated = _read_json(latest_path(config))
-    if updated.get("characters"):
-        return updated
-    return _read_json(core.CHARACTERS_JSON)
+    if not updated.get("characters"):
+        return bundled
+    return combine_tables(bundled, updated)
 
 
 # ---------------------------------------------------------------- 对外小工具（脚本用）

@@ -577,3 +577,17 @@ progress::-webkit-progress-value { border-radius: 999px; }
 
 .launch-option { display: flex; align-items: center; gap: 12px; margin: 8px 0; }
 .launch-option input[type=range] { flex: 1; max-width: 360px; }
+
+/* ── 网址直接点开（用户 2026-10-01 要求去掉所有「打开」按钮） ──────────────────
+   链接要一眼看出可点：用主题强调色 + 下划线，悬停再亮一档。
+   点击由 app.js 里的全局委托转给 open_external（用系统默认浏览器打开），
+   所以 WebView 自己不会把界面导航走。 */
+a[href^="http"] {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  word-break: break-all;
+}
+
+a[href^="http"]:hover { color: var(--accent-2); }

@@ -14,6 +14,11 @@ from typing import Any
 from . import activation, core, dependencies, diagnostics, dlss5_fetcher, integrity, launcher, reshade, reshade_integration, runtime_assets, runtime_deps, selfupdate
 from .config import AppConfig, auto_detect_migoto_loader, auto_detect_official_launcher, auto_detect_xxmi, cached_detect
 
+# 拖进 Mod 库页面的压缩包格式（用户 2026-10-01：「需要增加支持拖入 7z」「rar 也要」）。
+# zip 走标准库（自带 zip-slip 防护），7z/rar 走外部解压器（见 dependencies.find_archive_tool）。
+IMPORT_SUFFIXES = (".zip", ".7z", ".rar")
+IMPORT_SUFFIX_HINT = " / ".join(IMPORT_SUFFIXES)
+
 
 class EndfieldModControllerApi:
     def __init__(self, config_path: Path | None = None) -> None:
@@ -637,6 +642,10 @@ class EndfieldModControllerApi:
             self.config.staging_mods_path,
             self.config.runtime_path,
             selected_ids=active_ids,
+            # 默认 False：不改写 Mod 自带热键（见 activation.stage_and_prepare 的说明）
+            hotkey_takeover=bool(getattr(self.config, "hotkey_takeover", False)),
+            # 默认 False：保留同角色互斥；用户打开"强行关闭互斥"拨钮后放行同角色多个 Mod
+            allow_same_character=bool(getattr(self.config, "allow_same_character_mods", False)),
         )
         self.config.selected_mods = list(active_ids)
         self.config.save()
@@ -1567,33 +1576,41 @@ class EndfieldModControllerApi:
         return result
 
     def _import_archive_file(self, archive_path: Path, name: str) -> dict[str, Any]:
-        """把**已经落盘**的 .zip 解压进 Mod 库，然后复用收编 + 角色归属流程。
+        """把**已经落盘**的压缩包解压进 Mod 库，然后复用收编 + 角色归属流程。
 
         `import_mod_archive`（小包一次性传）与 `import_mod_finish`（大包分块传）
         都走这里，保证两条路径行为一致。
+
+        支持 `.zip` / `.7z` / `.rar`（用户 2026-10-01 要求「增加支持拖入 7z」「rar 也要」）：
+        zip 用标准库（自带 zip-slip 防护），7z/rar 交给 `dependencies.extract_archive`
+        （7-Zip 优先，Windows 自带 bsdtar 兜底）。
         """
         import re
         import shutil
-        import zipfile
 
+        suffix = Path(name).suffix.lower()
         launcher._append_log(self.config, f"导入: 开始解压 {name}（{archive_path.stat().st_size} B）")
         base = re.sub(r'[\\/:*?"<>|]', "_", Path(name).stem).strip() or "imported_mod"
         dest = self.config.library_path / base
-        suffix = 1
+        counter = 1
         while dest.exists():
-            suffix += 1
-            dest = self.config.library_path / f"{base}_{suffix}"
+            counter += 1
+            dest = self.config.library_path / f"{base}_{counter}"
         try:
             dest.mkdir(parents=True, exist_ok=True)
-            root = dest.resolve()
-            with zipfile.ZipFile(archive_path) as archive:
-                for member in archive.namelist():
-                    # 防 zip slip：任何解析后跑到目标目录之外的条目一律拒绝
-                    target = (dest / member).resolve()
-                    if not str(target).startswith(str(root)):
-                        raise ValueError(f"压缩包里有非法路径: {member}")
-                archive.extractall(dest)
-        except (zipfile.BadZipFile, ValueError, OSError) as exc:
+            if suffix == ".zip":
+                self._extract_zip_into(archive_path, dest)
+            else:
+                # 7z/rar 在**临时目录**里解，再整份搬进库：这样即使包里有
+                # `../` 之类的路径逃逸，也只会落在临时目录里，进不了 Mod 库。
+                # tolerate_partial：bsdtar 解部分 rar 时会为个别目录条目返回 exit 1，
+                # 而文件其实已经解出来了 —— 那种情况继续导入，把原因写进日志。
+                dependencies.extract_archive(
+                    archive_path, dest, strip_root=True,
+                    warn=lambda message: launcher._append_log(self.config, message),
+                    tolerate_partial=True,
+                )
+        except Exception as exc:  # noqa: BLE001  （BadZipFile / RuntimeError / OSError …）
             launcher._append_log(self.config, f"导入失败（解压）: {exc}")
             shutil.rmtree(dest, ignore_errors=True)
             return {"ok": False, "message": f"解压失败：{exc}"}
@@ -1613,8 +1630,11 @@ class EndfieldModControllerApi:
         launcher._append_log(self.config, f"导入: 解压完成 → {dest.name}，开始收编与角色识别")
         try:
             synced = self.import_manual_mods()
-            # 从扫描结果里取这个新 Mod（**不管它有没有进"待确认"列表**）—— 角色被成功识别时
-            # 它不会出现在 pending 里，但调用方仍然需要知道识别成了谁。
+            # **解压进库的新目录要立刻可见**：`_mods()` 是有缓存的，而"收编"只处理
+            # 手动放进游戏 Mods 目录的东西（found 为空时不会失效缓存）。少了这一行，
+            # 下面拿到的就是**导入前的旧列表** → 找不到新 Mod → 永远判定"角色已识别"，
+            # 于是识别不出角色的包**根本不弹角色确认窗**（2026-10-01 用户反馈的 bug）。
+            self._invalidate_mods()
             mods = self._mods()
             target = next((m for m in mods if str(m.path).startswith(str(dest))), None)
             pending = self.pending_characters()
@@ -1632,8 +1652,19 @@ class EndfieldModControllerApi:
                 "group": target.group,
                 "confidence": target.char_confidence,
                 "candidates": list(target.char_candidates),
+                "guess": target.char_guess,
             }
-        launcher._append_log(self.config, f"导入: 完成 {dest.name}（识别={target.group if target else '未识别'}）")
+        need_confirm = bool(target is not None and target.id in pending_ids)
+        # 包里可能压根没有 .ini（比如拖错了文件）—— 那样它不会出现在 Mod 列表里，
+        # 必须如实告诉用户，否则界面只会说"已导入"，用户会以为成功了。
+        warning = ""
+        if target is None:
+            warning = "已解压到 Mod 库，但没在里面找到 .ini，可能不是有效的服装 Mod 包"
+        launcher._append_log(
+            self.config,
+            f"导入: 完成 {dest.name}（识别={target.group if target else '未识别'}"
+            f"，置信度={target.char_confidence if target else '-'}"
+            f"，需确认={'是' if need_confirm else '否'}）")
         return {
             "ok": True,
             "name": dest.name,
@@ -1642,10 +1673,24 @@ class EndfieldModControllerApi:
             "group": (target.group if target is not None else ""),
             "confidence": (target.char_confidence if target is not None else ""),
             "candidates": (list(target.char_candidates) if target is not None else []),
-            "need_confirm": bool(target is not None and target.id in pending_ids),
+            "need_confirm": need_confirm,
+            "mod_id": (target.id if target is not None else ""),
+            "warning": warning,
             "imported": info,
             "pending_total": pending.get("total", 0),
         }
+
+    def _extract_zip_into(self, archive_path: Path, dest: Path) -> None:
+        """把 zip 解进 ``dest``，逐条做 zip-slip 校验（任何逃逸条目直接拒绝）。"""
+        import zipfile
+
+        root = dest.resolve()
+        with zipfile.ZipFile(archive_path) as archive:
+            for member in archive.namelist():
+                target = (dest / member).resolve()
+                if not str(target).startswith(str(root)):
+                    raise ValueError(f"压缩包里有非法路径: {member}")
+            archive.extractall(dest)
 
     def import_mod_begin(self, file_name: str) -> dict[str, Any]:
         """开始**分块**接收拖进来的压缩包。
@@ -1655,14 +1700,16 @@ class EndfieldModControllerApi:
         和识别角色，然后闪退」）。改成前端每块 1 MB、逐块调用，后端追加写临时文件。
         """
         name = Path(str(file_name or "")).name
-        if not name.lower().endswith(".zip"):
-            return {"ok": False, "message": "目前只支持 .zip（其他格式请先解压）"}
+        suffix = Path(name).suffix.lower()
+        if suffix not in IMPORT_SUFFIXES:
+            return {"ok": False, "message": f"目前只支持 {IMPORT_SUFFIX_HINT}（其他格式请先解压）"}
         import time as _time
 
         incoming = self.config.runtime_path / "_incoming"
         incoming.mkdir(parents=True, exist_ok=True)
         token = f"{int(_time.time())}-{os.getpid()}-{abs(hash(name)) % 100000}"
-        part = incoming / f"{token}.zip.part"
+        # 后缀必须带上：解压时按它选解压器（.zip → 标准库；.7z/.rar → 7-Zip / bsdtar）
+        part = incoming / f"{token}{suffix}.part"
         try:
             part.write_bytes(b"")
         except OSError as exc:
@@ -1673,7 +1720,7 @@ class EndfieldModControllerApi:
             self._import_sessions = sessions
         sessions[token] = {"path": part, "name": name, "size": 0}
         launcher._append_log(self.config, f"导入: 开始接收 {name}（分块）")
-        return {"ok": True, "token": token}
+        return {"ok": True, "token": token, "suffix": suffix}
 
     def import_mod_chunk(self, token: str, data_b64: str) -> dict[str, Any]:
         """接收一个分块（base64）。"""
@@ -1706,18 +1753,31 @@ class EndfieldModControllerApi:
         part: Path = info["path"]
         if not part.is_file() or part.stat().st_size == 0:
             return {"ok": False, "message": "没有收到文件内容"}
-        try:
-            return self._import_archive_file(part, str(info["name"]))
-        finally:
+        # 接收期用 `<token><后缀>.part` 命名（半截文件一眼能认出来），但解压器是按
+        # **扩展名**挑的 —— 带着 `.part` 会让 7z/rar 被判成"不支持的格式"（2026-10-01
+        # 实测：拖 .7z 报 `unsupported archive format: …60000.7z.part`）。
+        # 所以这里先原子改名成 `<token><后缀>` 再解压，最后两个名字都清掉。
+        staged = part
+        if part.name.lower().endswith(".part"):
+            staged = part.with_name(part.name[:-len(".part")])
             try:
-                part.unlink()
+                part.replace(staged)
             except OSError:
-                pass
+                staged = part
+        try:
+            return self._import_archive_file(staged, str(info["name"]))
+        finally:
+            for candidate in {staged, part}:
+                try:
+                    candidate.unlink()
+                except OSError:
+                    pass
 
     def import_mod_archive(self, file_name: str, data_b64: str) -> dict[str, Any]:
-        """把拖进界面的 `.zip` 解压进 Mod 库（**一次性传**，小包用；大包走分块接口）。
+        """把拖进界面的压缩包（`.zip` / `.7z` / `.rar`）解压进 Mod 库（**一次性传**，小包用）。
 
-        用户需求（原话）：「如果在 Mod 库界面，能直接拖 zip 进去，然后自动解压，解析角色归属」。
+        用户需求（原话）：「如果在 Mod 库界面，能直接拖 zip 进去，然后自动解压，解析角色归属」，
+        2026-10-01 追加：「需要增加支持拖入 7z」「rar 也要」。
 
         为什么走 base64：pywebview 拿不到拖放文件的**本地路径**（WebView2 沙箱里
         `File.path` 不可用），所以前端用 `FileReader` 读出内容再传过来。为避免超大包
@@ -1726,8 +1786,9 @@ class EndfieldModControllerApi:
         import base64
 
         name = Path(str(file_name or "")).name
-        if not name.lower().endswith(".zip"):
-            return {"ok": False, "message": "目前只支持 .zip（其他格式请先解压）"}
+        suffix = Path(name).suffix.lower()
+        if suffix not in IMPORT_SUFFIXES:
+            return {"ok": False, "message": f"目前只支持 {IMPORT_SUFFIX_HINT}（其他格式请先解压）"}
         max_bytes = 300 * 1024 * 1024
         try:
             blob = base64.b64decode(data_b64 or "", validate=False)
@@ -1809,6 +1870,10 @@ class EndfieldModControllerApi:
                     "group": mod.group,
                     "confidence": mod.char_confidence,
                     "candidates": list(mod.char_candidates),
+                    # **预识别**（用户 2026-10-01 要求「对没法完全确定归属的 Mod 进行预识别，
+                    # 匹配与哪个角色相关字数最多」）：前端拿它做下拉的默认选中项 ——
+                    # 但黄字"角色待确认"照旧显示，必须用户点一下才算数。
+                    "guess": mod.char_guess,
                 })
         return {"pending": pending, "total": len(pending), "known": self.known_characters()}
 

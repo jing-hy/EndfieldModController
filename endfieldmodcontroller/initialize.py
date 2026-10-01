@@ -1256,6 +1256,8 @@ def _check_controller(config: AppConfig, report: Report, log: Callable[[str], No
             config.staging_mods_path,
             config.runtime_path,
             selected_ids=config.selected_mods,
+            hotkey_takeover=bool(getattr(config, "hotkey_takeover", False)),
+            allow_same_character=bool(getattr(config, "allow_same_character_mods", False)),
         )
         report.add("controller", True, f"已重新生成控制器（staging {result.get('patch_count', 0)} 个 Mod）", fixed=True)
         report.action("重新生成控制器与 staging")
@@ -1281,6 +1283,8 @@ def _check_staging(config: AppConfig, report: Report, log: Callable[[str], None]
             config.staging_mods_path,
             config.runtime_path,
             selected_ids=config.selected_mods,
+            hotkey_takeover=bool(getattr(config, "hotkey_takeover", False)),
+            allow_same_character=bool(getattr(config, "allow_same_character_mods", False)),
         )
         report.add("staging", True, f"已重新 staging {result.get('patch_count', 0)} 个 Mod", fixed=True)
         report.action("重新 staging 选中的 Mod")

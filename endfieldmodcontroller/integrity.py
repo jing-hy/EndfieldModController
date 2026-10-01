@@ -135,6 +135,8 @@ def repair_integrity(config: AppConfig, log: Callable[[str], None] | None = None
         config.staging_mods_path,
         config.runtime_path,
         selected_ids=config.selected_mods,
+        hotkey_takeover=bool(getattr(config, "hotkey_takeover", False)),
+        allow_same_character=bool(getattr(config, "allow_same_character_mods", False)),
     )
 
     # ③ 随包资产（assets）+ DLSS5 目录内容 + ReShade.ini + 游戏目录运行库 + 乳摇/摆姿：

@@ -324,7 +324,82 @@ def _find_7z() -> str | None:
     return None
 
 
-def extract_archive(archive: Path, target: Path, *, strip_root: bool = True) -> None:
+def _system_tar() -> str | None:
+    """Windows 自带的 bsdtar（`%SystemRoot%\\System32\\tar.exe`，libarchive 实现）。
+
+    **只认 System32 这一个位置，不走 PATH**：Git for Windows / msys 也带 tar，但那是
+    GNU tar —— 它只认 tar/tgz，读 7z、rar 会直接报错，用它等于功能不可用。
+    libarchive 的 bsdtar 则能读 7z 与 rar（rar4/rar5），是"用户机器上没装 7-Zip 时"
+    最可靠的兜底（Windows 10 1803+ 都自带）。
+    """
+    if os.name != "nt":
+        return None
+    root = os.environ.get("SystemRoot") or r"C:\Windows"
+    candidate = Path(root) / "System32" / "tar.exe"
+    return str(candidate) if candidate.is_file() else None
+
+
+def find_archive_tool() -> tuple[str, str] | None:
+    """找一个**能解 7z / rar** 的外部解压器，返回 ``(kind, exe)`` 或 ``None``。
+
+    kind 取 ``"7z"``（7-Zip：格式支持最全、项目内优先）或 ``"tar"``（bsdtar 兜底）。
+    用户 2026-10-01 要求「需要增加支持拖入 7z」「rar 也要」—— 解压链就是这里。
+    """
+    seven = _find_7z()
+    if seven:
+        return ("7z", seven)
+    tar = _system_tar()
+    if tar:
+        return ("tar", tar)
+    return None
+
+
+def _extract_with_tool(archive: Path, target: Path, tool: tuple[str, str],
+                       *, warn: Callable[[str], None] | None = None,
+                       tolerate_partial: bool = False) -> None:
+    """用外部解压器把 ``archive`` 解到 ``target``（调用方保证 target 是临时目录）。
+
+    ``tolerate_partial``：解压器返回非零但**已经解出内容**时不当失败。
+
+    为什么需要它（2026-10-01 实测）：Windows 自带的 bsdtar 解某些 RAR 时会为个别
+    目录条目打印 `Archive entry has empty or unreadable filename ... skipping` 并以
+    exit 1 收场 —— 文件其实已经解出来了。若照搬"非零即失败"，用户拖进来的 rar 会
+    被判成"解压失败"，而内容明明在临时目录里。所以：有内容就继续（把原因写进日志），
+    一个文件都没有才算真失败。依赖下载那条链路**不开**这个开关（半份资产比失败更糟）。
+    """
+    kind, exe = tool
+    if kind == "7z":
+        cmd = [exe, "x", "-y", f"-o{target}", str(archive)]
+    else:
+        # bsdtar：按扩展名/魔数自动识别格式；-C 指定输出目录
+        cmd = [exe, "-xf", str(archive), "-C", str(target)]
+    try:
+        subprocess.run(
+            cmd,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=600,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except subprocess.CalledProcessError as exc:
+        detail = ((exc.stderr or "") + (exc.stdout or "")).strip()[:300]
+        message = f"{archive.name}: 解压失败（{kind} exit {exc.returncode}）：{detail}"
+        # 只有"确实解出了东西"才容忍非零退出；空目录一律当真失败。
+        if tolerate_partial and any(target.iterdir()):
+            if warn is not None:
+                warn(f"[WARN] {message}（已解出的内容仍会导入）")
+            return
+        raise RuntimeError(message) from exc
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"{archive.name}: 解压超时（600 秒）") from exc
+    except OSError as exc:
+        raise RuntimeError(f"{archive.name}: 无法调用解压器 {exe}：{exc}") from exc
+
+
+def extract_archive(archive: Path, target: Path, *, strip_root: bool = True,
+                    warn: Callable[[str], None] | None = None,
+                    tolerate_partial: bool = False) -> None:
     target.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="mc-extract-") as tmp:
         tmp_path = Path(tmp)
@@ -336,26 +411,15 @@ def extract_archive(archive: Path, target: Path, *, strip_root: bool = True) -> 
             with tarfile.open(archive) as tf:
                 tf.extractall(tmp_path)
         elif suffixes.endswith((".7z", ".rar")):
-            seven = _find_7z()
-            if not seven:
-                raise RuntimeError(f"{archive.name}: rar/7z needs 7z.exe in tools/7zip or on PATH")
+            tool = find_archive_tool()
+            if not tool:
+                raise RuntimeError(
+                    f"{archive.name}: 解压 7z/rar 需要 7-Zip（放 tools/7zip/7z.exe 或装到 PATH）"
+                    f"或 Windows 自带的 tar.exe，两者都没找到")
             # 2026-10-01 修（⑩）：加超时与输出捕获 —— 原先没有 timeout，7z 卡住会让
             # 整个"更新依赖"永久挂起（界面假死），而且失败只有 "exit status 2"，
             # 拿不到任何原因（stderr 被丢掉了）。
-            try:
-                subprocess.run(
-                    [seven, "x", "-y", f"-o{tmp_path}", str(archive)],
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=600,
-                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-                )
-            except subprocess.CalledProcessError as exc:
-                detail = ((exc.stderr or "") + (exc.stdout or "")).strip()[:300]
-                raise RuntimeError(f"{archive.name}: 7z 解压失败（exit {exc.returncode}）：{detail}") from exc
-            except subprocess.TimeoutExpired as exc:
-                raise RuntimeError(f"{archive.name}: 7z 解压超时（600 秒）") from exc
+            _extract_with_tool(archive, tmp_path, tool, warn=warn, tolerate_partial=tolerate_partial)
         else:
             raise RuntimeError(f"unsupported archive format: {archive.name}")
 

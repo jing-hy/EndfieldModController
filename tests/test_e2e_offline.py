@@ -71,13 +71,17 @@ $hat = 0,1
         original = (self.library / "陈" / "夏日" / "mod.ini").read_text(encoding="utf-8")
         self.assertIn("key = no_modifiers VK_9", original)
 
-        # Managed staging is patched and contains controller files.
+        # Managed staging 保留 Mod 自带热键（2026-10-01 起默认**不再**改写为 VK_F24，
+        # 见 activation.stage_and_prepare：控制面板还没做好，先让 Mod 原键可用），
+        # 同时仍然生成控制器文件。
         managed = api.config.managed_mods_path
         self.assertTrue(managed.is_dir())
         self.assertTrue((api.config.controller_dir / "controller.ini").is_file())
         staged_text = "\n".join(p.read_text(encoding="utf-8") for p in api.config.staging_mods_path.rglob("mod.ini"))
-        self.assertIn("key = no_modifiers vk_f24", staged_text.lower())
+        self.assertIn("key = no_modifiers vk_9", staged_text.lower())
+        self.assertNotIn("vk_f24", staged_text.lower())
         self.assertIn("[key", staged_text.lower())
+        self.assertEqual(prepare["patch_count"], 0)
 
         # ReShade add-on and action list are deployed outside the game dir.
         self.assertTrue((api.config.reshade_runtime_path / "Addons" / "endfieldmodcontroller.addon").is_file())

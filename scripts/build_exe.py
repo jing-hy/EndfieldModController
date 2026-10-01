@@ -29,8 +29,14 @@ ROOT = Path(__file__).resolve().parents[1]
 ENTRY = ROOT / "scripts" / "exe_entry.py"
 APP_NAME = "EndfieldModController"
 
-# 只读资源：web 前端整目录打进去
-ADD_DATA = [("web", "web")]
+# 只读资源：web 前端整目录 + 角色名表（含拼音别名）打进去。
+# ⚠ 角色表必须显式带上：它是 .json 数据文件，PyInstaller 只自动收 .py —— 少了它，
+# 发布版会退化成 core.CHARACTER_ALIASES 那 18 条内置兜底表（官网那 33 位与拼音别名
+# 全部失效，新 Mod 的自动归类随之变差）。2026-10-01 实测旧包内确实没有它。
+ADD_DATA = [
+    ("web", "web"),
+    ("endfieldmodcontroller/characters.json", "endfieldmodcontroller"),
+]
 
 # 应用图标（多尺寸 ico，含 16/24/32/48/64/128/256）。放进 exe 后，
 # 资源管理器、任务栏、窗口标题栏都会用它。

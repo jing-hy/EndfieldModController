@@ -5,37 +5,352 @@
   "fetched_at": "2026-09-27",
   "official_count": 33,
   "characters": [
-    { "name": "提弗洛斯", "codename": "Typhoeus",     "key": "typhoea",        "aliases": ["提弗洛斯", "typhoeus", "typhoea"] },
-    { "name": "噗切娜",   "codename": "Purrchena",    "key": "purrche",        "aliases": ["噗切娜", "purrchena", "purrche"] },
-    { "name": "管理员",   "codename": "Endministrator","key": "endministrator", "aliases": ["管理员", "女管理员", "男管理员", "女管理", "男管理", "endministrator", "endmin"] },
-    { "name": "佩丽卡",   "codename": "Perlica",      "key": "perlica",        "aliases": ["佩丽卡", "佩利卡", "perlica", "prelica"] },
-    { "name": "陈千语",   "codename": "Chen Qianyu",  "key": "chen",           "aliases": ["陈千语", "陈", "chen", "chenqianyu", "chengqianyu"] },
-    { "name": "诀",       "codename": "Arcane",       "key": "lizhiyan",       "aliases": ["诀", "arcane", "lizhiyan"] },
-    { "name": "梨诺",     "codename": "Liino",        "key": "liino",          "aliases": ["梨诺", "liino", "linuo"] },
-    { "name": "弭弗",     "codename": "Mi Fu",        "key": "mifu",           "aliases": ["弭弗", "弥弗", "mifu"] },
-    { "name": "卡缪",     "codename": "Camille",      "key": "camille",        "aliases": ["卡缪", "camille"] },
-    { "name": "庄方宜",   "codename": "Zhuang Fangyi","key": "zhuangfy",       "aliases": ["庄方宜", "zhuangfangyi", "zhuang fangyi", "zhuangfy"] },
-    { "name": "汤汤",     "codename": "Tangtang",     "key": "tangtang",       "aliases": ["汤汤", "tangtang"] },
-    { "name": "洛茜",     "codename": "Rossi",        "key": "rossi",          "aliases": ["洛茜", "rossi"] },
-    { "name": "莱万汀",   "codename": "Laevatain",    "key": "laevatain",      "aliases": ["莱万汀", "laevatain", "laevat"] },
-    { "name": "伊冯",     "codename": "Yvonne",       "key": "yvonne",         "aliases": ["伊冯", "yvonne"] },
-    { "name": "洁尔佩塔", "codename": "Gilberta",     "key": "gilberta",       "aliases": ["洁尔佩塔", "gilberta", "aglina"] },
-    { "name": "艾尔黛拉", "codename": "Ardelia",      "key": "ardelia",        "aliases": ["艾尔黛拉", "ardelia", "小羊"] },
-    { "name": "余烬",     "codename": "Ember",        "key": "ember",          "aliases": ["余烬", "ember"] },
-    { "name": "别礼",     "codename": "Last Rite",    "key": "lastrite",       "aliases": ["别礼", "last rite", "lastrite", "bieli"] },
-    { "name": "黎风",     "codename": "Lifeng",       "key": "lifeng",         "aliases": ["黎风", "lifeng"] },
-    { "name": "骏卫",     "codename": "Pogranichnik", "key": "pogranichnik",   "aliases": ["骏卫", "pogranichnik"] },
-    { "name": "阿列什",   "codename": "Alesh",        "key": "alesh",          "aliases": ["阿列什", "alesh"] },
-    { "name": "弧光",     "codename": "Arclight",     "key": "arclight",       "aliases": ["弧光", "arclight"] },
-    { "name": "艾维文娜", "codename": "Avywenna",     "key": "avywenna",       "aliases": ["艾维文娜", "艾闻维娜", "avywenna", "avywen"] },
-    { "name": "大潘",     "codename": "Da Pan",       "key": "dapan",          "aliases": ["大潘", "da pan", "dapan"] },
-    { "name": "昼雪",     "codename": "Snowshine",    "key": "snowshine",      "aliases": ["昼雪", "snowshine"] },
-    { "name": "狼卫",     "codename": "Wulfgard",     "key": "wulfgard",       "aliases": ["狼卫", "wulfgard"] },
-    { "name": "赛希",     "codename": "Xaihi",        "key": "xaihi",          "aliases": ["赛希", "塞希", "塞西", "xaihi"] },
-    { "name": "秋栗",     "codename": "Akekuri",      "key": "akekuri",        "aliases": ["秋栗", "akekuri"] },
-    { "name": "安塔尔",   "codename": "Antal",        "key": "antal",          "aliases": ["安塔尔", "antal"] },
-    { "name": "卡契尔",   "codename": "Catcher",      "key": "catcher",        "aliases": ["卡契尔", "catcher"] },
-    { "name": "埃特拉",   "codename": "Estella",      "key": "estella",        "aliases": ["埃特拉", "estella", "whiten"] },
-    { "name": "萤石",     "codename": "Fluorite",     "key": "fluorite",       "aliases": ["萤石", "fluorite", "bounda"] }
-  ]
+    {
+      "name": "提弗洛斯",
+      "codename": "Typhoeus",
+      "key": "typhoea",
+      "aliases": [
+        "提弗洛斯",
+        "typhoeus",
+        "typhoea",
+        "tifuluosi"
+      ]
+    },
+    {
+      "name": "噗切娜",
+      "codename": "Purrchena",
+      "key": "purrche",
+      "aliases": [
+        "噗切娜",
+        "purrchena",
+        "purrche",
+        "puqiena"
+      ]
+    },
+    {
+      "name": "管理员",
+      "codename": "Endministrator",
+      "key": "endministrator",
+      "aliases": [
+        "管理员",
+        "女管理员",
+        "男管理员",
+        "女管理",
+        "男管理",
+        "endministrator",
+        "endmin",
+        "guanliyuan"
+      ]
+    },
+    {
+      "name": "佩丽卡",
+      "codename": "Perlica",
+      "key": "perlica",
+      "aliases": [
+        "佩丽卡",
+        "佩利卡",
+        "perlica",
+        "prelica",
+        "peilika"
+      ]
+    },
+    {
+      "name": "陈千语",
+      "codename": "Chen Qianyu",
+      "key": "chen",
+      "aliases": [
+        "陈千语",
+        "陈",
+        "chen",
+        "chenqianyu",
+        "chengqianyu"
+      ]
+    },
+    {
+      "name": "诀",
+      "codename": "Arcane",
+      "key": "lizhiyan",
+      "aliases": [
+        "诀",
+        "arcane",
+        "lizhiyan",
+        "jue"
+      ]
+    },
+    {
+      "name": "梨诺",
+      "codename": "Liino",
+      "key": "liino",
+      "aliases": [
+        "梨诺",
+        "liino",
+        "linuo"
+      ]
+    },
+    {
+      "name": "弭弗",
+      "codename": "Mi Fu",
+      "key": "mifu",
+      "aliases": [
+        "弭弗",
+        "弥弗",
+        "mifu"
+      ]
+    },
+    {
+      "name": "卡缪",
+      "codename": "Camille",
+      "key": "camille",
+      "aliases": [
+        "卡缪",
+        "camille",
+        "kamou",
+        "kamiao",
+        "kamiu"
+      ]
+    },
+    {
+      "name": "庄方宜",
+      "codename": "Zhuang Fangyi",
+      "key": "zhuangfy",
+      "aliases": [
+        "庄方宜",
+        "zhuangfangyi",
+        "zhuang fangyi",
+        "zhuangfy"
+      ]
+    },
+    {
+      "name": "汤汤",
+      "codename": "Tangtang",
+      "key": "tangtang",
+      "aliases": [
+        "汤汤",
+        "tangtang"
+      ]
+    },
+    {
+      "name": "洛茜",
+      "codename": "Rossi",
+      "key": "rossi",
+      "aliases": [
+        "洛茜",
+        "rossi",
+        "luoqian",
+        "luoxi"
+      ]
+    },
+    {
+      "name": "莱万汀",
+      "codename": "Laevatain",
+      "key": "laevatain",
+      "aliases": [
+        "莱万汀",
+        "laevatain",
+        "laevat",
+        "laiwanting"
+      ]
+    },
+    {
+      "name": "伊冯",
+      "codename": "Yvonne",
+      "key": "yvonne",
+      "aliases": [
+        "伊冯",
+        "yvonne",
+        "yifeng"
+      ]
+    },
+    {
+      "name": "洁尔佩塔",
+      "codename": "Gilberta",
+      "key": "gilberta",
+      "aliases": [
+        "洁尔佩塔",
+        "gilberta",
+        "aglina",
+        "jieerpeita",
+        "杰哥",
+        "jiege"
+      ]
+    },
+    {
+      "name": "艾尔黛拉",
+      "codename": "Ardelia",
+      "key": "ardelia",
+      "aliases": [
+        "艾尔黛拉",
+        "ardelia",
+        "小羊",
+        "aierdaila"
+      ]
+    },
+    {
+      "name": "余烬",
+      "codename": "Ember",
+      "key": "ember",
+      "aliases": [
+        "余烬",
+        "ember",
+        "yujin"
+      ]
+    },
+    {
+      "name": "别礼",
+      "codename": "Last Rite",
+      "key": "lastrite",
+      "aliases": [
+        "别礼",
+        "last rite",
+        "lastrite",
+        "bieli"
+      ]
+    },
+    {
+      "name": "黎风",
+      "codename": "Lifeng",
+      "key": "lifeng",
+      "aliases": [
+        "黎风",
+        "lifeng"
+      ]
+    },
+    {
+      "name": "骏卫",
+      "codename": "Pogranichnik",
+      "key": "pogranichnik",
+      "aliases": [
+        "骏卫",
+        "pogranichnik",
+        "junwei"
+      ]
+    },
+    {
+      "name": "阿列什",
+      "codename": "Alesh",
+      "key": "alesh",
+      "aliases": [
+        "阿列什",
+        "alesh",
+        "alieshi"
+      ]
+    },
+    {
+      "name": "弧光",
+      "codename": "Arclight",
+      "key": "arclight",
+      "aliases": [
+        "弧光",
+        "arclight",
+        "huguang"
+      ]
+    },
+    {
+      "name": "艾维文娜",
+      "codename": "Avywenna",
+      "key": "avywenna",
+      "aliases": [
+        "艾维文娜",
+        "艾闻维娜",
+        "avywenna",
+        "avywen",
+        "aiweiwenna"
+      ]
+    },
+    {
+      "name": "大潘",
+      "codename": "Da Pan",
+      "key": "dapan",
+      "aliases": [
+        "大潘",
+        "da pan",
+        "dapan"
+      ]
+    },
+    {
+      "name": "昼雪",
+      "codename": "Snowshine",
+      "key": "snowshine",
+      "aliases": [
+        "昼雪",
+        "snowshine",
+        "zhouxue"
+      ]
+    },
+    {
+      "name": "狼卫",
+      "codename": "Wulfgard",
+      "key": "wulfgard",
+      "aliases": [
+        "狼卫",
+        "wulfgard",
+        "langwei"
+      ]
+    },
+    {
+      "name": "赛希",
+      "codename": "Xaihi",
+      "key": "xaihi",
+      "aliases": [
+        "赛希",
+        "塞希",
+        "塞西",
+        "xaihi",
+        "saixi"
+      ]
+    },
+    {
+      "name": "秋栗",
+      "codename": "Akekuri",
+      "key": "akekuri",
+      "aliases": [
+        "秋栗",
+        "akekuri",
+        "qiuli"
+      ]
+    },
+    {
+      "name": "安塔尔",
+      "codename": "Antal",
+      "key": "antal",
+      "aliases": [
+        "安塔尔",
+        "antal",
+        "antaer"
+      ]
+    },
+    {
+      "name": "卡契尔",
+      "codename": "Catcher",
+      "key": "catcher",
+      "aliases": [
+        "卡契尔",
+        "catcher",
+        "kaqier"
+      ]
+    },
+    {
+      "name": "埃特拉",
+      "codename": "Estella",
+      "key": "estella",
+      "aliases": [
+        "埃特拉",
+        "estella",
+        "whiten",
+        "aitela"
+      ]
+    },
+    {
+      "name": "萤石",
+      "codename": "Fluorite",
+      "key": "fluorite",
+      "aliases": [
+        "萤石",
+        "fluorite",
+        "bounda",
+        "yingshi"
+      ]
+    }
+  ],
+  "_pinyin": "拼音别名由 scripts/gen_character_pinyin.py 用 pypinyin 生成；运行时不依赖 pypinyin。"
 }

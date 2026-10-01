@@ -63,6 +63,7 @@ def env(tmp_path, monkeypatch):
     # core 的模块级缓存里，把**别的测试**（test_core 的角色识别）带偏。
     monkeypatch.setattr(core, "CHARACTERS_OVERRIDE", None)
     monkeypatch.setattr(core, "_CHARACTER_ALIAS_CACHE", None)
+    monkeypatch.setattr(core, "_COMPACT_ALIAS_CACHE", None)
     return SimpleNamespace(config=config, tmp=tmp_path)
 
 
@@ -163,6 +164,40 @@ def test_sync_failure_is_silent(env, monkeypatch):
 
 
 # --------------------------------------------------------------- 写盘 + core 生效
+def test_load_local_merges_bundled_pinyin_with_runtime_table(env):
+    """运行时表（官网同步来的，没有拼音）不能把**随包表里的拼音别名**顶掉。
+
+    2026-10-01：拼音别名是固化在随包 `characters.json` 里的，而程序优先读
+    `<数据根>\\runtime\\_state\\characters.json` —— 老用户升级前就有这张表了，
+    合并前会把拼音整份丢掉，等于"拼音识别"在他们机器上没做。
+    """
+    runtime_table = {"schema_version": 2, "fetched_at": "2026-10-01", "characters": [
+        {"name": "洛茜", "codename": "Rossi", "key": "rossi", "aliases": ["洛茜", "rossi"]},
+    ]}
+    character_sync._write_json(character_sync.latest_path(env.config), runtime_table)
+
+    local = character_sync.load_local(env.config)
+    by_name = {item["name"]: item for item in local["characters"]}
+    self_aliases = by_name["洛茜"]["aliases"]
+    assert "luoxi" in self_aliases        # ← 随包表里的拼音保住了
+    assert "rossi" in self_aliases        # 运行时表原有的别名也还在
+    assert len(local["characters"]) > 30  # 随包表的其它角色同样保留
+
+
+def test_combine_tables_keeps_both_sides():
+    bundled = {"characters": [
+        {"name": "甲", "codename": "A", "key": "a", "aliases": ["甲", "a", "jia"]},
+    ]}
+    runtime = {"characters": [
+        {"name": "甲", "codename": "A", "key": "a", "aliases": ["甲", "a", "新别名"]},
+        {"name": "乙", "codename": "B", "key": "b", "aliases": ["乙", "b"]},
+    ]}
+    combined = character_sync.combine_tables(bundled, runtime)
+    by_name = {item["name"]: item for item in combined["characters"]}
+    assert set(by_name["甲"]["aliases"]) == {"甲", "a", "jia", "新别名"}
+    assert "乙" in by_name                 # 只有运行时表里有的角色也要保留
+
+
 def test_write_latest_lands_in_data_root_and_core_picks_it_up(env):
     parsed = character_sync.parse_official(FAKE_HTML)
     payload = character_sync.merge_payload(LOCAL, parsed)["payload"]

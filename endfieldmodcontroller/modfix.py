@@ -118,8 +118,17 @@ def ensure_tool(config: AppConfig, *, log: Log = None) -> dict[str, Any]:
 
 def tool_status(config: AppConfig) -> dict[str, Any]:
     path = tool_path(config)
+    ready = path.is_file()
+    # 随包资产里有没有工具：`ready=False` 但随包有 → 点「修复」时 ensure_tool 会自动展开，
+    # 属于**可用**。2026-10-01 用户反馈「为什么现在更多中修复点不了」—— 就是因为界面只看
+    # `ready`（runtime\modfix 里还没有）就把它置灰了，而其实随包那份一直都在。
+    bundled = next((p for p in _tool_candidates(config) if p.is_file()), None)
     return {
-        "ready": path.is_file(),
+        "ready": ready,
+        "bundled": bool(bundled),
+        "bundled_path": str(bundled) if bundled else "",
+        # 能不能修：runtime 里已就位，或随包里能展开出来
+        "usable": ready or bool(bundled),
         "path": str(path),
         "name": TOOL_NAME,
         "version": "v1.5 (Endfield_PS-T_DrawSection_Fix_v2.1)",

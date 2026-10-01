@@ -117,6 +117,18 @@ class AppConfig:
     theme: str = "light"
     last_tab: str = "library"
     inject_reshade_ui: bool = True
+    # **是否接管 Mod 自带热键**（把每个 Mod 的 `[Key*]` 统一改写成 `VK_F24`，改由控制器
+    # 面板驱动）。2026-10-01 用户拍板：**控制面板还没做好，在此之前先恢复快捷键** ——
+    # 面板是我们自研的 ReShade addon（`EndfieldModController.addon`），它没随包、也没装进
+    # ReShade 真正读取的目录，导致"键被改死了、面板却不存在"，Mod 的按键与控制菜单全失效。
+    # 所以默认 False = 不动 Mod 的键，readme 里写的快捷键直接生效；等面板做好再打开。
+    hotkey_takeover: bool = False
+    # **强行关闭角色 Mod 互斥**（用户 2026-10-01 要求：「设置…拨钮…强行关闭角色 mod 互斥，
+    # 这个可以禁用互斥功能，介绍写便于部分同角色但不冲突的 mod」）。
+    # True = 勾选时不再自动取消同角色的其它 Mod，控制器生成时也不再按角色去重 ——
+    # 用于"同角色但资源不冲突"的搭配（例如一个改服装、一个只改贴图）。
+    # 默认 False：同角色两个 Mod 同时生效**常会崩游戏**，只在确认不冲突时才开。
+    allow_same_character_mods: bool = False
     dependency_manifest: str = "dependencies.json"
     launch_extra_args: list[str] = field(default_factory=list)
     selected_mods: list[str] = field(default_factory=list)

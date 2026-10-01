@@ -1,4 +1,8 @@
-const state = { config: {}, mods: [], dependency_report: {}, selected: new Set(), lastPrepare: null, fileWatchdog: null };
+const state = { config: {}, mods: [], dependency_report: {}, selected: new Set(), lastPrepare: null, fileWatchdog: null, modfixTool: null };
+
+// 反馈途径（用户 2026-10-01 要求：所有反馈相关弹窗/说明/README 都要带上 QQ 群）
+const FEEDBACK_QQ = '1045239747';
+const FEEDBACK_QQ_ANSWER = 'jing_hy';
 
 // 后端返回的字符串（Mod 名、角色名、分组、文件路径、错误信息）一律先转义再拼进 HTML。
 // 这些内容来自用户导入的 mod 包与下载的依赖清单 —— 直接拼模板等于把"包名"当代码执行，
@@ -78,7 +82,7 @@ function setStatus(text) {
 // 用户要求把所有弹窗都改成它那个样式，因此这里提供 Promise 版的 showAlert /
 // showConfirm 取代原生 alert/confirm（原生弹窗由系统渲染、改不了样式），
 // 全项目 27 处调用已批量替换过来。
-function showModalDialog({ title, message, okText = '确定', cancelText = '取消', showCancel = true }) {
+function showModalDialog({ title, message, okText = '确定', cancelText = '取消', showCancel = true, link = null }) {
   return new Promise((resolve) => {
     const wrap = document.createElement('div');
     wrap.className = 'modal';
@@ -88,6 +92,17 @@ function showModalDialog({ title, message, okText = '确定', cancelText = '取�
       + '<div class="modal-actions"></div></div>';
     wrap.querySelector('h3').textContent = title;
     wrap.querySelector('.modal-body').textContent = message;
+    if (link && link.url) {
+      // 正文里的网址**直接点开**，不再配一个「打开」按钮（用户 2026-10-01 要求）；
+      // 点击由 boot 里注册的全局委托转给 open_external。
+      const anchor = document.createElement('a');
+      anchor.className = 'ext-link';
+      anchor.href = link.url;
+      anchor.target = '_blank';
+      anchor.rel = 'noopener';
+      anchor.textContent = link.text || link.url;
+      wrap.querySelector('.modal-body').after(anchor);
+    }
     const actions = wrap.querySelector('.modal-actions');
     let settled = false;
     const onKey = (event) => {
@@ -231,16 +246,15 @@ async function maybeShowAnnouncements() {
       __announcementsShown.add(a.id);
       const lines = [a.title || '公告', ''];
       if (a.body) lines.push(a.body, '');
-      if (a.url) lines.push(`详情：${a.url}`, '');
-      const openDetail = await showModalDialog({
+      if (a.url) lines.push('详情见下面的链接：');
+      // 网址直接点开：不再提供「打开详情」按钮（用户 2026-10-01 要求去掉所有"打开键"）
+      await showModalDialog({
         title: '来自作者的公告',
         message: lines.join('\n'),
-        okText: a.url ? '打开详情' : '我知道了',
-        cancelText: '关闭',
+        link: a.url ? { text: a.url, url: a.url } : null,
+        okText: '我知道了',
+        showCancel: false,
       });
-      if (a.url && openDetail) {
-        try { await call('open_external', a.url); } catch (err) { /* 忽略 */ }
-      }
       // 记已读：同一条公告下次启动不再弹（critical 预警不在此列，它每次都弹）
       try { await call('announcements_seen', [a.id]); } catch (err) { /* 忽略 */ }
     }
@@ -410,8 +424,11 @@ function renderMods() {
     grid.className = 'mod-list';
     for (const mod of mods) {
       const dependency = mod.kind === 'dependency' || mod.kind === 'tool';
-      // 角色识别不确定时（low/none）在卡片上打个标记，点它就能选择
+      // 角色识别不确定时（low/none）在卡片上打个标记，点它就能选择。
+      // 用户 2026-10-01 要求「对没法完全确定归属的 Mod 进行**预识别**（匹配与哪个角色
+      // 相关字数最多）」，但**黄字照旧显示** —— 预识别只是把下拉预选上，仍需用户点一下。
       const needConfirm = !dependency && (mod.char_confidence === 'low' || mod.char_confidence === 'none');
+      const guess = (mod.char_guess || '').trim();
       const card = document.createElement('div');
       card.className = 'mod-card' + (dependency ? ' disabled' : '');
       const checked = dependency || state.selected.has(mod.id);
@@ -419,7 +436,8 @@ function renderMods() {
         <div class="cover" data-cover-box="${escapeHtml(mod.id)}"><span>无预览图</span></div>
         <div class="name">${escapeHtml(mod.name)}</div>
         <div class="meta">${escapeHtml(mod.kind)} · id=${escapeHtml(mod.id)}</div>
-        ${needConfirm ? '<div class="meta" style="color:#d98a1f;cursor:pointer" data-char-pick="' + escapeHtml(mod.id) + '">⚠ 角色待确认 —— 点此选择</div>' : ''}
+        ${needConfirm ? '<div class="meta" style="color:#d98a1f;cursor:pointer" data-char-pick="' + escapeHtml(mod.id) + '">⚠ 角色待确认'
+          + (guess ? `（预识别：${escapeHtml(guess)}）` : '') + ' —— 点此选择</div>' : ''}
         ${mod.fixed ? '<div class="fixed-tag">✓ 已修复过（可在「⋯」里回滚）</div>' : ''}
         <label class="switch">
           <input type="checkbox" data-mod-toggle value="${escapeHtml(mod.id)}" ${checked ? 'checked' : ''} ${dependency ? 'disabled' : ''}>
@@ -437,15 +455,20 @@ function renderMods() {
       const mod = state.mods.find(item => item.id === cb.value);
       if (!mod) return;
       const groupKey = mod.conflict_group || mod.group;
+      // 「强行关闭角色 Mod 互斥」打开时：只增删自己，**不再**取消同角色的其它 Mod
+      // （用户 2026-10-01 要求：便于部分同角色但不冲突的 Mod）
+      const allowSame = state.config.allow_same_character_mods === true;
       if (cb.checked) {
         state.selected.add(mod.id);
-        for (const other of state.mods) {
-          if (other.id === mod.id) continue;
-          if (other.kind !== 'character') continue;
-          if ((other.conflict_group || other.group) !== groupKey) continue;
-          state.selected.delete(other.id);
-          const otherToggle = root.querySelector(`input[data-mod-toggle][value="${CSS.escape(other.id)}"]`);
-          if (otherToggle) otherToggle.checked = false;
+        if (!allowSame) {
+          for (const other of state.mods) {
+            if (other.id === mod.id) continue;
+            if (other.kind !== 'character') continue;
+            if ((other.conflict_group || other.group) !== groupKey) continue;
+            state.selected.delete(other.id);
+            const otherToggle = root.querySelector(`input[data-mod-toggle][value="${CSS.escape(other.id)}"]`);
+            if (otherToggle) otherToggle.checked = false;
+          }
         }
       } else {
         state.selected.delete(mod.id);
@@ -469,16 +492,9 @@ function renderMods() {
     btn.onmouseleave = () => scheduleModMenuClose();
   });
   $('library-status').textContent = `已发现 ${state.mods.length} 个 Mod，按角色分组显示`;
-  // 修复工具没就位时**当场说清**（否则用户点「修复」只会拿到一句报错，还得猜为什么）
-  if ($('modfix-hint')) {
-    call('modfix_status').then((r) => {
-      const tool = (r && r.tool) || {};
-      $('modfix-hint').textContent = tool.ready
-        ? `｜修复工具已就位：${tool.version}`
-        : '｜⚠ 修复工具未就位：「修复」会失败 —— 把 exe 放到 <数据根>\\runtime\\modfix\\，'
-          + '或重新展开随包资产（assets\\modfix 或 Release 里的 assets-bundle.zip）';
-    }).catch(() => {});
-  }
+  // 修复工具就位的状态**不再占版面**（用户 2026-10-01 要求去掉库页那段说明）：
+  // 只在「⋯」菜单里体现 —— 工具没就位时「修复」按钮置灰，悬停能看到该放哪。
+  call('modfix_status').then((r) => { state.modfixTool = (r && r.tool) || {}; }).catch(() => {});
   loadCovers();
 }
 
@@ -514,8 +530,12 @@ function openModMenu(modId, anchorEl) {
   const tags = [];
   if (mod.fixed) tags.push('已修复过');
   if (mod.can_rollback) tags.push('可回滚');
+  // 注意：**不要因为"工具还没展开到 runtime\modfix"就把「修复」置灰**（2026-10-01 用户
+  // 反馈「为什么现在更多中修复点不了」）—— 随包 assets\modfix 里那份一直都在，点下去会
+  // 自动展开。只有"随包也没有、runtime 也没有"时才在点击时说明原因。
   menu.innerHTML = `
-    <div class="mod-menu-head">${escapeHtml(tags.length ? tags.join(' · ') : '未修复过')}</div>
+    <div class="mod-menu-head">归属：${escapeHtml(mod.group || '未分类')}${tags.length ? ' · ' + escapeHtml(tags.join(' · ')) : ''}</div>
+    <button data-act="assign">更换 Mod 归属…</button>
     <button data-act="fix">修复（实验性）</button>
     <button data-act="rollback" ${mod.can_rollback ? '' : 'disabled'}>回滚修复</button>
     <button data-act="open">打开所在文件夹</button>
@@ -544,6 +564,7 @@ function openModMenu(modId, anchorEl) {
       const act = btn.dataset.act;
       closeModMenus();
       if (act === 'open') { call('open_path_in_explorer', mod.path || ''); return; }
+      if (act === 'assign') return openCharacterAssign(modId, mod.name, mod.group || '');
       if (act === 'fix') return doFixMod(modId, mod.name);
       if (act === 'rollback') return doRollbackMod(modId, mod.name);
       if (act === 'delete') return doDeleteMod(modId, mod.name);
@@ -560,6 +581,15 @@ document.addEventListener('keydown', (event) => { if (event.key === 'Escape') cl
 window.addEventListener('scroll', () => closeModMenus(), true);
 
 async function doFixMod(modId, name) {
+  // 只有"随包也没有、runtime 也没有"时才拦（正常情况随包 assets\modfix 里一直有）
+  const tool = state.modfixTool || {};
+  if (tool.usable === false) {
+    await showAlert('没找到 Mod 修复工具，所以现在修不了：\n'
+      + '· 正常情况下它随包放在 assets\\modfix\\，启动时会自动展开\n'
+      + '· 也可以手动把 exe 放到 <数据根>\\runtime\\modfix\\\n'
+      + '· 从 Release 下载的话，重新展开一次 assets-bundle.zip 即可', '修复工具未就位');
+    return;
+  }
   if (!await showModalDialog({
     title: '修复这个 Mod（实验性）',
     message: '会把 ini 里的资源槽位号适配当前游戏版本：\n'
@@ -609,8 +639,53 @@ async function doDeleteMod(modId, name) {
   await refreshFromState();
 }
 
-function updateGroupHeader(block, groupKey) {
-  if (!block) return;
+// ── 「⋯」→ 更换 Mod 归属 ───────────────────────────────────────────────────
+// 用户 2026-10-01 要求：「更多中加一项**更换 Mod 归属**」。识别的结果会写进该 Mod 的
+// mod.meta.json（和"角色待确认"那条链路同一个后端接口），卡片分组与同角色互斥随之改变。
+async function openCharacterAssign(modId, name, current) {
+  const modal = $('char-assign-modal');
+  const select = $('char-assign-select');
+  if (!modal || !select) return;
+  let known = [];
+  try {
+    known = (await call('known_characters')) || [];
+  } catch (err) {
+    known = [];      // 后端忙也不挡住手工选择：至少能选回当前值
+  }
+  // 当前归属也列进去（可能是用户自定义的分组名，不在标准角色表里）
+  const options = [...new Set([...(current ? [current] : []), ...known])].filter(Boolean);
+  select.innerHTML = options
+    .map((n) => `<option value="${escapeHtml(n)}"${n === current ? ' selected' : ''}>${escapeHtml(n)}</option>`)
+    .join('');
+  $('char-assign-name').textContent = name || '';
+  $('char-assign-current').textContent = current || '未分类';
+  modal.classList.remove('hidden');
+
+  $('char-assign-cancel').onclick = () => modal.classList.add('hidden');
+  $('char-assign-save').onclick = async () => {
+    const value = (select.value || '').trim();
+    if (!value) {
+      await showAlert('请先选择一个角色。', '更换 Mod 归属');
+      return;
+    }
+    try {
+      const r = await call('set_mod_character', modId, value);
+      if (!r || !r.ok) {
+        await showAlert((r && r.message) || '保存失败', '更换 Mod 归属');
+        return;
+      }
+      modal.classList.add('hidden');
+      logLine(`已更换归属: ${name} → ${value}`);
+      setStatus(`已把「${name}」归到「${value}」`);
+      await scan();
+      await refreshFromState();
+    } catch (err) {
+      await showAlert(`保存失败：${err.message || err}`, '更换 Mod 归属');
+    }
+  };
+}
+
+function updateGroupHeader(block, groupKey) {  if (!block) return;
   const mods = state.mods.filter(m => (m.conflict_group || m.group) === groupKey);
   const enabledCount = mods.filter(m => m.kind === 'dependency' || m.kind === 'tool' || state.selected.has(m.id)).length;
   const hint = block.querySelector('.group-header .hint');
@@ -740,8 +815,8 @@ function dragHasFiles(event) {
 
 async function importDroppedFile(file) {
   if (!file) return;
-  if (!/\.zip$/i.test(file.name)) {
-    await showAlert('目前只支持 .zip 压缩包（其他格式请先解压再拖进来）。', '导入 Mod');
+  if (!/\.(zip|7z|rar)$/i.test(file.name)) {
+    await showAlert('目前只支持 .zip / .7z / .rar 压缩包（其他格式请先解压再拖进来）。', '导入 Mod');
     return;
   }
   dropBusy = true;
@@ -779,14 +854,23 @@ async function importDroppedFile(file) {
     dropBusy = false;
     if (!result.ok) {
       await showAlert(result.message || '导入失败', '导入 Mod');
-    } else if (result.need_confirm) {
-      await showAlert(`已导入「${result.name}」，但角色归属不确定 —— `
-        + '请点「确认角色归属」按钮选一下角色。', '导入 Mod');
     } else {
-      await showAlert(`已导入「${result.name}」，角色归属已识别。`, '导入 Mod');
+      try { await scan(); } catch (err) { /* 扫描失败不影响导入结果 */ }
+      try { await refreshFromState(); } catch (err) { /* 同上 */ }
+      if (result.need_confirm && result.mod_id) {
+        // **识别不出来就直接把角色确认窗弹出来**（用户 2026-10-01 反馈：「一个不能确定
+        // 角色名字的 mod 拖进去不会弹出角色确定窗」）。以前这里只弹一句"请点确认角色归属
+        // 按钮"，用户还得自己回列表找那个 Mod —— 现在拖完立刻让他选。
+        setStatus(`「${result.name}」的角色归属不确定，请选择角色`);
+        await startCharacterCheck(result.mod_id);
+      } else if (result.group && result.mod_id) {
+        await showAlert(`已导入「${result.name}」，识别为「${result.group}」。`, '导入 Mod');
+      } else if (result.mod_id) {
+        await showAlert(`已导入「${result.name}」。`, '导入 Mod');
+      } else {
+        await showAlert(result.warning || `已解压到 Mod 库，但没有识别出 Mod。`, '导入 Mod');
+      }
     }
-    try { await scan(); } catch (err) { /* 扫描失败不影响导入结果 */ }
-    try { await refreshFromState(); } catch (err) { /* 同上 */ }
   } catch (err) {
     await showAlert(`导入失败：${err.message || err}`, '导入 Mod');
   } finally {
@@ -971,6 +1055,17 @@ async function refreshFromState() {
   }
   if ($('cfg-third-party-mods')) {
     $('cfg-third-party-mods').checked = modsOn;
+  }
+  // 「强行关闭角色 Mod 互斥」拨钮：打开后勾选不再自动取消同角色的其它 Mod
+  const allowSame = s.config.allow_same_character_mods === true;
+  if ($('cfg-allow-same-character')) {
+    $('cfg-allow-same-character').checked = allowSame;
+  }
+  const mutualHint = $('mutual-hint');
+  if (mutualHint) {
+    mutualHint.textContent = allowSame
+      ? '⚠ 同角色互斥已关闭：同角色多个 Mod 可同时勾选（不冲突才这样配）。选择自动保存。把 .zip / .7z / .rar 拖到页面任意处即可导入。'
+      : '同角色自动互斥，选择自动保存。把 .zip / .7z / .rar 拖到页面任意处即可导入。';
   }
   const modList = $('mod-list');
   if (modList) modList.classList.toggle('mods-disabled', !modsOn);
@@ -1197,7 +1292,7 @@ const TOUR_STEPS = [
     tab: 'library',
     target: '',
     title: '第二步：把 Mod 拖进来',
-    body: '在「Mod 库」页，把 Mod 的 .zip 直接拖到页面任意位置即可导入：\n'
+    body: '在「Mod 库」页，把 Mod 的压缩包（.zip / .7z / .rar）直接拖到页面任意位置即可导入：\n'
       + '松手后自动解压进库，并尝试识别角色归属。\n\n'
       + '同一个角色只保留一个 Mod（自动互斥），避免游戏崩溃。',
   },
@@ -1362,17 +1457,56 @@ async function exportDiagnostics() {
   setStatus('正在导出诊断包...');
   const result = await call('export_diagnostics');
   if (result && result.ok) {
-    if ($('log-modal').classList.contains('hidden')) openLog();
-    const box = $('log-text');
-    box.textContent += `
+    if (!$('log-modal').classList.contains('hidden')) {
+      const box = $('log-text');
+      box.textContent += `
 
 [诊断包] ${result.path}
 `;
-    box.scrollTop = box.scrollHeight;
+      box.scrollTop = box.scrollHeight;
+    }
     setStatus(`诊断包已导出: ${result.path}`);
+    // 用户 2026-10-01 要求：导出诊断包后弹窗给出 GitHub 与 QQ 群的反馈方式，并要求附上现象
+    showFeedbackModal(result.path || '');
   } else {
     setStatus(`导出诊断包失败: ${result.message || '未知错误'}`);
+    await showAlert(`导出诊断包失败：${result && result.message ? result.message : '未知错误'}`, '导出诊断包');
   }
+}
+
+// ── 诊断包导出后的「怎么反馈」弹窗（GitHub issue / QQ 群 + 附上现象） ──────────
+function showFeedbackModal(zipPath) {
+  const modal = $('feedback-modal');
+  if (!modal) return;
+  $('feedback-zip').textContent = zipPath || '(看下面的日志窗里的路径)';
+  if ($('feedback-qq')) $('feedback-qq').textContent = FEEDBACK_QQ;
+  if ($('feedback-qq-answer')) $('feedback-qq-answer').textContent = FEEDBACK_QQ_ANSWER;
+  const issueUrl = (window.__mcLinks && window.__mcLinks.issues) || '';
+  if ($('feedback-issue-link')) {
+    // 网址直接点开（全局委托负责调用 open_external，见 boot 里的说明）
+    $('feedback-issue-link').href = issueUrl || '#';
+    $('feedback-issue-link').textContent = issueUrl || '（见「说明」页的反馈地址）';
+  }
+  if ($('feedback-open-zip')) {
+    const target = zipPath || '';
+    $('feedback-open-zip').onclick = () => {
+      if (target) call('open_path_in_explorer', target).catch(() => {});
+    };
+  }
+  if ($('feedback-copy-zip')) {
+    $('feedback-copy-zip').onclick = async () => {
+      try { await navigator.clipboard.writeText(zipPath || ''); setStatus('诊断包路径已复制'); }
+      catch (err) { setStatus(`复制失败，请手动复制: ${zipPath || ''}`); }
+    };
+  }
+  if ($('feedback-copy-qq')) {
+    $('feedback-copy-qq').onclick = async () => {
+      try { await navigator.clipboard.writeText(`${FEEDBACK_QQ}（验证答案：${FEEDBACK_QQ_ANSWER}）`); setStatus('QQ 群号已复制'); }
+      catch (err) { setStatus(`复制失败，请手动复制: ${FEEDBACK_QQ}`); }
+    };
+  }
+  if ($('feedback-modal-close')) $('feedback-modal-close').onclick = () => modal.classList.add('hidden');
+  modal.classList.remove('hidden');
 }
 
 async function previewLaunch() {
@@ -1542,6 +1676,7 @@ function bind() {
   $('prepare-launch-btn').onclick = prepare;
   $('open-log-btn').onclick = openLog;
   $('export-diagnostics-btn').onclick = exportDiagnostics;
+  if ($('settings-export-diagnostics-btn')) $('settings-export-diagnostics-btn').onclick = exportDiagnostics;
   $('force-close-game-btn').onclick = forceCloseGame;
   $('game-inject-audit-btn').onclick = () => auditGameInjections();
   $('game-inject-clean-btn').onclick = cleanGameInjections;
@@ -1866,6 +2001,26 @@ function bind() {
   if (modsMaster) modsMaster.onchange = () => applyModsMaster(modsMaster.checked);
   const efmiToggle = $('cfg-efmi-injection');
   if (efmiToggle) efmiToggle.onchange = () => applyModsMaster(efmiToggle.checked);
+  // 「强行关闭角色 Mod 互斥」：只改配置 + 立刻按新规则刷新列表与提示
+  // （真正生效点有两处：前端勾选不再互相取消，后端生成控制器时不再按角色去重）
+  const sameCharToggle = $('cfg-allow-same-character');
+  if (sameCharToggle) {
+    sameCharToggle.onchange = async () => {
+      const enabled = sameCharToggle.checked;
+      state.config.allow_same_character_mods = enabled;
+      try {
+        await call('save_config', { allow_same_character_mods: enabled });
+        logLine(enabled
+          ? '已强行关闭角色 Mod 互斥：同角色多个 Mod 可同时勾选（生成控制器时不再按角色去重）'
+          : '已恢复角色 Mod 互斥：同角色只保留一个');
+        setStatus(enabled ? '同角色互斥已关闭' : '同角色互斥已恢复');
+      } catch (err) {
+        logLine(`✗ 切换同角色互斥失败: ${err.message || err}`);
+        setStatus(`切换失败: ${err.message || err}`);
+      }
+      await refreshFromState();      // 刷新提示文案与勾选状态
+    };
+  }
   // 初始化自检
   // 一键还原游戏本体：把游戏目录里所有第三方插件文件移走（先整体备份），恢复成原版状态
   if ($('game-restore-btn')) {
@@ -2029,11 +2184,13 @@ function bind() {
     appLinks.repo = base;
     appLinks.issues = `${base}/issues/new/choose`;
     appLinks.releases = `${base}/releases`;
+    window.__mcLinks = appLinks;      // 「怎么反馈」弹窗要用它（见 showFeedbackModal）
     const pairs = [
       ['about-repo-link', appLinks.repo],
       ['about-issues-link', appLinks.issues],
       ['about-releases-link', appLinks.releases],
       ['crash-issue-link', appLinks.issues],
+      ['feedback-issue-link', appLinks.issues],
     ];
     for (const [id, url] of pairs) {
       const el = $(id);
@@ -2041,11 +2198,14 @@ function bind() {
     }
   }
 
-  document.querySelectorAll('[data-open-url]').forEach((el) => {
-    el.onclick = () => {
-      const url = appLinks[el.dataset.openUrl];
-      if (url) call('open_external', url).catch(() => {});
-    };
+  // 界面上所有网址都**直接点开**（用户 2026-10-01 要求：「程序内所有给网址做了打开键的，
+  // 全部去掉，点击网址就可以直接打开了」）—— 用事件委托，动态填进去的链接（仓库/issue/
+  // 发布页、弹窗里的反馈地址）也一并生效，不必逐处绑 onclick，也不会漏。
+  document.addEventListener('click', (event) => {
+    const anchor = event.target && event.target.closest ? event.target.closest('a[href^="http"]') : null;
+    if (!anchor) return;
+    event.preventDefault();          // 别让 WebView 把界面导航走
+    call('open_external', anchor.href).catch(() => {});
   });
 
   async function initAppUpdate() {
@@ -2388,7 +2548,7 @@ async function boot() {
           : '') +
           '引导会带你走一遍最关键的几步（约 1 分钟）：\n'
           + '· 在「依赖」页一键装齐全部组件\n'
-          + '· 在「Mod 库」页把 zip 拖进来导入 Mod\n'
+          + '· 在「Mod 库」页把压缩包（.zip / .7z / .rar）拖进来导入 Mod\n'
           + '· 一键启动，以及出问题时怎么一键还原\n',
         okText: '开始引导',
         cancelText: '跳过',
@@ -2431,7 +2591,7 @@ function showCrashModal(bundle) {
   if ($('crash-modal-hint')) {
     $('crash-modal-hint').textContent = isConflict
       ? '自检记录到 Mod 资源冲突，游戏随后在加载过程中退出。建议先清冲突（这一步最可能一步解决），诊断包仍会照常生成。'
-      : '已自动把「控制器日志 + 终末地自己的日志 + 崩溃转储」收集并打包。把这个 zip 发到本项目的 issue 即可，里面已经包含定位所需的一切。';
+      : '已自动把「控制器日志 + 终末地自己的日志 + 崩溃转储」收集并打包。把这个 zip 发到本项目的 issue 或 QQ 群即可，里面已经包含定位所需的一切（记得附上现象：崩溃前你在做什么）。';
   }
   if ($('crash-conflict-block')) {
     $('crash-conflict-block').style.display = isConflict ? '' : 'none';
@@ -2464,7 +2624,8 @@ function showCrashModal(bundle) {
     ...(bundle.game_logs || []).slice(0, 12).map((n) => `   ${n}`),
     '',
     '包里还带了 dlss5-feed.log / ReShade.ini（DLSS5 现场）与 cause.json（归因）。',
-    '反馈建议：把 zip 里的内容贴到 GitHub issue，或直接发给作者。',
+    '反馈建议：把 zip 里的内容贴到 GitHub issue，或加 QQ 群 '
+      + `${FEEDBACK_QQ}（验证答案：${FEEDBACK_QQ_ANSWER}）发在群里；两种方式都请附上现象。`,
   ];
   $('crash-summary').textContent = lines.join('\n');
   modal.classList.remove('hidden');
@@ -2478,6 +2639,12 @@ function showCrashModal(bundle) {
     };
   }
   if ($('crash-modal-close')) $('crash-modal-close').onclick = () => modal.classList.add('hidden');
+  if ($('crash-copy-qq')) {
+    $('crash-copy-qq').onclick = async () => {
+      try { await navigator.clipboard.writeText(`${FEEDBACK_QQ}（验证答案：${FEEDBACK_QQ_ANSWER}）`); setStatus('QQ 群号已复制'); }
+      catch (err) { setStatus(`复制失败，请手动复制: ${FEEDBACK_QQ}`); }
+    };
+  }
 }
 
 // ── 角色识别不确定时弹窗让用户选择 ──────────────────────────────
@@ -2513,11 +2680,14 @@ function showCharacterModal(data) {
     const why = item.confidence === 'none'
       ? '名字里没找到任何角色名'
       : '出现了多个角色名，分不清哪个才是主体';
-    const first = (item.candidates || [])[0] || '';
-    const all = [...new Set([...(item.candidates || []), ...(data.known || [])])];
+    const first = (item.guess || (item.candidates || [])[0] || '');
+    const all = [...new Set([...(item.candidates || []), ...(data.known || [])])].filter(Boolean);
     const opts = all
       .map((n) => `<option value="${escapeHtml(n)}"${n === first ? ' selected' : ''}>${escapeHtml(n)}</option>`)
       .join('');
+    const guessLine = item.guess
+      ? `<div class="hint" style="margin:2px 0 0">预识别：<b>${escapeHtml(item.guess)}</b>（按"和哪个角色相关字数最多"猜的，请确认）</div>`
+      : '';
     row.innerHTML = `
       <div style="font-weight:600">${escapeHtml(item.name)}</div>
       <div class="hint" style="margin:2px 0 6px">${escapeHtml(why)}</div>
@@ -2525,6 +2695,7 @@ function showCharacterModal(data) {
         <option value="">（请选择角色）</option>
         ${opts}
       </select>
+      ${guessLine}
     `;
     list.appendChild(row);
   }

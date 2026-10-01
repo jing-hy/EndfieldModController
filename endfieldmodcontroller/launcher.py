@@ -1232,6 +1232,8 @@ def launch_official_gui(config: AppConfig) -> dict[str, Any]:
                 config.staging_mods_path,
                 config.runtime_path,
                 selected_ids=config.selected_mods,
+                hotkey_takeover=bool(getattr(config, "hotkey_takeover", False)),
+                allow_same_character=bool(getattr(config, "allow_same_character_mods", False)),
             )
         except Exception as exc:  # noqa: BLE001
             _append_log(config, f"暂存所选 mod 失败: {exc}")
@@ -1451,6 +1453,8 @@ def launch(
             config.staging_mods_path,
             config.runtime_path,
             selected_ids=config.selected_mods,
+            hotkey_takeover=bool(getattr(config, "hotkey_takeover", False)),
+            allow_same_character=bool(getattr(config, "allow_same_character_mods", False)),
         )
 
     problems = config.validate()
@@ -1926,6 +1930,8 @@ def launch_migoto_loader(
         config.runtime_path,
         selected_ids=config.selected_mods,
         user_ini_path=user_ini,
+        hotkey_takeover=bool(getattr(config, "hotkey_takeover", False)),
+        allow_same_character=bool(getattr(config, "allow_same_character_mods", False)),
     )
     controller_dir = Path(result["controller_dir"])
 

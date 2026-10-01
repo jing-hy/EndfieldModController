@@ -39,7 +39,19 @@ class ActivationReport:
         return asdict(self)
 
 
-def resolve_active_set(mods: Iterable[mc_core.ModInfo], selected_ids: Iterable[str] | None = None) -> tuple[list[mc_core.ModInfo], ActivationReport]:
+def resolve_active_set(
+    mods: Iterable[mc_core.ModInfo],
+    selected_ids: Iterable[str] | None = None,
+    *,
+    allow_same_character: bool = False,
+) -> tuple[list[mc_core.ModInfo], ActivationReport]:
+    """解析"最终要生效的 Mod 集合"。
+
+    ``allow_same_character=True`` = **关闭同角色互斥**（用户 2026-10-01 要求：「强行关闭
+    角色 Mod 互斥…便于部分同角色但不冲突的 mod」）：此时同一个 ``conflict_group`` 下的
+    多个 Mod 会**全部保留**，不再只留第一个。默认 False 保持原行为 —— 同角色两个 Mod
+    同时生效常会让游戏崩，所以只在用户明确开启时才放行。
+    """
     selected_ids = set(selected_ids or [])
     mods = list(mods)
     available_deps = {m.name.lower(): m for m in mods if m.is_dependency}
@@ -49,6 +61,9 @@ def resolve_active_set(mods: Iterable[mc_core.ModInfo], selected_ids: Iterable[s
     report = ActivationReport()
     for mod in candidates:
         key = mod.conflict_group or mod.group or mod.id
+        if allow_same_character:
+            # 不用「角色」当 key，改用 Mod 自己的 id —— 于是同角色多个都进 chosen。
+            key = mod.id
         if key in chosen:
             report.dropped.append({
                 "id": mod.id,
@@ -370,6 +385,8 @@ def stage_and_prepare(
     selected_ids: Iterable[str] | None = None,
     user_ini_path: Path | None = None,
     all_when_empty: bool = False,
+    hotkey_takeover: bool = False,
+    allow_same_character: bool = False,
 ) -> dict[str, Any]:
     """Plan, stage, patch and generate controller files for the selected mods.
 
@@ -378,6 +395,14 @@ def stage_and_prepare(
     重建成全部 Mod）。所以这里默认把**显式传入的空列表**视为"什么都不选"——
     只清空 staging 并生成空的控制器，不再退化成"全部"。确实需要全部激活时，
     显式传 ``all_when_empty=True``。
+
+    ⚠ 关于 ``hotkey_takeover``：**默认 False = 不改写 Mod 自带热键**（2026-10-01 用户
+    拍板：「那个控制面板还没做好，在此之前先恢复快捷键」）。改写热键本意是把操作权交给
+    控制器面板（`EndfieldModController.addon` + `controller.ini` 的合成键协议），但那个
+    addon 既没随包、也没装进 ReShade 真正读取的目录（它只在 d3d12.dll 所在目录搜 addon），
+    结果就是：**键被改死了（全变 `VK_F24`）、面板却不存在** —— Mod 自带的快捷键与
+    `CTRL 0`/`ALT 1` 那类控制菜单全都弹不出来。所以默认保留原键；等面板做好，
+    把 ``config.hotkey_takeover`` 打开即可恢复接管。
     """
     library_root = library_root.resolve()
     staging_root = staging_root.resolve()
@@ -389,7 +414,9 @@ def stage_and_prepare(
 
     # First scan only to obtain metadata/identity.
     provisional = mc_core.scan_library(library_root, staging_root)
-    active_plan, activation_report = resolve_active_set(provisional, selected_ids)
+    active_plan, activation_report = resolve_active_set(
+        provisional, selected_ids, allow_same_character=allow_same_character
+    )
 
     managed_root = staging_root / MANAGED_DIR_NAME
     previous_manifest = managed_root / "active_targets.json"
@@ -484,10 +511,13 @@ def stage_and_prepare(
 
     backup_root = runtime_dir / "backups" / "hotkey_patch"
     patch_records: list[mc_core.PatchRecord] = []
-    for mod in staged_mods:
-        if mod.is_dependency:
-            continue
-        patch_records.extend(mc_core.patch_mod_hotkeys(mod.path, backup_root, mod.id))
+    if hotkey_takeover:
+        # 只有显式打开接管时才改写 Mod 热键 —— 默认保留原键，让 readme 里写的快捷键
+        # 与 Mod 自带的控制菜单都能用（见函数 docstring）。
+        for mod in staged_mods:
+            if mod.is_dependency:
+                continue
+            patch_records.extend(mc_core.patch_mod_hotkeys(mod.path, backup_root, mod.id))
 
     controller_dir = staging_root / "MC_Controller"
     if controller_dir.exists():

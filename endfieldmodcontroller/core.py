@@ -318,6 +318,10 @@ class ModInfo:
     # （见 match_character_detail；用户需求「如果不确定就弹窗让用户选择」）
     char_confidence: str = "high"
     char_candidates: list[str] = field(default_factory=list)
+    # **预识别**角色（用户 2026-10-01 要求「对没法完全确定归属的 Mod 进行预识别，
+    # 匹配与哪个角色相关字数最多」）：只用于界面预选/预填，不改变 char_confidence ——
+    # 卡片上那行黄字"角色待确认"照旧显示。
+    char_guess: str = ""
     requires: list[str] = field(default_factory=list)
     source: str = ""
     source_id: str = ""
@@ -342,6 +346,7 @@ class ModInfo:
             # （注意这里是**显式列字段**，新增字段必须加进来，否则前端永远拿不到）
             "char_confidence": self.char_confidence,
             "char_candidates": list(self.char_candidates),
+            "char_guess": self.char_guess,
             "requires": list(self.requires),
             "source": self.source,
             "source_id": self.source_id,
@@ -426,9 +431,10 @@ CHARACTERS_OVERRIDE: Path | None = None
 
 def set_characters_override(path: Path | None) -> None:
     """切换"更新版角色表"的位置并清缓存（character_sync 与 api 启动时各调一次）。"""
-    global CHARACTERS_OVERRIDE, _CHARACTER_ALIAS_CACHE
+    global CHARACTERS_OVERRIDE, _CHARACTER_ALIAS_CACHE, _COMPACT_ALIAS_CACHE
     CHARACTERS_OVERRIDE = Path(path) if path else None
     _CHARACTER_ALIAS_CACHE = None
+    _COMPACT_ALIAS_CACHE = None
 
 # 角色名出现在名称前多少个字符内，才认为它是这个 Mod 的"主体"，
 # 而不是括号说明文字里顺带提到的路人名（超过就降级为需要用户确认）。
@@ -481,6 +487,76 @@ def character_alias_pairs() -> list[tuple[str, str]]:
     return sorted(pairs, key=lambda item: -len(item[0]))
 
 
+# 紧凑化：去掉空格、下划线、连字符、点等一切分隔与标点，只留字母/数字/汉字。
+# 目的（2026-10-01 用户要求「中文拼音也要自动识别」）：Mod 目录名里的拼音有各种写法 ——
+# `ZhuangFangyi`、`zhuang_fang_yi`、`zhuang-fangyi`、`流萤 zhuang fang yi v2`，
+# 只有把它们折叠成 `zhuangfangyi` 再比对，同一条别名才能全都命中。
+_COMPACT_DROP_RE = re.compile(r"[^0-9a-z\u4e00-\u9fff]+")
+_COMPACT_ALIAS_CACHE: list[tuple[str, str]] | None = None
+
+
+def compact_text(text: str) -> str:
+    """把文本折叠成"只有字母数字与汉字"的紧凑形式（用于拼音/下划线写法的匹配）。"""
+    return _COMPACT_DROP_RE.sub("", str(text).lower())
+
+
+def compact_alias_pairs() -> list[tuple[str, str]]:
+    """``character_alias_pairs()`` 的紧凑版：别名同样折叠，按长度降序、去重。"""
+    global _COMPACT_ALIAS_CACHE
+    if _COMPACT_ALIAS_CACHE is not None:
+        return _COMPACT_ALIAS_CACHE
+    seen: set[str] = set()
+    pairs: list[tuple[str, str]] = []
+    for alias, canonical in character_alias_pairs():
+        folded = compact_text(alias)
+        if not folded or folded in seen:
+            continue
+        seen.add(folded)
+        pairs.append((folded, canonical))
+    _COMPACT_ALIAS_CACHE = sorted(pairs, key=lambda item: -len(item[0]))
+    return _COMPACT_ALIAS_CACHE
+
+
+def guess_character(haystack: str) -> str:
+    """**预识别**：说不清归属时，按"哪个角色相关字数最多"猜一个（仅供下拉预选，不代表确认）。
+
+    用户需求（原话，2026-10-01）：「还要对一些没法完全确定归属的 Mod 进行预识别，
+    就是匹配与哪个角色相关**字数最多**，比如杰哥属于洁尔佩塔，但预识别过的**还是要显示
+    那个黄字无法确认归属**」。
+
+    做法：在**紧凑串**（折叠空格/下划线/连字符，见 :func:`compact_text`）上，对每个角色
+    把「命中次数 × 别名长度」累加作为"相关字数"，取最大者；并列时先看最长别名（更具体），
+    再看首次出现位置（更靠前）。线索太弱（最高分 < 2，例如只命中一个单字别名）时不猜。
+
+    返回值用途严格限定为"预选/预填"：`char_confidence` 不会被它抬高，界面上的黄色
+    「角色待确认」标记照旧显示 —— 猜错会让同角色互斥失效，所以最终仍要用户点一下。
+    """
+    text = compact_text(haystack)
+    if not text:
+        return ""
+    scores: dict[str, int] = {}
+    longest: dict[str, int] = {}
+    first_pos: dict[str, int] = {}
+    for alias, canonical in compact_alias_pairs():
+        if not alias:
+            continue
+        count = text.count(alias)
+        if not count:
+            continue
+        scores[canonical] = scores.get(canonical, 0) + count * len(alias)
+        if len(alias) > longest.get(canonical, 0):
+            longest[canonical] = len(alias)
+        pos = text.find(alias)
+        if canonical not in first_pos or pos < first_pos[canonical]:
+            first_pos[canonical] = pos
+    if not scores:
+        return ""
+    ranked = sorted(scores.items(),
+                    key=lambda kv: (-kv[1], -longest.get(kv[0], 0), first_pos.get(kv[0], 0)))
+    best, best_score = ranked[0]
+    return best if best_score >= 2 else ""
+
+
 def match_character(haystack: str) -> str:
     """从目录名/元数据里判断属于哪个角色，返回官方中文名（无匹配返回空串）。
 
@@ -516,10 +592,35 @@ def match_character_detail(haystack: str) -> dict[str, Any]:
     * 只出现一个角色名但位置很靠后 → ``low``（很可能是括号/说明文字里的路人名）；
     * 出现多个角色名：第一个明显早于第二个（间隔 > 名字长度 + 余量）→ ``high``；
       否则视为分不清主次 → ``low`` 并把候选全部列出，交用户决定。
+
+    2026-10-01（用户要求「**中文拼音也要自动识别**」）：先按**原样**匹配一遍（保持既有
+    判定不变），没得到高置信时再用 :func:`compact_text` 折叠后的串匹配一遍 ——
+    这样 `ZhuangFangyi`、`zhuang_fang_yi`、`zhuang-fangyi` 这类拼音写法都能认出来。
+
+    返回里另有 ``guess``：**预识别**角色（见 :func:`guess_character`）—— 说不清归属时
+    给用户一个预选，但 ``confidence`` 不变（界面上仍显示黄字"无法确认归属"）。
     """
+    text = str(haystack or "")
+    plain = _match_in(text.lower(), character_alias_pairs())
+    if plain["confidence"] == "high":
+        return {**plain, "guess": plain["character"]}
+
+    compact = _match_in(compact_text(text), compact_alias_pairs())
+    if compact["confidence"] == "high":
+        return {**compact, "guess": compact["character"]}
+
+    guess = guess_character(text)
+    if plain["confidence"] == "low" or compact["confidence"] == "low":
+        merged = list(dict.fromkeys(list(plain["candidates"]) + list(compact["candidates"])))
+        return {"character": "", "confidence": "low", "candidates": merged, "guess": guess}
+    return {"character": "", "confidence": "none", "candidates": [], "guess": guess}
+
+
+def _match_in(text: str, pairs: Sequence[tuple[str, str]]) -> dict[str, Any]:
+    """在 ``text`` 上跑一遍"位置靠前优先"的匹配（``pairs`` 已按长度降序）。"""
     hits: dict[str, int] = {}
-    for alias, canonical in character_alias_pairs():
-        pos = haystack.find(alias)
+    for alias, canonical in pairs:
+        pos = text.find(alias)
         if pos < 0:
             continue
         if canonical not in hits or pos < hits[canonical]:
@@ -602,7 +703,8 @@ def infer_character_detail(rel_parts: Sequence[str], meta: dict[str, Any]) -> di
     """
     explicit = str(meta.get("group") or meta.get("character") or "").strip()
     if explicit:
-        return {"character": explicit, "confidence": "high", "candidates": [explicit]}
+        return {"character": explicit, "confidence": "high", "candidates": [explicit],
+                "guess": explicit}
     return match_character_detail(" ".join(rel_parts).lower())
 
 
@@ -719,6 +821,7 @@ def _make_mod_info(
             detail.get("confidence") or ("high" if group and group != "未分类" else "none")
         ),
         char_candidates=[str(c) for c in (detail.get("candidates") or [])],
+        char_guess=str(detail.get("guess") or ""),
         requires=[str(x) for x in requires],
         source=str(meta.get("source") or ""),
         source_id=str(meta.get("source_id") or ""),
@@ -1446,10 +1549,14 @@ def prepare_runtime(
     mods_root: Path,
     runtime_dir: Path,
     *,
-    patch: bool = True,
+    patch: bool = False,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    """Scan, patch and generate controller files for the PoC."""
+    """Scan, patch and generate controller files for the PoC.
+
+    ``patch`` 默认 **False**：2026-10-01 起不再改写 Mod 自带热键（控制面板还没做好，
+    见 ``activation.stage_and_prepare``）—— 只有显式传 True 才把键改成 ``VK_F24``。
+    """
     mods = scan_library(library_root, mods_root)
     patch_records: list[PatchRecord] = []
     if patch:
@@ -1474,14 +1581,15 @@ if __name__ == "__main__":  # pragma: no cover - tiny manual smoke path
     parser.add_argument("--library", default="library")
     parser.add_argument("--mods-root", default="runtime/EFMI/Mods")
     parser.add_argument("--runtime", default="runtime")
-    parser.add_argument("--no-patch", action="store_true")
+    parser.add_argument("--patch", action="store_true",
+                        help="改写 Mod 自带热键为 VK_F24（默认不改，见 prepare_runtime）")
     parser.add_argument("--dry-run", action="store_true")
     ns = parser.parse_args()
     result = prepare_runtime(
         Path(ns.library),
         Path(ns.mods_root),
         Path(ns.runtime),
-        patch=not ns.no_patch,
+        patch=ns.patch,
         dry_run=ns.dry_run,
     )
     print(json.dumps({
