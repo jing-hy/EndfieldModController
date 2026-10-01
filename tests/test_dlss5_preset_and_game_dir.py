@@ -163,7 +163,7 @@ def test_ensure_xxmi_game_folder_logs_when_game_dir_unknown(tmp_path, monkeypatc
     assert logs and any("XXMI 游戏目录" in line for line in logs)
 
 
-def test_nr_binding_check_flags_create_failure_only(tmp_path):
+def test_nr_binding_check_flags_create_failure_only(tmp_path, monkeypatch):
     """NR 失败判据 = `feature 18 create failed`；**原生/DLAA 那条 INFO 不能当失败**。
 
     2026-10-01 我在这里判错过一次：把 `NR upscaling is not applicable` 当成"档位是原生所以
@@ -199,7 +199,11 @@ def test_nr_binding_check_flags_create_failure_only(tmp_path):
     result = check()
     assert result["ok"] is True, result
 
-    # ② 真正失败：feature 18 create failed → 报出来，且文案里明确排除"档位/驱动"这两个错误方向
+    # ② 真正失败：feature 18 create failed
+    #    先打桩显卡 —— **别让测试依赖本机到底是 50 系还是 40 系**（开发机是 5080，跑测试的
+    #    人可能是 40 系，结论完全不同）。DLSS5 首发只支持 RTX 50 系。
+    from endfieldmodcontroller import deviceinfo
+
     log.write_text(
         "Initializing crosire's ReShade\n"
         "DLSS5 Generic: signed DLSSNR 310.8.0 D3D12 runtime initialized\n"
@@ -207,6 +211,20 @@ def test_nr_binding_check_flags_create_failure_only(tmp_path):
         "ERROR | DLSS5 Generic: feature 18 create failed with 0xbad00001\n",
         encoding="utf-8",
     )
+
+    def fake_collect(adapters: str):
+        def _collect(refresh: bool = False):
+            return {"adapters": [{"name": adapters}]}
+        return _collect
+
+    # ②a 40 系（那两台反馈机的情形）→ 判为"支持范围问题"，**不**报成故障、也不让他折腾设置
+    monkeypatch.setattr(deviceinfo, "collect", fake_collect("NVIDIA GeForce RTX 4060 Laptop GPU"))
+    result = check()
+    assert result["ok"] is True, result
+    assert "50 系" in result["message"] and "4060" in result["message"]
+
+    # ②b 50 系却失败 → 罕见，报出来让他发日志，并明确排除档位/驱动/运行库三个方向
+    monkeypatch.setattr(deviceinfo, "collect", fake_collect("NVIDIA GeForce RTX 5080"))
     result = check()
     assert result["ok"] is False
     assert "0xbad00001" in result["message"]

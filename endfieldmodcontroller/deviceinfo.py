@@ -141,14 +141,48 @@ def collect(refresh: bool = False) -> dict[str, Any]:
     return info
 
 
+def nvidia_generation(names_lower: str) -> int | None:
+    """从显卡名里认出 NVIDIA 的**代次**（`RTX 5080` → 50，`RTX 4060 Laptop GPU` → 40）。
+
+    2026-10-01 加：判断"DLSS5 能不能用"**不能只看是不是 RTX** —— DLSS 5 神经渲染
+    首发是 **RTX 50 系（Blackwell）独占**（官方 2026-09-04 定档：[17173 报道](https://news.17173.com/content/09022026/080619827.shtml)），
+    RTX 40 系要等 NVIDIA 放开（官方后来确认会扩展：[guru3d](https://www.guru3d.com/story/nvidia-reverses-course-dlss-5-is-now-officially-coming-to-rtx-40series-gpus/)）。
+    实测印证：一台 RTX 5080 正常出帧，两台 RTX 40 系笔记本（4060 / 4070 Laptop）
+    都是 `feature 18 create failed with 0xbad00001`（NGX FeatureNotSupported）。
+    """
+    import re
+
+    match = re.search(r"rtx\s*(\d{4})", names_lower)
+    if match:
+        return int(match.group(1)[:2])
+    match = re.search(r"rtx\s*(\d{3})", names_lower)
+    if match:
+        return int(match.group(1)[:2])
+    return None
+
+
 def _verdict(names_lower: str) -> str:
     """给"DLSS5 能不能用"一个一眼可读的结论。
 
-    只是**硬件前提**的提示，不是硬判定 —— 具体还得看 nvngx 运行库与面板里的
-    `成功NR帧`（见诊断包的运行库指纹段）。
+    只讲**硬件前提**，不是硬判定 —— 具体还得看 nvngx 运行库与面板里的 `成功NR帧`
+    （见诊断包的运行库指纹段）。判据按**代次**：DLSS5 首发只支持 RTX 50 系。
     """
     if "rtx" in names_lower:
-        return "检测到 RTX 显卡 → 具备 DLSS / DLSS5 神经渲染的硬件前提"
+        gen = nvidia_generation(names_lower)
+        if gen == 50:
+            return "检测到 RTX 50 系显卡 → 具备 DLSS5 神经渲染的硬件前提"
+        if gen is not None:
+            return (
+                f"检测到 RTX {gen} 系显卡 → **DLSS5 神经渲染首发仅支持 RTX 50 系**（官方已表态"
+                f"后续扩展到 40 系，但当前驱动/运行库尚未放开）。这类机器进游戏后会看到面板"
+                f"「成功NR帧 0」+ `最新NR NGX结果 0xBAD00001`（NGX 明确回「不支持该特性」），"
+                f"`ReShade.log` 里是 `feature 18 create failed with 0xbad00001` —— "
+                f"**属于支持范围问题，不是装坏了、也不是配置错误**，等 NVIDIA 放开后即可用。"
+            )
+        return (
+            "检测到 RTX 显卡（型号里没读到代次）→ 只有 **RTX 50 系**目前支持 DLSS5 神经渲染；"
+            "40 系及更早请以面板「成功NR帧」为准"
+        )
     if "nvidia" in names_lower:
         return (
             "检测到 NVIDIA 显卡但**不是 RTX 系列**（GTX/其它）→ DLSS 与 DLSS5 神经渲染无法启用，"

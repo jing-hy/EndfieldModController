@@ -670,18 +670,43 @@ def _check_dlss5_nr_binding(config: AppConfig, report: Report,
         report.add("dlss5:nr_binding", True, "上次进游戏时 DLSS5 的 NR 正常出帧（面板「成功NR帧」应当有数）")
         return
     if "feature 18 create failed" in recent or "NR feature create failed" in recent:
+        # 先看显卡代次 —— DLSS5 神经渲染首发**只支持 RTX 50 系**，40 系及更早会被 NGX
+        # 以"该特性不支持"拒掉（正是这个 0xBAD00001）。2026-10-01 三台机器的一致模式：
+        # RTX 5080 正常出帧；RTX 4060 / 4070 Laptop 都是同一个码。别让 40 系用户去折腾
+        # 分辨率、驱动、虚拟显示适配器 —— 那是白费功夫。
+        generation = None
+        gpu = ""
+        try:
+            from . import deviceinfo
+
+            info = deviceinfo.collect()
+            names = " / ".join(str(a.get("name") or "") for a in (info.get("adapters") or []))
+            gpu = "、".join(
+                str(a.get("name")) for a in (info.get("adapters") or []) if "nvidia" in str(a.get("name", "")).lower()
+            ) or names
+            generation = deviceinfo.nvidia_generation(names.lower())
+        except Exception:  # noqa: BLE001
+            generation = None
+        if generation is not None and generation < 50:
+            report.add(
+                "dlss5:nr_binding",
+                True,
+                f"上次进游戏时 DLSS5 的 NR 没建起来（`feature 18 create failed with 0xbad00001`）——"
+                f"你的显卡是 **{gpu or ('RTX ' + str(generation) + ' 系')}**，而 **DLSS5 神经渲染目前只支持"
+                f" RTX 50 系**（官方已表态后续会扩展到 40 系）。NGX 回的就是「不支持该特性」，所以"
+                f"**这不是装坏了、也不是配置问题，暂时不用折腾任何设置**；等 NVIDIA 放开后再进游戏，"
+                f"面板「成功NR帧」自然会有数。",
+            )
+            return
         report.add(
             "dlss5:nr_binding",
             False,
-            "上次进游戏时 DLSS5 的 NR **没建起来**（日志：`feature 18 create failed with "
-            "0xbad00001`）—— 注意这**不是**游戏内超分档位的问题（原生 / DLAA 下 DLSS5 一样"
-            "能正常出帧），也**不是**运行库或驱动的问题（同驱动 + 同运行库的机器上就是正常的）。"
-            "日志里能确认的是：运行库初始化成功（`signed DLSSNR 310.8.0 D3D12 runtime "
-            "initialized`）、NR 资源也建好了（`created inline NR resources …`），**只有 NGX "
-            "拒绝创建 feature**。按可能性先试：① 把游戏分辨率 / 渲染比例调低一档再进（显存预算，"
-            "8 GB 显存的笔记本尤其值得试）；② 关掉 ToDesk / 模拟器这类**虚拟显示适配器**和其它"
-            "占显存的程序再进；③ 仍不行就把 `ReShade.log` 里 `feature 18 create failed` 前后"
-            "20 行发出来。",
+            "上次进游戏时 DLSS5 的 NR 没建起来（日志：`feature 18 create failed with 0xbad00001`）。"
+            "**注意**：这**不是**游戏内超分档位的问题（原生 / DLAA / 开超分都能正常出帧，反例已实测），"
+            "也**不是**驱动或运行库的问题（同驱动同运行库的机器上是正常的）；失败机与正常机的日志"
+            "逐行对照只差这一行 —— 所以别再试「降分辨率 / 关虚拟显示适配器」。"
+            "请把显卡型号与 `ReShade.log` 里 `feature 18 create failed` 前后 20 行发出来"
+            "（RTX 50 系仍然失败属于罕见情况，值得单独查）。",
             manual=True,
         )
         return
