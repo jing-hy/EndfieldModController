@@ -350,7 +350,16 @@ def main() -> int:
         olds = sorted(p.name for p in OLD_DIR.glob("*.exe"))
         if olds:
             print(f"      dist\\_old 已归置：{', '.join(olds)}", flush=True)
+    # 可选：把"这一版构建时的环境"留一份快照（推 main 时 `scripts/push.py` 会自动做，这里供手动）
+    if "--snapshot" in args:
+        print("[8/8] 快照当前状态（--snapshot）", flush=True)
+        try:
+            run([sys.executable, "scripts/snapshot.py", "--label", version], label="状态快照")
+        except SystemExit as exc:      # 快照失败不影响产物
+            print(f"      !! 快照失败（产物不受影响）：{exc}", flush=True)
+
     print("\n下一步：要发布就跑 `python scripts/prepare_release.py`（备齐附件并打印上传指引）。", flush=True)
+    print("      推送用 `python scripts/push.py` —— 它会**先自动快照**再推 main。", flush=True)
     print("DONE", flush=True)
     return 0
 

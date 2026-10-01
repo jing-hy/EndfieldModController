@@ -469,13 +469,24 @@ python -m endfieldmodcontroller --cli   :: 打印状态 JSON
 
 ## 七、发布规则
 
-三个固化脚本（**构建**与**上传**分开；上传永远由你自己执行）：
+四个固化脚本（**构建**与**推送/上传**分开；推送与上传永远由你自己执行）：
 
 ```bat
 python scripts\build_release.py          :: 静态检查 → 构建最新版 + 带版本号副本 + 伪旧版 → 归置旧版
+python scripts\push.py                   :: **先自动做状态快照**，再推 main（只推代码，不发 Release）
 python scripts\prepare_release.py        :: 校验产物 + 生成 assets-bundle.zip + 打印上传指引
 python scripts\upload_release_assets.py  :: 上传两个附件（大文件走直连，见下）
 ```
+
+> **推送前必须快照（2026-10-01 起，用户要求「每次推 github 都要做快照」）**：
+> `scripts\push.py` 会先跑 `scripts\snapshot.py` 把"此刻到底是什么环境"整份记下来 ——
+> `git` 状态、exe/addon 的 sha256、数据根（modtest）的关键文件、游戏目录的完整清单、以及
+> 哪些开关开着/勾了哪些 Mod。**快照失败就不推**（`--skip-snapshot` 可显式跳过，不推荐）。
+> 快照落在**工作区上级**的 `_snapshot_<版本>-<时间戳>\`（不进仓库、不污染 `git status`），
+> 只复制 2 MB 以内的小文件、大文件只记 sha256，`--keep`（默认 10）自动清理更旧的。
+> **为什么要这么做**：当天排查一个 bug 时环境被改了多处，之后每一次「还是不行」都不再是
+> 同一条件下的复现 —— 有了快照才能回到"那一版当时到底是什么状态"。
+> `build_release.py --snapshot` 也可以在构建后手动留一份（快照失败不影响产物）。
 
 > **大文件上传的坑（实测）**：机器上开着 Steam++ / Watt Toolkit 时，它会把 github
 > 相关域名写进 hosts 指向 `127.0.0.1` 的本地反代，而该反代对**大 body 的 POST 上传**支持不好 ——
