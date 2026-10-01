@@ -1322,28 +1322,6 @@ async function refreshFromState() {
   if ($('cfg-firstperson-addon')) {
     $('cfg-firstperson-addon').checked = addonCfg.firstperson_addon_enabled !== false;
   }
-  // Magpie（可选扩展）：依赖页那个开关控制"要不要下载"，启动页滑块在**未下载时灰掉**
-  const magpie = s.magpie || null;
-  if (magpie) {
-    if ($('cfg-magpie-enabled')) $('cfg-magpie-enabled').checked = magpie.enabled === true;
-    if ($('cfg-magpie-launch')) {
-      $('cfg-magpie-launch').checked = magpie.enabled === true;
-      $('cfg-magpie-launch').disabled = magpie.installed !== true;
-    }
-    if ($('magpie-status')) {
-      const mb = Math.round((magpie.approx_bytes || 0) / 1048576);
-      $('magpie-status').textContent = magpie.installed
-        ? `已下载${magpie.version ? '（' + magpie.version + '）' : ''} · ${magpie.dir}${magpie.enabled ? ' · 已启用' : ' · 已关闭（文件保留）'}`
-        : `还没下载（主包约 ${mb} MB）—— 打开这个开关才会去下载`;
-    }
-    if ($('magpie-launch-hint')) {
-      $('magpie-launch-hint').innerHTML = magpie.installed
-        ? (magpie.enabled
-            ? '已启用：一键启动会把它一起拉起（它常驻托盘，选好效果组与目标窗口后按它的快捷键生效）。'
-            : '已下载但当前关闭；打开这个滑块即可在启动时一并拉起。')
-        : '还没下载 —— <b>需要在依赖页把「Magpie Experimental」那个开关打开</b>（主包约 467 MB）。';
-    }
-  }
   const modsOn = s.config.efmi_injection !== false;
   if ($('cfg-efmi-injection')) {
     $('cfg-efmi-injection').checked = modsOn;
@@ -2330,58 +2308,6 @@ function bind() {
       } finally {
         btn.disabled = false;
         await refreshFromState();
-      }
-    };
-  }
-
-  // ── Magpie（可选扩展）：依赖页开关与启动页滑块共用同一个开关 ──────────
-  async function toggleMagpie(enabled) {
-    const current = (state && state.magpie) || {};
-    if (enabled && !current.installed) {
-      const ok = await showConfirm(
-        'Magpie 主包约 467 MB，会走镜像线路下载（支持断点续传、下完校验 sha256），需要一些时间。\n\n' +
-        '它是可选扩展，且效果不如游戏内 DLSS5：拿不到原生运动矢量与深度，文字和 UI 会一起被处理，' +
-        '动态画面可能有鬼影。\n\n现在下载吗？',
-        '下载 Magpie（约 467 MB）'
-      );
-      if (!ok) {
-        await refreshFromState();   // 把开关弹回原状态
-        return;
-      }
-    }
-    setStatus(enabled ? '正在处理 Magpie…' : '正在关闭 Magpie…');
-    try {
-      const r = await call('set_magpie_enabled', enabled);
-      if (r && r.message) { logLine('Magpie: ' + r.message); setStatus(r.message); }
-      if (r && r.status) state.magpie = r.status;
-      if (r && r.downloading) {
-        // ⚠️ **必须接进依赖页那套轮询**，否则进度条与日志框都不会更新 ——
-        // 用户实测反馈「弹窗显示开始下载，但下载日志并没有」就是这个原因。
-        showTab('dependencies');
-        await refreshFromState();
-        await pollDependencyProgress($('dep-results'));
-      }
-    } catch (err) {
-      logLine('✗ Magpie 切换失败: ' + (err.message || err));
-      setStatus('Magpie 切换失败: ' + (err.message || err));
-    }
-    await refreshFromState();
-  }
-  const magpieToggle = $('cfg-magpie-enabled');
-  if (magpieToggle) magpieToggle.onchange = () => toggleMagpie(magpieToggle.checked);
-  const magpieLaunchSwitch = $('cfg-magpie-launch');
-  if (magpieLaunchSwitch) magpieLaunchSwitch.onchange = () => toggleMagpie(magpieLaunchSwitch.checked);
-  if ($('magpie-launch-btn')) {
-    $('magpie-launch-btn').onclick = async () => {
-      try {
-        const r = await call('launch_magpie');
-        if (r && r.ok === false) {
-          await showAlert(r.message || '启动 Magpie 失败', '启动 Magpie');
-        } else {
-          setStatus((r && r.message) || '已启动 Magpie');
-        }
-      } catch (err) {
-        setStatus('启动 Magpie 失败：' + (err.message || err));
       }
     };
   }

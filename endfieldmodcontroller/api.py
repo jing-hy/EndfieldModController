@@ -851,8 +851,6 @@ class EndfieldModControllerApi:
             "hotkey_panel": reshade_integration.panel_status(self.config),
             # Mod 备份仓现状（设置页显示"备份了几个、占多大、还差几个"）
             "mod_backup": self.mod_backup_status(),
-            # Magpie 可选扩展（依赖页开关 + 启动页滑块灰显判断）
-            "magpie": self.magpie_status(),
             "reshade_addon_ready": (self.config.dlss5_path / reshade_integration.ADDON_NAME).is_file(),
             # 这三个探测**读缓存**，不在这里触发全盘扫描（否则加载页会被卡住十几秒）；
             # 缓存由后台预热线程填好，前端看到 warming=True 时会再刷新一次。
@@ -1710,110 +1708,6 @@ class EndfieldModControllerApi:
     #   上游 AGPL-3.0：我们只下载它的官方安装包并调用它自己的安装向导，
     #   不随包分发其二进制；摆姿与播放仍然用它自己的面板 / 摆姿页。
     # ------------------------------------------------------------------
-    # ------------------------------------------------------------------
-    # Magpie Experimental（**可选扩展**：画面级 AI 效果器）
-    # ------------------------------------------------------------------
-    def magpie_status(self) -> dict[str, Any]:
-        """依赖页开关 / 启动页滑块 / 设置页共用的状态。"""
-        from . import magpie
-
-        return magpie.status(self.config)
-
-    def set_magpie_enabled(self, enabled: bool) -> dict[str, Any]:
-        """依赖页顶部那个「Magpie Experimental」开关。
-
-        用户 2026-10-01 要求：「做成拓展功能，在依赖上面加一个这个的开关，**默认关，
-        关不下载**，如果未下载，启动一栏这个就滑块变灰色，介绍加上需要在依赖页开启下载」。
-        所以：**关** → 只记开关（已下载的文件保留，不去查更新）；
-        **开** → 立刻在后台下载/更新（主包约 467 MB，前端会先弹确认框）。
-        """
-        from . import launcher, magpie, runtime_deps
-
-        enabled = bool(enabled)
-        self.config.magpie_enabled = enabled
-        try:
-            self.config.save()
-        except OSError:
-            pass
-        launcher._append_log(
-            self.config,
-            f"Magpie 扩展{'开启（开始下载/更新）' if enabled else '关闭（保留已下载文件）'}",
-        )
-        if not enabled:
-            return {
-                "ok": True,
-                "downloading": False,
-                "status": magpie.status(self.config),
-                "message": "已关闭 —— 已下载的 Magpie 文件会保留，随时可以再打开。",
-            }
-        if magpie.installed(self.config) and magpie.version(self.config):
-            # 已经装过：后台静默检查一次更新（失败不影响使用）
-            pass
-        if self._dep_task and self._dep_task.get("running"):
-            return {
-                "ok": True,
-                "downloading": True,
-                "status": magpie.status(self.config),
-                "message": "已有下载任务在跑，进度见依赖页。",
-            }
-        self._dep_task = {
-            "running": True,
-            "dry_run": False,
-            "only_missing": False,
-            "include_builtin": False,
-            "current": 0,
-            "total": 1,
-            "percent": 0.0,
-            "message": "正在下载 Magpie（主包约 467 MB）…",
-            "log": ["Magpie: 开始处理可选扩展（查询最新版本 → 下载 → 解压）"],
-            "results": [],
-        }
-        progress, byte_progress, _bump = self._make_dep_progress()
-
-        def worker() -> None:
-            assert self._dep_task is not None
-            try:
-                result = runtime_deps.ensure_magpie(self.config, progress, byte_progress)
-                self._dep_task["results"] = [result.__dict__]
-                self._dep_task["current"] = 1
-                self._dep_task["percent"] = 100.0
-                self._dep_task["message"] = (
-                    "Magpie 已就位" if str(result.status) in ("installed", "up_to_date")
-                    else f"Magpie 未就位：{result.message}"
-                )
-                launcher._append_log(self.config, f"Magpie 下载结果：{result.status} {result.message}")
-            except Exception as exc:  # noqa: BLE001 - 失败要落日志（用户要求），不能只留在内存
-                self._dep_task["message"] = f"Magpie 下载失败：{exc}"
-                # **界面日志也要有**：用户实测反馈过"只弹了开始下载、日志里什么都没有"，
-                # 当时失败原因只写进了 launch.log，界面上看不出来。
-                self._dep_task["log"].append(f"Magpie 下载失败：{exc}")
-                launcher._append_log(self.config, f"WARN Magpie 下载失败: {exc}")
-            finally:
-                self._dep_task["running"] = False
-
-        threading.Thread(target=worker, name="mc-magpie-download", daemon=True).start()
-        return {
-            "ok": True,
-            "downloading": True,
-            "status": magpie.status(self.config),
-            "message": "已开始下载（约 467 MB，进度见依赖页；下载完成后这一栏就能用了）。",
-        }
-
-    def launch_magpie(self) -> dict[str, Any]:
-        """启动 Magpie（未下载时给出可操作提示）。"""
-        from . import launcher, magpie
-
-        result = magpie.launch(self.config, log=lambda m: launcher._append_log(self.config, m))
-        return result
-
-    def open_magpie_dir(self) -> dict[str, Any]:
-        from . import magpie
-
-        result = magpie.open_dir(self.config)
-        if result.get("ok"):
-            return self.open_path_in_explorer(str(result["path"]))
-        return result
-
     def poser_status(self) -> dict[str, Any]:
         from . import poser
 

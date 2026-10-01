@@ -50,9 +50,5 @@
   "launch_extra_args": [],
   "selected_mods": [],
   "auto_update_dependencies": false,
-  "require_admin": true,
-  "_magpie_dir_说明": "Magpie（可选扩展）解压目录：默认 runtime/magpie。程序本体不随我们分发（上游 GPL-3.0、非官方实验构建），由依赖页从它自己的 Release 下载后解压到这里。",
-  "magpie_dir": "runtime/magpie",
-  "_magpie_enabled_说明": "Magpie Experimental 扩展开关：**默认 false**（关着时任何链路都不下载，主包约 467 MB，只有你在依赖页主动打开才下）。它=抓窗口画面自己做 DLSSNR/超分/帧生成，不碰游戏进程，可与游戏内 DLSS5 叠加；但**效果不如游戏内 DLSS5**。",
-  "magpie_enabled": false
+  "require_admin": true
 }

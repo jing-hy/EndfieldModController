@@ -145,38 +145,6 @@ Windows 桌面程序（Python + PyWebview），单文件 exe，**零配置启动
 （`set_component_addon` 返回 `rejected: dlss5_unsupported_gpu`，前端弹窗讲清原因并把开关
 弹回关闭），自检项 `dlss5:gpu_support` 也会如实说明。
 
-### Magpie Experimental（可选扩展：多层 NR）
-
-依赖页顶部有一个**默认关闭**的开关：**Magpie Experimental** ——
-[`SAOG0721/Magpie`](https://github.com/SAOG0721/Magpie)，`Blinue/Magpie` 的**非官方实验性 fork**
-（默认分支 `experimental`，**GPL-3.0**）。它把窗口放大工具扩成了"抓窗口画面 → 用效果组处理 →
-全屏输出"的**画面级 AI 效果器**：空间放大/锐化、实验性时域超分（DLSS SR / FSR / XeSS）、
-**DLSSNR**（同分辨率 SDR 画质处理）、帧生成（DLSSFG / XeSSFG）。
-
-**为什么值得接**：它**不碰游戏进程**（不需往游戏里注入任何东西），所以能和游戏内 DLSS5
-**叠加**（多层 NR）；它的 DLSSNR 用的 `nvngx_dlssnr.dll` 是 **310.8.0.0**（与我们随包那份同版本），
-并且额外提供「**RTX 40/50 社区兼容版**」——40 系机器也能用它的 NR。
-
-**必须如实标注的代价**（界面上就写着，不藏）：
-
-* 它是**画面后处理**：拿不到游戏引擎的原生运动矢量、深度、曝光，也没法把 UI 单独分出来
-  （原作 README 原话：*not equivalent to native in-game DLSS/FSR/XeSS integration*）；
-* 因此**动态画面可能有鬼影**、**文字与 UI 会一起被处理** → **效果不如游戏内 DLSS5**；
-* 所以：**默认关闭**，启动页那一栏在**未下载时是灰的**，并提示"需要在依赖页开启下载"。
-
-**接入方式（都按可选组件处理）**：
-
-* 开关 = `config.magpie_enabled`（默认 `False`）。**关着时任何链路都不下载**：
-  `runtime_deps.ensure_all()` 里那一步会直接返回 `skipped`（测试里硬断言了
-  `_latest_release_asset` / `_download_extract` **没被调用**），因为主包**约 467 MB**。
-* 打开 → 后台下载（`api.set_magpie_enabled(True)` 复用依赖页那套进度任务），前端**先弹确认框**
-  写明体积与效果差异；下载走 fastnet（镜像回退 + 断点续传 + sha256 校验）。
-* 它**只发预发布版**（`/releases/latest` 返回 404）→ 必须 `include_prerelease=True`
-  （与 Endfield Poser 同一情况）。解压到 `<主路径>/runtime/magpie`，并写
-  `.endfieldmodcontroller.json` 记版本。
-* **不随包分发**（GPL-3.0 + 非官方实验构建），我们只做"下载 + 解压 + 启动"。
-* 依赖页显示它、状态卡给体积/许可/仓库链接；启动页给一个「启动 Magpie（可选扩展）」按钮。
-
 ### 面板的合成键协议（以及为什么是 F13..F24）
 
 面板本身不会去改 Mod 的变量 —— 它走一条既有的**合成键协议**：
