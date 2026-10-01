@@ -17,6 +17,8 @@ Design goals for this PoC:
 """
 from __future__ import annotations
 
+import time
+
 import hashlib
 import json
 import os
@@ -1407,15 +1409,17 @@ def generate_controller_mod(
         "global persist $mc_last_wire = 0",
         "global persist $mc_last_value = 0",
     ]
-    # **按键命中计数器（诊断用，2026-10-01）**：每个协议键各绑一个"记数"CommandList，
-    # 只要那个键被 EFMI 识别并触发，计数就 +1。这些变量是 persist，游戏退出后落在
-    # `d3dx_user.ini` 里 —— 于是"到底哪个键被认、哪个丢了"一目了然，不必依赖 EFMI 的日志
-    # （XXMI 这个版本的 EFMI 编不出来日志文件）。
-    for _d in range(10):
-        lines.append(f"global persist $mc_hit_F{13 + _d} = 0")
+    # ★ 最小探针集（2026-10-01）：保留 4 个关键量 —— `[Present]` 是否在跑、动作号是否非 0、
+    #   Commit 段里 `$controller_action` 到底有没有被写进去、以及"无修饰键"的按键能否触发。
+    # ★ 极简探针（2026-10-01 决定性一轮）：**只留一个诊断变量 + 一个探针段**。
+    #   起因：源码显示 `[Constants]` 段里"解析失败的行"不会被 erase，会在第二遍被当成命令处理，
+    #   可能连带毁掉整段的解析 —— 而此前每次加诊断变量，按键就整体不触发。
+    #   这一版把变量数降到协议必需 + 3 个，用来验证"是不是我加的声明行本身在捣乱"。
     lines.extend([
-        "global persist $mc_hit_F23 = 0",
-        "global persist $mc_hit_F24 = 0",
+        "global persist $mc_present_frames = 0",
+        "global persist $mc_action_seen = 0",
+        "global persist $mc_dbg_3 = -1",
+        "global persist $mc_plain_f24 = 0",
     ])
     for action in actions:
         lines.append(f"global persist $mc_state_{action.wire_id} = 0")
@@ -1442,32 +1446,14 @@ def generate_controller_mod(
         "run = CommandListMC_Commit",
         "",
     ])
-    # 诊断：同一批键各再绑一个"记数"段
-    for _d in range(10):
-        lines.extend([
-            f"[KeyMC_Hit{_d}]",
-            f"key = ctrl alt shift VK_F{13 + _d}",
-            f"run = CommandListMC_Hit{_d}",
-        ])
+    # ★ 只留一个探针段：**无修饰键的 VK_F24（提交键）**，用来判"注入的键到底有没有到达 EFMI"。
+    #   协议段（`KeyMC_Digit*` / `Stage` / `Commit`）保持不变。
     lines.extend([
-        "[KeyMC_Hit23]",
-        "key = ctrl alt shift VK_F23",
-        "run = CommandListMC_Hit23",
-        "[KeyMC_Hit24]",
+        "[KeyMC_ProbeCommit]",
         "key = ctrl alt shift VK_F24",
-        "run = CommandListMC_Hit24",
-        "",
-    ])
-    for _d in range(10):
-        lines.extend([
-            f"[CommandListMC_Hit{_d}]",
-            f"$mc_hit_F{13 + _d} = $mc_hit_F{13 + _d} + 1",
-        ])
-    lines.extend([
-        "[CommandListMC_Hit23]",
-        "$mc_hit_F23 = $mc_hit_F23 + 1",
-        "[CommandListMC_Hit24]",
-        "$mc_hit_F24 = $mc_hit_F24 + 1",
+        "run = CommandListMC_ProbeCommit",
+        "[CommandListMC_ProbeCommit]",
+        "$mc_plain_f24 = $mc_plain_f24 + 1",
     ])
     for digit in range(10):
         lines.extend([
@@ -1491,10 +1477,13 @@ def generate_controller_mod(
     lines.extend([
         "$controller_action = $mc_pending_action",
         "$controller_value = $mc_input",
+        "$mc_dbg_3 = $controller_action",
         "$mc_input = 0",
         "",
         "[Present]",
+        "$mc_present_frames = $mc_present_frames + 1",
         "if $controller_action != 0",
+        "    $mc_action_seen = $mc_action_seen + 1",
     ])
 
     for action in actions:

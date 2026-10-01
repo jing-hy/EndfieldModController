@@ -438,9 +438,26 @@ class HotkeySwitchTests(unittest.TestCase):
         # 第一人称 / 按切换头发会开关 DLSS5"。数字位整体挪到 F13..F22 就是为了根治它。
         self.assertIn("ctrl alt shift VK_F13", ini_text)   # Digit0
         self.assertIn("ctrl alt shift VK_F22", ini_text)   # Digit9
-        for clash in range(1, 13):
-            self.assertNotIn(f"ctrl alt shift VK_F{clash}\n", ini_text,
-                             f"协议键 VK_F{clash} 会撞别的 addon 的快捷键")
+        # ⚠️ 判据要**只看真正的协议段**（`KeyMC_Digit*` / `KeyMC_Stage` / `KeyMC_Commit`）：
+        # 2026-10-01 加过一批**诊断对照探针**（`KeyMC_Low*`，故意用 F1..F12 来对比
+        # "EFMI 认哪一批键"），它们用 F1..F12 是**有意为之**，不该被这条红线拦住。
+        import re as _re  # 就地导入
+        # 按行解析（不依赖 \n / \r\n）
+        protocol_keys: dict[str, str] = {}
+        _lines = ini_text.splitlines()
+        for _i in range(len(_lines) - 1):
+            _m = _re.match(r"^\[(KeyMC_[A-Za-z0-9_]+)\]$", _lines[_i].strip())
+            _nxt = _lines[_i + 1].strip()
+            if _m and _nxt.lower().startswith("key ="):
+                protocol_keys[_m.group(1)] = _nxt.split("=", 1)[1].strip()
+        protocol_keys = {k: v for k, v in protocol_keys.items()
+                         if k.startswith(("KeyMC_Digit", "KeyMC_Stage", "KeyMC_Commit"))}
+        self.assertTrue(protocol_keys, "没解析到协议键段")
+        for name, key in protocol_keys.items():
+            for clash in range(1, 13):
+                # ⚠️ 必须按**词边界**匹配：`VK_F13` 里含子串 `VK_F1`，用 assertNotIn 会误判
+                self.assertNotRegex(key, rf"\bVK_F{clash}\b",
+                                    f"{name} 用了 VK_F{clash} —— 会撞别的 addon 的快捷键（F6=DLSS5、F7=第一人称）")
         # 被锁的 Mod 热键用 `no_modifiers VK_F24`（在 Mod 自己的 ini 里，不在 controller.ini）：
         # 与我们带修饰的 F24 互斥（那条要求"一个修饰键都不许按"），不会误触
         self.assertTrue(all("vk_f24" in key for key in self._staged_keys()))

@@ -364,6 +364,45 @@ static void send_key_combo(WORD vk)
     Sleep(60);
 }
 
+// **关键对照（2026-10-01）**：只发主键、**不带任何修饰键**。
+// 用户实测「F12 有反应」——而 EFMI 自带的键写的是 `key = no_modifiers VK_F12`（不许按修饰键）。
+// 我们一直发的是 `ctrl alt shift + 键`。`GetAsyncKeyState` 读的是**物理键盘的异步状态**，
+// 而 `SendInput` 注入的是合成输入：单键我实测过能读回，**但注入的修饰键未必**——
+// 若是如此，我们那条"三个修饰键都按下"的条件永远不成立，键就永不触发。
+// 这一批专门验证它。
+static void send_key_combo_nomod(WORD vk)
+{
+    INPUT down[1] = {};
+    INPUT up[1] = {};
+    down[0].type = INPUT_KEYBOARD;
+    down[0].ki.wVk = vk;
+    up[0].type = INPUT_KEYBOARD;
+    up[0].ki.wVk = vk;
+    up[0].ki.dwFlags = KEYEVENTF_KEYUP;
+    SendInput(1, down, sizeof(INPUT));
+    Sleep(160);
+    SendInput(1, up, sizeof(INPUT));
+    Sleep(60);
+}
+
+static void send_digit_key_plain(int digit)
+{
+    if (digit < 0 || digit > 9)
+        return;
+    send_key_combo_nomod(static_cast<WORD>(VK_F13 + digit));
+}
+
+// 对照实验用（2026-10-01，用户建议"一批绑 F1..F12、一批绑 F13..F24 对比"）：
+// 同一个动作**额外再发一遍低位键**（数字位 F1..F10、暂存 F11、提交 F12）。
+// F1..F12 是键盘上真实存在的键，F13..F24 不是 —— 两批各自在自己那套 ini 探针里
+// 记数，游戏退出后落进 d3dx_user.ini，于是"EFMI 到底认哪一批"一目了然。
+static void send_digit_key_low(int digit)
+{
+    if (digit < 0 || digit > 9)
+        return;
+    send_key_combo(static_cast<WORD>(VK_F1 + digit));
+}
+
 static void send_digit_key(int digit)
 {
     if (digit < 0 || digit > 9)
@@ -385,8 +424,129 @@ static void send_digit_key(int digit)
 //   * EFMI（3DMigoto）里 `key = ctrl alt shift VK_F13` 能正常解析（它支持到 VK_F24）；
 //   * 与 `patch_mod_hotkeys` 锁键用的 `no_modifiers VK_F24` **不冲突**：那条要求
 //     "一个修饰键都不许按"，而我们的提交键必须带 Ctrl+Alt+Shift —— 两者互斥，不会误触。
-static void send_action_keys(int wire_id, int value_index)
+// ---------------------------------------------------------------------------
+// **2026-10-01 方向调整（用户拍板）**：面板不再发自造的 F13..F24 协议键，
+// 而是**直接发这个 Mod 自己那一项的原按键**（actions.tsv 的 `original_keys` 列，
+// 例如 `vk_right` / `vk_left` / `backspace`）。
+//
+// 为什么：F13..F24 在标准键盘上**不存在** ⇒ SendInput 用虚拟键形式发它们时，
+// 系统不生成扫描码 ⇒ Unity + 反作弊的游戏进程**收不到**（现场：所有探针 0 触发，
+// 而用户手按 Mod 自带键一切正常；用户的实证是「Alt+Ctrl+Shift+Win 与单按 Win 效果一致」，
+// 即修饰键在游戏里被吞）。而方向键/退格是**真实键、有扫描码**，游戏一定认。
+//
+// 因此这里改用 **KEYEVENTF_SCANCODE**（并给方向键等加 KEYEVENTF_EXTENDEDKEY）。
+// ---------------------------------------------------------------------------
+
+static WORD vk_from_name(const std::string &raw)
 {
+    std::string name = trim(raw);
+    // 只取第一个（original_keys 可能是 `a, b` 形式）
+    const auto comma = name.find(',');
+    if (comma != std::string::npos)
+        name = trim(name.substr(0, comma));
+    // 统一成小写
+    for (auto &c : name)
+        c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+    // 去掉 vk_ 前缀
+    if (name.rfind("vk_", 0) == 0)
+        name = name.substr(3);
+
+    struct Entry { const char *name; WORD vk; };
+    static const Entry table[] = {
+        {"back", VK_BACK}, {"backspace", VK_BACK}, {"tab", VK_TAB}, {"return", VK_RETURN},
+        {"enter", VK_RETURN}, {"escape", VK_ESCAPE}, {"space", VK_SPACE},
+        {"left", VK_LEFT}, {"right", VK_RIGHT}, {"up", VK_UP}, {"down", VK_DOWN},
+        {"insert", VK_INSERT}, {"delete", VK_DELETE}, {"home", VK_HOME}, {"end", VK_END},
+        {"prior", VK_PRIOR}, {"next", VK_NEXT}, {"pgup", VK_PRIOR}, {"pgdn", VK_NEXT},
+        {"pageup", VK_PRIOR}, {"pagedown", VK_NEXT},
+        {"shift", VK_SHIFT}, {"control", VK_CONTROL}, {"ctrl", VK_CONTROL}, {"menu", VK_MENU},
+        {"alt", VK_MENU}, {"lshift", VK_LSHIFT}, {"rshift", VK_RSHIFT},
+        {"lcontrol", VK_LCONTROL}, {"rcontrol", VK_RCONTROL},
+        {"lmenu", VK_LMENU}, {"rmenu", VK_RMENU},
+        {"lwin", VK_LWIN}, {"rwin", VK_RWIN}, {"apps", VK_APPS},
+        {"scroll", VK_SCROLL}, {"pause", VK_PAUSE}, {"caps", VK_CAPITAL},
+        {"numlock", VK_NUMLOCK}, {"multiply", VK_MULTIPLY}, {"add", VK_ADD},
+        {"subtract", VK_SUBTRACT}, {"decimal", VK_DECIMAL}, {"divide", VK_DIVIDE},
+        {"lbution", VK_LBUTTON}, {"lbutton", VK_LBUTTON}, {"rbutton", VK_RBUTTON},
+        {"mbutton", VK_MBUTTON}, {"xbutton1", VK_XBUTTON1}, {"xbutton2", VK_XBUTTON2},
+        {"oem_1", VK_OEM_1}, {"oem_plus", VK_OEM_PLUS}, {"oem_comma", VK_OEM_COMMA},
+        {"oem_minus", VK_OEM_MINUS}, {"oem_period", VK_OEM_PERIOD}, {"oem_2", VK_OEM_2},
+        {"oem_3", VK_OEM_3}, {"oem_4", VK_OEM_4}, {"oem_5", VK_OEM_5}, {"oem_6", VK_OEM_6},
+        {"oem_7", VK_OEM_7}, {"oem_8", VK_OEM_8},
+    };
+    for (const auto &e : table)
+        if (name == e.name)
+            return e.vk;
+    if (name.size() >= 2 && name[0] == 'f') {          // f1..f24
+        const int n = std::atoi(name.c_str() + 1);
+        if (n >= 1 && n <= 24)
+            return static_cast<WORD>(VK_F1 + n - 1);
+    }
+    if (name.size() == 1) {                            // 单字符 a-z / 0-9
+        const char c = name[0];
+        if (c >= 'a' && c <= 'z') return static_cast<WORD>('A' + c - 'a');
+        if (c >= '0' && c <= '9') return static_cast<WORD>(c);
+    }
+    if (name.rfind("numpad", 0) == 0) {                // numpad0..9
+        const int n = std::atoi(name.c_str() + 6);
+        if (n >= 0 && n <= 9) return static_cast<WORD>(VK_NUMPAD0 + n);
+    }
+    return 0;
+}
+
+static bool is_extended_key(WORD vk)
+{
+    switch (vk) {
+    case VK_LEFT: case VK_RIGHT: case VK_UP: case VK_DOWN:
+    case VK_INSERT: case VK_DELETE: case VK_HOME: case VK_END:
+    case VK_PRIOR: case VK_NEXT: case VK_NUMLOCK: case VK_DIVIDE:
+    case VK_SNAPSHOT: case VK_RCONTROL: case VK_RMENU:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// 发一个**真实键**：用扫描码形式（游戏认），按下保持 160ms 再释放（跨帧，EFMI 每帧轮询）。
+static void send_real_key(WORD vk)
+{
+    if (vk == 0)
+        return;
+    const UINT sc = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
+    const DWORD extra = is_extended_key(vk) ? KEYEVENTF_EXTENDEDKEY : 0;
+
+    INPUT down[1] = {};
+    INPUT up[1] = {};
+    down[0].type = INPUT_KEYBOARD;
+    down[0].ki.wScan = static_cast<WORD>(sc);
+    down[0].ki.dwFlags = KEYEVENTF_SCANCODE | extra;
+    if (sc == 0) {                       // 没有扫描码的键退回虚拟键形式
+        down[0].ki.wVk = vk;
+        down[0].ki.dwFlags = extra;
+    }
+    up[0] = down[0];
+    up[0].ki.dwFlags |= KEYEVENTF_KEYUP;
+
+    SendInput(1, down, sizeof(INPUT));
+    Sleep(160);
+    SendInput(1, up, sizeof(INPUT));
+    Sleep(60);
+}
+
+static void send_action_keys(const std::string &original_keys, int wire_id, int value_index)
+{
+    // **优先发 Mod 自己的原按键**（真实键、有扫描码 ⇒ 游戏一定认）。
+    // 解析不出时（键名没收录）才回退到旧的自造协议键。
+    const WORD real = vk_from_name(original_keys);
+    if (real != 0)
+    {
+        addon_log("key_protocol: real key vk=" + std::to_string(real)
+                  + " from '" + original_keys + "'");
+        send_real_key(real);
+        return;
+    }
+
+    addon_log("key_protocol: 原按键无法解析 '" + original_keys + "'，回退协议键");
     const std::string wire = std::to_string(wire_id > 0 ? wire_id : 1);
     const std::string value = std::to_string(value_index >= 0 ? value_index : 0);
     for (const char ch : wire)
@@ -397,6 +557,26 @@ static void send_action_keys(int wire_id, int value_index)
         if (ch >= '0' && ch <= '9')
             send_digit_key(ch - '0');
     send_key_combo(VK_F24); // 提交动作号 + 档位
+
+    // ── 对照：低位键那一批（只为让对应的探针计数器涨，不参与真正的协议）──
+    for (const char ch : wire)
+        if (ch >= '0' && ch <= '9')
+            send_digit_key_low(ch - '0');
+    send_key_combo(VK_F11); // 低位·暂存
+    for (const char ch : value)
+        if (ch >= '0' && ch <= '9')
+            send_digit_key_low(ch - '0');
+    send_key_combo(VK_F12); // 低位·提交
+
+    // ── 第三批：**不带修饰键**的 F13..F24（验证"注入的修饰键是否读不到"）──
+    for (const char ch : wire)
+        if (ch >= '0' && ch <= '9')
+            send_digit_key_plain(ch - '0');
+    send_key_combo_nomod(VK_F23);
+    for (const char ch : value)
+        if (ch >= '0' && ch <= '9')
+            send_digit_key_plain(ch - '0');
+    send_key_combo_nomod(VK_F24);
 }
 
 static void queue_action(reshade::api::effect_runtime *runtime, const ActionEntry &action, int value_index)
@@ -411,12 +591,14 @@ static void queue_action(reshade::api::effect_runtime *runtime, const ActionEntr
     // 现在面板保持打开；合成键走 SendInput，EFMI 是**轮询** `GetAsyncKeyState` 读键状态的，
     // 与 ReShade 的输入拦截（拦的是窗口消息）不是一条路，所以照样能读到。
     const int wire_id = action.wire_id > 0 ? action.wire_id : action.id;
-    std::thread([wire_id, value_index]()
+    const std::string original_keys = action.original_keys;   // 线程里按值捕获
+    std::thread([wire_id, value_index, original_keys]()
     {
         std::lock_guard<std::mutex> lock(g_key_mutex);
         Sleep(80);
-        addon_log("key_protocol: sending wire=" + std::to_string(wire_id) + " value=" + std::to_string(value_index));
-        send_action_keys(wire_id, value_index);
+        addon_log("key_protocol: sending original_keys='" + original_keys + "'"
+                  + " (wire=" + std::to_string(wire_id) + " value=" + std::to_string(value_index) + ")");
+        send_action_keys(original_keys, wire_id, value_index);
         addon_log("key_protocol: done");
     }).detach();
 }
@@ -524,7 +706,12 @@ static void draw_action_control(reshade::api::effect_runtime *runtime, const Act
                 : (index >= 0 && index < count ? action.values[static_cast<size_t>(index)] : std::string("%d"));
 
             ImGui::SetNextItemWidth(200.0f);
-            if (ImGui::SliderInt("##value", &index, 0, std::max(0, count - 1), format.c_str(), ImGuiSliderFlags_None))
+            // ⚠️ `ImGuiSliderFlags_NoInput`（2026-10-01 用户反馈）：ImGui 的滑块**默认**支持
+        // "Ctrl+点击 / 双击 → 变成输入框直接键入数值"。用户的实际感受是
+        // 「**那个滑钮点着点着就变成输入框了，不需要变输入框**」—— 面板上这些滑块
+        // 本来就只是"拨到某一档"，不该有键入模式，所以显式关掉它。
+        if (ImGui::SliderInt("##value", &index, 0, std::max(0, count - 1), format.c_str(),
+                             ImGuiSliderFlags_NoInput))
             {
                 g_selected_index[action.id] = index;
                 queue_action(runtime, action, index);

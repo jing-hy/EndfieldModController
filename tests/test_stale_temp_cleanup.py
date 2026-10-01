@@ -88,3 +88,48 @@ class EfmiEarlyIncludesTests(unittest.TestCase):
             ini.write_text("[Logging]\nskip_early_includes_load = 1\n[System]\nskip_early_includes_load = 0\n"
                            "config_initialization_delay = -1\n", encoding="utf-8")
             self.assertFalse(ensure_efmi_early_includes(ini))
+
+class EfmiExplicitIncludeTests(unittest.TestCase):
+    """`[Key*]` 段必须通过**显式 include** 加载才会被注册。
+
+    源码依据（`IniHandler.cpp` 初始化顺序）：`ParseConstantsSection()` →
+    **`RegisterPresetKeyBindings()`** → `ParseCommandList(L"Present")`。
+    `[Constants]`/`[Present]` 是命令列表，晚一点进也生效；而 `[Key*]` 只在
+    `RegisterPresetKeyBindings()` **那一刻**从当时的 `ini_sections` 里取一次 ——
+    经 `include_recursive = Mods` 递归进来的段赶不上，于是"Mod 外观生效、面板按键全无反应"。
+    """
+
+    def test_adds_explicit_include_before_recursive(self) -> None:
+        from endfieldmodcontroller.launcher import ensure_efmi_early_includes
+
+        with tempfile.TemporaryDirectory(prefix="mc-inc-") as tmp:
+            ini = Path(tmp) / "d3dx.ini"
+            ini.write_text(
+                "[Include]\n"
+                "include = Core\\EFMI\\main.ini\n"
+                "include_recursive = Mods\n"
+                "\n[System]\n"
+                "skip_early_includes_load = 1\n"
+                "config_initialization_delay = 0\n",
+                encoding="utf-8")
+            self.assertTrue(ensure_efmi_early_includes(ini))
+            text = ini.read_text(encoding="utf-8")
+            self.assertIn("include = Mods\\MC_Controller\\controller.ini", text)
+            inc = text.index("include = Mods\\MC_Controller\\controller.ini")
+            rec = text.index("include_recursive = Mods")
+            self.assertLess(inc, rec, "显式 include 必须排在 include_recursive 之前")
+            self.assertIn("skip_early_includes_load = 0", text)
+
+    def test_idempotent_on_second_run(self) -> None:
+        from endfieldmodcontroller.launcher import ensure_efmi_early_includes
+
+        with tempfile.TemporaryDirectory(prefix="mc-inc2-") as tmp:
+            ini = Path(tmp) / "d3dx.ini"
+            ini.write_text("[Include]\ninclude_recursive = Mods\n\n[System]\n"
+                           "skip_early_includes_load = 0\n"
+                           "config_initialization_delay = -1\n", encoding="utf-8")
+            ensure_efmi_early_includes(ini)
+            before = ini.read_text(encoding="utf-8")
+            self.assertFalse(ensure_efmi_early_includes(ini))
+            self.assertEqual(before, ini.read_text(encoding="utf-8"))
+            self.assertEqual(before.count("MC_Controller\\controller.ini"), 1)

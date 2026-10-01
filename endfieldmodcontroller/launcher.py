@@ -937,9 +937,19 @@ def ensure_injections(config: AppConfig) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001
         warnings.append(f"准备 XXMI 签名密钥失败: {exc}")
 
+    # ⚠️ **2026-10-01 修 NameError（由反馈者诊断包定位）**：本函数里从来没有名为 `log` 的
+    # 局部变量（其它调用点用的是 `log=lambda ...`），而下面两处写成了 `log=log` →
+    # **抛 `NameError` 被 except 吞成一条 WARN**，后果是：
+    #   ① `ensure_xxmi_game_folder()` **从来没执行过** ⇒ XXMI 配置里 `active_importer` /
+    #      `enabled_importers` 一直是 None ⇒ **XXMI 界面里不出现终末地的启动按钮**；
+    #   ② OptiScaler 的自动移走也从来没执行过。
+    # 现在统一给本函数一个局部 logger。
+    def _log(message: str) -> None:
+        _append_log(config, message)
+
     # 让 XXMI 知道游戏装在哪 —— 否则它界面里不会出现终末地的启动按钮（2026-09-29 空环境实测）
     try:
-        game_folder_state = ensure_xxmi_game_folder(config, log=log)
+        game_folder_state = ensure_xxmi_game_folder(config, log=_log)
         if game_folder_state.get("changed"):
             actions.append(str(game_folder_state.get("message") or "已让 XXMI 指向游戏目录"))
         elif not game_folder_state.get("ok"):
@@ -957,7 +967,7 @@ def ensure_injections(config: AppConfig) -> dict[str, Any]:
     try:
         from . import game_clean
 
-        conflict_state = game_clean.quarantine_injector(config, log=log)
+        conflict_state = game_clean.quarantine_injector(config, log=_log)
         if conflict_state.get("changed"):
             actions.append(str(conflict_state.get("message")
                                or "已移走第三方 NGX 注入器（OptiScaler）"))
@@ -2161,6 +2171,29 @@ def ensure_efmi_early_includes(d3dx_ini: Path) -> bool:
         if not found_skip:
             out.insert(insert_at, "skip_early_includes_load = 0")
             changed = True
+    # ★ 2026-10-01【按键全无反应的真正根源，读源码定案】：
+    #   `[Key*]` 段**必须走显式 include** 才会被注册。
+    #   源码 `IniHandler.cpp` 的初始化顺序是：
+    #       ParseConstantsSection();        // [Constants]（命令列表）
+    #       RegisterPresetKeyBindings();    // ← [Key*] **只在这一刻**从当前 ini_sections 里注册
+    #       ParseCommandList(L"Present");   // [Present]（命令列表）
+    #   而 `[Constants]` / `[Present]` 是**命令列表** —— 晚一点进也照样生效；
+    #   `[Key*]` 却只被取一次 —— 所以**通过 `include_recursive = Mods` 递归进来的段赶不上那一刻**
+    #   （EFMI 的 `skip_early_includes_load` 会把递归 include 推后），
+    #   于是表现为"**Mod 外观能生效、面板按键一个都不触发**"，且 ini 文本完全正常。
+    #   对照：EFMI 自带的 `KeyBindings.ini` 能正常工作，正是因为它走的是**显式 `include =`**。
+    #   这里在 `[Include]` 段里补一条显式 include（放在 `include_recursive` 之前）。
+    include_marker = "mods\\mc_controller\\controller.ini"
+    already = any(include_marker in line.lower() and line.strip().lower().startswith("include")
+                  for line in out)
+    if not already and any(line.strip().lower().startswith("include_recursive")
+                           for line in out):
+        insert_at = next(i for i, line in enumerate(out)
+                         if line.strip().lower().startswith("include_recursive"))
+        out.insert(insert_at, "; MC: [Key*] 段必须显式 include 才会被注册（见 launcher.ensure_efmi_early_includes）")
+        out.insert(insert_at + 1, "include = Mods\\MC_Controller\\controller.ini")
+        changed = True
+
     if changed:
         _write_ini_atomic(d3dx_ini, chr(10).join(out) + chr(10))
     return changed

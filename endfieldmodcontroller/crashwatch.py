@@ -518,6 +518,7 @@ def collect_evidence(config: AppConfig, *, started_at: float | None = None,
         "player_log_tail": [],
         "game_errors": _extract_game_errors(config),
     }
+    evidence["_started_at"] = started_at
     evidence["cause"] = classify_cause(config, evidence, started_at=started_at)
     if started_at:
         evidence["process"]["started_at"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(started_at))
@@ -531,6 +532,14 @@ def collect_evidence(config: AppConfig, *, started_at: float | None = None,
             section = _player_log_crash_section(d)
             if section:
                 evidence["crashes"].append(section)
+
+    # 运行时采样时间线（每 5 秒一次）—— "跑几十秒就闪退"最需要的证据
+    try:
+        from . import watchsample
+
+        evidence["watch_samples"] = watchsample.read_all(config)
+    except Exception:  # noqa: BLE001
+        evidence["watch_samples"] = []
 
     low = _endfield_local_low() / "Player.log"
     if low.is_file():
@@ -649,6 +658,193 @@ def _environment_text(config: AppConfig) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _collect_full_game_logs(config: AppConfig, bundle_dir: Path) -> None:
+    """**完整的** `Player.log`（含 `-prev`）—— 不再只取尾部 15 行。
+
+    "跑四十多秒就闪退"的关键信息在**退出前最后几十行**，而此前的包只收尾部，
+    且夹在报告正文里；现在整份收进来。
+    """
+    low = _endfield_local_low()
+    for name in ("Player.log", "Player-prev.log"):
+        src = low / name
+        if src.is_file() and src.stat().st_size <= 32 * 1024 * 1024:
+            try:
+                shutil.copy2(src, bundle_dir / f"Endfield-{name}")
+            except OSError:
+                pass
+
+
+def _collect_crash_dumps(config: AppConfig, bundle_dir: Path) -> int:
+    """官方崩溃转储目录 `Crashes/Crash_*`（含 crash.dmp / error.log / output_log.txt）。
+
+    这是判断"到底崩没崩、崩在哪个模块"的一手材料；此前完全没进包。
+    """
+    root = _crash_root()
+    if not root.is_dir():
+        return 0
+    taken = 0
+    try:
+        dirs = sorted((d for d in root.iterdir() if d.is_dir()),
+                      key=lambda d: d.stat().st_mtime, reverse=True)[:3]
+    except OSError:
+        return 0
+    for d in dirs:
+        dest = bundle_dir / "official-crash" / d.name
+        try:
+            dest.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            continue
+        for src in sorted(d.rglob("*")):
+            if not src.is_file():
+                continue
+            try:
+                if src.stat().st_size > 64 * 1024 * 1024:   # 单个 dmp 一般几十 MB，过大的跳过
+                    continue
+                shutil.copy2(src, dest / src.name)
+                taken += 1
+            except OSError:
+                continue
+    return taken
+
+
+def _collect_game_config(config: AppConfig, bundle_dir: Path) -> None:
+    """EFMI 侧的配置与 Mod 清单 —— 判断"按键/Mod 状态"必须的两份文件。"""
+    try:
+        from .config import auto_detect_migoto_loader  # 延迟导入避免循环依赖
+        loader = auto_detect_migoto_loader()
+        if loader:
+            root = Path(loader)
+            for name in ("d3dx.ini", "d3dx_user.ini"):
+                src = root / name
+                if src.is_file() and src.stat().st_size <= 8 * 1024 * 1024:
+                    shutil.copy2(src, bundle_dir / f"efmi-{name}")
+            mods = root / "Mods"
+            if mods.is_dir():
+                listing = []
+                for item in sorted(mods.iterdir()):
+                    try:
+                        kind = "dir" if item.is_dir() else f"{item.stat().st_size} B"
+                    except OSError:
+                        kind = "?"
+                    listing.append(f"{item.name}\t{kind}")
+                (bundle_dir / "efmi-mods-listing.txt").write_text(
+                    "EFMI Mods 目录清单\n" + "\n".join(listing) + "\n", encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _collect_event_log(config: AppConfig, bundle_dir: Path, started_at: float | None) -> None:
+    """把该时段的 Windows 事件日志导出来 —— 应用崩溃/挂起事件会写**出错模块名**。"""
+    import subprocess
+
+    since = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime((started_at or time.time()) - 300))
+    ps = (
+        "$ErrorActionPreference='SilentlyContinue';"
+        f"Get-WinEvent -FilterHashtable @{{LogName='Application','System';StartTime='{since}'}} "
+        "-MaxEvents 400 | Select-Object TimeCreated,Id,LevelDisplayName,ProviderName,Message | Format-List"
+    )
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        out = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+                             capture_output=True, text=True, encoding="utf-8", errors="replace",
+                             timeout=60, creationflags=flags)
+        text = (out.stdout or "") + (out.stderr or "")
+        if text.strip():
+            (bundle_dir / "windows-events.txt").write_text(text, encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _collect_xxmi_log(config: AppConfig, bundle_dir: Path) -> None:
+    """XXMI 自己的日志（注入记录、dll_paths、错误都在里面）。"""
+    try:
+        from .config import auto_detect_xxmi
+        root = auto_detect_xxmi()
+        if not root:
+            return
+        for candidate in (Path(root) / "XXMI Launcher Log.txt",):
+            if candidate.is_file() and candidate.stat().st_size <= 16 * 1024 * 1024:
+                shutil.copy2(candidate, bundle_dir / "xxmi-launcher-log.txt")
+        # 配置也带上：active_importer / extra_libraries / 签名长度都在这
+        cfg = Path(root) / "XXMI Launcher Config.json"
+        if cfg.is_file() and cfg.stat().st_size <= 2 * 1024 * 1024:
+            shutil.copy2(cfg, bundle_dir / "xxmi-config.json")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _collect_mods_tree(config: AppConfig, bundle_dir: Path) -> int:
+    """**把整个 EFMI `Mods` 目录的文件收进包**（2026-10-01 用户要求：
+    「上传包加一项，增加整个 mod 目录中的文件」）。
+
+    取舍：**诊断价值高的小文本（`.ini`/`.json`/`.txt`/`.cfg`/`.tsv` 等）一律收**；
+    大资源（`.dds`/`.buf`/`.mesh`）**只登记进清单**（含大小与 sha256），因为它们对定位问题
+    没有信息量、却能把包撑到几百 MB。**清单永远完整列出所有文件**，并在表头写明收了多少、
+    合计多大、上限多少。总量上限 200 MB、单文件 64 MB。
+    """
+    import hashlib
+
+    try:
+        from .config import auto_detect_migoto_loader
+
+        loader = auto_detect_migoto_loader()
+        mods = Path(loader) / "Mods" if loader else None
+        if not mods or not mods.is_dir():
+            return 0
+    except Exception:  # noqa: BLE001
+        return 0
+
+    TEXT_EXT = {".ini", ".json", ".txt", ".cfg", ".md", ".xml", ".yaml", ".yml",
+                ".log", ".tsv", ".csv"}
+    LIMIT_TOTAL = 200 * 1024 * 1024
+    LIMIT_FILE = 64 * 1024 * 1024
+
+    def digest(path: Path) -> str:
+        try:
+            h = hashlib.sha256()
+            with path.open("rb") as fh:
+                for chunk in iter(lambda: fh.read(1 << 20), b""):
+                    h.update(chunk)
+            return h.hexdigest()
+        except OSError:
+            return "?"
+
+    listing: list[str] = []
+    taken = 0
+    total = 0
+    for src in sorted(mods.rglob("*")):
+        if not src.is_file():
+            continue
+        try:
+            size = src.stat().st_size
+        except OSError:
+            continue
+        rel = src.relative_to(mods)
+        is_text = src.suffix.lower() in TEXT_EXT
+        copy_it = (total + size <= LIMIT_TOTAL and size <= LIMIT_FILE
+                   and (is_text or size <= 2 * 1024 * 1024))
+        if copy_it:
+            try:
+                dest = bundle_dir / "efmi-mods" / rel
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dest)
+                taken += 1
+                total += size
+                listing.append(f"{rel}\t{size} B\t已收入包")
+            except OSError as exc:
+                listing.append(f"{rel}\t{size} B\t复制失败: {exc}")
+        else:
+            listing.append(f"{rel}\t{size} B\t仅登记（sha256={digest(src)}）")
+
+    header = (f"EFMI Mods 目录完整清单：共 {len(listing)} 个文件；"
+              f"已收入包 {taken} 个、合计 {total / 1048576:.1f} MB"
+              f"（上限 {LIMIT_TOTAL // 1048576} MB，单文件 {LIMIT_FILE // 1048576} MB）\n"
+              f"目录: {mods}\n\n")
+    (bundle_dir / "efmi-mods-tree.txt").write_text(header + "\n".join(listing) + "\n",
+                                                   encoding="utf-8")
+    return taken
+
+
 def make_bundle(config: AppConfig, evidence: dict[str, Any] | None = None,
                 *, log: Callable[[str], None] | None = None) -> dict[str, Any]:
     """把崩溃现场 + 控制器日志 + 终末地日志打成 zip，返回路径信息。"""
@@ -699,6 +895,34 @@ def make_bundle(config: AppConfig, evidence: dict[str, Any] | None = None,
             _json.dumps(cause, ensure_ascii=False, indent=2), encoding="utf-8")
     except (OSError, ValueError):
         pass
+    # ④-c **全量现场**（2026-10-01 用户要求「让日志包一次抓全所有数据，不要搞好几轮」）
+    #   针对的正是反馈里那个"跑四十多秒就闪退"的形态 —— 以前只收静态快照 + Player.log 尾部，
+    #   看不出这 40 秒里发生了什么。现在一次性收：运行时采样时间线、完整 Player.log、
+    #   官方崩溃转储、Windows 事件、EFMI 配置与 Mod 清单、XXMI 日志与配置、ReShade.log。
+    try:
+        from . import watchsample
+
+        samples = watchsample.read_all(config)
+        if samples:
+            (bundle_dir / "watch-samples.jsonl").write_text(
+                "\n".join(_json.dumps(s, ensure_ascii=False) for s in samples) + "\n", encoding="utf-8")
+            (bundle_dir / "watch-samples.txt").write_text(
+                "游戏进程运行时采样（每 5 秒一次）\n" + watchsample.summarise(samples), encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        pass
+    _collect_full_game_logs(config, bundle_dir)
+    _collect_crash_dumps(config, bundle_dir)
+    _collect_game_config(config, bundle_dir)
+    _collect_mods_tree(config, bundle_dir)
+    _collect_event_log(config, bundle_dir, evidence.get("_started_at"))
+    _collect_xxmi_log(config, bundle_dir)
+    try:
+        reshade_log = Path(config.dlss5_path) / "ReShade.log"
+        if reshade_log.is_file() and reshade_log.stat().st_size <= 16 * 1024 * 1024:
+            shutil.copy2(reshade_log, bundle_dir / "ReShade.log")
+    except OSError:
+        pass
+
     # 崩溃记忆：记下"这次崩的时候跑的是哪套 Mod"，一键启动前就能预警（用户 2026-09-30 要求）
     if str(cause.get("kind")) in {"crash", "mod_conflict"}:
         try:
@@ -783,6 +1007,17 @@ def _render_report(evidence: dict[str, Any]) -> str:
     else:
         verdict = "未发现崩溃迹象（无卸载统计、无 uploadCrash，请人工确认）"
     out.append(f"崩溃判定  : {verdict}")
+    # ⭐ 运行时采样时间线：看"哪一秒开始异常、崩前新加载了什么模块、内存/句柄怎么涨"
+    _samples = e.get("watch_samples") or []
+    if _samples:
+        try:
+            from . import watchsample
+
+            out.append("")
+            out.append("── 运行时采样时间线（每 5 秒一次）──")
+            out.append(watchsample.summarise(_samples))
+        except Exception:  # noqa: BLE001
+            pass
     cause = e.get("cause") or {}
     if cause:
         kind_text = {"mod_conflict": "Mod 资源冲突（自检记录）",
@@ -900,11 +1135,35 @@ def start_watch(config: AppConfig, *, timeout: float = 6 * 3600.0,
             _WATCH["started_at"] = started
             _emit(f"崩溃监控: 已跟踪 {GAME_PROCESS} pid={pid}")
 
-            # ② 等进程退出
+            # ② 等进程退出 —— **每 5 秒采一次样**（2026-10-01 用户要求"日志包一次抓全"）：
+            #    "跑四十多秒就闪退"这种问题，静态快照看不出任何东西；
+            #    必须留下**时间线**（哪个模块在哪一秒才加载、内存/句柄怎么涨、日志有没有停）。
+            #    采样增量落盘，即使进程被强杀也已写好前面几次。
+            from . import watchsample
+
+            watchsample.reset(config)
+            known_modules: set[str] = set()
+            last_sample = 0.0
             while time.time() < deadline:
                 if not _process_ids():
                     break
-                time.sleep(2.0)
+                now = time.time()
+                if now - last_sample >= 5.0:
+                    try:
+                        entry = watchsample.sample(
+                            pid,
+                            known_modules=known_modules,
+                            feed_log=Path(config.dlss5_path) / "dlss5-feed.log",
+                            reshade_log=Path(config.dlss5_path) / "ReShade.log",
+                        )
+                        if entry:
+                            watchsample.append(config, entry)
+                            known_modules = {os.path.basename(m).lower()
+                                             for m in (entry.get("modules") or [])}
+                    except Exception as exc:  # noqa: BLE001 —— 采样失败绝不打断跟踪
+                        _emit(f"崩溃监控: 采样失败 {exc}")
+                    last_sample = now
+                time.sleep(1.0)
             exit_time = time.time()
             alive = exit_time - started
             _emit(f"崩溃监控: 游戏已退出（存活 {alive:.0f} 秒），正在收集现场…")
