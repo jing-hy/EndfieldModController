@@ -48,6 +48,7 @@
 
   <nav class="tabs">
     <button class="tab active" data-tab="library">Mod 库</button>
+    <button class="tab" data-tab="assist">辅助 Mod</button>
     <button class="tab" data-tab="dependencies">依赖</button>
     <button class="tab" data-tab="launch">启动</button>
     <button class="tab" data-tab="settings">设置</button>
@@ -82,6 +83,23 @@
       </div>
       <div id="library-status" class="hint"></div>
       <div id="mod-list" class="mod-groups"></div>
+    </section>
+
+    <section class="panel" id="tab-assist">
+      <div class="switch-item">
+        <div class="switch-desc" style="margin:0">
+          <b>辅助 Mod</b>：不换装、只改行为的小 Mod（例如「隐藏 UI＆UID」按 <code>alt 1</code> 那把）。
+          它们<b>不属于任何角色、也不参与同角色互斥</b>，可以和任意皮肤 Mod 同时启用、也能多个一起开。
+          <br><b>怎么被认出来的</b>：没有换装资源（无 Meshes/Textures、无 .dds/.buf 等）＋（名字含「隐藏/辅助/UI/HUD/水印…」或 ini 是 <code>handling = skip</code> 跳过绘制型）＋ <b>归不到任何角色</b>。
+          认错了不要紧 —— 在卡片的「⋯」里可以<b>手动改标记</b>（角色 Mod ⇄ 辅助 Mod）。
+        </div>
+      </div>
+      <div class="toolbar">
+        <button id="assist-scan-btn">重新扫描</button>
+        <button id="assist-open-lib-btn">打开 Mod 库文件夹</button>
+        <span class="hint" id="assist-status">把 .zip / .7z / .rar 拖到页面任意处即可导入。</span>
+      </div>
+      <div id="assist-list"></div>
     </section>
 
     <section class="panel" id="tab-dependencies">
@@ -265,6 +283,10 @@
           <span class="setting-label">启动时请求管理员权限</span>
           <label class="switch"><input type="checkbox" id="cfg-require_admin"><span class="slider"></span></label>
         </div>
+        <div class="setting-row switch-row">
+          <span class="setting-label" title="终末地自带 DLSS：喂帧组件（dlss5-feed）会与游戏自己的 DLSS 抢同一条 NGX 链路。开启时自检会自动把它停用（文件移到 runtime\dlss5\_disabled\，可逆）；关掉这个开关就会自动放回。">游戏自带 DLSS 时自动停用喂帧组件（可逆）</span>
+          <label class="switch"><input type="checkbox" id="cfg-auto-disable-feed"><span class="slider"></span></label>
+        </div>
       </div>
 
       <div class="settings-group">
@@ -412,7 +434,8 @@
       <div class="path-row"><span>崩溃包 zip：</span><code id="crash-zip"></code><button id="crash-open-zip">打开</button><button id="crash-copy-zip">复制路径</button></div>
       <pre id="crash-summary" class="code-block" style="max-height:200px"></pre>
       <div class="modal-actions">
-        <button id="crash-goto-library" class="primary" style="display:none">去 Mod 库清理冲突</button>
+        <button id="crash-goto-library" style="display:none">去 Mod 库清理冲突</button>
+        <button id="crash-resolve-conflicts" class="primary" style="display:none">一键关闭其中一个（自行选择）</button>
         <button id="crash-modal-close" class="primary">知道了</button>
       </div>
     </div>

@@ -501,10 +501,25 @@ def _check_dlss5_preset(config: AppConfig, report: Report, log: Callable[[str], 
         pos_feed_fx = effect_order_line.find(DLSS5_FEED_EFFECT)
         effect_order_ok = (pos_provider != -1
                            and (pos_feed_fx == -1 or pos_provider < pos_feed_fx))
-    if (enabled_map.get(launchpad_name) == "1" and enabled_map.get(feed_name) == "1"
-            and order_ok and effect_order_ok):
+    # **判据 = 两项都启用**（2026-10-01 修）：顺序**不再**作为"必须修复"的条件 ——
+    # 我们写入的顺序和 ReShade 自己重排后的顺序都可能变，拿顺序当判据会陷入
+    # "每轮一键启动都报需要修复、修完自己又判不过"的死循环：一份真实诊断包里
+    # `DLSS5 preset 需要修复：… technique 顺序正确=False、effect 顺序正确=False`
+    # 从 10:33 一路报到 11:09，而 DLSS5 其实完全正常（feature ready + 帧统计都有），
+    # 这种日志只会把用户和排查的人一起带偏。
+    # 顺序不对时**只提示**：真出问题时面板与 `dlss5-feed.log` 会写明
+    # `enable it above DLSS 5 Feed`，那时再按提示手动调。
+    if enabled_map.get(launchpad_name) == "1" and enabled_map.get(feed_name) == "1":
+        if not (order_ok and effect_order_ok):
+            _log(log, "DLSS5 preset 顺序提示："
+                      f"technique 顺序正确={order_ok}、effect 顺序正确={effect_order_ok} —— "
+                      "ReShade 会按自己的规则重排这两行，通常无碍；"
+                      "若面板或 dlss5-feed.log 出现 provider DISABLED"
+                      "（enable it above DLSS 5 Feed），再把 MartysMods_Launchpad 排到 DLSS 5 Feed 之前")
         report.add("dlss5:preset", True,
-                   f"{preset_path.name} 已启用 MartysMods_Launchpad + DLSS5_Feed（technique 与 effect 顺序均正确）")
+                   f"{preset_path.name} 已启用 MartysMods_Launchpad + DLSS5_Feed"
+                   + ("（顺序也正确）" if (order_ok and effect_order_ok)
+                      else "（顺序由 ReShade 自行重排，不影响启用）"))
         return
     _log(log, "DLSS5 preset 需要修复："
               f"MartysMods_Launchpad={enabled_map.get(launchpad_name, '缺失')}、"
@@ -521,14 +536,17 @@ def _check_dlss5_preset(config: AppConfig, report: Report, log: Callable[[str], 
         [f"DLSS5_MV_PROVIDER={DLSS5_MV_PROVIDER_LAUNCHPAD}"],
     )
     # provider 必须排在 DLSS5_Feed **之上**（effect list 与 technique 顺序都要）。
+    # ⚠️ 2026-10-01 修正：这里原来写的是 `[feed_name, launchpad_name]`（**feed 在前**），
+    #    与上面的判据、与这里的注释、与 addon 的要求**全都相反** —— 于是每轮修完自己
+    #    还是判不过，日志永远在报"需要修复"。现在统一成"launchpad（provider）在前"。
     # ⚠️ **不要写 `=1`** —— 照 ReShade 自己写出来的格式（"列出即启用"）。
     # 2026-09-29 实测：手写 `DLSS5_Feed@DLSS5_Feed.fx=1` 时 addon 一直不开 session，
     # 而 ReShade 自己写成不带 `=1` 之后 `feature ready / frame delivered` 才出现。
-    updated = _merge_preset_line(updated, "Techniques", [feed_name, launchpad_name])
+    updated = _merge_preset_line(updated, "Techniques", [launchpad_name, feed_name])
     updated = _merge_preset_line(updated, "TechniqueSorting",
-                                 [feed_name, launchpad_name], front=True)
+                                 [launchpad_name, feed_name], front=True)
     updated = _merge_preset_line(updated, "EffectSorting",
-                                 [DLSS5_FEED_EFFECT, DLSS5_PROVIDER_EFFECT], front=True)
+                                 [DLSS5_PROVIDER_EFFECT, DLSS5_FEED_EFFECT], front=True)
     try:
         if body:
             backup = preset_path.with_name(f"{preset_path.name}.bak-before-fix")
@@ -548,6 +566,130 @@ def _check_dlss5_preset(config: AppConfig, report: Report, log: Callable[[str], 
         fixed=True,
     )
     report.action(f"增补 {preset_path.name}（不覆盖 ReShade 写的内容）")
+
+
+def _check_dlss5_ngx_consumer(config: AppConfig, report: Report,
+                              log: Callable[[str], None] | None) -> None:
+    """有没有第三方在**截获 NGX**（目前已知的是 OptiScaler）—— **有就自动处理掉**。
+
+    2026-10-01 加，起因是一份真实诊断包 + 用户发的三张面板截图：`ReShade.log` 报
+    `Failed to find NVSDK_NGX_D3D12_EvaluateFeature_C`，面板 `成功NR帧 ≈ 0`、
+    `最新NR NGX结果 0xBAD00001`，用户说「未启动 DLSS5 / NR 也是 0」。根因是那台机器装了
+    **OptiScaler DLSS-NR（`WINHTTP.dll` 注入）**：它把进程里**所有** NGX 调用截走
+    （连游戏自带的 DLSS 一起），而它自己的 `[DlssNr] Enabled` 默认是 `false`、只做超分 ——
+    于是 DLSS5 的神经渲染一帧都出不来。
+
+    ⚠️ 我第一版把这里写成"给用户一句说明（这都属正常）"，方向是错的：
+    ① OptiScaler 接管并**不是"正常"**，它让功能真的不工作；② 用户 2026-10-01 明确说
+    「**不是提示的问题，正常用户不会看日志，需要自动检测处理**」。
+    现在改成：**检测到就备份移走**（`game_clean.quarantine_injector`，proxy 补回系统原版、
+    备份区可还原），并只报一项 `dlss5:ngx_conflict`（`fixed=True`）。
+    """
+    if not getattr(config, "dlss5_addon_enabled", True):
+        report.add("dlss5:ngx_consumer", True, "DLSS5 已在启动页关闭（跳过 NGX 消费者检查）")
+        return
+    from . import reshade_integration      # 本模块其余检查也都是函数内导入，保持一致
+
+    game_dir = reshade_integration.detect_game_dir(config, allow_scan=False)
+    if game_dir is None:
+        game_dir = reshade_integration.detect_game_dir(config)
+    try:
+        info = reshade_integration.optiscaler_present(game_dir)
+    except Exception as exc:  # noqa: BLE001
+        report.add("dlss5:ngx_consumer", True, f"检查 NGX 消费者时出错（不影响使用）: {exc}")
+        return
+    if info.get("present"):
+        files = "、".join(info.get("files") or [])
+        from . import game_clean
+
+        result = game_clean.quarantine_injector(config, log=log)
+        if result.get("changed"):
+            report.add(
+                "dlss5:ngx_conflict", True,
+                f"检测到 OptiScaler（第三方 NGX 注入器：{files}）会截走 NGX 调用，"
+                f"导致 DLSS5 的神经渲染一帧都出不来（面板会显示「成功NR帧 0」与 "
+                f"「最新NR NGX结果 0xBAD00001」）——**已自动备份并移走** → "
+                f"{result.get('backup_dir')}（要恢复就把里面的文件放回游戏目录）。"
+                f"请重新进游戏，确认面板的「成功 NR 帧」开始增长、`NGX Hook 创建` > 0。",
+                fixed=True,
+            )
+            _log(log, f"DLSS5 NGX 冲突: 已自动移走 OptiScaler（{files}）→ {result.get('backup_dir')}")
+        else:
+            report.add(
+                "dlss5:ngx_conflict", False,
+                f"检测到 OptiScaler（{files}），但自动移走失败：{result.get('message')}",
+                manual=True,
+            )
+        return
+    report.add("dlss5:ngx_consumer", True, "未检测到第三方 NGX 接管（走 ReShade 自己的 NGX hook 路线）")
+
+
+def _check_dlss5_feed_redundant(config: AppConfig, report: Report,
+                                log: Callable[[str], None] | None) -> None:
+    """游戏**自带 DLSS** 时，自动停用「喂帧组件」（`dlss5-feed.addon64`）。
+
+    2026-10-01，用户原话：「**你把 2 做了，然后在设置留个这个开关，默认开启自动停用**」。
+    起因是 `dlss5-feed` 组件自己在日志里写的诊断：
+    「this game runs NVIDIA Streamline (sl.interposer.dll): it has DLSS of its own …
+      This project is for games WITHOUT DLSS — use the game's own DLSS with OptiScaler,
+      and remove dlss5-feed.addon64」—— 自带 DLSS 的游戏上它多余，还会与游戏自己的 DLSS
+    （以及 OptiScaler 这类第三方 NGX 注入器）抢同一条 NGX 链路。
+
+    行为（都**可逆**，只移动 addon 文件，不动 preset/shader）：
+    * 自带 DLSS 且喂帧组件在启用状态 → **停用**（移进 `_disabled`），报 `fixed=True`；
+    * 不自带 DLSS 但它是被"上次按开关停用"的 → **自动放回**（换了游戏/换了版本也能自愈）；
+    * 设置页把 `auto_disable_feed_on_native_dlss` 关掉 → 整项跳过（用户自己决定）。
+    """
+    if not getattr(config, "auto_disable_feed_on_native_dlss", True):
+        report.add("dlss5:feed", True,
+                   "已在设置页关闭「游戏自带 DLSS 时自动停用喂帧组件」（跳过）")
+        return
+    from . import launcher, reshade_integration
+
+    try:
+        status = launcher.feed_addon_status(config)
+    except Exception as exc:  # noqa: BLE001
+        report.add("dlss5:feed", True, f"读取喂帧组件状态失败（不影响使用）: {exc}")
+        return
+    if not status.get("present"):
+        report.add("dlss5:feed", True, "喂帧组件不在位（跳过）")
+        return
+
+    game_dir = reshade_integration.detect_game_dir(config, allow_scan=False)
+    if game_dir is None:
+        game_dir = reshade_integration.detect_game_dir(config)
+    native = reshade_integration.native_dlss_present(game_dir)
+    hits = "、".join(native.get("files") or [])
+
+    if native.get("present") and status.get("on"):
+        result = launcher.set_feed_addon_enabled(config, False, log=log)
+        if result.get("ok") and result.get("moved"):
+            report.add(
+                "dlss5:feed", True,
+                f"检测到游戏**自带 DLSS**（{hits}）：喂帧组件（dlss5-feed.addon64）对这个游戏是"
+                f"多余的，还会与游戏自己的 DLSS 抢同一条 NGX 链路 —— **已自动停用**"
+                f"（移到 runtime\\dlss5\\_disabled\\，想在设置页关掉这个行为就会自动放回）。",
+                fixed=True,
+            )
+        else:
+            report.add("dlss5:feed", False,
+                       f"检测到游戏自带 DLSS（{hits}），但停用喂帧组件失败：{result.get('message')}",
+                       manual=True)
+        return
+
+    if not native.get("present") and not status.get("on"):
+        result = launcher.set_feed_addon_enabled(config, True, log=log)
+        if result.get("ok") and result.get("moved"):
+            report.add("dlss5:feed", True,
+                       "当前游戏未检测到自带 DLSS → 已把之前停用的喂帧组件**放回**",
+                       fixed=True)
+        else:
+            report.add("dlss5:feed", True, "喂帧组件已停用，且当前游戏未检测到自带 DLSS（放回失败，稍后重试）")
+        return
+
+    report.add("dlss5:feed", True,
+               f"喂帧组件状态正常（{'启用中' if status.get('on') else '已停用'}；"
+               f"游戏自带 DLSS={'是' if native.get('present') else '否'}）")
 
 
 def _check_reshade_ini(config: AppConfig, report: Report, log: Callable[[str], None] | None) -> None:
@@ -1017,16 +1159,21 @@ def _mod_resource_hashes(mod_dir: Path, limit_files: int = 40) -> set[str]:
     return found
 
 
-def _mod_conflict_summary(config: AppConfig, mods_dir: Path, names: list[str]) -> list[str]:
+def _mod_conflict_summary(config: AppConfig, mods_dir: Path, names: list[str]) -> list[dict[str, Any]]:
     """按「实际覆盖的资源标识相交」判定冲突。
 
     注意：很多 Mod 会同时 override 一批**公共资源**（实测有 4 个 hash 被 5 个以上
     Mod 共用），直接用交集会大量误报。所以先统计频率，把"被本组里超过 1/3 的 Mod
     覆盖"的标识当作公共资源排除，只看**两个 Mod 独享**的低频标识 —— 那才是真冲突。
+
+    **返回结构化冲突组**（2026-10-01 改）：不再只是给人看的字符串 —— 前端要
+    「每组冲突一个下拉框、让用户挑保留哪个」（用户要求"一键关闭其中一个（自行选择）…
+    在冲突的中间下拉框选择要保留的，每组冲突单独下拉框"），所以这里给出
+    ``[{"names": [a, b], "shared": [...], "text": "「a」与「b」覆盖同一批资源（…）"}]``。
     """
     from collections import Counter
 
-    problems: list[str] = []
+    groups: list[dict[str, Any]] = []
     ids: dict[str, set[str]] = {name: _mod_resource_hashes(mods_dir / name) for name in names}
     freq: Counter[str] = Counter()
     for values in ids.values():
@@ -1037,9 +1184,14 @@ def _mod_conflict_summary(config: AppConfig, mods_dir: Path, names: list[str]) -
             # 单个标识相交可能是巧合，要求至少 2 个独享标识同时相交
             shared = {x for x in (ids[a] & ids[b]) if freq[x] <= threshold}
             if len(shared) >= 2:
-                sample = ", ".join(sorted(shared)[:3])
-                problems.append(f"「{a}」与「{b}」覆盖同一批资源（{len(shared)} 个独享标识: {sample}…）")
-    return problems
+                ordered = sorted(shared)
+                sample = ", ".join(ordered[:3])
+                groups.append({
+                    "names": [a, b],
+                    "shared": ordered,
+                    "text": f"「{a}」与「{b}」覆盖同一批资源（{len(ordered)} 个独享标识: {sample}…）",
+                })
+    return groups
 
 
 def _check_bundled_versions(config: AppConfig, report: Report, log: Callable[[str], None] | None) -> None:
@@ -1097,7 +1249,8 @@ def _check_mod_conflicts(config: AppConfig, report: Report, log: Callable[[str],
             continue
         (staged if child.name.startswith("MC_") else manual).append(child.name)
 
-    problems = _mod_conflict_summary(config, mods_dir, staged)
+    groups = _mod_conflict_summary(config, mods_dir, staged)
+    problems: list[str] = [str(item.get("text") or "") for item in groups]
 
     # 角色层：用 core 的别名解析（比 MC_ 前缀可靠）
     try:
@@ -1110,7 +1263,7 @@ def _check_mod_conflicts(config: AppConfig, report: Report, log: Callable[[str],
                 by_char.setdefault(group, []).append(name)
         for char, group_names in sorted(by_char.items()):
             if len(group_names) > 1:
-                already = any(all(n in p for n in group_names) for p in problems)
+                already = any(all(n in str(p) for n in group_names) for p in problems)
                 if not already:
                     problems.append(f"角色「{char}」有 {len(group_names)} 个 Mod: {', '.join(group_names)}")
     except Exception:  # noqa: BLE001
@@ -1120,13 +1273,36 @@ def _check_mod_conflicts(config: AppConfig, report: Report, log: Callable[[str],
         shown = ", ".join(manual[:4]) + ("…" if len(manual) > 4 else "")
         problems.append(f"Mods 里有 {len(manual)} 个非控制器生成的目录（手动放的）: {shown}")
 
+    # **把结构化冲突组补上库内 mod id**（2026-10-01）：前端「选择要保留的 Mod」弹窗
+    # 要按 mod id 取消勾选。staging 目录名 = `MC_{safe_name(group)}_{safe_name(name)}`，
+    # 所以扫一遍库、按同一公式重建名字就能精确反查（不靠猜、不比字符串相似度）。
+    if groups:
+        try:
+            from . import core
+
+            index = {
+                f"MC_{core.safe_name(mod.group)}_{core.safe_name(mod.name)}": mod
+                for mod in core.scan_library(config.library_path, config.staging_mods_path)
+            }
+        except Exception:  # noqa: BLE001
+            index = {}
+        for group in groups:
+            entries = []
+            for name in group.get("names") or []:
+                found = index.get(name)
+                entries.append({"name": name, "id": str(getattr(found, "id", "") or "")})
+            group["mods"] = entries
+            # resolvable = 每个 Mod 都能在库里定位到 id（定位不到就只能提示、不能自动处理）
+            group["resolvable"] = all(entry["id"] for entry in entries)
+
     detail = "；".join(problems)
     # 留痕：崩溃监视要用它判断"这次崩溃是不是 Mod 冲突造成的" —— 是的话弹窗要走
     # 另一套文案与按钮（用户 2026-09-30 要求「确定是 mod 冲突要区别于其他崩溃情况」）。
     try:
         from . import diagnostics
 
-        diagnostics.record_mod_conflicts(config, ok=not problems, detail=detail, conflicts=problems)
+        diagnostics.record_mod_conflicts(config, ok=not problems, detail=detail,
+                                         conflicts=problems, groups=groups)
     except Exception:  # noqa: BLE001
         pass
 
@@ -1305,6 +1481,11 @@ def ensure_all(config: AppConfig, log: Callable[[str], None] | None = None) -> d
     # shader 依赖要先补齐，否则 preset 里启用的 technique 编不过（"编译出错"）
     _check_dlss5_shaders(config, report, log)
     _check_dlss5_preset(config, report, log)
+    # NGX 消费者检查：检测到第三方截获（OptiScaler）就**自动移走**（用户要求"自动检测处理"，
+    # 不是写一句说明让用户自己看日志）
+    _check_dlss5_ngx_consumer(config, report, log)
+    # 游戏自带 DLSS → 自动停用「喂帧组件」（设置页有开关，默认开启）
+    _check_dlss5_feed_redundant(config, report, log)
     _check_game_libs(config, report, log)
     _check_bundled_versions(config, report, log)
     _check_controller(config, report, log)

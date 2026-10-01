@@ -134,6 +134,14 @@ class AppConfig:
     # 也可以填 `owner/repo` 或 `owner/repo@分支`（例如你自己 fork 的仓库 —— 在自己的仓库里
     # 改角色数据、push 即生效，不用等我们发版）。只**补缺失的角色**，不覆盖你调过的数值。
     sbm_data_source: str = ""
+    # **游戏自带 DLSS 时，自动停用「喂帧组件」（`dlss5-feed.addon64`）**（用户 2026-10-01 要求，
+    # 原话：「你把 2 做了，然后在设置留个这个开关，默认开启自动停用」）。
+    # 理由：`dlss5-feed` 自己的日志写着「this game runs NVIDIA Streamline … it has DLSS of its
+    # own … This project is for games WITHOUT DLSS — remove dlss5-feed.addon64」——
+    # 自带 DLSS 的游戏上它多余，且会与游戏自己的 DLSS（以及 OptiScaler 这类第三方 NGX
+    # 注入器）抢同一条 NGX 链路。停用 = 把文件移进 `runtime\dlss5\_disabled\`（**可逆**：
+    # 关掉这个开关，下次自检会自动放回）。默认 True。
+    auto_disable_feed_on_native_dlss: bool = True
     dependency_manifest: str = "dependencies.json"
     launch_extra_args: list[str] = field(default_factory=list)
     selected_mods: list[str] = field(default_factory=list)

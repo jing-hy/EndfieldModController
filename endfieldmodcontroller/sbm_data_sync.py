@@ -177,8 +177,23 @@ def _targets(config: AppConfig, relative: tuple[str, ...]) -> list[Path]:
 
     游戏目录排第一，因为它是**实际生效**的那份；assets 是"下次铺给新用户"的来源；
     工具目录是管理器自己读的那份（它读不到就显示"没有数据"）。
+
+    ⚠️ **绝不写入 PyInstaller 的临时解压目录（`sys._MEIPASS`）**（2026-10-01 修）：
+    onefile 下 `_assets_root()` 一度会退回 `_MEIPASS\\assets`，于是"新增角色数据"被写进
+    临时目录、退出即丢（真实诊断包日志实测：`…\\Temp\\_MEI00004bdc2\\assets\\…`）。
+    这里再兜一层：目标只要落在 `_MEIPASS` 里就整条跳过。
     """
+    import sys
+
     from . import secondary_motion
+
+    meipass = getattr(sys, "_MEIPASS", None)
+    meipass_path: Path | None = None
+    if meipass:
+        try:
+            meipass_path = Path(meipass).resolve()
+        except OSError:
+            meipass_path = None
 
     out: list[Path] = []
     game = secondary_motion.game_dir(config)
@@ -188,7 +203,17 @@ def _targets(config: AppConfig, relative: tuple[str, ...]) -> list[Path]:
     tool = secondary_motion._tool_dir(config)
     if tool is not None:
         out.append(Path(tool) / Path(*relative))
-    return out
+    if meipass_path is None:
+        return out
+    safe: list[Path] = []
+    for target in out:
+        try:
+            if target.resolve().is_relative_to(meipass_path):
+                continue
+        except OSError:
+            pass
+        safe.append(target)
+    return safe
 
 
 # ---------------------------------------------------------------- 入口

@@ -82,7 +82,7 @@ function setStatus(text) {
 // 用户要求把所有弹窗都改成它那个样式，因此这里提供 Promise 版的 showAlert /
 // showConfirm 取代原生 alert/confirm（原生弹窗由系统渲染、改不了样式），
 // 全项目 27 处调用已批量替换过来。
-function showModalDialog({ title, message, okText = '确定', cancelText = '取消', showCancel = true, link = null }) {
+function showModalDialog({ title, message, okText = '确定', cancelText = '取消', showCancel = true, link = null, extraButtons = [] }) {
   return new Promise((resolve) => {
     const wrap = document.createElement('div');
     wrap.className = 'modal';
@@ -133,6 +133,16 @@ function showModalDialog({ title, message, okText = '确定', cancelText = '取�
       cancel.onclick = () => finish(false);
       actions.appendChild(cancel);
     }
+    // 可选中间按钮（用户 2026-10-01 的冲突处理需要一个三选一弹窗）：
+    // 顺序按他的准则排 —— 冒险项在最左（cancelText）、推荐/主选在最右（primary）。
+    for (const extra of (Array.isArray(extraButtons) ? extraButtons : [])) {
+      if (!extra || !extra.text) continue;
+      const button = document.createElement('button');
+      button.textContent = String(extra.text);
+      button.dataset.extraValue = String(extra.value ?? extra.text);
+      button.onclick = () => finish(String(extra.value ?? extra.text));
+      actions.appendChild(button);
+    }
     const ok = document.createElement('button');
     ok.className = 'primary';
     ok.textContent = okText;
@@ -141,6 +151,138 @@ function showModalDialog({ title, message, okText = '确定', cancelText = '取�
     document.addEventListener('keydown', onKey);
     document.body.appendChild(wrap);
     ok.focus();
+  });
+}
+
+// ── 「选择要保留的 Mod」弹窗（用户 2026-10-01 要求）────────────────────────
+// 场景：**确定是皮肤（Mod）冲突**时（启动前风险弹窗 / 崩溃归因弹窗）给一个选项
+// 「一键关闭其中一个（自行选择）」→ 点了之后**先关掉原弹窗**，再弹这一个：
+//   · **每组冲突一个下拉框**，选你要保留的那个（同组其余会被取消勾选）；
+//   · 只改**勾选**，绝不动 Mod 库（不删除、不移动文件）；
+//   · 确认后自动跑一次「生成控制器」，让 staging 立刻变干净。
+// 返回值：后端结果对象（成功）或 false（取消）。
+async function showConflictResolveModal() {
+  let groups = [];
+  try {
+    const info = await call('conflict_groups');
+    groups = (info && info.groups) || [];
+  } catch (err) {
+    await showAlert(`读取冲突信息失败：${err}`, '读取失败');
+    return false;
+  }
+  if (!groups.length) {
+    await showAlert('当前没有可以自动处理的冲突（可能已经清理过，或者是手动放进 Mods 的目录）。',
+      '没有可处理的冲突');
+    return false;
+  }
+  return new Promise((resolve) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'modal';
+    const content = document.createElement('div');
+    content.className = 'modal-content';
+    content.style.width = 'min(640px, 94vw)';
+
+    const header = document.createElement('div');
+    header.className = 'modal-header';
+    const heading = document.createElement('h3');
+    heading.textContent = '选择要保留的 Mod';
+    header.appendChild(heading);
+    content.appendChild(header);
+
+    const tip = document.createElement('p');
+    tip.className = 'hint';
+    tip.textContent = '下面每组里的 Mod 覆盖同一批游戏资源，同时启用会互相覆盖'
+      + '（表现成某个 Mod「不加载」，或在加载时闪退）。每组请选一个保留，'
+      + '其余的会自动取消勾选 —— 只改勾选，不会删除或移动你的 Mod 文件。';
+    content.appendChild(tip);
+
+    const picked = new Map();          // 组序号 -> 该组要保留的 mod id
+    groups.forEach((group, index) => {
+      const entries = (group.mods || []).filter((entry) => entry);
+      const block = document.createElement('div');
+      block.className = 'conflict-group';
+      const label = document.createElement('div');
+      label.className = 'conflict-group-title';
+      label.textContent = `冲突组 ${index + 1}（共享 ${(group.shared || []).length} 个资源标识）`;
+      block.appendChild(label);
+
+      const select = document.createElement('select');
+      select.dataset.conflictGroup = String(index);
+      const usable = entries.filter((entry) => entry.id);
+      entries.forEach((entry, entryIndex) => {
+        const option = document.createElement('option');
+        option.value = String(entry.id || '');
+        option.textContent = String(entry.name || entry.id || `Mod ${entryIndex + 1}`);
+        option.selected = entryIndex === 0;
+        select.appendChild(option);
+      });
+      picked.set(index, String((usable[0] || {}).id || ''));
+      select.onchange = () => picked.set(index, select.value);
+      if (!usable.length) {
+        select.disabled = true;
+        const warn = document.createElement('div');
+        warn.className = 'hint';
+        warn.textContent = '这一组在 Mod 库里定位不到（可能是手动放进 Mods 的目录）—— 需要手动处理。';
+        block.appendChild(warn);
+      }
+      block.appendChild(select);
+      if ((group.shared || []).length) {
+        const detail = document.createElement('div');
+        detail.className = 'hint';
+        detail.textContent = `共享标识：${(group.shared || []).slice(0, 6).join('、')}`;
+        block.appendChild(detail);
+      }
+      content.appendChild(block);
+    });
+
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      document.removeEventListener('keydown', onKey);
+      wrap.remove();
+      resolve(value);
+    };
+    const onKey = (event) => {
+      const modals = document.querySelectorAll('.modal');
+      if (modals.length && modals[modals.length - 1] !== wrap) return;
+      if (event.key === 'Escape') { event.preventDefault(); finish(false); }
+    };
+
+    const actions = document.createElement('div');
+    actions.className = 'modal-actions';
+    const cancel = document.createElement('button');
+    cancel.textContent = '取消';
+    cancel.onclick = () => finish(false);
+    const apply = document.createElement('button');
+    apply.className = 'primary';
+    apply.textContent = '保留所选并重新生成控制器';
+    apply.onclick = async () => {
+      apply.disabled = true;
+      apply.textContent = '处理中…';
+      try {
+        const result = await call('resolve_mod_conflicts',
+          Array.from(picked.values()).filter(Boolean));
+        if (!result || result.ok === false) {
+          await showAlert((result && result.message) || '处理失败', '处理失败');
+        } else {
+          await showAlert(result.message || '已处理冲突', '冲突已处理');
+          await refreshFromState();
+        }
+        finish(result || true);
+      } catch (err) {
+        apply.disabled = false;
+        apply.textContent = '保留所选并重新生成控制器';
+        await showAlert(`处理冲突失败：${err}`, '处理失败');
+      }
+    };
+    actions.appendChild(cancel);
+    actions.appendChild(apply);
+    content.appendChild(actions);
+
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(wrap);
+    apply.focus();
   });
 }
 
@@ -405,6 +547,9 @@ function renderMods() {
     // 它们是别人依赖的公共资源，由依赖页统一管理
     const groupName = String(mod.conflict_group || mod.group || '');
     if (groupName === '_deps' || mod.kind === 'dependency') continue;
+    // **辅助 Mod 不在这里显示**（用户 2026-10-01 方案④）：它们不属于任何角色，
+    // 单独在「辅助 Mod」页管理，免得混进角色分组里、还被要求确认归属。
+    if (mod.kind === 'assist') continue;
     const key = mod.conflict_group || mod.group || '未分类';
     (groups[key] ||= []).push(mod);
   }
@@ -439,6 +584,7 @@ function renderMods() {
         ${needConfirm ? '<div class="meta" style="color:#d98a1f;cursor:pointer" data-char-pick="' + escapeHtml(mod.id) + '">⚠ 角色待确认'
           + (guess ? `（预识别：${escapeHtml(guess)}）` : '') + ' —— 点此选择</div>' : ''}
         ${mod.fixed ? '<div class="fixed-tag">✓ 已修复过（可在「⋯」里回滚）</div>' : ''}
+        ${mod.duplicate_of ? '<div class="meta" style="color:#d98a1f">⚠ 与「' + escapeHtml(mod.duplicate_of) + '」内容相同（重复副本）</div>' : ''}
         <label class="switch">
           <input type="checkbox" data-mod-toggle value="${escapeHtml(mod.id)}" ${checked ? 'checked' : ''} ${dependency ? 'disabled' : ''}>
           <span class="slider"></span>
@@ -496,6 +642,77 @@ function renderMods() {
   // 只在「⋯」菜单里体现 —— 工具没就位时「修复」按钮置灰，悬停能看到该放哪。
   call('modfix_status').then((r) => { state.modfixTool = (r && r.tool) || {}; }).catch(() => {});
   loadCovers();
+  renderAssist();      // 辅助 Mod 页跟着一起刷新（它不参与上面的角色分组）
+}
+
+// ── 辅助 Mod 页（用户 2026-10-01 方案④：「给这种非皮肤小 mod 留加载通道」）──
+// 这类包（隐藏 UI / 改界面 / 小工具）不换装、不属于任何角色，所以：
+//   · 不进角色分组、不参与同角色互斥（后端 conflict_group 用自身路径）；
+//   · 不弹"确认角色归属"（后端直接给 high 置信度）；
+//   · 单独一页列出来，开关即启用（勾选后照常被 stage 进 Mods、由 EFMI 加载）。
+function renderAssist() {
+  const root = $('assist-list');
+  if (!root) return;
+  const assistMods = state.mods.filter(m => m.kind === 'assist');
+  const status = $('assist-status');
+  root.innerHTML = '';
+  if (!assistMods.length) {
+    if (status) status.textContent = `当前没有辅助 Mod（共扫到 ${state.mods.length} 个 Mod）`;
+    root.innerHTML = '<p class="hint">还没有辅助 Mod。<br>'
+      + '· 把这类小包（隐藏 UI / 改界面 / 小工具）<b>拖到页面任意处</b>导入，或放进 Mod 库后点「重新扫描」；<br>'
+      + '· 自动识别条件：<b>没有换装资源</b>（无 Meshes/Textures）+（名字含「隐藏/辅助/UI/HUD/水印」或 ini 是 <code>handling = skip</code>）+ <b>归不到任何角色</b>；<br>'
+      + '· 也可以在任何 Mod 卡片的「⋯」里手动「<b>标记为辅助 Mod</b>」。</p>';
+    return;
+  }
+  const enabled = assistMods.filter(m => state.selected.has(m.id)).length;
+  if (status) status.textContent = `辅助 Mod ${assistMods.length} 个 · 已启用 ${enabled} · 与角色 Mod 互不影响`;
+  const grid = document.createElement('div');
+  grid.className = 'mod-list';
+  for (const mod of assistMods) {
+    const checked = state.selected.has(mod.id);
+    const actionCount = (mod.actions || []).length;
+    const card = document.createElement('div');
+    card.className = 'mod-card';
+    card.innerHTML = `
+      <div class="cover" data-cover-box="${escapeHtml(mod.id)}"><span>无预览图</span></div>
+      <div class="name">${escapeHtml(mod.name)}</div>
+      <div class="meta">辅助 Mod · 可调动作 ${actionCount} 个${mod.fixed ? ' · 已修复过' : ''}${mod.duplicate_of ? ` · ⚠ 与「${escapeHtml(mod.duplicate_of)}」内容相同（重复副本）` : ''}</div>
+      <label class="switch">
+        <input type="checkbox" data-assist-toggle value="${escapeHtml(mod.id)}" ${checked ? 'checked' : ''}>
+        <span class="slider"></span>
+      </label>
+      <button class="mod-more" data-mod-more="${escapeHtml(mod.id)}" title="更多：更换归属 / 标记 / 修复 / 移出库">⋯</button>
+    `;
+    grid.appendChild(card);
+  }
+  root.appendChild(grid);
+
+  root.querySelectorAll('input[data-assist-toggle]').forEach(cb => {
+    cb.onchange = () => {
+      // 只增删自己：辅助 Mod 之间、以及与角色 Mod 之间都不互斥
+      if (cb.checked) state.selected.add(cb.value); else state.selected.delete(cb.value);
+      saveSelection();
+      renderAssist();
+    };
+  });
+  root.querySelectorAll('button[data-mod-more]').forEach(btn => {
+    const open = () => { cancelModMenuClose(); openModMenu(btn.dataset.modMore, btn); };
+    btn.onmouseenter = open;
+    btn.onclick = (event) => { event.preventDefault(); event.stopPropagation(); open(); };
+    btn.onmouseleave = () => scheduleModMenuClose();
+  });
+  loadCovers();
+}
+
+// 手动改标记（自动识别认错了就在这里救回来）：角色 Mod ⇄ 辅助 Mod
+async function markModKind(modId, name, kind) {
+  const result = await call('set_mod_kind', modId, kind);
+  if (!result || result.ok === false) {
+    await showAlert((result && result.message) || '标记失败', '标记失败');
+    return;
+  }
+  setStatus(kind === 'assist' ? `已把「${name}」标记为辅助 Mod` : `已把「${name}」标记为角色 Mod`);
+  await scan();       // 重扫一遍，让它出现在对应的页里
 }
 
 // ── Mod 卡片「⋯」：就地弹出的小菜单（修复 / 回滚 / 打开目录 / 移出库） ──────
@@ -530,12 +747,15 @@ function openModMenu(modId, anchorEl) {
   const tags = [];
   if (mod.fixed) tags.push('已修复过');
   if (mod.can_rollback) tags.push('可回滚');
+  const isAssist = mod.kind === 'assist';
+  if (isAssist) tags.push('辅助 Mod');
   // 注意：**不要因为"工具还没展开到 runtime\modfix"就把「修复」置灰**（2026-10-01 用户
   // 反馈「为什么现在更多中修复点不了」）—— 随包 assets\modfix 里那份一直都在，点下去会
   // 自动展开。只有"随包也没有、runtime 也没有"时才在点击时说明原因。
   menu.innerHTML = `
     <div class="mod-menu-head">归属：${escapeHtml(mod.group || '未分类')}${tags.length ? ' · ' + escapeHtml(tags.join(' · ')) : ''}</div>
     <button data-act="assign">更换 Mod 归属…</button>
+    <button data-act="${isAssist ? 'mark-character' : 'mark-assist'}">${isAssist ? '标记为角色 Mod' : '标记为辅助 Mod'}</button>
     <button data-act="fix">修复（实验性）</button>
     <button data-act="rollback" ${mod.can_rollback ? '' : 'disabled'}>回滚修复</button>
     <button data-act="open">打开所在文件夹</button>
@@ -565,6 +785,8 @@ function openModMenu(modId, anchorEl) {
       closeModMenus();
       if (act === 'open') { call('open_path_in_explorer', mod.path || ''); return; }
       if (act === 'assign') return openCharacterAssign(modId, mod.name, mod.group || '');
+      if (act === 'mark-assist') return markModKind(modId, mod.name, 'assist');
+      if (act === 'mark-character') return markModKind(modId, mod.name, 'character');
       if (act === 'fix') return doFixMod(modId, mod.name);
       if (act === 'rollback') return doRollbackMod(modId, mod.name);
       if (act === 'delete') return doDeleteMod(modId, mod.name);
@@ -975,6 +1197,10 @@ async function refreshPaths(config) {
   $('cfg-use_builtin_runtime').checked = config.use_builtin_runtime !== false;
   $('cfg-auto_update_dependencies').checked = !!config.auto_update_dependencies;
   $('cfg-require_admin').checked = !!config.require_admin;
+  // 「游戏自带 DLSS 时自动停用喂帧组件」——默认开启（config 缺字段时按 true 显示）
+  if ($('cfg-auto-disable-feed')) {
+    $('cfg-auto-disable-feed').checked = config.auto_disable_feed_on_native_dlss !== false;
+  }
   if ($('cfg-download_boost')) $('cfg-download_boost').value = config.download_boost || 'auto';
   if ($('cfg-download_line')) $('cfg-download_line').value = config.download_line || 'auto';
   refreshDownloadStatus();
@@ -1023,6 +1249,7 @@ async function saveConfig() {
     use_builtin_runtime: $('cfg-use_builtin_runtime').checked,
     auto_update_dependencies: $('cfg-auto_update_dependencies').checked,
     require_admin: $('cfg-require_admin').checked,
+    auto_disable_feed_on_native_dlss: $('cfg-auto-disable-feed') ? $('cfg-auto-disable-feed').checked : true,
     download_boost: $('cfg-download_boost') ? $('cfg-download_boost').value : 'auto',
     download_line: $('cfg-download_line') ? $('cfg-download_line').value : 'auto',
   };
@@ -1679,6 +1906,12 @@ async function restoreGameInjections() {
 function bind() {
   document.querySelectorAll('.tab').forEach(tab => tab.onclick = () => showTab(tab.dataset.tab));
   $('scan-btn').onclick = scan;
+  // 辅助 Mod 页的两个按钮（用户 2026-10-01 方案④）
+  if ($('assist-scan-btn')) $('assist-scan-btn').onclick = scan;
+  if ($('assist-open-lib-btn')) {
+    $('assist-open-lib-btn').onclick = () => call(
+      'open_path_in_explorer', (state.config && state.config.library_dir) || '');
+  }
   $('prepare-btn').onclick = prepare;
   $('dep-scan-btn').onclick = async () => { await refreshFromState(); setStatus('依赖状态已刷新'); };
   $('dep-check-btn').onclick = () => startFullUpdate(true);
@@ -1855,22 +2088,34 @@ function bind() {
         }
         rl.push('建议：到「Mod 库」页把冲突项取消勾选一个 → 点「生成控制器」→ 再启动。');
         rl.push('也可以选择仍然启动 —— 但游戏有可能在加载过程中闪退。');
-        // 按钮层级（用户 2026-09-30 要求：「发现 mod 冲突风险应该先去清理才是右边的橙色主选项」）：
-        //   主选项 = 右侧 primary（橙色）= 去清理，而且默认聚焦在它上面（安全侧）；
-        //   次要 = 左侧 = 仍然启动。返回值 true 表示"去清理"。
-        const goClean = await showModalDialog({
+        // 按钮层级（用户 2026-09-30 要求：「发现 mod 冲突风险应该先去清理才是右边的橙色主选项」；
+        // 2026-10-01 他又加了更直接的一档：「弹窗加个选项，一键关闭其中一个（自行选择）」）：
+        //   最右 primary（橙色，默认聚焦）= 一键关闭其中一个（进"选择要保留的"弹窗）
+        //   中间 = 先去清理，不启动（原来的主选，只是不动手，改用去库页）
+        //   最左 = 仍然启动（冒险项）
+        const choice = await showModalDialog({
           title: '启动前发现 Mod 冲突风险',
           message: rl.join('\n'),
-          okText: '先去清理，不启动',
+          okText: '一键关闭其中一个（自行选择）',
+          extraButtons: [{ text: '先去清理，不启动', value: 'clean' }],
           cancelText: '仍然启动',
         });
-        logLine(`   风险确认：${goClean ? '你选择先去清理' : '你选择仍然启动'}`);
-        if (goClean) {
+        if (choice === 'clean') {
+          logLine('   风险确认：你选择先去清理');
           setStatus('已取消启动（先处理 Mod 冲突）');
           logLine('   已取消启动 —— 处理完冲突再点「一键启动」即可');
           showTab('library');
           return { needsSecondStart: false, gameReason: '已取消：启动前检测到 Mod 冲突风险' };
         }
+        if (choice === true) {
+          logLine('   风险确认：你选择先关掉其中一个（进"选择要保留的 Mod"）');
+          setStatus('请选择要保留的 Mod');
+          await showConflictResolveModal();
+          setStatus('已取消启动（冲突处理完之后再点一键启动）');
+          logLine('   已取消启动 —— 冲突处理完再点「一键启动」即可');
+          return { needsSecondStart: false, gameReason: '已取消：处理 Mod 冲突' };
+        }
+        logLine('   风险确认：你选择仍然启动');
       }
 
       logLine('② 拉起 XXMI Launcher，请在它的界面里点 Start 启动游戏');
@@ -2616,6 +2861,16 @@ function showCrashModal(bundle) {
   if (gotoLibrary) {
     gotoLibrary.style.display = isConflict ? '' : 'none';
     gotoLibrary.onclick = () => { modal.classList.add('hidden'); showTab('library'); };
+  }
+  // 「一键关闭其中一个（自行选择）」（用户 2026-10-01 要求）：点了之后**先关掉这个弹窗**，
+  // 再弹「选择要保留的 Mod」——那里每组冲突一个下拉框，选完自动取消勾选其余并重新生成控制器。
+  const resolveButton = $('crash-resolve-conflicts');
+  if (resolveButton) {
+    resolveButton.style.display = isConflict ? '' : 'none';
+    resolveButton.onclick = async () => {
+      modal.classList.add('hidden');
+      await showConflictResolveModal();
+    };
   }
   if ($('crash-modal-close')) {
     // 冲突时把主按钮让给「去 Mod 库清理冲突」，关闭按钮降为次要

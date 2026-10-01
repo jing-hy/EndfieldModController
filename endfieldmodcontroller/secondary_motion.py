@@ -194,9 +194,12 @@ def _assets_root(config: AppConfig | None = None) -> Path:
     if config is not None:
         base = getattr(config, "base_dir", None)
         if base is not None:
-            candidate = Path(base) / "assets"
-            if candidate.is_dir():
-                return candidate
+            # ⚠️ **即使 `assets` 还不存在也要返回它**（2026-10-01 修）：早先这里加了
+            # `is_dir()` 判断，于是在"数据根还没有 assets"（恰恰是最需要靠下载补上、
+            # 也最需要往里写数据的那一刻）会退回 `_MEIPASS\assets` —— 调用方（如
+            # `sbm_data_sync`）就会把数据写进 PyInstaller 的**临时解压目录**，退出即丢。
+            # 真实诊断包日志实测：写到 `…\Temp\_MEI00004bdc2\assets\secondary_motion\data`。
+            return Path(base) / "assets"
     return Path(__file__).resolve().parents[1] / "assets"
 
 

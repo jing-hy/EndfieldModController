@@ -591,3 +591,16 @@ a[href^="http"] {
 }
 
 a[href^="http"]:hover { color: var(--accent-2); }
+
+/* ── 「选择要保留的 Mod」弹窗：每组冲突一个区块（用户 2026-10-01 要求"每组冲突单独下拉框"）──
+   只做排布，不改主题色：边框用 color-mix 从当前文字色派生，深浅两套主题都自适应。 */
+.conflict-group {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+  border-radius: var(--radius, 10px);
+  background: color-mix(in srgb, currentColor 4%, transparent);
+}
+.conflict-group-title { font-weight: 600; margin-bottom: 4px; }
+.conflict-group select { width: 100%; margin-top: 6px; }
+.conflict-group .hint { margin: 2px 0 0; }

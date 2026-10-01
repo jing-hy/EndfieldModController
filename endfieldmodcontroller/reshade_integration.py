@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 from pathlib import Path
 from typing import Any, Callable
@@ -136,18 +137,49 @@ def detect_game_dir(config: AppConfig, *, allow_scan: bool = True) -> Path | Non
     if launcher is None:
         return None
     config_path = xxmi_config_path(launcher)
-    if config_path is None:
-        return None
-    try:
-        data = json.loads(config_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    folder = data.get("Importers", {}).get("EFMI", {}).get("Importer", {}).get("game_folder")
-    if folder:
-        path = Path(folder)
-        if path.is_dir():
-            return path
-    # ③ 兜底：自动搜索游戏本体（不硬编码任何盘符/目录）
+    data: dict = {}
+    if config_path is not None:
+        try:
+            loaded = json.loads(config_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                data = loaded
+        except (OSError, json.JSONDecodeError):
+            data = {}
+    # ③ **遍历所有 importer 的 game_folder**（2026-10-01 修）：原先只读 EFMI 一家 ——
+    #    用户换过 importer、或只有别的 importer 配过游戏目录时，这里就整体读不到，
+    #    于是"未定位到游戏目录"→ XXMI 的 game_folder/active_importer/enabled_importers
+    #    三个字段全都写不进去（一份真实诊断包里 `active_importer: None` 就是这么来的）。
+    #    顺序：`Launcher.active_importer` 指向的那个优先，然后其余 importer；
+    #    带 `Endfield.exe` 的目录优先，只有目录（没 exe）的作为兜底。
+    if data:
+        importers = data.get("Importers") if isinstance(data.get("Importers"), dict) else {}
+        active = str((data.get("Launcher") or {}).get("active_importer") or "")
+        order = ([active] if active else []) + [name for name in importers if name != active]
+        fallback: Path | None = None
+        for name in order:
+            block = importers.get(name)
+            if not isinstance(block, dict):
+                continue
+            folder = (block.get("Importer") or {}).get("game_folder")
+            if not folder:
+                continue
+            path = Path(str(folder))
+            if not path.is_dir():
+                continue
+            if (path / "Endfield.exe").is_file():
+                return path
+            if fallback is None:
+                fallback = path
+        if fallback is not None:
+            return fallback
+    # ③.5 **从 XXMI 自己的启动日志里捞真实路径**（2026-10-01 加）：XXMI 每次注入都会记
+    #     `Successfully injected DLL to process Endfield.exe … ` 与
+    #     `exe_path=WindowsPath('…/Endfield Game/Endfield.exe')` —— 只要用户用它启动过一次
+    #     （哪怕配置里的 game_folder 是空的），日志里就有真路径，比全盘扫描可靠得多。
+    from_log = game_dir_from_xxmi_log(launcher, config_path)
+    if from_log is not None:
+        return from_log
+    # ④ 兜底：自动搜索游戏本体（不硬编码任何盘符/目录）
     #
     # `allow_scan=False` 时**绝不扫盘** —— 界面刷新（get_state）走的就是这条路。
     # pywebview 的 js_api 调用是在 GUI 线程上执行的，这里一旦扫遍所有盘符，窗口渲染
@@ -159,6 +191,44 @@ def detect_game_dir(config: AppConfig, *, allow_scan: bool = True) -> Path | Non
 
     guess = auto_detect_game_dir()
     return Path(guess) if guess else None
+
+
+GAME_EXE_PATH_RE = re.compile(r"([A-Za-z]:[\\/][^\r\n'\"<>|]*?[\\/]Endfield\.exe)", re.IGNORECASE)
+
+
+def game_dir_from_xxmi_log(launcher: Path, config_path: Path | None = None) -> Path | None:
+    """从 `XXMI Launcher Log.txt` 里捞游戏目录（XP 那台机器游戏在 W 盘时救过场）。
+
+    只要用户用 XXMI 启动过一次游戏，日志里就会留下
+    `Successfully injected DLL to process Endfield.exe (PID: …)` 或
+    `exe_path=WindowsPath('…/Endfield Game/Endfield.exe')` —— 直接解析出路径，
+    **不必依赖配置里的 `game_folder`，也不必全盘扫描**。
+    只读日志末尾 256 KB；路径必须真实存在才采用。
+    """
+    bases = [p for p in (config_path.parent if config_path else None,
+                         launcher.parent, launcher.parent.parent,
+                         launcher.parent.parent.parent) if p is not None]
+    seen: set[Path] = set()
+    for base in bases:
+        if base in seen:
+            continue
+        seen.add(base)
+        log_path = base / "XXMI Launcher Log.txt"
+        if not log_path.is_file():
+            continue
+        try:
+            size = log_path.stat().st_size
+            with log_path.open("rb") as handle:
+                if size > 262_144:
+                    handle.seek(size - 262_144)
+                text = handle.read().decode("utf-8", errors="replace")
+        except OSError:
+            continue
+        for match in reversed(GAME_EXE_PATH_RE.findall(text)):
+            candidate = Path(match)
+            if candidate.is_file():
+                return candidate.parent
+    return None
 
 
 def detect_render_api(game_dir: Path) -> str:
@@ -746,6 +816,17 @@ LOADER_PROXY_MODULES = (
     "nvapi64.dll",
     "winmm.dll",
     "version.dll",
+    # 2026-10-01 补：注入器常用、原先**完全没纳入审计**的 proxy 名。
+    # 起因是一份诊断包：那台机器装着 **OptiScaler DLSS-NR**（以 `WINHTTP.dll` 形式注入、
+    # 接管 NGX 调用），而我们的名单里没有 winhttp → 「一键还原游戏本体」**根本不知道
+    # 它在**，用户以为已经还原干净。用户明确要求「**一键还原游戏本体要全部移走**」。
+    "winhttp.dll",
+    "wininet.dll",
+    "dbghelp.dll",
+    "dinput8.dll",
+    "d3d9.dll",
+    "opengl32.dll",
+    "nvngx.dll",
 )
 
 LOADER_PROXY_DISABLED_SUFFIX = ".loader.endfieldmodcontroller.disabled"
@@ -797,6 +878,137 @@ def looks_like_loader_proxy(path: Path) -> bool:
     except OSError:
         return False
     return any(marker in blob for marker in _BOOTSTRAP_MARKERS)
+
+
+# OptiScaler（DLSS-NR 替换注入器）：它自带的特征串，以及它注入时用的 proxy 名
+# （默认就是 `winhttp.dll`）。2026-10-01 加 —— 一份诊断包里 `ReShade.log` 报
+# `Failed to find NVSDK_NGX_D3D12_EvaluateFeature_C`、面板 `NGX Hook 创建: 0`，
+# 真相是 NGX 被 OptiScaler 接管，而我们的审计/净化**完全不认识它**。
+_OPTISCALER_MARKERS = (
+    b"OptiScaler",
+    b"OptiScaler.ini",
+    b"OptiScaler.log",
+    b"dlss-nr",
+    b"DLSS-NR",
+    b"OptiScaler-DLSSNR",
+)
+
+# 第三方注入器留在游戏目录里的**配置/日志**（原版绝不会有）：proxy 移走了它们还留着，
+# 用户会以为"没弄干净"。净化时会一并备份移走（用户 2026-10-01：「一键还原游戏本体要全部移走」）。
+INJECTOR_DATA_NAMES = ("OptiScaler.ini", "OptiScaler.log", "OptiScaler.dll")
+
+
+def looks_like_optiscaler(path: Path) -> bool:
+    """这个文件是不是 OptiScaler（按内容特征，不看文件名）。"""
+    try:
+        with path.open("rb") as handle:
+            blob = handle.read(512 * 1024)
+    except OSError:
+        return False
+    return any(marker in blob for marker in _OPTISCALER_MARKERS)
+
+
+def optiscaler_present(game_dir: Path | None, *, plugin_dir: Path | None = None) -> dict[str, Any]:
+    """游戏目录（含 `plugin\\`）里有没有 OptiScaler —— 给自检与诊断包用。
+
+    返回 ``{"present": bool, "files": [相对路径…], "ini": bool}``。
+    判定三路任一命中：① 同名配置/日志文件（`OptiScaler.ini` / `OptiScaler.log`）；
+    ② 名单里的 proxy dll 内容带 OptiScaler 特征；③ proxy dll 与 System32 原版**不同**
+    且旁边就有 OptiScaler 的 ini/log（避免把游戏自带的同名模块误判进来）。
+    """
+    result: dict[str, Any] = {"present": False, "files": [], "ini": False}
+    if game_dir is None:
+        return result
+    game_dir = Path(game_dir)
+    for name in INJECTOR_DATA_NAMES:
+        if (game_dir / name).is_file():
+            result["ini"] = result["ini"] or name.endswith(".ini")
+            result["files"].append(name)
+    roots = [game_dir]
+    if plugin_dir is None:
+        plugin_dir = game_dir / PLUGIN_DIR_NAME
+    if Path(plugin_dir).is_dir():
+        roots.append(Path(plugin_dir))
+    for root in roots:
+        for name in LOADER_PROXY_MODULES:
+            path = root / name
+            if not path.is_file():
+                continue
+            if looks_like_optiscaler(path) or (
+                result["ini"] and system_module_differs(name, path)
+            ):
+                relative = f"{root.name}\\{name}" if root != game_dir else name
+                if relative not in result["files"]:
+                    result["files"].append(relative)
+    result["present"] = bool(result["files"])
+    return result
+
+
+# 「游戏自带 DLSS」的判据（2026-10-01）：`sl.interposer.dll`（NVIDIA Streamline 的调度层，
+# 只有自带 DLSS/帧生成的游戏才会带）或 `nvngx_dlss.dll`（NGX 的 DLSS 运行库，游戏原版就有）。
+NATIVE_DLSS_FILES = ("sl.interposer.dll", "nvngx_dlss.dll")
+
+
+def native_dlss_present(game_dir: Path | None) -> dict[str, Any]:
+    """游戏是否**自带 DLSS**？
+
+    返回 ``{"present": bool, "files": [命中的文件名…]}``。
+    为什么要问这个：`dlss5-feed`（喂帧组件）自己的日志写着 —
+    「this game runs NVIDIA Streamline (sl.interposer.dll): it has DLSS of its own …
+      This project is for games WITHOUT DLSS — use the game's own DLSS with OptiScaler,
+      and remove dlss5-feed.addon64」。也就是说**自带 DLSS 的游戏上它多余**，留着会与游戏
+    自己的 DLSS（以及第三方 NGX 注入器）抢同一条 NGX 链路。用户 2026-10-01 要求
+    「游戏自带 DLSS 时自动停用喂帧组件」（默认开启、设置页可关）。
+    """
+    result: dict[str, Any] = {"present": False, "files": []}
+    if game_dir is None:
+        return result
+    game_dir = Path(game_dir)
+    for name in NATIVE_DLSS_FILES:
+        try:
+            if (game_dir / name).is_file():
+                result["files"].append(name)
+        except OSError:
+            continue
+    result["present"] = bool(result["files"])
+    return result
+
+
+def system_module_differs(name: str, path: Path) -> bool:
+    """游戏目录里这个模块与 `System32` 的原版**是不是不同的东西**（被第三方换过）。
+
+    只比大小（够用且便宜）：OptiScaler 这类工具正是把 `winhttp.dll` 放在游戏目录
+    顶替系统模块 —— 大小必然不同。系统里没有这个名字时返回 False（不据此判定，
+    免得误伤游戏自带的同名文件）。
+    """
+    root = os.environ.get("SystemRoot") or r"C:\Windows"
+    original = Path(root) / "System32" / name
+    try:
+        if not original.is_file():
+            return False
+        return original.stat().st_size != path.stat().st_size
+    except OSError:
+        return False
+
+
+def is_third_party_proxy(path: Path) -> str:
+    """这个 DLL 是不是"第三方塞进游戏目录的 proxy"？返回血统（``""`` = 不是）。
+
+    三条判据任一命中：
+      ① 内容带我们生态的 loader 标记 → ``"sbm"`` / ``"poser"``；
+      ② 内容带 **OptiScaler** 特征 → ``"optiscaler"``；
+      ③ 名字是系统模块但**与 System32 原版不同** → ``"third-party"``
+         （OptiScaler 用 `winhttp.dll` 顶替系统模块就是这一类；用户 2026-10-01 明确
+         要求「一键还原游戏本体要**全部移走**」）。
+    """
+    origin = loader_kind(path)
+    if origin:
+        return origin
+    if looks_like_optiscaler(path):
+        return "optiscaler"
+    if system_module_differs(path.name, path):
+        return "third-party"
+    return ""
 
 
 def _resolve_game_dir(config: AppConfig, game_dir: Path | None = None) -> Path | None:

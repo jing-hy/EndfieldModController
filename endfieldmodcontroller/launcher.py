@@ -446,6 +446,12 @@ def sign_xxmi_setting(config_path: Path, value: str) -> str:
 # *.addon64，把文件移进 _disabled 子目录就等于停用。
 DLSS5_ADDON_GLOBS = ("renodx-dlss5*.addon64", "dlss5-feed.addon64", "trans-zh.addon64", "translations.txt")
 FIRSTPERSON_ADDON_GLOBS = ("renodx-endfield-enhancer.addon64",)
+# 「喂帧组件」单独一档（2026-10-01）：它平时跟 DLSS5 组件一起启停，但在**游戏自带 DLSS**
+# 的机器上会与游戏自己的 DLSS 抢同一条 NGX 链路 —— `dlss5-feed` 组件自己在日志里就写着
+# 「this game runs NVIDIA Streamline (sl.interposer.dll): it has DLSS of its own …
+#   This project is for games WITHOUT DLSS — use the game's own DLSS with OptiScaler,
+#   and remove dlss5-feed.addon64」。用户要求这件事**自动做掉**（默认开启、设置页可关）。
+FEED_ADDON_GLOBS = ("dlss5-feed.addon64",)
 ADDON_DISABLED_DIR = "_disabled"
 
 
@@ -556,6 +562,71 @@ def set_component_addons(config: AppConfig, component: str, enabled: bool) -> di
                 shutil.move(str(path), str(target))
                 moved.append(path.name)
     return {"ok": True, "component": component, "enabled": enabled, "moved": moved}
+
+
+def set_feed_addon_enabled(
+    config: AppConfig,
+    enabled: bool,
+    *,
+    log: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
+    """单独启停「喂帧组件」`dlss5-feed.addon64`（移动文件，**可逆**；不动 preset / shader）。
+
+    与 `set_component_addons` 同一套机制（底座根目录 ↔ `_disabled` 子目录，ReShade 只加载
+    根目录里的 `*.addon`/`*.addon64`），但**粒度更细**：只动这一个文件，避免把
+    `renodx-dlss5*.addon64` / 汉化一起停掉。
+
+    为什么需要它：在**游戏自带 DLSS**（`sl.interposer.dll` / 游戏原版 `nvngx_dlss.dll`）的机器上，
+    `dlss5-feed` 组件自己就会在日志里建议「这个项目是给没有 DLSS 的游戏用的 —— 用游戏自己的
+    DLSS，并移除 dlss5-feed.addon64」；留着它会与游戏自己的 DLSS（以及第三方 NGX 注入器）
+    抢同一条 NGX 链路。用户 2026-10-01 要求这件事**自动做掉**（默认开启、设置页可关掉）。
+    """
+    base = config.dlss5_path
+    disabled = base / ADDON_DISABLED_DIR
+    try:
+        disabled.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return {"ok": False, "enabled": enabled, "moved": [], "message": f"创建 _disabled 失败: {exc}"}
+    source_dir, target_dir = (disabled, base) if enabled else (base, disabled)
+    moved: list[str] = []
+    for pattern in FEED_ADDON_GLOBS:
+        for path in sorted(source_dir.glob(pattern)):
+            target = target_dir / path.name
+            if target.exists():
+                continue
+            try:
+                shutil.move(str(path), str(target))
+            except OSError as exc:
+                return {"ok": False, "enabled": enabled, "moved": moved,
+                        "message": f"移动 {path.name} 失败: {exc}"}
+            moved.append(path.name)
+            if log is not None:
+                try:
+                    log(f"喂帧组件 dlss5-feed: {'放回' if enabled else '停用'} {path.name}")
+                except Exception:  # noqa: BLE001
+                    pass
+    action = "放回" if enabled else "停用"
+    return {
+        "ok": True,
+        "enabled": enabled,
+        "moved": moved,
+        "message": (f"已{action}喂帧组件（{', '.join(moved)}）" if moved
+                    else f"喂帧组件无需{action}（已经到位）"),
+    }
+
+
+def feed_addon_status(config: AppConfig) -> dict[str, Any]:
+    """喂帧组件 `dlss5-feed.addon64` 现在在哪（根目录 = 启用中；`_disabled` = 已停用）。"""
+    base = config.dlss5_path
+    disabled = base / ADDON_DISABLED_DIR
+    active = [p.name for pattern in FEED_ADDON_GLOBS for p in base.glob(pattern)]
+    inactive = [p.name for pattern in FEED_ADDON_GLOBS for p in disabled.glob(pattern)]
+    return {
+        "active": sorted(active),
+        "disabled": sorted(inactive),
+        "on": bool(active),
+        "present": bool(active or inactive),
+    }
 
 
 def component_addon_status(config: AppConfig) -> dict[str, Any]:
@@ -728,11 +799,33 @@ def ensure_injections(config: AppConfig) -> dict[str, Any]:
 
     # 让 XXMI 知道游戏装在哪 —— 否则它界面里不会出现终末地的启动按钮（2026-09-29 空环境实测）
     try:
-        game_folder_state = ensure_xxmi_game_folder(config)
+        game_folder_state = ensure_xxmi_game_folder(config, log=log)
         if game_folder_state.get("changed"):
             actions.append(str(game_folder_state.get("message") or "已让 XXMI 指向游戏目录"))
+        elif not game_folder_state.get("ok"):
+            # 2026-10-01：失败**不再静默** —— 以前这条 message 谁都不记，于是
+            # "XXMI 里没有终末地启动按钮"只能靠猜（诊断包里 active_importer=None）。
+            warnings.append(str(game_folder_state.get("message") or "XXMI 未能指向游戏目录"))
     except Exception as exc:  # noqa: BLE001
         warnings.append(f"写入 XXMI 游戏目录失败: {exc}")
+
+    # 第三方 NGX 注入器（OptiScaler）会截走进程里**所有** NGX 调用 —— 连游戏自带的 DLSS
+    # 一起 —— 而它自己的 `[DlssNr] Enabled` 默认是 false（只做超分），于是 DLSS5 的神经
+    # 渲染一帧都出不来（面板 `成功NR帧 0` / `0xBAD00001`）。用户 2026-10-01 明确要求
+    # 「**不是提示的问题，正常用户不会看日志，需要自动检测处理**」→ 这里在**注入之前**
+    # 就把它备份移走（`game_clean.quarantine_injector`：先备份、proxy 补回系统原版、可还原）。
+    try:
+        from . import game_clean
+
+        conflict_state = game_clean.quarantine_injector(config, log=log)
+        if conflict_state.get("changed"):
+            actions.append(str(conflict_state.get("message")
+                               or "已移走第三方 NGX 注入器（OptiScaler）"))
+        elif not conflict_state.get("ok"):
+            warnings.append(str(conflict_state.get("message")
+                                or "处理第三方 NGX 注入器失败"))
+    except Exception as exc:  # noqa: BLE001
+        warnings.append(f"处理第三方 NGX 注入器失败: {exc}")
 
     # 先按两个开关同步 addon 的启停（同一底座下的 DLSS5 / 第一人称各自独立）
     status = component_addon_status(config)
@@ -887,22 +980,60 @@ def bootstrap_xxmi_config(config: AppConfig, *, wait_seconds: int = 40,
             "message": f"等了 {wait_seconds}s 仍没等到 XXMI 写出配置"}
 
 
-def ensure_xxmi_game_folder(config: AppConfig) -> dict[str, Any]:
+def ensure_xxmi_game_folder(config: AppConfig, *, log: Callable[[str], None] | None = None) -> dict[str, Any]:
     """把游戏目录写进 XXMI 配置的 `Importers.EFMI.Importer.game_folder`。
 
     **不做这件事，XXMI 界面里就不会出现终末地的启动按钮** —— 实测空环境下该字段是空
     字符串（2026-09-29），XXMI 既搜不到游戏、也没人告诉它路径，于是"没有启动按钮"。
     顺带把 `Launcher.active_importer` 设为 `EFMI`（本方案跑的就是 EFMI / 服装 Mod）。
+    以及 **`Launcher.enabled_importers`**（XXMI 界面只显示"已启用"的 importer，
+    这个列表为空时连启动按钮都不出现，而且 XXMI 启动后还会把 active_importer 重置回
+    `"XXMI"` —— 2026-09-29 对照两份配置才定位到）。
+
+    **2026-10-01 修的两处**（一份真实诊断包暴露）：
+    * 定位不到游戏目录时**原先完全静默**（调用方连 message 都不记）→ 用户与排查者都
+      看不到"为什么 XXMI 里没有启动按钮"；现在失败会写日志并且 message 交给调用方
+      放进自检 warnings。
+    * 定位成功后**把 `config.game_exe` 回填**（仅当它原本为空 —— 不覆盖用户设置），
+      这样后续所有 `detect_game_dir` 直接命中，不必再扫盘/依赖 XXMI 配置。
     """
+    def _log(message: str) -> None:
+        """可选日志回调（launcher 里没有全局 _log，就地包一层，失败静默）。"""
+        if log is None:
+            return
+        try:
+            log(message)
+        except Exception:  # noqa: BLE001
+            pass
+
     launcher_path = config.xxmi_launcher_path
     if launcher_path is None:
-        return {"ok": False, "changed": False, "message": "未配置 XXMI Launcher"}
+        message = "未配置 XXMI Launcher，跳过「让 XXMI 指向游戏目录」"
+        _log(f"XXMI 游戏目录: {message}")
+        return {"ok": False, "changed": False, "message": message}
     game_dir = reshade_integration.detect_game_dir(config)
     if game_dir is None:
-        return {"ok": False, "changed": False, "message": "未定位到游戏目录"}
+        message = ("未定位到游戏目录，所以没能把游戏路径写进 XXMI 配置"
+                   "（影响：XXMI 界面里可能不显示终末地的启动按钮）。"
+                   "请到设置页把「游戏启动器」或「游戏 exe」填上，"
+                   "或在 XXMI 里手动选一次游戏目录后重试。")
+        _log(f"WARN XXMI 游戏目录: {message}")
+        return {"ok": False, "changed": False, "message": message}
+    # 反推/探测成功后回填 config.game_exe —— **只在原本为空时写**，绝不覆盖用户填的值
+    # （2026-09-30 的 issue #4 就是"补齐流程覆盖了用户设置"造成的，这个坑不再踩）。
+    exe = Path(game_dir) / "Endfield.exe"
+    if exe.is_file() and not str(getattr(config, "game_exe", "") or "").strip():
+        config.game_exe = str(exe)
+        _log(f"XXMI 游戏目录: 已记住游戏位置 {exe}")
+        try:
+            config.save()
+        except OSError:
+            pass
     config_path = reshade_integration.xxmi_config_path(launcher_path)
     if config_path is None or not config_path.is_file():
-        return {"ok": False, "changed": False, "message": "找不到 XXMI 配置文件"}
+        message = "找不到 XXMI 配置文件（它由 XXMI 首次运行时生成）"
+        _log(f"WARN XXMI 游戏目录: {message}")
+        return {"ok": False, "changed": False, "message": message}
     try:
         data = json.loads(config_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:

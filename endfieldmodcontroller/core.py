@@ -322,6 +322,10 @@ class ModInfo:
     # 匹配与哪个角色相关字数最多」）：只用于界面预选/预填，不改变 char_confidence ——
     # 卡片上那行黄字"角色待确认"照旧显示。
     char_guess: str = ""
+    # **重复副本标注**（2026-10-01 用户要求 B）：如果库里存在另一个**内容指纹相同**的 Mod，
+    # 这里记下那个 Mod 的名字（前端显示成"与「X」内容相同（重复副本）"）。
+    # 只标注，**绝不自动删/自动移出** —— 去不去重由用户在界面上决定。
+    duplicate_of: str = ""
     requires: list[str] = field(default_factory=list)
     source: str = ""
     source_id: str = ""
@@ -347,6 +351,8 @@ class ModInfo:
             "char_confidence": self.char_confidence,
             "char_candidates": list(self.char_candidates),
             "char_guess": self.char_guess,
+            # 重复副本标注（前端卡片上显示"与「X」内容相同（重复副本）"）
+            "duplicate_of": self.duplicate_of,
             "requires": list(self.requires),
             "source": self.source,
             "source_id": self.source_id,
@@ -695,25 +701,48 @@ def find_cover(source_root: Path, mod_root: Path, meta: dict[str, Any]) -> Path 
     return None
 
 
-def infer_character_detail(rel_parts: Sequence[str], meta: dict[str, Any]) -> dict[str, Any]:
+def infer_character_detail(
+    rel_parts: Sequence[str],
+    meta: dict[str, Any],
+    kind: str = "",
+) -> dict[str, Any]:
     """角色归属 + 置信度，供界面在「不确定」时弹窗让用户选择。
 
     * ``meta`` 里显式写了 ``group`` / ``character``（用户此前确认过，或 Mod 自带）→ ``high``；
+    * **辅助 mod（``kind == "assist"``）直接算 ``high``**：它本来就不属于任何角色，
+      不必（也不该）弹"请确认角色归属"—— 用户 2026-10-01 反馈这类小 Mod 被当成
+      未识别角色 mod，卡片挂着黄字、导入还被拦一下，体验完全不对；
     * 否则按目录名匹配，返回 ``match_character_detail`` 的结果。
     """
     explicit = str(meta.get("group") or meta.get("character") or "").strip()
     if explicit:
         return {"character": explicit, "confidence": "high", "candidates": [explicit],
                 "guess": explicit}
+    if kind == "assist":
+        return {"character": "", "confidence": "high", "candidates": [], "guess": ""}
     return match_character_detail(" ".join(rel_parts).lower())
 
 
-def infer_kind_and_group(rel_parts: Sequence[str], meta: dict[str, Any]) -> tuple[str, str]:
-    """Return (kind, group) using metadata first, then folder-name aliases."""
+def infer_kind_and_group(
+    rel_parts: Sequence[str],
+    meta: dict[str, Any],
+    path: Path | None = None,
+) -> tuple[str, str]:
+    """Return (kind, group) using metadata first, then folder-name aliases.
+
+    ``kind`` 取值：``character``（换装/皮肤，要角色归属与同角色互斥）、
+    ``dependency``（库依赖）、``tool``、以及 2026-10-01 新增的 **``assist``（辅助 mod）**。
+
+    **辅助 mod**（用户 2026-10-01 要求：「能不能在 mod 管理器中增加一个辅助 mod 页，
+    给这种非皮肤小 mod 留加载通道」）指的是"不换装、只改行为"的小 Mod ——
+    例如「隐藏 UI＆UID」（`alt 1`）那种：没有 Meshes/Textures 资源，ini 全是
+    `[TextureOverride_*] + handling = skip`（跳过某段绘制）。它们**不该**被当成角色 Mod
+    （不然会被要求"确认角色归属"、还会按目录名分组），所以在这里单独判出来。
+    """
     kind = str(meta.get("kind") or "").strip().lower()
-    group = str(meta.get("group") or meta.get("character") or "").strip()
-    if not group:
-        group = match_character(" ".join(rel_parts).lower())
+    explicit_group = str(meta.get("group") or meta.get("character") or "").strip()
+    matched = explicit_group or match_character(" ".join(rel_parts).lower())
+    group = matched
     if not group:
         group = rel_parts[0] if rel_parts else "未分类"
     if not kind:
@@ -722,9 +751,74 @@ def infer_kind_and_group(rel_parts: Sequence[str], meta: dict[str, Any]) -> tupl
             kind = "dependency"
         elif any(k in lowered for k in ("tool", "tools", "utility")):
             kind = "tool"
+        elif path is not None and looks_like_assist(path, rel_parts, meta, matched):
+            kind = "assist"
         else:
             kind = "character"
     return kind, group or "未分类"
+
+
+# 辅助 mod 的判据（2026-10-01）：关键词只是"候选"，真正定案还要看**有没有换装资源**——
+# 皮肤 mod 一定带 Meshes/Textures（或 .dds/.buf/mesh 之类），辅助 mod 不带。
+ASSIST_HINTS = (
+    "辅助", "隐藏", "去ui", "去界面", "水印", "工具", "菜单", "面板",
+    "hide", "hud", "uid", "watermark", "overlay", "assist", "helper",
+    "uifix", "nohud", "no-ui", "tool",
+)
+ASSIST_RESOURCE_DIRS = ("meshes", "textures", "texture", "mesh", "materials", "res")
+ASSIST_RESOURCE_EXTS = {".buf", ".dds", ".mesh", ".ib", ".vb", ".fmt", ".obj", ".fbx"}
+ASSIST_SKIP_RE = re.compile(r"^\s*handling\s*=\s*skip\b", re.IGNORECASE)
+
+
+def has_mod_resources(path: Path) -> bool:
+    """这个 Mod 目录里有没有"换装资源"（模型/贴图）—— 用来区分皮肤 Mod 与辅助 Mod。"""
+    if not path.is_dir():
+        return False
+    try:
+        if any((path / name).is_dir() for name in ASSIST_RESOURCE_DIRS):
+            return True
+        for item in path.rglob("*"):
+            if item.is_file() and item.suffix.lower() in ASSIST_RESOURCE_EXTS:
+                return True
+    except OSError:
+        return False
+    return False
+
+
+def looks_like_assist(
+    path: Path,
+    rel_parts: Sequence[str],
+    meta: dict[str, Any],
+    character: str = "",
+) -> bool:
+    """判断是不是「辅助 mod」（不换装、只改行为的小 Mod）。
+
+    判据（**前两条都要满足**）：
+      ① **没有换装资源**（无 Meshes/Textures 目录，也没有 .dds/.buf/mesh 等文件）；
+      ② 「名字/元数据里有辅助类关键词」**或**「ini 是跳过绘制型」（`handling = skip`）。
+    再加一条**否决项**：
+      ③ **只要能识别出角色，就不是辅助 mod** —— 这是 2026-10-01 拿 37 个真实 Mod 回归
+         才定下来的：`女管理员去面具`、`莱万汀去除背后圆环` 这类"去掉某个部件"的 Mod
+         结构上与"隐藏 UI"**完全一样**（都只有一个 `handling = skip` 的 ini、都没有资源），
+         但它们**属于那个角色的变体**，就该留在角色库里参与同角色互斥；而
+         `Hide UI＆UID` 归不到任何角色 —— 这才是真正的"辅助"。
+         想反过来（把去部件的小 Mod 也当辅助），在卡片「⋯」里手动标记即可。
+    """
+    if character:
+        return False
+    if has_mod_resources(path):
+        return False
+    lowered = " ".join(rel_parts).lower() + " " + str(meta.get("name", "")).lower()
+    if any(hint in lowered for hint in ASSIST_HINTS):
+        return True
+    try:
+        for ini in list(path.rglob("*.ini"))[:4]:
+            text = ini.read_text(encoding="utf-8", errors="replace")
+            if any(ASSIST_SKIP_RE.match(line) for line in text.splitlines()):
+                return True
+    except OSError:
+        return False
+    return False
 
 
 def _is_group_layout(entry: Path) -> bool:
@@ -732,6 +826,31 @@ def _is_group_layout(entry: Path) -> bool:
         return False
     children_with_ini = [child for child in entry.iterdir() if child.is_dir() and direct_ini(child)]
     return bool(children_with_ini)
+
+
+def mod_fingerprint(path: Path, *, max_files: int = 400) -> str:
+    """Mod 的「内容指纹」：文件相对路径 + 大小，小文本文件（ini/json/txt/cfg ≤1 MB）再算内容 hash。
+
+    只用于**标注"可能是同一个 Mod 的重复副本"**（用户 2026-10-01 要求 B），
+    **不用于任何自动删除** —— 所以刻意**不读大文件**：几百 MB 的贴图包也只是一堆 stat，
+    扫库不会被拖慢。返回空串表示读不到（该 Mod 跳过重复判定）。
+    """
+    digest = hashlib.sha1()
+    try:
+        files = sorted((p for p in path.rglob("*") if p.is_file()),
+                       key=lambda p: str(p).lower())[:max_files]
+    except OSError:
+        return ""
+    for file in files:
+        try:
+            size = file.stat().st_size
+            digest.update(str(file.relative_to(path)).lower().encode("utf-8", "replace"))
+            digest.update(str(size).encode())
+            if size <= 1_048_576 and file.suffix.lower() in {".ini", ".json", ".txt", ".cfg"}:
+                digest.update(hashlib.sha1(file.read_bytes()).digest())
+        except OSError:
+            continue
+    return digest.hexdigest()
 
 
 def scan_library(library_root: Path, mods_root: Path) -> list[ModInfo]:
@@ -767,24 +886,48 @@ def scan_library(library_root: Path, mods_root: Path) -> list[ModInfo]:
             continue
 
         if _is_group_layout(entry):
-            for child in sorted(p for p in entry.iterdir() if p.is_dir()):
-                if not has_any_ini(child):
-                    continue
+            children = [child for child in sorted(p for p in entry.iterdir() if p.is_dir())
+                        if has_any_ini(child)]
+            # **穿透"只有一个子目录"的包裹层**（2026-10-01 用户要求 B）：很多包被**整包**拷进
+            # 库时会多包一层（`<包名>/<真 Mod>/…`）。只有一个子目录时那不是"按角色分组"，而是
+            # "多包了一层" —— 若仍按分组处理，同一个 Mod 会被扫成**两条**（真实案例：
+            # `library\Hide UI＆UID\` 与 `library\【辅助】隐藏UI和UID_alt加1\Hide UI＆UID\`
+            # 各算一个，界面上出现两个同名条目、还会同时进 staging）。这里把它当**一个 Mod**，
+            # 名字取里层目录名（与"导入 zip"得到的结果一致）；**只改扫描视角，不动文件系统**。
+            # 子目录 ≥2 个时仍按"分组布局"处理（那才是 `library/<角色>/<Mod>/`）。
+            if len(children) == 1:
+                children = [children[0]]     # 包裹层 → 当作"一个 Mod"，不再按分组展开
+            for child in children:
                 meta = load_sidecar(child)
-                parts = [entry.name, child.name]
-                kind, group = infer_kind_and_group(parts, meta)
+                # 包裹层（只有一个子目录）时**不带外层包名**参与识别 —— 否则组名/角色会取到
+                # 包名（实测：`【辅助】隐藏UI和UID_alt加1` 这种归档名会被当成 group）。
+                parts = [child.name] if len(children) == 1 else [entry.name, child.name]
+                kind, group = infer_kind_and_group(parts, meta, child)
                 mods.append(_make_mod_info(child, child, group, kind, meta, mods_root,
-                                           char_detail=infer_character_detail(parts, meta)))
+                                           char_detail=infer_character_detail(parts, meta, kind)))
             continue
 
         if not has_any_ini(entry):
             continue
         meta = load_sidecar(entry)
         parts = [entry.name]
-        kind, group = infer_kind_and_group(parts, meta)
+        kind, group = infer_kind_and_group(parts, meta, entry)
         mods.append(_make_mod_info(entry, entry, group, kind, meta, mods_root,
-                                   char_detail=infer_character_detail(parts, meta)))
+                                   char_detail=infer_character_detail(parts, meta, kind)))
 
+    # **重复副本标注**（2026-10-01 用户要求 B）：内容指纹相同的 Mod 只**标注**、
+    # 绝不自动删（真实案例：`Hide UI＆UID` 在库里被放了两份 → 界面上两个同名条目、
+    # 还会同时进 staging）。标注由前端显示成"与「X」内容相同（重复副本）"。
+    first_by_fingerprint: dict[str, ModInfo] = {}
+    for mod in mods:
+        fingerprint = mod_fingerprint(mod.path)
+        if not fingerprint:
+            continue
+        seen = first_by_fingerprint.get(fingerprint)
+        if seen is None:
+            first_by_fingerprint[fingerprint] = mod
+        else:
+            mod.duplicate_of = seen.name
     return mods
 
 
@@ -799,7 +942,13 @@ def _make_mod_info(
 ) -> ModInfo:
     name = str(meta.get("name") or source_root.name)
     mod_id = str(meta.get("id") or stable_id(str(source_root.resolve()), name))
-    conflict_group = str(meta.get("conflict_group") or meta.get("character") or group)
+    # **辅助 mod 不参与同角色互斥**（用户 2026-10-01）：它的 conflict_group 用自身路径，
+    # 每个辅助 mod 独占一组 —— 于是"隐藏 UI"能和任意角色服装同时生效，多个辅助 mod
+    # 也能一起开；否则它们会共用 group（例如都以目录名为组）而互相挤掉。
+    if kind == "assist":
+        conflict_group = f"assist:{source_root.resolve()}"
+    else:
+        conflict_group = str(meta.get("conflict_group") or meta.get("character") or group)
     requires = meta.get("requires") or meta.get("dependencies") or []
     if isinstance(requires, str):
         requires = [requires]

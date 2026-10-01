@@ -286,6 +286,79 @@ class EndfieldModControllerApi:
 
         return crashwatch.prelaunch_risks(self.config)
 
+    def conflict_groups(self) -> dict[str, Any]:
+        """当前 Mod 资源冲突的**结构化**列表（每组含涉及的 Mod 名与库内 id）。
+
+        给前端「选择要保留的 Mod」弹窗用 —— 用户 2026-10-01 要求：「如果确定是皮肤冲突
+        导致崩溃，弹窗加个选项，一键关闭其中一个（自行选择）… 再弹一个，选择要保留的，
+        在冲突的中间下拉框选择要保留的，**每组冲突单独下拉框**」。
+        数据来自最近一次自检落盘的 `runtime\\_state\\mod_conflicts.json`（已算好的事实）。
+        """
+        from . import crashwatch
+
+        report = crashwatch.prelaunch_risks(self.config)
+        return {
+            "ok": True,
+            "groups": report.get("groups") or [],
+            "conflicts": report.get("conflicts") or [],
+            "checked_at": report.get("checked_at") or "",
+        }
+
+    def resolve_mod_conflicts(self, keep: list[str] | None = None) -> dict[str, Any]:
+        """按用户的选择**取消勾选**冲突里没被保留的那些 Mod，然后重新生成控制器。
+
+        用户 2026-10-01 要求：冲突时给"一键关闭其中一个（自行选择）"，弹窗里**每组一个
+        下拉框**选要保留的。这里只改**勾选**（`selected_mods`）—— **绝不动用户的 Mod 库**
+        （数据安全红线）；改完立刻跑一次 `prepare()` 把 staging 清干净，否则用户进游戏还是撞。
+        """
+        keep_ids = {str(item) for item in (keep or []) if str(item)}
+        from . import crashwatch
+
+        report = crashwatch.prelaunch_risks(self.config)
+        involved: list[str] = []
+        for group in report.get("groups") or []:
+            for entry in group.get("mods") or []:
+                mod_id = str(entry.get("id") or "")
+                if mod_id:
+                    involved.append(mod_id)
+        involved = list(dict.fromkeys(involved))
+        if not involved:
+            return {"ok": False,
+                    "message": "当前没有可以自动处理的冲突（可能已经清过，或是手动放进 Mods 的目录）"}
+
+        drop = [mod_id for mod_id in involved if mod_id not in keep_ids]
+        if not drop:
+            return {"ok": True, "changed": False, "dropped": [], "kept": sorted(keep_ids),
+                    "message": "没有需要取消勾选的 Mod"}
+        remaining = [mod_id for mod_id in (self.config.selected_mods or [])
+                     if mod_id not in set(drop)]
+        names = {mod.id: mod.name for mod in self._mods()}
+        dropped_names = [names.get(mod_id, mod_id) for mod_id in drop]
+        self.config.selected_mods = remaining
+        self.config.save()
+        self._invalidate_mods()
+        launcher._append_log(
+            self.config,
+            f"冲突处理：取消勾选 {'、'.join(dropped_names)}（保留 {len(keep_ids)} 个），重新生成控制器")
+        summary: dict[str, Any] = {"skipped": True}
+        if remaining:
+            result = self.prepare(remaining)
+            summary = {
+                "patch_count": result.get("patch_count"),
+                "action_count": result.get("action_count"),
+            }
+        return {
+            "ok": True,
+            "changed": True,
+            "dropped": drop,
+            "dropped_names": dropped_names,
+            "kept": sorted(keep_ids),
+            "selected": remaining,
+            "prepare": summary,
+            "message": ("已取消勾选 " + "、".join(dropped_names)
+                        + ("；并重新生成了控制器" if remaining else "；已无选中 Mod，跳过生成")),
+        }
+
     # ------------------------------------------------------------------
     # 公告 / 异常状态预警（仓库里的 alerts.json）
     # ------------------------------------------------------------------
@@ -1956,6 +2029,43 @@ class EndfieldModControllerApi:
         self._invalidate_mods()
         launcher._append_log(self.config, f"角色归属已确认: {target.name} -> {character}")
         return {"ok": True, "id": mod_id, "character": character, "meta_path": str(meta_path)}
+
+    def set_mod_kind(self, mod_id: str, kind: str) -> dict[str, Any]:
+        """把某个 Mod 标成「辅助 mod」或「角色 mod」（写进它的 `mod.meta.json`）。
+
+        用户 2026-10-01 要求（方案④）：自动识别 + **手动纠正** + 独立页签。
+        自动识别只认"没有换装资源 + 跳过绘制型/辅助关键词 + **归不到任何角色**"的包；
+        像「去面具 / 去圆环」这种其实属于角色变体的，或反过来想当辅助管的，都在这里手动改 ——
+        写了 ``kind`` 之后，扫描时**显式 meta 优先于自动识别**（见 `core.infer_kind_and_group`）。
+        """
+        kind = (kind or "").strip().lower()
+        if kind not in {"assist", "character"}:
+            return {"ok": False, "message": "kind 只能是 assist 或 character"}
+        target = next((m for m in self._mods() if m.id == mod_id), None)
+        if target is None:
+            return {"ok": False, "message": f"找不到 Mod: {mod_id}"}
+
+        meta_path = target.path / "mod.meta.json"
+        payload: dict[str, Any] = {}
+        if meta_path.is_file():
+            try:
+                loaded = json.loads(meta_path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    payload = loaded
+            except (OSError, json.JSONDecodeError):
+                payload = {}
+        payload["kind"] = kind
+        payload.setdefault("id", target.id)
+        payload.setdefault("name", target.name)
+        try:
+            meta_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError as exc:
+            return {"ok": False, "message": f"写入失败: {exc}"}
+
+        self._invalidate_mods()
+        label = "辅助 Mod" if kind == "assist" else "角色 Mod"
+        launcher._append_log(self.config, f"已标记为{label}: {target.name}")
+        return {"ok": True, "id": mod_id, "kind": kind, "meta_path": str(meta_path)}
 
     def ensure_initialized(self) -> dict[str, Any]:
         """手动跑一次文件层初始化自检（不含注入库；一键启动请用 prepare_launch）。"""

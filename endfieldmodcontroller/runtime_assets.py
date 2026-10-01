@@ -467,7 +467,8 @@ def fetch_bundle(
     import urllib.error
     import urllib.request
 
-    from .version import LATEST_API, USER_AGENT
+    from . import github
+    from .version import LATEST_API, REPO, USER_AGENT
 
     stamp = PROJECT_ROOT / "runtime" / "_update" / "bundle-fetch.json"
     if not force and stamp.is_file():
@@ -492,15 +493,43 @@ def fetch_bundle(
         except OSError:
             pass
 
-    try:
-        request = urllib.request.Request(LATEST_API, headers={
-            "User-Agent": USER_AGENT, "Accept": "application/vnd.github+json"})
-        with urllib.request.urlopen(request, timeout=25) as response:
-            release = json.loads(response.read().decode("utf-8", errors="replace"))
-    except Exception as exc:  # noqa: BLE001
-        message = f"查询 Release 失败：{exc}"
+    # **网页优先 → 失败才打 API**（2026-10-01 修）：原先这里直接请求 `LATEST_API`，
+    # 匿名额度一用尽就是 `HTTP Error 403: rate limit exceeded` —— 一份真实诊断包里那台机器
+    # **整套随包资产都因此拿不到**（nvngx×2、6 个 shader 标准头、Textures、三个 addon 全缺），
+    # 用户看到的就是「缺失 renodx-endfield-enhancer.addon64、无法修复」，界面还一直提示
+    # 「随包组件与基线不一致」。自更新检查 / Poser / 公告早就补了网页+镜像回退（`0muo6sow`），
+    # **唯独资产包这条路径漏了** —— 现在统一走 `github.releases_latest()`（网页优先、可借镜像）。
+    release: dict[str, Any] | None = None
+    last_error: object = ""
+    for prefer_api in (False, True):
+        try:
+            release = github.releases_latest(REPO, prefer_api=prefer_api)
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            continue
+        if isinstance(release, dict):
+            break
+    if not isinstance(release, dict):
+        message = f"查询 Release 失败：{last_error}"
         remember(message)
         return {"ok": False, "changed": False, "message": message}
+
+    # 网页路线拿不到 `digest`（asset 的 sha256）—— **能补就补**：它用来防止第三方镜像
+    # 中转时把大文件换掉。API 额度还在就顺手取一份；取不到也不拦着下载。
+    if str(release.get("source") or "") == "web":
+        try:
+            api_release = github.api_get(LATEST_API)
+            digests = {
+                str(item.get("name") or ""): str(item.get("digest") or "")
+                for item in (api_release.get("assets") or [])
+            }
+            for item in release.get("assets") or []:
+                item["digest"] = digests.get(str(item.get("name") or ""), "")
+                item["size"] = item.get("size") or next(
+                    (int(a.get("size") or 0) for a in (api_release.get("assets") or [])
+                     if str(a.get("name") or "") == str(item.get("name") or "")), 0)
+        except Exception:  # noqa: BLE001
+            pass
 
     candidates = [
         asset for asset in (release.get("assets") or [])

@@ -297,12 +297,16 @@ def prelaunch_risks(config: AppConfig) -> dict[str, Any]:
 
     state = diagnostics.mod_conflict_state(config)
     conflicts = [str(x) for x in (state.get("conflicts") or [])] if state.get("ok") is False else []
+    # 结构化冲突组（2026-10-01）：前端「选择要保留的 Mod」弹窗按"每组一个下拉框"渲染，
+    # 选完调 `api.resolve_mod_conflicts()` 自动取消勾选其余的那些。
+    groups = [g for g in (state.get("groups") or []) if isinstance(g, dict)] if state.get("ok") is False else []
     mods = staging_mods(config)
     memories = [e for e in read_crash_memory(config)
                 if _same_combo(list(e.get("mods") or []), mods)]
     return {
         "blocking": bool(conflicts or memories),
         "conflicts": conflicts,
+        "groups": groups,
         "memories": memories[:3],
         "mods": mods,
         "checked_at": str(state.get("at_text") or ""),

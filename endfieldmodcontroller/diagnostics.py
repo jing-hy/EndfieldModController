@@ -536,12 +536,18 @@ def mod_conflict_state_path(config: Any) -> Path:
 
 
 def record_mod_conflicts(config: Any, *, ok: bool, detail: str = "",
-                         conflicts: list[str] | None = None) -> None:
+                         conflicts: list[str] | None = None,
+                         groups: list[dict[str, Any]] | None = None) -> None:
     """把**本次自检**的 Mod 冲突结论落盘。
 
     为什么要落盘（2026-09-30）：崩溃监视跑在另一个线程（且常在用户下次开程序时才
     收集现场），它要判断"这次崩溃是不是 Mod 冲突造成的"，只能靠这份留痕 —— 否则
     弹窗只能笼统地说"异常退出"，用户不知道该先去清 Mod 还是去查注入。
+
+    `groups`（2026-10-01 新增）：**结构化**冲突组（每组含涉及的 Mod 名 + 库内 id）——
+    前端「选择要保留的 Mod」弹窗用它渲染"每组一个下拉框"，选完调
+    `api.resolve_mod_conflicts()` 自动取消勾选其余的那些。`conflicts`（字符串）保留，
+    是为了兼容既有文案与诊断包。
     """
     payload = {
         "at": int(time.time()),
@@ -549,6 +555,7 @@ def record_mod_conflicts(config: Any, *, ok: bool, detail: str = "",
         "ok": bool(ok),
         "detail": str(detail or ""),
         "conflicts": [str(item) for item in (conflicts or [])],
+        "groups": [dict(item) for item in (groups or []) if isinstance(item, dict)],
     }
     path = mod_conflict_state_path(config)
     try:
@@ -615,6 +622,36 @@ def _nvngx_fingerprint(config: Any) -> list[str]:
             f"{name}: size={actual:,}（基线 {expected:,}）与随包基线 sha256 一致={verdict} "
             f"sha256={got[:16]}…"
         )
+    return lines
+
+
+def _ngx_consumer_summary(game_dir: Path | None) -> list[str]:
+    """「NGX 消费者」是谁 —— 决定"面板的 NGX Hook 计数算不算数"（2026-10-01 加）。
+
+    为什么必须有这一段：一份真实诊断包里 `ReShade.log` 报
+    `Failed to find NVSDK_NGX_D3D12_EvaluateFeature_C`、面板 `NGX Hook 创建: 0`，
+    看包的人（包括我）第一反应都是"DLSS5 没起来" —— 而它其实一直出帧，因为那台机器用
+    **OptiScaler DLSS-NR（`WINHTTP.dll`）** 当神经消费者，NGX 调用被接管、不走 ReShade 的 hook。
+    这段把"是不是这种共存方式"直接写在包的开头部分，避免同类误判再发生。
+    """
+    lines = ["", "-- NGX 消费者（判断面板「NGX Hook 创建: 0」算不算问题先看这里）--"]
+    try:
+        from . import reshade_integration
+
+        info = reshade_integration.optiscaler_present(game_dir)
+    except Exception as exc:  # noqa: BLE001
+        lines.append(f"（检查失败: {exc}）")
+        return lines
+    if not info.get("present"):
+        lines.append("未检测到第三方 NGX 接管 → DLSS5 走 ReShade 自己的 NGX hook 路线，"
+                     "面板的「NGX Hook 创建」应当 > 0；若为 0 才需要按 NGX/运行库方向排查。")
+        return lines
+    files = "、".join(info.get("files") or [])
+    lines.append(f"检测到 **OptiScaler**（{files}）在接管 NGX —— 这是一种正常共存方式：")
+    lines.append("  · 面板「NGX Hook 创建」**必然是 0**、ReShade.log 会报 "
+                 "`Failed to find NVSDK_NGX_D3D12_EvaluateFeature_C`，**均属正常**；")
+    lines.append("  · 判断 DLSS5 是否生效请看：面板的「成功 NR 帧」是否增长，以及本包里 "
+                 "`dlss5\\dlss5-feed.log` 是否出现 `feature ready` 与持续的帧统计。")
     return lines
 
 
@@ -735,6 +772,7 @@ def create_diagnostic_bundle(config: Any, *, game_dir: Path | None = None, note:
     ]
     summary.extend(_nvngx_fingerprint(config))
     summary.extend(_xxmi_summary(config))
+    summary.extend(_ngx_consumer_summary(game_dir))
     summary.extend(_shader_summary(config))
     # 设备型号 / 显卡与驱动（用户 2026-10-01 要求）：判断"是不是显卡不支持"就靠这段。
     try:

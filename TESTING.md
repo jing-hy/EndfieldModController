@@ -7,9 +7,9 @@
 
 | 位置 | 版本 | 说明 |
 |---|---|---|
-| GitHub Release | **0.7.2** | 已发布（Latest） |
-| 工作区源码 | **0.7.2 + 未发版改动** | 本轮（2026-10-01）新增：拖入 **.7z / .rar**、**中文拼音识别**、**认不出角色时直接弹确认窗**（bug 修复）。**未推送、未改版本号**（等用户发话） |
-| `D:\zmdmod\modtest\` | 0.7.2 | 与 GitHub 那份一致（本轮源码改动尚未构建进它） |
+| GitHub Release | **0.7.4** | 已发布（Latest）—— 本版 0.8.0 发布后此处应更新为 0.8.0 |
+| 工作区源码 | **0.8.0** | 本版内容：辅助 Mod 通道 / DLSS5 preset 判据修复 / 游戏目录定位三层兜底 / **OptiScaler 自动移走** / **自带 DLSS 时自动停用喂帧组件** / **冲突一键处理（每组一个下拉框）** / 资产包补网页-镜像回退 / 不再写进 `_MEIPASS` / 包裹层穿透 + 重复副本标注 |
+| `D:\zmdmod\modtest\` | 同工作区 | 由 `build_release.py` 第 6 步同步（**用户在跑就跳过**；`library\` 由用户自行清空，不归我们管） |
 
 ---
 
@@ -339,3 +339,87 @@
 | 125 ★★ | 承接上一步，改成**默认的内置 XXMI 目录**（`runtime\builtin\XXMI\EFMI\Mods`）→ 点「生成控制器」 | 恢复正常：控制器产物生成、Mod 库原样不动 |
 | 126 ★ | 正常使用中随时检查 | 程序**永不会**删除/移动你的 Mod 库 —— 唯一例外是你自己在卡片「⋯」里点「移出 Mod 库」（那是移到 `runtime\backups\mod-trash\`，可找回） |
 | 127 ★ | （开发向）在 `dependencies.json` 里把某项 `install_dir` 改成库里的普通目录名（如 `陈/夏日`）→ 触发该依赖更新 | 被拒绝并报错（`install_dir 只允许位于 <Mod 库>\_deps\ 之内`），**不会** `rmtree` 掉那个目录 |
+
+## X. 2026-10-01 追加：**辅助 Mod 通道**（自动识别 + 手动标记 + 独立页签，未发版）
+
+> 用户原话：「**你看一下这种辅助 mod 要怎么塞进去，能不能在 mod 管理器中增加一个辅助 mod 页，给这种非皮肤小 mod 留加载通道**」（样本 = 群友包里的 **Hide UI＆UID**，`alt 1` 隐藏 UI/UID；它只有 `.ini + .json + .bitmap`，ini 全是 `[TextureOverride_*] + handling = skip`）。
+> 落地（方案④）：顶部导航新增**「辅助 Mod」页**；后端 `core` 新增 `kind = "assist"` —— 判定 = **没有换装资源**（无 Meshes/Textures、无 .dds/.buf/mesh 等）＋（名字含「隐藏/辅助/UI/HUD/水印…」**或** ini 是 `handling = skip` 型）＋ **归不到任何角色**；这类 Mod **不参与同角色互斥**（`conflict_group` 用自身路径）、**不给"角色待确认"黄字**（置信度直接 high）。卡片「⋯」里可**手动改标记**（角色 Mod ⇄ 辅助 Mod，写 `mod.meta.json` 的 `kind`，显式 meta 优先于自动识别）。
+> ⚠️ 那条"归不到任何角色"的否决项是拿 **37 个真实 Mod 回归**才定下来的：`女管理员去面具`、`莱万汀去除背后圆环` 与"隐藏 UI"**结构完全一样**（都只有一个 skip ini、都没有资源），但它们**属于角色变体**，必须留在角色库里参与互斥。
+
+| # | 操作 | 预期结果 |
+| --- | --- | --- |
+| 128 ★★ | 把 `Hide UI＆UID` 放进 Mod 库 → 「辅助 Mod」页点「重新扫描」 | 它**出现在辅助 Mod 页**（不在角色库、没有"角色待确认"黄字），显示"辅助 Mod · 可调动作 1 个" |
+| 129 ★★ | 勾选它 + 再勾选一个角色皮肤（如陈千语）→ 生成控制器 | **两个都在**（互不挤掉）；日志里两个都被 stage 进 `MC_*`；游戏里皮肤与 UI 隐藏同时生效（`alt 1` 切换） |
+| 130 ★ | 对照组：勾选**同角色**的两个皮肤 | 仍然**互斥**（只留最后勾的那个）—— 辅助通道没有放松这条规则 |
+| 131 ★ | 在某个「去面具 / 去圆环」小 Mod 的「⋯」里点「**标记为辅助 Mod**」 | 它从角色库移到辅助 Mod 页；再点「标记为角色 Mod」会回到角色库 —— 自动识别认错时用它救回来 |
+| 132 ★ | 断网/库为空时打开「辅助 Mod」页 | 显示引导文案（怎么导入、识别条件是什么），不报错 |
+
+## Y. 2026-10-01 追加：**第三方 NGX 接管（OptiScaler）的识别与净化**（未发版）
+
+> 用户拍板原话：「**一键还原游戏本体要全部移走，1 和 2 可以做**」。
+> 起因：一份真实诊断包里 `ReShade.log` 报 `Failed to find NVSDK_NGX_D3D12_EvaluateFeature_C`、面板 `NGX Hook 创建: 0`，反馈者据此说「未启动 DLSS5」——而日志证明它**一直在出帧**（`feature ready: 2560x1440 DLAA`、`OptiScaler DLSS-NR … neural model (feature 18) loaded`）。真相是那台机器用 **OptiScaler DLSS-NR（以 `WINHTTP.dll` 注入）** 当神经消费者，NGX 调用被它接管、**不走 ReShade 的 hook**。
+> 落地：① 自检新增 **`dlss5:ngx_consumer`**（认得出就写清"面板 hook 计数为 0 属正常、判断生效要看成功 NR 帧与 `dlss5-feed.log` 的 `feature ready`"；这一项**永远 ok**，不算故障）；② 诊断包 `summary.txt` 新增「**NGX 消费者**」段；③ 净化扩展 —— `LOADER_PROXY_MODULES` 补 `winhttp.dll`/`wininet.dll`/`dbghelp.dll`/`dinput8.dll`/`d3d9.dll`/`opengl32.dll`/`nvngx.dll`，判定放宽为"内容标记 / OptiScaler 特征 / **与 System32 原版不同（被顶替）**"，并把 `OptiScaler.ini|log|dll` 归入新分类 `injector_data`。
+
+| # | 操作 | 预期结果 |
+| --- | --- | --- |
+| 133 ★★ | 在装了 OptiScaler 的机器上点「一键检测全部」（或直接「一键启动」） | 自检出现 `dlss5:ngx_conflict` 且是 **`fixed=True`（已自动处理）**：OptiScaler 的 `winhttp.dll` / `OptiScaler.ini|.log` 被**备份并移走**（备份区 `runtime\game_backup\ngx-conflict-<时间戳>\files\`，系统原版 `winhttp.dll` 补回），日志里写明移走了哪些、备份在哪。**不需要用户看任何日志** —— 用户 2026-10-01 要求「不是提示的问题，正常用户不会看日志，需要自动检测处理」 |
+| 134 ★ | 导出诊断包 → 打开 `summary.txt` | 有「**-- NGX 消费者 --**」段；装了 OptiScaler 时写明它是接管方，没装时写"未检测到第三方 NGX 接管" |
+| 135 ★★ | 游戏目录里放一个第三方 proxy（例如用 `winhttp.dll` 顶替系统模块，再加一个 `OptiScaler.ini`）→ 设置页点「**一键还原游戏本体**」 | `winhttp.dll` **与 `OptiScaler.ini` 都被备份并移走**（备份区 `runtime\game_backup\<时间戳>\files\` 里能找到原件），系统原版 `winhttp.dll` 被补回；结果 `ok=True` 并列出移走了哪些 |
+| 136 ★ | 对照：游戏目录里那份系统模块与 `System32` **完全一致**（没被换过） | **不会被移走**（避免误伤游戏自带 / 正版模块） |
+
+## Z. 2026-10-01 追加：**随包资产拿不到（API 限流）** 与"数据被写进临时目录"（未发版）
+
+> 起因是另一份诊断包（数据根 `E:\EndfieldModController`，机器上**没有 `assets\`**）。日志链条：
+> ```
+> WARN 初始化: bundled_assets: 找不到随包资产（assets\nvngx\manifest.json / assets\dlss5\manifest.json）
+> WARN 初始化: dlss5:renodx-endfield-enhancer.addon64: 缺失且找不到素材来源
+> WARN 初始化: dlss5:trans-zh.addon64: 缺失且找不到素材来源
+> WARN 初始化: dlss5:plugin: 找不到 RenoDX-DLSS5 插件(renodx-dlss5*.addon64)
+> WARN 初始化: dlss5:shader_deps: 缺少 DLSS5 shader 依赖 …（6 个标准头）
+> WARN 初始化: game:nvngx_dlssnr.dll: 游戏目录缺该文件，内置副本也没有
+> 资产包获取失败，重试第 1/3 次 … → 未能获取资产包：查询 Release 失败：HTTP Error 403: rate limit exceeded
+> ```
+> **① 资产包这条路只打 API** —— 匿名额度用尽（403）就彻底拿不到，于是三个 addon / 6 个 shader 标准头 / Textures / 两个 nvngx 全缺，用户在游戏里看到的就是「缺失第一人称插件 `renodx-endfield-enhancer.addon64`、无法修复」。自更新检查 / Poser / 公告早就补了网页+镜像回退，**唯独资产包漏了** → 现在统一走 `github.releases_latest()`（网页优先、可借镜像，失败才打 API），并且网页路线拿不到 `digest` 时会**再试一次 API 补上校验值**。
+> **② 我们自己引入的 bug**：同一份日志里有 `乳摇数据补充：… （C:\Users\…\Temp\_MEI00004bdc2\assets\…）` —— `_assets_root()` 在"数据根没有 assets"时退回了 `_MEIPASS`，于是自动补齐的角色数据被写进 PyInstaller 的**临时解压目录**（退出即丢）→ 现在 `_assets_root()` **无条件优先返回数据根的 `assets`**（哪怕它还不存在），`sbm_data_sync._targets()` 再兜一层"落在 `_MEIPASS` 里的落点整条跳过"。
+
+| # | 操作 | 预期结果 |
+| --- | --- | --- |
+| 137 ★★ | 把数据根的 `assets\` 整份改名移走（模拟"随包资产缺失"）→ 点「一键启动」 | 即使 GitHub API 被限流（403），日志里也应看到**经网页/镜像线路**把 `assets-bundle.zip` 拉下来并展开（不再只有一句 `rate limit exceeded`）；展开后 `assets\nvngx\manifest.json` 与 `assets\dlss5\manifest.json` 都在，自检里 `bundled_assets` 不再是 WARN |
+| 138 ★★ | 接上一步，看自检结论 | `renodx-endfield-enhancer.addon64`、`trans-zh.addon64`、`renodx-dlss5*.addon64` 与 6 个 shader 标准头（`ReShade.fxh` 等）**都被补齐**；`runtime\dlss5\ReShade.log` 里能看到这三个 addon 被 `Registered add-on` |
+| 139 ★ | 看控制器日志里"乳摇数据补充"那条的路径 | 路径必须是**数据根**下的 `…\assets\secondary_motion\…`，**绝不能**再出现 `…\Temp\_MEI…\assets\…`（写进临时目录等于写完就丢） |
+
+## AA. 2026-10-01 追加：**游戏自带 DLSS 时自动停用喂帧组件**（未发版）
+
+> 用户原话：「**你把 2 做了，然后在设置留个这个开关，默认开启自动停用**」。
+> 背景：`dlss5-feed` 组件自己在日志里就写着 —— `this game runs NVIDIA Streamline (sl.interposer.dll): it has DLSS of its own … This project is for games WITHOUT DLSS — use the game's own DLSS with OptiScaler, and remove dlss5-feed.addon64`。终末地**自带 DLSS**，所以喂帧组件对它多余，还会与游戏自己的 DLSS（以及 OptiScaler 这类第三方 NGX 注入器）抢同一条 NGX 链路。
+> 落地：判据 = 游戏目录里有 `sl.interposer.dll` 或 `nvngx_dlss.dll`；动作 = **只把 `dlss5-feed.addon64` 移进 `runtime\dlss5\_disabled\`**（可逆，不动 `renodx-dlss5*.addon64` / 汉化 / preset / shader）；开关 = 设置页「**游戏自带 DLSS 时自动停用喂帧组件（可逆）**」，config 字段 `auto_disable_feed_on_native_dlss`，**默认开启**；开关关掉或换成不带 DLSS 的游戏时，被停用的组件会**自动放回**。
+
+| # | 操作 | 预期结果 |
+| --- | --- | --- |
+| 140 ★★ | 保证 `runtime\dlss5\dlss5-feed.addon64` 在位（若已在 `_disabled` 里先放回）→ 点「一键检测全部」 | 它被**自动停用**（移到 `runtime\dlss5\_disabled\`），自检里 `dlss5:feed` 报 **`fixed=True`（已自动停用）**并说明理由；**对照**：`renodx-dlss5*.addon64`、`trans-zh.addon64` **仍在**根目录（不许被连带停掉） |
+| 141 ★ | 设置页把「游戏自带 DLSS 时自动停用喂帧组件」**关掉** → 再点一次「一键检测全部」 | 喂帧组件被**自动放回**根目录（`dlss5:feed` 报已放回）；再打开开关 → 下次自检又停用。开关状态记在 `config.json` |
+| 142 ★ | 检查 `runtime\dlss5\ReShadePreset.ini` 与 `reshade-shaders\Shaders\` | **没有任何改动** —— 停用只动 addon 文件，不碰 preset 与 shader（想彻底验证：停用前后各存一份对比） |
+
+## BB. 2026-10-01 追加：**冲突一键处理（每组一个下拉框）**（未发版）
+
+> 用户原话：「**如果确定是皮肤冲突导致崩溃，弹窗加个选项，一键关闭其中一个（自行选择），然后点了这个之后关掉这个弹窗，再弹一个，选择要保留的，然后在冲突的中间下拉框选择要保留的，每组冲突单独下拉框**」。
+> 落地：冲突数据从"人话字符串"升级为**结构化冲突组**（每组含涉及的 Mod 名 + **库内 id**，`staging 名 = MC_{safe_name(group)}_{safe_name(name)}` 反查）；两个入口（**启动前风险弹窗** + **崩溃归因弹窗**）都加了「**一键关闭其中一个（自行选择）**」按钮 → 点它**先关掉原弹窗**，再弹「**选择要保留的 Mod**」：**每组冲突一个下拉框**（默认保留第一个），点「保留所选并重新生成控制器」→ 自动**取消勾选**其余那些并跑一次 `prepare()`；**只改勾选，绝不动 Mod 库**。后端 API：`conflict_groups()` / `resolve_mod_conflicts(keep)`。
+
+| # | 操作 | 预期结果 |
+| --- | --- | --- |
+| 143 ★★ | 先打开库页「强行关闭角色 Mod 互斥」，让两个**同角色同资源**的 Mod 都进 staging（例如两个庄方宜水墨旗袍）→ 点「一键启动」 | 弹出「启动前发现 Mod 冲突风险」，**右侧橙色主按钮 =「一键关闭其中一个（自行选择）」**（默认聚焦）；点它 → **原弹窗关闭** → 弹出「选择要保留的 Mod」：**每组的 Mod 都各有一个下拉框**（默认选第一个），下面显示该组共享的资源标识 |
+| 144 ★★ | 在上一步的弹窗里每组选一个 → 点「保留所选并重新生成控制器」 | 提示「已取消勾选 X；并重新生成了控制器」；库页里被取消的那个**勾选已去掉**；`EFMI\Mods` 里对应的 `MC_*` 目录消失；**Mod 库文件一个都没少**（去文件夹确认）；**不会启动游戏**（回库页/状态栏说明） |
+| 145 ★ | 崩溃归因弹窗（Mod 冲突那次崩溃）里的同一按钮 | 同样：**先关掉崩溃弹窗**，再弹「选择要保留的 Mod」；处理完可正常重新启动 |
+| 146 ★ | 弹窗里的其它两个按钮 | 中间「**先去清理，不启动**」= 取消启动并切到 Mod 库页（不动勾选）；最左「**仍然启动**」= 照旧拉起 XXMI（冒险项） |
+| 147 ★ | 冲突里含**手动**放进 `EFMI\Mods` 的目录（库里没有） | 那一组的下拉框**置灰**并提示"在 Mod 库里定位不到 —— 需要手动处理"，其余组照常可选可处理 |
+
+## CC. 2026-10-01 追加：**扫库的两条加固（包裹层穿透 + 重复副本标注）**（未发版）
+
+> 起因：库页里出现了**两个** `Hide UI＆UID`。查下来是库里**真的有两份顶层目录**：一份是导入 zip 得到的 `library\Hide UI＆UID\`，另一份是**整包拷进来**多包了一层的 `library\【辅助】隐藏UI和UID_alt加1\Hide UI＆UID\`（两份逐字节相同）。后果：两个同名条目、两条都能勾选、都会进 staging。
+> 加固（用户 2026-10-01 选 B）：① **穿透"只有一个子目录的包裹层"** —— 只有一个子目录时那不是"按角色分组"而是"多包了一层"，按**一个 Mod** 处理，且**外层归档名不再参与识别**（否则组名会变成 `【辅助】隐藏UI和UID_alt加1`）；② **内容相同的重复副本只标注、绝不自动删** —— 卡片上出现黄字「⚠ 与「X」内容相同（重复副本）」。指纹只 stat + 读小文本（ini/json/txt/cfg ≤1 MB），**不读大文件**，所以几百 MB 的贴图包也不会拖慢扫库。
+
+| # | 操作 | 预期结果 |
+| --- | --- | --- |
+| 148 ★★ | 把某个包**整个文件夹**（含外层包名）放进库：`library\某包名\真Mod\…` → 点「重新扫描」 | 只出现**一个**条目，名字 = **真 Mod 名**（不是包名）；卡片上的组/角色也不该是那个包名 |
+| 149 ★★ | 库里同时存在内容相同的两份（一份在根、一份在多包一层的那份里）→ 看卡片 | 两个条目都在（**不会被自动删**），其中一条带黄字「⚠ 与「X」内容相同（重复副本）」；去不去重由你决定（在「⋯」里移出库即可） |
+| 150 ★ | 对照：`library\陈千语\夏日\` + `library\陈千语\冬装\`（**两个**子目录） | 仍然各自成为一个 Mod（组 = 陈千语）—— 穿透只作用于"只有一个子目录"的包裹层，不影响真正的分组布局 |

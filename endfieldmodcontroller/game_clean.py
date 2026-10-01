@@ -54,6 +54,7 @@ NEW_NVNGX_SIZES = {"nvngx_dlss.dll": 58977904}
 
 CATEGORY_LABELS = {
     "loader_proxy": "第三方加载器 DLL（proxy，会注入 plugin/*.dll）",
+    "injector_data": "第三方注入器的配置/日志（如 OptiScaler）",
     "plugin_payload": "plugin/ 下会被注入的插件 DLL",
     "plugin_log": "插件日志 / 探针输出",
     "plugin_data": "插件在游戏目录写的数据目录",
@@ -94,6 +95,11 @@ def _looks_like_reshade_payload(path: Path) -> bool:
     try:
         checker = getattr(reshade_integration, "looks_like_loader_proxy", None)
         if callable(checker) and checker(path):
+            return True
+        # 2026-10-01：补一条更宽的第三方判定（OptiScaler 特征 / 顶替了系统模块），
+        # 否则 OptiScaler 那类注入会被当成游戏自带文件而留下。
+        third = getattr(reshade_integration, "is_third_party_proxy", None)
+        if callable(third) and third(path):
             return True
         inner = getattr(reshade_integration, "_looks_like_reshade_dll", None)
         if callable(inner):
@@ -146,12 +152,39 @@ def audit(config: AppConfig, *, log: Log = None) -> dict[str, Any]:
     # ① 加载器 proxy
     for name in reshade_integration.LOADER_PROXY_MODULES:
         path = game_dir / name
-        if path.is_file() and reshade_integration.looks_like_loader_proxy(path):
-            backup = path.with_name(name + ".bak")
+        if not path.is_file():
+            continue
+        # 2026-10-01：判据从"内容像 loader proxy（sbm / poser 标记）"放宽为
+        # `is_third_party_proxy()` —— 内容标记、**OptiScaler 特征**、或"与 System32
+        # 原版不同（被顶替）"三条任一命中即算第三方。用户要求「**一键还原游戏本体要
+        # 全部移走**」：原先 OptiScaler 的 `winhttp.dll` 既不在名单、内容也没有我们的
+        # 标记 → **整体漏判**，用户以为还原干净了、其实注入链还挂在那儿。
+        origin = reshade_integration.is_third_party_proxy(path)
+        if not origin:
+            continue
+        backup = path.with_name(name + ".bak")
+        origin_label = {
+            "sbm": "乳摇 loader",
+            "poser": "Poser loader",
+            "optiscaler": "OptiScaler（DLSS-NR 注入器）",
+            "third-party": "第三方 proxy（顶替了系统模块）",
+        }.get(origin, origin)
+        findings.append(Finding(
+            "loader_proxy", name, str(path), size=path.stat().st_size,
+            sha256=_sha256(path),
+            detail=f"{origin_label}；系统原版备份{'存在' if backup.is_file() else '不存在'}（{backup.name}）",
+        ))
+
+    # ①.5 第三方注入器留下的**配置/日志**（OptiScaler.ini / OptiScaler.log / OptiScaler.dll）：
+    #      proxy 都移走了、这些还留着，用户会以为"没还原干净"。用户 2026-10-01 明确要求
+    #      「一键还原游戏本体要**全部移走**」，所以一并备份移走（restore 时原样放回）。
+    for name in getattr(reshade_integration, "INJECTOR_DATA_NAMES", ()):
+        path = game_dir / name
+        if path.is_file():
             findings.append(Finding(
-                "loader_proxy", name, str(path), size=path.stat().st_size,
+                "injector_data", name, str(path), size=path.stat().st_size,
                 sha256=_sha256(path),
-                detail=f"系统原版备份{'存在' if backup.is_file() else '不存在'}（{backup.name}）",
+                detail="第三方注入器（OptiScaler）的配置/日志，原版游戏不会有",
             ))
 
     # ② plugin/ 里的 payload 与日志（含已被停用但没删掉的副本）
@@ -282,6 +315,108 @@ def _restore_system_module(game_dir: Path, name: str, log: Log) -> dict[str, Any
             return None
     _log(log, f"⚠ 找不到 {name} 的系统原版（既没有 .bak 也不在 System32），游戏目录里暂时没有这个模块")
     return None
+
+
+def quarantine_injector(
+    config: AppConfig,
+    *,
+    log: Log = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """把「会截获 NGX 的第三方注入器」（目前已知 = OptiScaler）**备份移走**。
+
+    **为什么是自动处理、而不是弹一句提示**：用户 2026-10-01 原话 ——
+    「**不是提示的问题，正常用户不会看日志，需要自动检测处理**」。
+    背景：装了 OptiScaler 的机器上，它会把进程里**所有** NGX 调用截走（连游戏自带的
+    DLSS 一起），于是 ReShade 的 DLSS5 addon hook 不到
+    `NVSDK_NGX_D3D12_EvaluateFeature_C`；而 OptiScaler 自己的 `[DlssNr] Enabled` 默认又是
+    `false`（只做超分）→ 面板表现为 `成功NR帧 ≈ 0` + `最新NR NGX结果 0xBAD00001`，
+    用户看到的就是"DLSS5 没启动、NR 也是 0"，而日志里那几行他根本不会去看。
+
+    语义与「一键还原游戏本体」一致：**先备份 → 再移走 → proxy 补回系统原版**，
+    随时能从 `runtime\\game_backup\\ngx-conflict-<时间戳>\\files\\` 放回去。
+    只动"确定是注入器"的文件（OptiScaler 的配置/日志，以及被顶替/带 OptiScaler 特征的 proxy），
+    **不碰 Mod 库、不碰游戏本体资源、不碰我们自己的注入**。
+    """
+    from . import reshade_integration
+
+    game_dir = reshade_integration.detect_game_dir(config)
+    if game_dir is None:
+        return {"ok": False, "changed": False, "moved": [], "message": "没有找到游戏目录"}
+    try:
+        info = reshade_integration.optiscaler_present(game_dir)
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "changed": False, "moved": [], "message": f"检测失败：{exc}"}
+    if not info.get("present"):
+        return {"ok": True, "changed": False, "moved": [],
+                "message": "未检测到第三方 NGX 注入器"}
+
+    proxy_names = {name.lower() for name in reshade_integration.LOADER_PROXY_MODULES}
+    plan: list[Path] = []
+    for relative in info.get("files") or []:
+        path = game_dir / str(relative).replace("\\", "/")
+        if path.is_file():
+            plan.append(path)
+    if not plan:
+        return {"ok": True, "changed": False, "moved": [],
+                "message": "第三方注入器已不在游戏目录"}
+
+    stamp = _stamp()
+    root = backup_root(config) / f"ngx-conflict-{stamp}"
+    files_dir = root / "files"
+    moved: list[dict[str, Any]] = []
+    restored: list[dict[str, Any]] = []
+    errors: list[str] = []
+    for path in plan:
+        relative = path.name
+        try:
+            size = path.stat().st_size
+            digest = _sha256(path)
+        except OSError as exc:
+            errors.append(f"{relative}: {exc}")
+            continue
+        if not dry_run:
+            try:
+                _copy_tree(path, files_dir / relative)   # ① 先备份
+                path.unlink()                            # ② 确认备份后才移走
+            except OSError as exc:
+                errors.append(f"{relative}: {exc}")
+                _log(log, f"⚠ 移走 {relative} 失败: {exc}")
+                continue
+        moved.append({"relative": relative, "size": size, "sha256": digest})
+        _log(log, f"已备份并移走第三方 NGX 注入器文件: {relative}（{size:,} B）")
+        # proxy 被移走后要把系统原版补回，否则游戏可能找不到这个模块
+        if path.name.lower() in proxy_names and not dry_run:
+            module = _restore_system_module(game_dir, path.name, log)
+            if module:
+                restored.append(module)
+
+    if not dry_run and moved:
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+            (root / MANIFEST_NAME).write_text(json.dumps({
+                "stamp": stamp,
+                "created_at": int(time.time()),
+                "reason": "OptiScaler 截获 NGX 调用，导致 DLSS5 的神经渲染无法生效（成功NR帧 0 / 0xBAD00001）",
+                "game_dir": str(game_dir),
+                "entries": moved,
+                "restored_modules": restored,
+                "errors": errors,
+            }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+        except OSError as exc:
+            errors.append(f"写清单失败: {exc}")
+
+    names = "、".join(item["relative"] for item in moved)
+    return {
+        "ok": not errors,
+        "changed": bool(moved),
+        "moved": moved,
+        "restored": restored,
+        "errors": errors,
+        "backup_dir": str(root) if moved and not dry_run else "",
+        "message": (f"已把第三方 NGX 注入器（OptiScaler）备份并移走：{names} → {root}"
+                    if moved else "没有需要处理的文件"),
+    }
 
 
 def backup_and_clean(

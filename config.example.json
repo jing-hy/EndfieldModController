@@ -36,6 +36,8 @@
   "allow_same_character_mods": false,
   "_sbm_data_source_说明": "乳摇（SBM）角色参数的拉取来源。留空 = 上游默认 Sp1cHless/Arknights-Endfield-Plugin-Secondary-bodyphysics@main；也可填 owner/repo 或 owner/repo@分支（例如你自己 fork 的仓库）。每次启动后台检查（24 小时节流），只补本地缺失的角色，不覆盖你调过的数值。",
   "sbm_data_source": "",
+  "_auto_disable_feed_on_native_dlss_说明": "游戏自带 DLSS 时自动停用「喂帧组件」dlss5-feed.addon64（终末地自带 DLSS，判据 = 游戏目录有 sl.interposer.dll 或 nvngx_dlss.dll）。理由：喂帧组件自己的日志写着 This project is for games WITHOUT DLSS；留着会与游戏自己的 DLSS 抢同一条 NGX 链路。停用 = 把文件移进 runtime\\dlss5\\_disabled\\，可逆；关掉这个开关下次自检会自动放回。默认 true。",
+  "auto_disable_feed_on_native_dlss": true,
   "dependency_manifest": "dependencies.json",
   "launch_extra_args": [],
   "selected_mods": [],
