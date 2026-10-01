@@ -103,8 +103,21 @@ Windows 桌面程序（Python + PyWebview），单文件 exe，**零配置启动
 * **纯复制、不打包**：一个 Mod 一个文件夹，原样躺在备份仓里（先复制到 `_copying_xxx`
   临时目录、成功后再改名 —— 中途失败不会在备份仓里留下半份"看起来备份了"的东西）。
 
-### 注入链（同一进程内同时生效）
+### DLSS5「成功 NR 帧 = 0」时先看这里
 
+自检里有一项 `dlss5:nr_binding`（读**最近一次**运行的 `runtime\dlss5\ReShade.log`，只认最后一次，
+不拿历史成功记录充数）：
+
+* 日志里出现 `NR upscaling is not applicable: the game's DLSS already renders at output resolution`
+  → **游戏内超分档位是「原生 / DLAA」**：DLSS5 的神经渲染是"重建更高的分辨率"，游戏已经按原生
+  输出，NR 没有放大任务 → NGX 直接拒绝创建 feature（面板 `成功NR帧 0` / `最新NR NGX结果 0xBAD00001`）。
+  **动作**：游戏「设置 → 画面」把超分辨率档位改成**质量 / 平衡 / 性能**（任一）。这既不是装坏了、
+  也不用重装。2026-10-01 一份真实反馈就是这个原因。
+* 只有 `NR feature create failed with 0xbad00001`（没有上面那句）→ 往运行库/驱动方向查：先确认
+  `runtime\dlss5` 里的 nvngx 运行库没被别的整合包换过（`bundled_versions` 自检会报），再考虑更新驱动。
+* 若是第三方 NGX 注入器（OptiScaler）截走 NGX，程序会**自动备份移走**它（见上表「NGX 冲突自动处理」）。
+
+### 注入链（同一进程内同时生效）
 ```text
 唯一的 ReShade 底座  runtime\dlss5\d3d12.dll（ReShade 6.8.0 Addon 版）
   ├─ renodx-dlss5-4.7_汉化.addon64      → DLSS5 神经渲染

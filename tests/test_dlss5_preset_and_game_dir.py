@@ -163,6 +163,48 @@ def test_ensure_xxmi_game_folder_logs_when_game_dir_unknown(tmp_path, monkeypatc
     assert logs and any("XXMI 游戏目录" in line for line in logs)
 
 
+def test_nr_binding_check_explains_native_dlss(tmp_path):
+    """游戏内超分选成"原生/DLAA"时，DLSS5 的 NR 永远绑不上 —— 自检要说清并给动作。
+
+    真实反馈（2026-10-01，v0.8.0）：面板 `成功NR帧 0` / `0xBAD00001`，
+    `ReShade.log` 原文 `NR upscaling is not applicable: the game's DLSS already renders at
+    output resolution`。
+    """
+    from endfieldmodcontroller import initialize
+
+    dlss5 = tmp_path / "runtime" / "dlss5"
+    dlss5.mkdir(parents=True)
+    config = AppConfig(
+        runtime_dir=str(tmp_path / "runtime"),
+        dlss5_dir=str(dlss5),
+        builtin_runtime_dir=str(tmp_path / "runtime" / "builtin"),
+    )
+    log = dlss5 / "ReShade.log"
+    log.write_text(
+        "Initializing crosire's ReShade version '6.8.0'\n"
+        "DLSS5 Generic: NR upscaling is not applicable: the game's DLSS already renders at "
+        "output resolution (2560x1440 vs output 2560x1440 (native))\n"
+        "DLSS5 Generic: NR feature create failed with 0xbad00001\n",
+        encoding="utf-8",
+    )
+    report = initialize.Report()
+    initialize._check_dlss5_nr_binding(config, report, None)
+    check = next(c for c in report.to_dict()["checks"] if c["key"] == "dlss5:nr_binding")
+    assert check["ok"] is False
+    assert "原生" in check["message"] and "质量" in check["message"]
+
+    # 老日志里的失败不许拿来吓人：只看最后一次运行
+    log.write_text(
+        "Initializing crosire's ReShade\nNR feature create failed with 0xbad00001\n"
+        "Initializing crosire's ReShade\nDLSS5 Generic: feature ready: 2560x1440\n",
+        encoding="utf-8",
+    )
+    report = initialize.Report()
+    initialize._check_dlss5_nr_binding(config, report, None)
+    check = next(c for c in report.to_dict()["checks"] if c["key"] == "dlss5:nr_binding")
+    assert check["ok"] is True, check
+
+
 def test_xxmi_launcher_falls_back_to_builtin(tmp_path):
     """`xxmi_launcher` 留空 → 自动找内置那份（用户 2026-10-01：「xxmi 如果留空应该就找内置
     正常会放的地方，没有就下载」）。"""

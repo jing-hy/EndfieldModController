@@ -624,6 +624,71 @@ def _check_dlss5_ngx_consumer(config: AppConfig, report: Report,
     report.add("dlss5:ngx_consumer", True, "未检测到第三方 NGX 接管（走 ReShade 自己的 NGX hook 路线）")
 
 
+def _check_dlss5_nr_binding(config: AppConfig, report: Report,
+                            log: Callable[[str], None] | None) -> None:
+    """**上次进游戏时 DLSS5 的 NR 到底绑上没有？**没绑上就说清是哪一类原因。
+
+    2026-10-01 一份真实反馈（v0.8.0）：「dlss5 也启动不了」——面板 `成功NR帧 0`、
+    `超分: 请求ON | 活动OFF | 比例1.00`、`最新NR NGX结果 0xBAD00001`。查 `ReShade.log`
+    看到真正的原因（原文）：
+
+        DLSS5 Generic: NR upscaling is not applicable: the game's DLSS already renders at
+        output resolution (2560x1440 vs output 2560x1440 (native)) format=28
+
+    也就是**游戏内超分档位选在"原生/DLAA"**：DLSS5 的神经渲染是"重建更高的分辨率"，
+    游戏已经按 2560x1440 原生输出，NR 没有放大任务 → NGX 直接拒绝创建 feature
+    （`0xBAD00001`）。**这不是装坏了**，但用户不可能从那个码看出来，所以在这里如实报出
+    并给出**具体动作**（游戏画面设置里把超分档位改成质量/平衡/性能）。
+
+    判据只认**最近一次运行**的日志（以最后一个 `Initializing crosire's ReShade` 为界），
+    没证据就不报 —— 不许拿上一次运行的结果吓人。
+    """
+    if not getattr(config, "dlss5_addon_enabled", True):
+        report.add("dlss5:nr_binding", True, "DLSS5 已在启动页关闭（跳过 NR 绑定检查）")
+        return
+    log_path = config.dlss5_path / "ReShade.log"
+    if not log_path.is_file():
+        report.add("dlss5:nr_binding", True, "还没有 ReShade.log（没进过游戏，跳过）")
+        return
+    try:
+        text = log_path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        report.add("dlss5:nr_binding", True, f"读不到 ReShade.log（{exc}）")
+        return
+    # 只看最后一次运行：日志是追加的，老结果不能拿来判断现在
+    marker = "Initializing crosire's ReShade"
+    last = text.rfind(marker)
+    recent = text[last:] if last >= 0 else text
+    if "NR upscaling is not applicable" in recent:
+        report.add(
+            "dlss5:nr_binding",
+            False,
+            "上次进游戏时 DLSS5 的神经渲染**没生效**：游戏里超分档位是「原生 / DLAA」"
+            "（日志原文 `NR upscaling is not applicable: the game's DLSS already renders at "
+            "output resolution`），NR 没有放大任务 → NGX 拒绝创建（面板显示 `成功NR帧 0` / "
+            "`0xBAD00001`）。**动作**：进游戏 →「设置 → 画面」把超分辨率档位改成 "
+            "**质量 / 平衡 / 性能**（任一，别用原生/DLAA），再进游戏看面板的「成功 NR 帧」"
+            "是否开始增长。",
+            manual=True,
+        )
+        return
+    if "NR feature create failed with 0xbad00001" in recent:
+        report.add(
+            "dlss5:nr_binding",
+            False,
+            "上次进游戏时 NR 特性创建失败（`0xbad00001`）且不是分辨率档位问题 —— "
+            "多半是运行库/驱动这一层：先确认 `runtime\\dlss5` 里的 nvngx 运行库没被其它"
+            "整合包换过（自检的 bundled_versions 会报），再考虑更新显卡驱动；"
+            "把 `ReShade.log` 里 `NR feature` 前后 20 行发出来更快。",
+            manual=True,
+        )
+        return
+    if "feature ready" in recent:
+        report.add("dlss5:nr_binding", True, "上次进游戏时 DLSS5 的 NR 已就绪（面板「成功NR帧」应当有数）")
+        return
+    report.add("dlss5:nr_binding", True, "上次运行的日志里没有 NR 失败记录")
+
+
 def _check_dlss5_feed_redundant(config: AppConfig, report: Report,
                                 log: Callable[[str], None] | None) -> None:
     """游戏**自带 DLSS** 时，自动停用「喂帧组件」（`dlss5-feed.addon64`）。
@@ -1527,6 +1592,8 @@ def ensure_all(config: AppConfig, log: Callable[[str], None] | None = None) -> d
     # NGX 消费者检查：检测到第三方截获（OptiScaler）就**自动移走**（用户要求"自动检测处理"，
     # 不是写一句说明让用户自己看日志）
     _check_dlss5_ngx_consumer(config, report, log)
+    # DLSS5 的 NR 上次到底绑上没有（游戏内超分档位选成"原生/DLAA"时它永远绑不上）
+    _check_dlss5_nr_binding(config, report, log)
     # 游戏自带 DLSS → 自动停用「喂帧组件」（设置页有开关，默认开启）
     _check_dlss5_feed_redundant(config, report, log)
     _check_game_libs(config, report, log)

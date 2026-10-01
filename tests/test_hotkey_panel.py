@@ -385,11 +385,18 @@ class HotkeySwitchTests(unittest.TestCase):
         self.patcher.start()
         from endfieldmodcontroller.api import EndfieldModControllerApi
 
+        # ⚠ 别依赖"本机到底有没有开游戏"：开发机上真开着 Endfield 时，切换开关会走
+        #   "游戏在跑 → 先不重新生成控制器"那条分支（这是对的行为），测试却会假失败。
+        self.running_patcher = mock.patch.object(
+            EndfieldModControllerApi, "game_running", return_value={"running": False}
+        )
+        self.running_patcher.start()
         self.api = EndfieldModControllerApi(self.config_path)
         self.api.config.selected_mods = [mod["id"] for mod in self.api.scan()["mods"]]
         self.api.config.save()
 
     def tearDown(self) -> None:
+        self.running_patcher.stop()
         self.patcher.stop()
         self.tmp.cleanup()
 
