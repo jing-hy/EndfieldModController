@@ -425,12 +425,88 @@ class HotkeySwitchTests(unittest.TestCase):
         self.assertIn("takeover=1", (self.dlss5 / "panel_info.txt").read_text(encoding="utf-8"))
         # 控制器自己的合成键不受影响（否则面板点不动任何东西）
         controller_ini = self.staging / "MC_Controller" / "controller.ini"
-        self.assertIn("ctrl alt shift VK_F11", controller_ini.read_text(encoding="utf-8"))
+        ini_text = controller_ini.read_text(encoding="utf-8")
+        self.assertIn("ctrl alt shift VK_F23", ini_text)
+        self.assertIn("ctrl alt shift VK_F24", ini_text)
+        # **协议键绝不能落在 F1..F12**：2026-10-01 用户实测撞键 —— F6 是 DLSS5 的 NR 开关、
+        # F7 是第一人称切换（那些 addon 自己读键状态、不看修饰键），表现为"按开关外套会切
+        # 第一人称 / 按切换头发会开关 DLSS5"。数字位整体挪到 F13..F22 就是为了根治它。
+        self.assertIn("ctrl alt shift VK_F13", ini_text)   # Digit0
+        self.assertIn("ctrl alt shift VK_F22", ini_text)   # Digit9
+        for clash in range(1, 13):
+            self.assertNotIn(f"ctrl alt shift VK_F{clash}\n", ini_text,
+                             f"协议键 VK_F{clash} 会撞别的 addon 的快捷键")
+        # 被锁的 Mod 热键用 `no_modifiers VK_F24`（在 Mod 自己的 ini 里，不在 controller.ini）：
+        # 与我们带修饰的 F24 互斥（那条要求"一个修饰键都不许按"），不会误触
+        self.assertTrue(all("vk_f24" in key for key in self._staged_keys()))
+        mod_ini = "\n".join(
+            p.read_text(encoding="utf-8", errors="replace")
+            for p in self.staging.rglob("*.ini")
+        )
+        self.assertIn("no_modifiers VK_F24", mod_ini)
 
         closed = self.api.set_hotkey_takeover(False)
         self.assertNotIn("vk_f24", " ".join(self._staged_keys()))
         self.assertIn("还原", closed["message"])
         self.assertIn("takeover=0", (self.dlss5 / "panel_info.txt").read_text(encoding="utf-8"))
+
+
+class PanelKeyConflictTests(unittest.TestCase):
+    """面板合成键与别的插件快捷键的冲突检查（2026-10-01 撞车事故的兜底）。"""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory(prefix="mc-keyconf-")
+        self.root = Path(self.tmp.name)
+        self.dlss5 = self.root / "runtime" / "dlss5"
+        self.dlss5.mkdir(parents=True)
+        self.staging = self.root / "runtime" / "EFMI" / "Mods"
+        from endfieldmodcontroller.config import AppConfig
+
+        self.config = AppConfig(
+            runtime_dir=str(self.root / "runtime"),
+            dlss5_dir=str(self.dlss5),
+            staging_mods_dir=str(self.staging),
+            hotkey_takeover=True,
+        )
+        self.ini = self.dlss5 / "ReShade.ini"
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _check(self) -> dict:
+        from endfieldmodcontroller import initialize
+
+        report = initialize.Report()
+        initialize._check_panel_hotkey_conflicts(self.config, report, None)
+        return next(c for c in report.to_dict()["checks"] if c["key"] == "panel:hotkey_conflicts")
+
+    def test_dlss5_and_firstperson_keys_do_not_conflict(self) -> None:
+        # F6 = DLSS5 的 NR 开关、F7 = 第一人称切换 —— 旧协议正是撞在这两个键上
+        self.ini.write_text(
+            "[INPUT]\nKeyOverlay=36,0,0,0\nKeyScreenshot=44,0,0,0\n"
+            "[RenoDX.DLSS5]\nNRToggleKey=117\n",
+            encoding="utf-8",
+        )
+        self.assertTrue(self._check()["ok"], self._check())
+
+    def test_conflict_on_f13_plus_is_reported(self) -> None:
+        self.ini.write_text("[OTHER.ADDON]\nOtherToggleKey=124\nSomeShortcut=135\n", encoding="utf-8")
+        check = self._check()
+        self.assertFalse(check["ok"])
+        self.assertIn("F13", check["message"])
+        self.assertIn("F24", check["message"])
+
+    def test_legacy_staging_keys_are_flagged(self) -> None:
+        self.ini.write_text("[INPUT]\nKeyOverlay=36,0,0,0\n", encoding="utf-8")
+        controller = self.staging / "MC_Controller"
+        controller.mkdir(parents=True)
+        (controller / "controller.ini").write_text("key = ctrl alt shift VK_F1\n", encoding="utf-8")
+        check = self._check()
+        self.assertTrue(check["ok"])              # 不是故障，是"下次启动会重写"
+        self.assertIn("旧版", check["message"])
+
+        (controller / "controller.ini").write_text("key = ctrl alt shift VK_F13\n", encoding="utf-8")
+        self.assertNotIn("旧版", self._check()["message"])
 
 
 class HintsFileTests(unittest.TestCase):

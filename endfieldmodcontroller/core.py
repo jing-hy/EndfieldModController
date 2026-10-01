@@ -1411,20 +1411,24 @@ def generate_controller_mod(
         lines.append(f"global persist $mc_state_{action.wire_id} = 0")
     lines.extend([
         "",
-        "; Synthetic key protocol: Ctrl+Alt+Shift+F1..F12",
+        "; Synthetic key protocol: Ctrl+Alt+Shift+F13..F24",
+        "; 2026-10-01：数字位从 F1..F10 挪到 **F13..F22**、暂存 F23、提交 F24 ——",
+        "; 旧键位会撞别的 addon（F6 = DLSS5 的 NR 开关、F7 = 第一人称切换，它们不看修饰键），",
+        "; 用户实测「按开关外套会切第一人称 / 按切换头发开关了 DLSS5」就是这么来的。",
+        "; F13 以上的键标准键盘上不存在，插件与游戏都不会绑。",
     ])
     for digit in range(10):
         lines.extend([
             f"[KeyMC_Digit{digit}]",
-            f"key = ctrl alt shift VK_F{digit + 1}",
+            f"key = ctrl alt shift VK_F{13 + digit}",
             f"run = CommandListMC_Digit{digit}",
         ])
     lines.extend([
         "[KeyMC_Stage]",
-        "key = ctrl alt shift VK_F11",
+        "key = ctrl alt shift VK_F23",
         "run = CommandListMC_Stage",
         "[KeyMC_Commit]",
-        "key = ctrl alt shift VK_F12",
+        "key = ctrl alt shift VK_F24",
         "run = CommandListMC_Commit",
         "",
     ])

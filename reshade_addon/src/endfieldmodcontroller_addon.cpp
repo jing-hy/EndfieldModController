@@ -11,8 +11,8 @@
 //   user_ini_path.txt               EFMI 的 d3dx_user.ini 路径
 //   panel_info.txt                  面板状态（是否已接管 / 生成时间）
 //
-// 操作路径：点/拖控件 → 发合成键 `Ctrl+Alt+Shift+F<wire>`（数字键逐位）+ F11 暂存 +
-// F12 提交 → EFMI 里 controller.ini 的 `[KeyMC_*]` 把它变成 `$mc_state_N` →
+// 操作路径：点/拖控件 → 发合成键 `Ctrl+Alt+Shift+F<wire>`（数字键逐位）+ F23 暂存 +
+// F24 提交 → EFMI 里 controller.ini 的 `[KeyMC_*]` 把它变成 `$mc_state_N` →
 // `[Present]` 段按 `$controller_action` 写回 Mod 自己的变量（`$ear` 之类），立刻生效。
 //
 // ⚠ 面板**只能**待在这儿：ReShade 6.8 的日志写死了它只搜 `d3d12.dll` 所在目录
@@ -363,9 +363,23 @@ static void send_digit_key(int digit)
 {
     if (digit < 0 || digit > 9)
         return;
-    send_key_combo(static_cast<WORD>(VK_F1 + digit));
+    // 数字位用 **F13..F22**（= VK_F13 + digit）：这些键**键盘上根本不存在**，
+    // 任何游戏、任何 addon 都不会去绑它们 —— 见下面 send_action_keys 的注释。
+    send_key_combo(static_cast<WORD>(VK_F13 + digit));
 }
 
+// 2026-10-01 修：**协议键必须用键盘上不存在的键**。
+//
+// 用户实测报告（打通面板后立刻撞了）：
+//   ①「按开关外套的时候会切换第一人称」—— 第一人称 addon 的 `ShortcutFirstPerson=112`
+//      就是 **VK_F7**，而我们旧协议的数字位 6 = `VK_F1 + 6` = F7 → 一点面板就切第一人称；
+//   ②「按切换头发会开关 dlss5」—— DLSS5 addon 的 NR 开关是 **F6**，数字位 5 = F6 → 中招。
+//   这些 addon 是**自己读键状态**的（不看修饰键），所以带 Ctrl+Alt+Shift 也照样触发。
+//   现在数字位整体挪到 **F13..F22**、暂存 **F23**、提交 **F24**：
+//   * F13 以上的键在标准键盘上不存在，插件/游戏/系统都不会绑定；
+//   * EFMI（3DMigoto）里 `key = ctrl alt shift VK_F13` 能正常解析（它支持到 VK_F24）；
+//   * 与 `patch_mod_hotkeys` 锁键用的 `no_modifiers VK_F24` **不冲突**：那条要求
+//     "一个修饰键都不许按"，而我们的提交键必须带 Ctrl+Alt+Shift —— 两者互斥，不会误触。
 static void send_action_keys(int wire_id, int value_index)
 {
     const std::string wire = std::to_string(wire_id > 0 ? wire_id : 1);
@@ -373,21 +387,24 @@ static void send_action_keys(int wire_id, int value_index)
     for (const char ch : wire)
         if (ch >= '0' && ch <= '9')
             send_digit_key(ch - '0');
-    send_key_combo(VK_F11); // 暂存动作号
+    send_key_combo(VK_F23); // 暂存动作号
     for (const char ch : value)
         if (ch >= '0' && ch <= '9')
             send_digit_key(ch - '0');
-    send_key_combo(VK_F12); // 提交动作号 + 档位
+    send_key_combo(VK_F24); // 提交动作号 + 档位
 }
 
 static void queue_action(reshade::api::effect_runtime *runtime, const ActionEntry &action, int value_index)
 {
+    (void)runtime;
     addon_log("queue_action: id=" + std::to_string(action.id) + " wire=" + std::to_string(action.wire_id)
               + " value=" + std::to_string(value_index));
 
-    if (runtime != nullptr)
-        runtime->open_overlay(false, reshade::api::input_source::keyboard);
-
+    // 2026-10-01 修：**不要再自动关面板**。
+    // 旧实现每次操作都 `runtime->open_overlay(false, …)`，用户的实际感受是
+    // 「按一个键就会退出 ReShade 页面」—— 想在面板里连点几个开关根本做不到。
+    // 现在面板保持打开；合成键走 SendInput，EFMI 是**轮询** `GetAsyncKeyState` 读键状态的，
+    // 与 ReShade 的输入拦截（拦的是窗口消息）不是一条路，所以照样能读到。
     const int wire_id = action.wire_id > 0 ? action.wire_id : action.id;
     std::thread([wire_id, value_index]()
     {

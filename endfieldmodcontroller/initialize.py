@@ -624,6 +624,74 @@ def _check_dlss5_ngx_consumer(config: AppConfig, report: Report,
     report.add("dlss5:ngx_consumer", True, "未检测到第三方 NGX 接管（走 ReShade 自己的 NGX hook 路线）")
 
 
+def _check_panel_hotkey_conflicts(config: AppConfig, report: Report,
+                                  log: Callable[[str], None] | None) -> None:
+    """面板发的合成键，有没有和别的 addon / ReShade 自带快捷键撞车。
+
+    2026-10-01 用户实测撞过（面板刚打通就中招）：旧协议用 `Ctrl+Alt+Shift+F1..F12`，而
+    **DLSS5 的 NR 开关就是 F6**、**第一人称切换就是 F7** —— 那些 addon 自己读键状态、
+    **不看修饰键**，所以点面板等于在按 F6/F7：现象是「按开关外套会切换第一人称 /
+    按切换头发会开关 DLSS5」。协议键已整体挪到 **F13..F24**（标准键盘上根本没有这些键）。
+    这里再兜一层：要是还有谁绑了这批键，就报出来。
+    """
+    staged = config.staging_mods_path / "MC_Controller" / "controller.ini"
+    if not getattr(config, "hotkey_takeover", False):
+        report.add("panel:hotkey_conflicts", True, "未开启「整合 Mod 快捷键」（跳过协议键冲突检查）")
+        return
+    ini = config.dlss5_ini_path
+    if not ini.is_file():
+        report.add("panel:hotkey_conflicts", True, "还没有 ReShade.ini（跳过协议键冲突检查）")
+        return
+    try:
+        text = ini.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        report.add("panel:hotkey_conflicts", True, f"读不到 ReShade.ini（{exc}）")
+        return
+    conflicts: list[str] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith(";") or line.startswith("[") or "=" not in line:
+            continue
+        name, _, value = line.partition("=")
+        name = name.strip()
+        if not (name.lower().startswith("key") or "shortcut" in name.lower()):
+            continue
+        first = value.split(",")[0].strip()
+        if not first.isdigit():
+            continue
+        code = int(first)
+        if 124 <= code <= 135:                     # VK_F13..VK_F24
+            conflicts.append(f"{name}=F{code - 111}")
+    # 顺带看一眼控制器有没有还停在旧键位（旧版 staging 不会自己变）
+    legacy: list[str] = []
+    if staged.is_file():
+        try:
+            current = staged.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            current = ""
+        if current and "VK_F13" not in current:
+            legacy.append(str(staged))
+    if conflicts:
+        report.add(
+            "panel:hotkey_conflicts", False,
+            "面板的合成键（`Ctrl+Alt+Shift+F13..F24`）和这些快捷键撞了：" + "、".join(conflicts)
+            + " —— 面板操作会顺带触发它们。请把这几项改到别的键"
+              "（它们在 `runtime\\dlss5\\ReShade.ini` 的 `[INPUT]` / 各 addon 段里），"
+              "否则点一次面板就会连带触发对应功能。",
+            manual=True,
+        )
+        return
+    if legacy:
+        report.add(
+            "panel:hotkey_conflicts", True,
+            "控制器的合成键位还是旧版（`F1..F12`，会撞 DLSS5 的 F6 / 第一人称的 F7）—— "
+            "下次「一键启动」会自动重写成 `F13..F24`；想立刻生效就在启动页把「整合 Mod 快捷键」"
+            "关一次再打开。",
+        )
+        return
+    report.add("panel:hotkey_conflicts", True, "面板合成键（Ctrl+Alt+Shift+F13..F24）没有与任何已装快捷键冲突")
+
+
 def _check_dlss5_nr_binding(config: AppConfig, report: Report,
                             log: Callable[[str], None] | None) -> None:
     """**上次进游戏时 DLSS5 的 NR 到底绑上没有？**没绑上就说清是哪一类原因。
@@ -1616,6 +1684,8 @@ def ensure_all(config: AppConfig, log: Callable[[str], None] | None = None) -> d
     # NGX 消费者检查：检测到第三方截获（OptiScaler）就**自动移走**（用户要求"自动检测处理"，
     # 不是写一句说明让用户自己看日志）
     _check_dlss5_ngx_consumer(config, report, log)
+    # 面板合成键有没有和别的 addon 快捷键撞车（F6/F7 撞车事故的兜底检查）
+    _check_panel_hotkey_conflicts(config, report, log)
     # DLSS5 的 NR 上次到底绑上没有（游戏内超分档位选成"原生/DLAA"时它永远绑不上）
     _check_dlss5_nr_binding(config, report, log)
     # 游戏自带 DLSS → 自动停用「喂帧组件」（设置页有开关，默认开启）

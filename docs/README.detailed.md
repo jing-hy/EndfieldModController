@@ -129,6 +129,31 @@ Windows 桌面程序（Python + PyWebview），单文件 exe，**零配置启动
 
 若是第三方 NGX 注入器（OptiScaler）截走 NGX，程序会**自动备份移走**它（见上表「NGX 冲突自动处理」）。
 
+### 面板的合成键协议（以及为什么是 F13..F24）
+
+面板本身不会去改 Mod 的变量 —— 它走一条既有的**合成键协议**：
+
+```text
+面板点/拖控件
+  → SendInput 发 Ctrl+Alt+Shift+F<数字位>（wire_id 逐位）+ F23 暂存 + F24 提交
+  → EFMI 里 MC_Controller 的 [KeyMC_*] 把这些键变成 $mc_state_N
+  → [Present] 把 $mc_state_N 写进 Mod 真正的变量（$\.\Demo\cape 之类）
+```
+
+⚠️ **键位必须用"键盘上不存在的键"**（2026-10-01 用户实测踩坑）：旧协议的数字位是 `F1..F10`，
+而 **DLSS5 的 NR 开关是 F6**、**第一人称切换是 F7** —— 这些 addon 是**自己读键状态**的，
+**不看修饰键**，于是现象变成「按开关外套会切换第一人称 / 按切换头发会开关 DLSS5」。
+现在数字位整体挪到 **F13..F22**、暂存 **F23**、提交 **F24**：标准键盘上没有这些键，
+游戏与插件都不会绑。两个附带点：
+
+* 与 `patch_mod_hotkeys` 锁键用的 `no_modifiers VK_F24` **不冲突** —— 那条要求"一个修饰键
+  都不许按"，而提交键必须带 `Ctrl+Alt+Shift`，两者互斥；
+* 自检里有一项 `panel:hotkey_conflicts`：万一日后哪个 addon 绑了 F13..F24，会直接报出来。
+
+另外：**面板操作不再自动关闭 overlay**（旧实现每次操作都调 `open_overlay(false)`，用户感受是
+「按一个键就会退出 ReShade 页面」，连点几个开关都做不到）。合成键走 `SendInput`，而 EFMI 是
+**轮询 `GetAsyncKeyState`** 读键状态的，与 ReShade 拦的"窗口消息"不是一条路，所以面板开着也照样生效。
+
 ### 注入链（同一进程内同时生效）
 ```text
 唯一的 ReShade 底座  runtime\dlss5\d3d12.dll（ReShade 6.8.0 Addon 版）
