@@ -323,6 +323,30 @@ class EndfieldModControllerApi:
 
         if component not in ("dlss5", "firstperson"):
             return {"ok": False, "message": f"未知组件: {component}"}
+        # **按显卡代次闸门**（用户 2026-10-01 要求：「开启时检测机器，如果不是 50 系就默认关
+        # dlss5，开启 dlss5 的时候弹窗说明拒绝」）—— DLSS5 首发只支持 RTX 50 系，40 系及更早
+        # 的机器上它一帧都出不来（NGX 回 `0xBAD00001` FeatureNotSupported）。与其让它"开着但
+        # 没用"，不如明确拒绝并说明原因；**拒绝时不写配置**，前端会把开关弹回去。
+        if component == "dlss5" and enabled:
+            from . import deviceinfo
+
+            try:
+                supported, gpu, reason = deviceinfo.dlss5_supported()
+            except Exception:  # noqa: BLE001 - 探测失败不拦人
+                supported, gpu, reason = True, "", ""
+            if not supported:
+                launcher._append_log(self.config, f"DLSS5 启用被拒绝（显卡不支持）: {gpu} —— {reason}")
+                return {
+                    "ok": False,
+                    "rejected": "dlss5_unsupported_gpu",
+                    "gpu": gpu,
+                    "message": (
+                        f"这台机器的显卡是 {gpu}，{reason}\n\n"
+                        "所以这个开关不给你开 —— 开了也是白开：进游戏后面板会一直显示"
+                        "「成功NR帧 0」和 `最新NR NGX结果 0xBAD00001`，还会让你误以为是装坏了。\n\n"
+                        "等 NVIDIA 放开 RTX 40 系之后，这个开关会自动变得可用（到时更新一下就行）。"
+                    ),
+                }
         key = "dlss5_addon_enabled" if component == "dlss5" else "firstperson_addon_enabled"
         setattr(self.config, key, bool(enabled))
         self.config.save()

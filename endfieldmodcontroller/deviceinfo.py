@@ -141,6 +141,41 @@ def collect(refresh: bool = False) -> dict[str, Any]:
     return info
 
 
+def dlss5_supported(refresh: bool = False) -> tuple[bool, str, str]:
+    """这台机器能不能用 **DLSS5 神经渲染**？
+
+    返回 `(supported, gpu_name, reason)`。判据 = **NVIDIA 显卡代次 ≥ 50 系**（DLSS 5 首发
+    RTX 50 独占，40 系官方表态后续支持但当前驱动/运行库尚未放开 —— 实测 40 系机器上
+    NGX 会以 `0xBAD00001`（FeatureNotSupported）拒掉 feature 18，见 lesson `0mup6bvc`）。
+
+    2026-10-01 用户要求：「**开启时检测机器，如果不是 50 系就默认关 dlss5，开启 dlss5 的
+    时候弹窗说明拒绝**」—— 这个函数就是那个判据的唯一实现，config 默认值迁移、开关闸门、
+    自检三处都调它，避免各写一套。
+    """
+    try:
+        info = collect(refresh=refresh)
+    except Exception as exc:  # noqa: BLE001
+        return True, "", f"读不到设备信息（{exc}）—— 先按支持处理"
+    adapters = info.get("adapters") or []
+    nvidia = [str(a.get("name") or "") for a in adapters if "nvidia" in str(a.get("name", "")).lower()]
+    gpu = "、".join(nvidia) or "未检测到 NVIDIA 显卡"
+    if not nvidia:
+        return False, gpu, "未检测到 NVIDIA 显卡 —— DLSS5 神经渲染无法启用"
+    generation = nvidia_generation(" / ".join(nvidia).lower())
+    if generation is None:
+        return False, gpu, f"识别不出显卡代次（{gpu}）—— DLSS5 目前只支持 RTX 50 系"
+    if generation >= 50:
+        return True, gpu, f"RTX {generation} 系（满足 DLSS5 的硬件前提）"
+    return (
+        False,
+        gpu,
+        f"RTX {generation} 系 —— **DLSS5 神经渲染目前只支持 RTX 50 系**"
+        f"（官方已表态后续扩展到 40 系，但当前驱动/运行库尚未放开）。"
+        f"这类机器上它一帧也出不来（面板会显示「成功NR帧 0」+ `最新NR NGX结果 0xBAD00001`），"
+        f"所以默认帮你关掉、也不再让你白折腾。",
+    )
+
+
 def nvidia_generation(names_lower: str) -> int | None:
     """从显卡名里认出 NVIDIA 的**代次**（`RTX 5080` → 50，`RTX 4060 Laptop GPU` → 40）。
 

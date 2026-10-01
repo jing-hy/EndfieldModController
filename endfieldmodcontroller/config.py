@@ -76,6 +76,31 @@ def _safe_save(cfg: "AppConfig", path: Path) -> bool:
         return False
 
 
+def _apply_gpu_defaults(cfg: "AppConfig") -> bool:
+    """按**显卡代次**决定 DLSS5 的默认开关；只在"还没跟过这个默认"时执行一次。
+
+    用户 2026-10-01 要求：「**开启时检测机器，如果不是 50 系就默认关 dlss5，开启 dlss5 的
+    时候弹窗说明拒绝**」。理由：DLSS5 首发只支持 RTX 50 系，40 系及更早的机器上它**一帧都
+    出不来**（NGX 回 `0xBAD00001` FeatureNotSupported），默认开着只会让人以为坏了。
+
+    返回是否改动过配置（调用方据此决定要不要落盘）。读设备信息是毫秒级注册表查询且有
+    进程内缓存，而且只在迁移那一次真正取值。
+    """
+    if getattr(cfg, "dlss5_gpu_default_applied", False):
+        return False
+    supported = True
+    try:
+        from . import deviceinfo
+
+        supported, _gpu, _reason = deviceinfo.dlss5_supported()
+    except Exception:  # noqa: BLE001 - 读不到就当支持，绝不因为探测失败把功能关掉
+        supported = True
+    if not supported:
+        cfg.dlss5_addon_enabled = False
+    cfg.dlss5_gpu_default_applied = True
+    return True
+
+
 def _quarantine_broken_config(path: Path) -> None:
     """把解析不了的 config.json 挪成带时间戳的副本，便于事后排查。
 
@@ -163,11 +188,21 @@ class AppConfig:
     # **「整合 Mod 快捷键」总开关**（2026-10-01 落地，取代旧的"面板还没做好"状态）。
     # True = 把每个 Mod 的 `[Key*]` 统一改写成 `VK_F24`，操作改到游戏内的统一面板
     # （自研 ReShade addon，按 Home 打开）—— 用户原话：「开了要锁 mod 快捷键，注入 reshade」。
-    # False（默认）= 完全维持原样：Mod 自带的快捷键与控制菜单直接生效。
+    # **默认 True**（2026-10-01 用户要求：「把快捷键整合设为默认开启」）：零配置用户装完
+    # 直接就有统一面板，不必先去设置页找开关。
     # ⚠ 打开后**面板是必须存在的**：`launcher.resolve_hotkey_takeover` 会先确认面板真的
-    #   躺在 ReShade 会读的目录、且 ReShade 注入可用，否则拒绝锁键（2026-10-01 的事故
-    #   就是"键锁死了、面板却不存在"，见 lesson 0muovz4ap）。
-    hotkey_takeover: bool = False
+    #   躺在 ReShade 会读的目录、且 ReShade 注入可用，否则**拒绝锁键**（2026-10-01 的事故
+    #   就是"键锁死了、面板却不存在"，见 lesson `0muovz4ap`）—— 所以"默认开"不会造成
+    #   任何"键没了、面板也没有"的后果，最多是"开关看着是开的、键还没锁"。
+    hotkey_takeover: bool = True
+    # **默认值迁移标记**：`hotkey_takeover` 从 False 改成 True 时，老配置文件里存的是显式的
+    # `false`，改默认值对它们不生效 → 所以做**一次性**迁移（见 `load()`）。这个字段为 True
+    # 表示"这份配置已经跟过新默认"，之后用户自己关掉不会再被改回来。
+    hotkey_default_applied: bool = False
+    # **按显卡代次决定 DLSS5 默认开关的迁移标记**（2026-10-01 用户要求：「开启时检测机器，
+    # 如果不是 50 系就默认关 dlss5，开启 dlss5 的时候弹窗说明拒绝」）。
+    # 为 True = 这份配置已经按机器代次定过默认值，之后用户手动设的不会被改回来。
+    dlss5_gpu_default_applied: bool = False
     # **面板的中文字体**：ReShade 默认字体（ProggyClean）没有中文字形，面板里的中文含义
     # 会显示成方块。True（默认）= 打开「整合 Mod 快捷键」时，若 `ReShade.ini` 的
     # `[STYLE] Font=` 还是空的，就自动指向系统中文字体（`msyh.ttc` 等，写前备份）。
@@ -214,6 +249,8 @@ class AppConfig:
         if not path.is_file():
             cfg = cls()
             cfg._config_path = str(path)
+            cfg.hotkey_default_applied = True   # 新配置天然就是新默认，无需迁移
+            _apply_gpu_defaults(cfg)            # 非 50 系 → DLSS5 默认关（读注册表，毫秒级）
             cfg.autofill(deep=False)   # 只填内嵌路径（毫秒级）；全盘探测交给后台预热
             _safe_save(cfg, path)
             return cfg
@@ -223,6 +260,8 @@ class AppConfig:
             _quarantine_broken_config(path)
             cfg = cls()
             cfg._config_path = str(path)
+            cfg.hotkey_default_applied = True
+            _apply_gpu_defaults(cfg)
             cfg.autofill(deep=False)   # 只填内嵌路径（毫秒级）；全盘探测交给后台预热
             _safe_save(cfg, path)
             return cfg
@@ -237,13 +276,25 @@ class AppConfig:
         cfg._config_path = str(path)
         if cfg.theme not in {"dark", "light"}:
             cfg.theme = "light"
+        # **一次性默认值迁移**（2026-10-01 用户要求「把快捷键整合设为默认开启」）：
+        # 老配置里躺着显式的 `"hotkey_takeover": false`，光改 dataclass 默认值对它无效 ——
+        # 所以只要这份配置**没跟过新默认**（`hotkey_default_applied` 不为 True），就把它设成
+        # True 并落盘标记。用户之后自己关掉开关，标记已经是 True，下次不会再被改回来。
+        migrated = False
+        if not cfg.hotkey_default_applied:
+            cfg.hotkey_takeover = True
+            cfg.hotkey_default_applied = True
+            migrated = True
+        # 同一次加载里顺手按显卡代次定 DLSS5 的默认（非 50 系 → 关）
+        if _apply_gpu_defaults(cfg):
+            migrated = True
         # 关键路径留空时按工作区内的内嵌组件补齐并落盘：
         # 这样把 config.json 整个删掉，一键启动依然能自建出完整可用配置。
         # **必须 deep=False**：默认的 deep=True 会扫遍所有盘符找 XXMI/乳摇/官方启动器/
         # migoto loader —— 实测这一行让"config 已存在"的加载路径多花 6.93 秒，
         # 而从零分支（上面那两处）反而是快的，正好造成"从零启动慢、之后快"的错觉
         # （2026-10-01 实测定位：窗口要等到 9.8 秒才可见）。缺的字段交给后台预热补。
-        if cfg.autofill(deep=False):
+        if cfg.autofill(deep=False) or migrated:
             try:
                 cfg.save(path)
             except OSError:

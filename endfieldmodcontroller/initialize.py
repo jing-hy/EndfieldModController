@@ -568,6 +568,53 @@ def _check_dlss5_preset(config: AppConfig, report: Report, log: Callable[[str], 
     report.action(f"增补 {preset_path.name}（不覆盖 ReShade 写的内容）")
 
 
+def _check_dlss5_gpu_support(config: AppConfig, report: Report,
+                             log: Callable[[str], None] | None) -> None:
+    """**按显卡代次决定 DLSS5 能不能用**（非 RTX 50 系 → 自动关掉，也不给手动开）。
+
+    用户 2026-10-01 要求：「**开启时检测机器，如果不是 50 系就默认关 dlss5，开启 dlss5 的
+    时候弹窗说明拒绝**」。理由：DLSS5 首发只支持 RTX 50 系，40 系及更早的机器上它一帧都
+    出不来（NGX 回 `0xBAD00001` FeatureNotSupported，见 lesson `0mup6bvc`），默认开着只会
+    让人以为装坏了 —— 而那台机器上所有"排查建议"都是白折腾。
+
+    这里**永远判 ok=True**：它不是用户的故障（硬件支持范围问题），不需要"待处理"；
+    真发现开关还开着就顺手关掉（`fixed` 语义），并在消息里说清为什么。
+    """
+    from . import deviceinfo
+
+    try:
+        supported, gpu, reason = deviceinfo.dlss5_supported()
+    except Exception as exc:  # noqa: BLE001
+        report.add("dlss5:gpu_support", True, f"读不到设备信息（{exc}）—— 跳过显卡代次检查")
+        return
+    if supported:
+        report.add("dlss5:gpu_support", True, f"满足 DLSS5 硬件前提：{gpu}")
+        return
+    turned_off = False
+    if getattr(config, "dlss5_addon_enabled", True):
+        config.dlss5_addon_enabled = False
+        try:
+            config.save()
+        except (OSError, ValueError):
+            # ValueError = 这份 config 还没落过盘（没有 _config_path）——
+            # 自检不能因为"存不下去"就崩，内存里已经改掉了，行为是对的。
+            pass
+        try:
+            from . import launcher
+
+            launcher.set_component_addons(config, "dlss5", False)
+            launcher.configure_dlss5_injection(config, enabled=True)
+        except Exception:  # noqa: BLE001 - 关不掉文件不影响判词
+            pass
+        turned_off = True
+        _log(log, f"DLSS5 已自动关闭：{gpu} —— {reason}")
+    report.add(
+        "dlss5:gpu_support",
+        True,
+        (f"{reason}　" + ("已自动关闭 DLSS5 开关。" if turned_off else "DLSS5 开关保持关闭。")),
+    )
+
+
 def _check_dlss5_ngx_consumer(config: AppConfig, report: Report,
                               log: Callable[[str], None] | None) -> None:
     """有没有第三方在**截获 NGX**（目前已知的是 OptiScaler）—— **有就自动处理掉**。
@@ -1683,6 +1730,8 @@ def ensure_all(config: AppConfig, log: Callable[[str], None] | None = None) -> d
     _check_dlss5_preset(config, report, log)
     # NGX 消费者检查：检测到第三方截获（OptiScaler）就**自动移走**（用户要求"自动检测处理"，
     # 不是写一句说明让用户自己看日志）
+    # 显卡代次决定 DLSS5 能否使用（非 50 系 → 自动关掉开关）
+    _check_dlss5_gpu_support(config, report, log)
     _check_dlss5_ngx_consumer(config, report, log)
     # 面板合成键有没有和别的 addon 快捷键撞车（F6/F7 撞车事故的兜底检查）
     _check_panel_hotkey_conflicts(config, report, log)

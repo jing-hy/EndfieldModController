@@ -129,6 +129,22 @@ Windows 桌面程序（Python + PyWebview），单文件 exe，**零配置启动
 
 若是第三方 NGX 注入器（OptiScaler）截走 NGX，程序会**自动备份移走**它（见上表「NGX 冲突自动处理」）。
 
+### 「整合 Mod 快捷键」与 DLSS5 的默认值
+
+**「整合 Mod 快捷键」默认开启**（`config.hotkey_takeover`，2026-10-01 用户要求「把快捷键整合
+设为默认开启」）：装完即用，不必先去设置页找开关。老配置里存着显式的 `false` —— 光改默认值
+对它们无效，所以 `AppConfig.load()` 里做**一次性迁移**（`hotkey_default_applied` 标记）：
+迁移过一次之后，用户自己关掉就不会再被改回来。开关关掉时仍然完全维持原样（Mod 自带按键与
+自带控制菜单照常），面板装不上时程序**拒绝锁键**并说明原因。
+
+**DLSS5 的默认开关按显卡代次决定**（2026-10-01 用户要求「开启时检测机器，如果不是 50 系就
+默认关 dlss5，开启 dlss5 的时候弹窗说明拒绝」）：DLSS5 神经渲染**首发只支持 RTX 50 系**，
+40 系及更早的机器上 NGX 直接回 `0xBAD00001`（FeatureNotSupported），面板永远 `成功NR帧 0`。
+所以：`deviceinfo.dlss5_supported()` 是**唯一判据**（迁移、开关闸门、自检三处共用），
+非 50 系 → 默认关掉（`dlss5_gpu_default_applied` 一次性迁移）；**手动去开会被后端拒绝**
+（`set_component_addon` 返回 `rejected: dlss5_unsupported_gpu`，前端弹窗讲清原因并把开关
+弹回关闭），自检项 `dlss5:gpu_support` 也会如实说明。
+
 ### 面板的合成键协议（以及为什么是 F13..F24）
 
 面板本身不会去改 Mod 的变量 —— 它走一条既有的**合成键协议**：

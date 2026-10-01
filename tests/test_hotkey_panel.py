@@ -315,6 +315,8 @@ class InitializePanelCheckTests(unittest.TestCase):
     def test_check_skips_when_disabled(self) -> None:
         from endfieldmodcontroller import initialize
 
+        # 默认值现在是 True（用户要求默认开启），这条测的是"关掉时跳过"，显式关一下
+        self.config.hotkey_takeover = False
         report = initialize.Report()
         initialize._check_hotkey_panel(self.config, report, None)
         payload = report.to_dict()
@@ -393,6 +395,9 @@ class HotkeySwitchTests(unittest.TestCase):
         self.running_patcher.start()
         self.api = EndfieldModControllerApi(self.config_path)
         self.api.config.selected_mods = [mod["id"] for mod in self.api.scan()["mods"]]
+        # 这条测的是"开关的往返"：默认值现在是 True（用户要求默认开启），
+        # 所以从这里显式关掉、再从"关"开始走一遍开→关。
+        self.api.config.hotkey_takeover = False
         self.api.config.save()
 
     def tearDown(self) -> None:

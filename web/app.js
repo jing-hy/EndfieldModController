@@ -2318,6 +2318,15 @@ function bind() {
     setStatus(`${enabled ? '正在启用' : '正在停用'}${label}…`);
     try {
       const r = await call('set_component_addon', component, enabled);
+      // DLSS5 在非 RTX 50 系的机器上会被**后端拒绝**（根本出不了帧）——
+      // 这时把开关弹回关闭状态，并把原因讲清楚，而不是让它"看着是开的"。
+      if (r && r.ok === false && r.rejected) {
+        logLine(`✗ ${label}无法启用：${r.message || ''}`);
+        setStatus(`${label}无法启用`);
+        await showAlert(r.message || '这台机器不支持 DLSS5 神经渲染。', '无法启用 DLSS5');
+        await refreshFromState();
+        return;
+      }
       logLine(`${label}: ${enabled ? '已启用' : '已停用'}（移动 ${(r.moved || []).length} 个文件）`);
       if (r.warning) logLine(`⚠ ${r.warning}`);
       setStatus(`${label}${enabled ? '已启用' : '已停用'}`);

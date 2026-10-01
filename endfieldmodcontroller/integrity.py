@@ -88,16 +88,26 @@ def check_integrity(config: AppConfig) -> dict:
     add("controller_actions", config.controller_dir / "actions.tsv", (config.controller_dir / "actions.tsv").is_file(), "controller actions.tsv")
 
     # 统一面板：只在「整合 Mod 快捷键」打开时才算必检项 —— 关着的时候没有它很正常
-    # （用户在设置里明确不要面板）。开着却没有面板 = 键会被锁死而入口不存在，
-    # 属于致命状态（2026-10-01 的事故），所以这里算 critical。
+    # （用户在设置里明确不要面板）。
+    #
+    # 2026-10-01 语义修正（`hotkey_takeover` 改成**默认开启**之后必须区分两种"缺面板"）：
+    #   ① **环境本来就不支持面板**（没开 ReShade 注入 / 没有 d3d12.dll 底座）→ 这时它
+    #      只是"用不上"，`resolve_hotkey_takeover` 会拒绝锁键、Mod 原键照常生效，
+    #      **不是故障**，不能报 critical —— 否则每个不用 xxmi_extra 注入的用户一装就报红。
+    #   ② **环境支持、面板该在却不在**（addon 文件缺 / actions.tsv 缺）→ 这才会导致
+    #      "键被锁死而入口不存在"，算 critical，走「修复」就能补齐。
     if getattr(config, "hotkey_takeover", False):
         status = reshade_integration.panel_status(config)
-        add(
-            "hotkey_panel",
-            Path(status["addon"]),
-            bool(status["addon_present"] and status["actions_present"]),
-            "统一 Mod 控制面板（整合 Mod 快捷键已打开）",
-        )
+        present = bool(status["addon_present"] and status["actions_present"])
+        if present:
+            add("hotkey_panel", Path(status["addon"]), True,
+                "统一 Mod 控制面板（整合 Mod 快捷键已打开）")
+        elif status.get("possible"):
+            add("hotkey_panel", Path(status["addon"]), False,
+                "统一 Mod 控制面板（整合 Mod 快捷键已打开）")
+        else:
+            add("hotkey_panel", Path(status["addon"]), True,
+                "统一 Mod 控制面板 —— 当前注入方式用不上面板，已保持 Mod 自带快捷键不被锁")
 
     critical_failures = [check for check in checks if check.critical and not check.ok]
     return {
