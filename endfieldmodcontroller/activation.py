@@ -18,6 +18,15 @@ from . import fsutil
 MANAGED_DIR_NAME = "EndfieldModControllerManaged"
 
 
+class LibraryGuardError(RuntimeError):
+    """staging 与用户的 **Mod 库** 重叠时抛这个 —— 拒绝执行，宁可什么都不做。
+
+    用户 2026-10-01 硬规则：「任何情况（除用户手动点击移出库外）都不要动用户的 mod 库
+    （包括换位置）」。清理 staging 是无条件 `rmtree`，一旦 staging 就是库（或包含库），
+    那就是把用户的 Mod 全删掉。调用方（`api.prepare` 等）应当把它转成一句可读的界面提示。
+    """
+
+
 def _log(log: Any, message: str) -> None:
     """可选的回调日志；调用方没给就静默忽略。"""
     if log is None:
@@ -212,7 +221,14 @@ def import_manual_mods(config: Any, log: Any = None) -> dict[str, Any]:
             result["matched"].append(target.name)
             _log(log, f"手动 Mod 已在库中: {src.name} -> {target.name}")
 
-        # 从 staging 移除手动目录，避免与随后的 MC_ staging 形成同角色成对
+        # 从 staging 移除手动目录，避免与随后的 MC_ staging 形成同角色成对。
+        # ⚠️ 但**绝不**碰用户的 Mod 库：如果这个"手动目录"其实在库里（staging 与库重叠的
+        # 错误配置），删它就等于删用户的 Mod —— 直接跳过并说明（用户 2026-10-01 硬规则）。
+        guard = fsutil.library_conflict(library_root, src)
+        if guard:
+            result["warnings"].append(f"保留 {src.name}：{guard}")
+            _log(log, f"WARN 不动 Mod 库，保留 {src.name}（{guard}）")
+            continue
         try:
             shutil.rmtree(src)
             result["actions"].append(f"从 Mods 移除手动目录「{src.name}」（改由本程序统一 staging）")
@@ -306,8 +322,12 @@ def apply_default_action_states(user_ini_path: Path, manifest: dict[str, Any]) -
         mc_core.set_user_var(user_ini_path, controller_ns, f"mc_state_{wire_id}", str(index))
 
 
-def cleanup_staging(staging_root: Path) -> list[str]:
-    """Remove EndfieldModController-managed active mods and controller files."""
+def cleanup_staging(staging_root: Path, library_root: Path | None = None) -> list[str]:
+    """删掉控制器自己在 staging 里的产物（manifest 记录的 + `MC_*` + probe）。
+
+    ``library_root`` 传了就走"不要动 Mod 库"护栏：**清单里指向库的路径一律跳过**
+    （用户 2026-10-01 硬规则：「任何情况都不要动用户的 mod 库」）。
+    """
     staging_root = Path(staging_root)
     removed: list[str] = []
     managed = staging_root / MANAGED_DIR_NAME
@@ -316,6 +336,8 @@ def cleanup_staging(staging_root: Path) -> list[str]:
         try:
             for target in json.loads(manifest.read_text(encoding="utf-8")):
                 path = Path(target)
+                if not fsutil.is_library_safe(library_root, path):
+                    continue
                 if path.exists():
                     shutil.rmtree(path, ignore_errors=True)
                     removed.append(str(path))
@@ -323,7 +345,7 @@ def cleanup_staging(staging_root: Path) -> list[str]:
             pass
     for name in ("MC_Controller", "_endfieldmodcontroller_managed", "EndfieldModControllerManaged"):
         path = staging_root / name
-        if path.exists():
+        if path.exists() and fsutil.is_library_safe(library_root, path):
             shutil.rmtree(path, ignore_errors=True)
             removed.append(str(path))
     probe = staging_root / "MC_Probe.ini"
@@ -341,9 +363,17 @@ def _stage_empty(library_root: Path, staging_root: Path, runtime_dir: Path,
     """
     cleared = 0
     keep = {"DISABLED"}
+    # 同样先过"不要动 Mod 库"这道闸（这个分支会清空 staging 下**所有**目录）
+    conflict = fsutil.library_conflict(library_root, staging_root)
+    if conflict:
+        raise LibraryGuardError(
+            f"拒绝清空 staging：{conflict}。这会动到你的 Mod 库，已中止（库内文件一个都没动）。"
+        )
     try:
         for child in list(staging_root.iterdir()):
             if child.is_dir() and child.name not in keep:
+                if not fsutil.is_library_safe(library_root, child):
+                    continue                      # 双保险：绝不删库里的任何东西
                 shutil.rmtree(child, ignore_errors=True)
                 cleared += 1
             elif child.is_file() and child.name.startswith("MC_"):
@@ -408,6 +438,21 @@ def stage_and_prepare(
     staging_root = staging_root.resolve()
     runtime_dir = runtime_dir.resolve()
 
+    # ⚠️ **「不要动用户的 Mod 库」前置闸**（用户 2026-10-01 定的硬规则：
+    #    「任何情况（除用户手动点击移出库外）都不要动用户的 mod 库（包括换位置）」）。
+    #    staging 与库只要有重叠（相同 / staging 在库内 / 库在 staging 内），
+    #    下面那段"无条件清空 staging"就是把库删光 —— 一条外部反馈正是这么丢的 Mod
+    #    （「重装的时候还把我 mod 都删完了，还好我备份了」）。
+    #    所以这里**直接拒绝执行**，一个文件都不动，并说清怎么改配置。
+    conflict = fsutil.library_conflict(library_root, staging_root)
+    if conflict:
+        raise LibraryGuardError(
+            f"拒绝 staging：{conflict}。这会动到你的 Mod 库，已中止（库内文件一个都没动）。\n"
+            f"请到设置页把「Staging Mods 目录」改成**不在 Mod 库里、也不包含 Mod 库**的位置"
+            f"（默认的内置 XXMI 就是安全的：runtime\\builtin\\XXMI\\EFMI\\Mods），"
+            f"Mod 库（{library_root}）保持原样。"
+        )
+
     if selected_ids is not None and not all_when_empty:
         if not list(selected_ids):
             return _stage_empty(library_root, staging_root, runtime_dir, user_ini_path)
@@ -423,12 +468,14 @@ def stage_and_prepare(
     if previous_manifest.is_file():
         try:
             for old_target in json.loads(previous_manifest.read_text(encoding="utf-8")):
+                if not fsutil.is_library_safe(library_root, Path(old_target)):
+                    continue          # 清单里的路径若指向库（历史配置变化），一律不删
                 shutil.rmtree(Path(old_target), ignore_errors=True)
         except Exception:
             pass
     for legacy_name in ("_endfieldmodcontroller_managed", "EndfieldModControllerManaged"):
         legacy = staging_root / legacy_name
-        if legacy.exists():
+        if legacy.exists() and fsutil.is_library_safe(library_root, legacy):
             shutil.rmtree(legacy, ignore_errors=True)
     # 无条件清空所有既存的 MC_* 产物：不能只信 manifest —— manifest 丢失时（例如
     # 内置 XXMI 是后复制进来的）旧产物会留在原地，与本次 staging 形成**同角色成对**，
@@ -436,6 +483,8 @@ def stage_and_prepare(
     try:
         for child in staging_root.iterdir():
             if child.name.startswith("MC_") and child.is_dir():
+                if not fsutil.is_library_safe(library_root, child):
+                    continue
                 shutil.rmtree(child, ignore_errors=True)
     except OSError:
         pass
@@ -443,10 +492,15 @@ def stage_and_prepare(
     # 唯一管理者：这里最终只应该存在"用户在 Mod 库勾选的那些"的 MC_* 产物。
     # 2026-09-27 踩过两次：残留的旧 MC_ 或手动放的 Mod 会与本次 staging 形成
     # **同角色成对**，EFMI 同时加载两个同角色 Mod 直接崩游戏。
+    #
+    # ⚠️ 但**永远不许**因为这条规则碰到用户的 Mod 库（用户 2026-10-01 硬规则）：
+    # 每个待删目录都先过 `is_library_safe`，库内/库本身/库的上级一律跳过。
     keep = {"MC_Controller", ADDON_DISABLED_DIR if False else "DISABLED"}
     try:
         for child in list(staging_root.iterdir()):
             if not child.is_dir() or child.name in keep:
+                continue
+            if not fsutil.is_library_safe(library_root, child):
                 continue
             if child.name in ("_endfieldmodcontroller_managed", "EndfieldModControllerManaged", "ModeControllerManaged"):
                 shutil.rmtree(child, ignore_errors=True)

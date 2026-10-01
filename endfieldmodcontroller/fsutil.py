@@ -106,3 +106,42 @@ def write_text_atomic(
             pass
         raise
     return path
+
+
+# ---------------------------------------------------------------------------
+# 「不要动用户的 Mod 库」护栏（用户 2026-10-01 定的硬规则）
+# ---------------------------------------------------------------------------
+def library_conflict(library_root: Path | None, target: Path | None) -> str:
+    """目标路径与 Mod 库的关系：``""`` = 安全；否则返回**危险原因**。
+
+    用户原话：「**任何情况（除用户手动点击移出库外）都不要动用户的 mod 库（包括换位置）**」。
+    危险有三种，任何一种都不许删/移：
+
+    * 目标**就是**库本身（`library\\`）；
+    * 目标**在库里面**（`library\\某个 Mod`）—— 删它就是删用户的 Mod；
+    * 目标是库的**上级目录**（例如把 `runtime\\` 或数据根当成 staging 去清空）—— 会连库一起端掉。
+
+    为什么要有它：清理 staging、收编手动 Mod、安装/重装组件这些流程都会 `rmtree`，
+    而一旦用户的 `library_dir` 与 `staging_mods_dir` 相同或互相嵌套（老教程让人把 Mod
+    放进 `EFMI\\Mods`，很容易配成这样），清理 staging 就等于**把库删光**
+    （2026-10-01 一条外部反馈：「重装的时候还把我 mod 都删完了，还好我备份了」）。
+    """
+    if library_root is None or target is None:
+        return ""
+    try:
+        lib = Path(library_root).resolve()
+        tgt = Path(target).resolve()
+    except OSError:
+        return ""
+    if lib == tgt:
+        return f"目标就是 Mod 库本身（{lib}）"
+    if lib in tgt.parents:
+        return f"目标在 Mod 库内（{tgt}）"
+    if tgt in lib.parents:
+        return f"目标是 Mod 库的上级目录（{tgt} 包含了 {lib}）"
+    return ""
+
+
+def is_library_safe(library_root: Path | None, target: Path | None) -> bool:
+    """``library_conflict(...) == ""`` 的可读写法。"""
+    return not library_conflict(library_root, target)

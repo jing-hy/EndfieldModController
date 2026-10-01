@@ -451,6 +451,16 @@ def _safe_install_dir(library_root: Path, raw: object) -> Path:
     resolved = (root / candidate).resolve()
     if resolved == root or not resolved.is_relative_to(root):
         raise ValueError(f"install_dir 必须位于 Mod 库之内：{name!r}")
+    # **只允许装到库的 `_deps\` 子目录里**（用户 2026-10-01 硬规则：「任何情况（除用户手动
+    # 点击移出库外）都不要动用户的 mod 库」）。下游紧接着就是 `shutil.rmtree(install_dir)`：
+    # 若清单里写一个普通 Mod 目录名（例如 `陈/夏日`），上面那条"必须在库内"根本挡不住，
+    # 这一行就等于把用户放进库里的 Mod 删掉。依赖清单本来就是全部装 `_deps\` 下
+    # （见 dependencies.json），所以把可写范围收紧到那里既安全又不影响功能。
+    deps_root = (root / "_deps").resolve()
+    if not resolved.is_relative_to(deps_root):
+        raise ValueError(
+            f"install_dir 只允许位于 <Mod 库>\\_deps\\ 之内（不能是库里的普通 Mod 目录）：{name!r}"
+        )
     return resolved
 
 

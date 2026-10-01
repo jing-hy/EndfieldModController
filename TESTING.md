@@ -302,3 +302,40 @@
 | 118 ★★ | 默认状态（拨钮关闭）下，勾选同角色的第二个 Mod | 第一个**自动取消**（互斥生效）—— 这是原有行为 |
 | 119 ★★ | 打开「强行关闭角色 Mod 互斥」→ 再勾选同角色的第二个 Mod | 两个**都被勾上**（第一个不再被取消）；库页上方提示变成「⚠ 同角色互斥已关闭…」；点「生成控制器」后 `…\EFMI\Mods\` 里**同时出现两个** `MC_<角色>_*` 产物（以前只会有一个） |
 | 120 ★ | 关掉这个拨钮 → 重新「生成控制器」 | 恢复互斥：同角色只留一个产物；提示变回「同角色自动互斥…」。⚠️ 同角色两个同时生效**常常会崩游戏**，只在确认它们改的不是同一批资源时才开 |
+
+## V. 2026-10-01 追加：乳摇角色参数「自行拉取」+ 模块自维护（未发版）
+
+> 用户原话：「**在作者改之前，mod 管理器自行拉取新的参数文件**」（起因：乳摇插件的上游 Release 停在 v2.3.5，角色数据只有 19 条、**没有提弗洛斯**，而仓库 main 已有 20 条；已给上游提了 issue #5 建议发新版）。
+>
+> 落地：新模块 `endfieldmodcontroller/sbm_data_sync.py`，挂在 `api._warm_up()` 后台线程（**非阻塞、24 小时节流、失败静默**）：
+> ① 从仓库拉 `SecondaryMotion/data/characters.default.json` 与 `SecondaryMotion/presets/Default.json`（优先 GitHub API，失败回退网页 raw）；
+> ② **只补本地缺失的角色**——本地已有的角色（你可能调过幅度/频率）**原样保留**；上游条目比本地少则整条跳过（防回退/坏数据）；
+> ③ **绝不碰 `presets/User.json`**（你自己的预设）；
+> ④ 落点三处：**游戏目录**（插件实际读的）、随包 `assets\secondary_motion`（下次铺给新用户）、乳摇工具目录（管理器读的），改写前留一份 `.mc.bak.<时间戳>` 备份；
+> ⑤ 来源可配：`config.sbm_data_source` 留空 = 上游默认，也可填 `owner/repo@分支`（例如你自己 fork 的仓库，改完 push 即生效、不用等我们发版）。
+
+| # | 操作 | 预期结果 |
+| --- | --- | --- |
+| 121 ★★ | 把游戏目录 `…\Endfield Game\SecondaryMotion\data\characters.default.json` 里的 `chr_0034_typhoea`（提弗洛斯）那段删掉 → 重启管理器（或点「一键启动」） | 日志出现「**乳摇数据补充：characters.default.json 新增 1 个角色**」；再看那个文件，提弗洛斯**回来了**，旁边多了一份 `characters.default.json.mc.bak.<时间戳>` 备份；**你调过的其它角色数值没有被改动** |
+| 122 ★ | 断网后启动管理器 | 日志只有一行「乳摇数据检查跳过…」；界面照常、不卡首屏、不影响启动（失败静默 + 状态落 `runtime\_state\sbm_data_check.json`，24 小时内不会反复重试打网络） |
+| 123 ★ | 把 `config.json` 的 `"sbm_data_source"` 填成自己的仓库（如 `jing-hy/Arknights-Endfield-Plugin-Secondary-bodyphysics@main`）→ 重启管理器 | 拉取来源变成你自己的仓库（日志/状态里的 `repo` 跟着变）—— 以后你在自己仓库里改角色数据、push 即生效 |
+
+## W. 2026-10-01 追加：**Mod 库保护**（数据安全红线，未发版）
+
+> 用户硬规则原话：「**任何情况（除用户手动点击移出库外）都不要动用户的 mod 库（包括换位置）**」。
+> 起因是一条外部反馈：「**重装的时候还把我 mod 都删完了**（还好我备份了）」—— 根因是
+> `stage_and_prepare` 会**无条件清空 staging 目录下所有内容**（含"非 `MC_` 前缀"的手动目录），
+> 而一旦 `library_dir` 与 `staging_mods_dir` **相同或互相嵌套**（老教程让人把 Mod 放进 EFMI 的
+> Mods 目录，很容易配成这样），清理 staging 就等于**把库删光**。
+>
+> 加固（三处）：
+> ① `fsutil.library_conflict()` 统一判据（目标=库 / 在库内 / 是库的上级 → 一律危险）；
+> ② `stage_and_prepare`、`_stage_empty`、`cleanup_staging`、`import_manual_mods` 全部先过这道闸：**staging 与库有重叠就直接拒绝执行**（抛 `LibraryGuardError`，界面弹「保护 Mod 库」并写明怎么改配置），逐项删除前还会再检查一次（双保险）；
+> ③ `_safe_install_dir` 收紧：依赖只允许装到 `<库>\_deps\` 之内 —— 否则清单里写一个普通 Mod 目录名，下游那句 `rmtree(install_dir)` 就把用户的 Mod 删了。
+
+| # | 操作 | 预期结果 |
+| --- | --- | --- |
+| 124 ★★ | 设置页把「Staging Mods 目录」**故意改成和 Mod 库同一个目录**（或库的上级/子目录）→ 保存 → 点「生成控制器」 | 弹「**保护 Mod 库**」并说明冲突原因与怎么改；**库里一个 Mod 都没少**（自己去文件夹确认）；设置页自检也会提示「Staging Mods 目录与 Mod 库重叠」 |
+| 125 ★★ | 承接上一步，改成**默认的内置 XXMI 目录**（`runtime\builtin\XXMI\EFMI\Mods`）→ 点「生成控制器」 | 恢复正常：控制器产物生成、Mod 库原样不动 |
+| 126 ★ | 正常使用中随时检查 | 程序**永不会**删除/移动你的 Mod 库 —— 唯一例外是你自己在卡片「⋯」里点「移出 Mod 库」（那是移到 `runtime\backups\mod-trash\`，可找回） |
+| 127 ★ | （开发向）在 `dependencies.json` 里把某项 `install_dir` 改成库里的普通目录名（如 `陈/夏日`）→ 触发该依赖更新 | 被拒绝并报错（`install_dir 只允许位于 <Mod 库>\_deps\ 之内`），**不会** `rmtree` 掉那个目录 |

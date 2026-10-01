@@ -99,6 +99,29 @@ class EndfieldModControllerApi:
                 launcher._append_log(self.config, f"角色表检查跳过: {exc}")
             except Exception:  # noqa: BLE001
                 pass
+        # 乳摇（SBM）角色参数：上游 Release 停在 v2.3.5（19 条，**没有提弗洛斯**），
+        # 而仓库 main 已有 20 条。用户 2026-10-01 要求：「**在作者改之前，mod 管理器自行
+        # 拉取新的参数文件**」。同样后台跑、24 小时节流、失败静默，而且**只补缺失的角色**
+        # （不覆盖用户调过的幅度/频率），来源可用 config.sbm_data_source 指向自己的 fork。
+        try:
+            from . import sbm_data_sync
+
+            report = sbm_data_sync.sync(
+                self.config,
+                log=lambda message: launcher._append_log(self.config, message),
+            )
+            if report.get("changed"):
+                names = "、".join(str(x) for x in (report.get("added") or [])[:6])
+                launcher._append_log(
+                    self.config,
+                    f"乳摇角色数据已补充：新增 {len(report.get('added') or [])} 个角色"
+                    f"（{names}），来源 {report.get('repo')}@{report.get('ref')}",
+                )
+        except Exception as exc:  # noqa: BLE001
+            try:
+                launcher._append_log(self.config, f"乳摇数据检查跳过: {exc}")
+            except Exception:  # noqa: BLE001
+                pass
         # 公告 / 异常状态预警：仓库里的 alerts.json（走 api.github.com，失败静默、不吃启动时间）。
         # 这里只取**未读公告**（info/warning，弹一次、不锁启动）；critical 留给点「一键启动」时
         # 由 prelaunch_alerts() 现拉现弹（每次都弹 + 强制停留）。
@@ -637,16 +660,32 @@ class EndfieldModControllerApi:
                 "user_ini_path": str(self.config.user_ini_path),
                 "reshade_addon": "",
             }
-        result = activation.stage_and_prepare(
-            self.config.library_path,
-            self.config.staging_mods_path,
-            self.config.runtime_path,
-            selected_ids=active_ids,
-            # 默认 False：不改写 Mod 自带热键（见 activation.stage_and_prepare 的说明）
-            hotkey_takeover=bool(getattr(self.config, "hotkey_takeover", False)),
-            # 默认 False：保留同角色互斥；用户打开"强行关闭互斥"拨钮后放行同角色多个 Mod
-            allow_same_character=bool(getattr(self.config, "allow_same_character_mods", False)),
-        )
+        try:
+            result = activation.stage_and_prepare(
+                self.config.library_path,
+                self.config.staging_mods_path,
+                self.config.runtime_path,
+                selected_ids=active_ids,
+                # 默认 False：不改写 Mod 自带热键（见 activation.stage_and_prepare 的说明）
+                hotkey_takeover=bool(getattr(self.config, "hotkey_takeover", False)),
+                # 默认 False：保留同角色互斥；用户打开"强行关闭互斥"拨钮后放行同角色多个 Mod
+                allow_same_character=bool(getattr(self.config, "allow_same_character_mods", False)),
+            )
+        except activation.LibraryGuardError as exc:
+            # "不要动用户的 Mod 库"（用户 2026-10-01 硬规则）：staging 与库重叠时拒绝执行。
+            # 这里转成一句可读的界面提示，而不是抛一堆栈给前端。
+            launcher._append_log(self.config, f"已拒绝 staging（保护 Mod 库）: {exc}")
+            return {
+                "ok": False,
+                "message": str(exc),
+                "blocked": "library_overlap",
+                "patch_count": 0,
+                "action_count": 0,
+                "controller_dir": str(self.config.controller_dir),
+                "reshade_dir": "",
+                "user_ini_path": str(self.config.user_ini_path),
+                "reshade_addon": "",
+            }
         self.config.selected_mods = list(active_ids)
         self.config.save()
         reshade_info = launcher.prepare_reshade_runtime(self.config, Path(result["controller_dir"]))
@@ -1367,6 +1406,16 @@ class EndfieldModControllerApi:
         from . import modfix
 
         return {"tool": modfix.tool_status(self.config)}
+
+    def sbm_data_status(self) -> dict[str, Any]:
+        """乳摇（SBM）角色参数现状：本地几个角色、来源是谁、上次检查补了什么。
+
+        用户 2026-10-01 要求「在作者改之前，mod 管理器自行拉取新的参数文件」——
+        这条接口给界面/排查用（真实拉取在后台预热线程里，24 小时节流）。
+        """
+        from . import sbm_data_sync
+
+        return sbm_data_sync.status(self.config)
 
     def mod_more_info(self, mod_id: str) -> dict[str, Any]:
         """「更多」菜单要显示的信息：修过没、能不能回滚、修复工具在不在。"""
@@ -2277,7 +2326,8 @@ class EndfieldModControllerApi:
         warnings = []
         managed = self.config.managed_mods_path
         try:
-            actions.extend(f"removed {item}" for item in activation.cleanup_staging(self.config.staging_mods_path))
+            actions.extend(f"removed {item}" for item in activation.cleanup_staging(
+                self.config.staging_mods_path, self.config.library_path))
         except OSError as exc:
             errors.append(f"remove managed staging failed: {exc}")
         if managed.exists():

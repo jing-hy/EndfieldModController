@@ -934,6 +934,16 @@ async function scan() {
 async function prepare() {
   setStatus('生成控制器中...');
   state.lastPrepare = await call('prepare', Array.from(state.selected));
+  // "不要动用户的 Mod 库"（2026-10-01 硬规则）：staging 与库重叠时后端会**拒绝执行**
+  // 并回 blocked —— 这里要把原因原样说给用户（否则只会看到"动作 0 个"摸不着头脑）。
+  if (state.lastPrepare && state.lastPrepare.ok === false) {
+    $('launch-status').textContent = JSON.stringify(state.lastPrepare, null, 2);
+    setStatus('已拒绝生成控制器（保护你的 Mod 库）');
+    await showAlert(state.lastPrepare.message || '已拒绝执行：这会动到你的 Mod 库。', '保护 Mod 库');
+    const s0 = await call('get_state');
+    refreshPaths(s0.config);
+    return;
+  }
   $('launch-status').textContent = JSON.stringify(state.lastPrepare, null, 2);
   setStatus(`控制器已生成，动作 ${state.lastPrepare.action_count} 个`);
   const s = await call('get_state');

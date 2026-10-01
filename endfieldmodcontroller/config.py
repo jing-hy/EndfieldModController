@@ -129,6 +129,11 @@ class AppConfig:
     # 用于"同角色但资源不冲突"的搭配（例如一个改服装、一个只改贴图）。
     # 默认 False：同角色两个 Mod 同时生效**常会崩游戏**，只在确认不冲突时才开。
     allow_same_character_mods: bool = False
+    # **乳摇（SBM）角色参数的拉取来源**（用户 2026-10-01 要求：「在作者改之前，mod 管理器
+    # 自行拉取新的参数文件」）。留空 = 上游仓库默认（`Sp1cHless/...Secondary-bodyphysics@main`）；
+    # 也可以填 `owner/repo` 或 `owner/repo@分支`（例如你自己 fork 的仓库 —— 在自己的仓库里
+    # 改角色数据、push 即生效，不用等我们发版）。只**补缺失的角色**，不覆盖你调过的数值。
+    sbm_data_source: str = ""
     dependency_manifest: str = "dependencies.json"
     launch_extra_args: list[str] = field(default_factory=list)
     selected_mods: list[str] = field(default_factory=list)
@@ -502,6 +507,17 @@ class AppConfig:
             problems.append(f"Official launcher not found: {self.official_launcher}")
         if self.reshade_dll and (self.reshade_dll_path is None or not self.reshade_dll_path.is_file()):
             problems.append(f"ReShade DLL not found: {self.reshade_dll}")
+        # **绝不允许 staging 与 Mod 库重叠**（用户 2026-10-01 硬规则：「任何情况都不要动
+        # 用户的 mod 库」）。清理 staging 是无条件 rmtree，一旦两者相同/互相嵌套，
+        # 就是把用户的 Mod 全删掉 —— 一条外部反馈正是这么丢的库。
+        from . import fsutil      # 局部导入，避免 config ↔ fsutil 的模块级循环引用
+
+        conflict = fsutil.library_conflict(self.library_path, self.staging_mods_path)
+        if conflict:
+            problems.append(
+                f"Staging Mods 目录与 Mod 库重叠：{conflict}；"
+                f"请把 staging 改到 Mod 库之外（默认的内置 XXMI 目录是安全的）"
+            )
         return problems
 
 
