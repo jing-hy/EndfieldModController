@@ -1846,15 +1846,28 @@ async function restoreD3D12Mode() {
 async function launchMigotoLoader() {
   // Official XXMI Launcher GUI mode.  Do not use the custom 3DMigoto loader,
   // do not auto-start the game, and do not write proxy DLLs into the game dir.
+  // 留空**不再直接拦下**：后端会自动回落到内置 XXMI（没有就下载）。
+  // 只有当内置那份也没装、且用户也没填路径时，后端才会抛错 —— 下面统一兜住并讲清去哪装。
   if (!state.config.xxmi_launcher) {
-    await showAlert('还没有配置 XXMI Launcher 路径。请到设置页选择 XXMI Launcher.exe，或点击“自动检测 XXMI”。');
-    showTab('settings');
-    return;
+    logLine('未填 XXMI 路径 —— 将使用内置那份（没有会自动下载安装）');
   }
   if (!await showConfirm('打开官方 XXMI Launcher（EFMI 图形界面）？\n不会自动启动游戏，也不会使用自定义 Loader。')) return;
   openLog();
   setStatus('正在打开官方 XXMI Launcher...');
-  const result = await call('launch_official_gui');
+  let result;
+  try {
+    result = await call('launch_official_gui');
+  } catch (err) {
+    const reason = err && err.message ? err.message : String(err);
+    logLine(`✗ 打开 XXMI 失败：${reason}`);
+    setStatus('打开 XXMI 失败：' + reason);
+    await showAlert(
+      `打开 XXMI 失败：\n${reason}\n\n到「依赖」页点「自动安装/更新」装好内置 XXMI，`
+      + '或在设置页填上你自己的 XXMI Launcher 路径后重试。',
+      '打开失败'
+    );
+    return;
+  }
   $('launch-status').textContent = JSON.stringify(result, null, 2);
   setStatus('官方 XXMI Launcher 已打开；请在 EFMI 界面里启动游戏');
 }
@@ -2177,7 +2190,25 @@ function bind() {
       }
 
       logLine('② 拉起 XXMI Launcher，请在它的界面里点 Start 启动游戏');
-      const launched = await call('launch_official_gui');
+      // ⚠ 2026-10-01：这一步必须自己兜住异常。以前没包 try/catch，`launch_official_gui`
+      //   一抛错（例如 "没有配置可用的 XXMI Launcher 路径"）就冒泡出去，流程停在半路、
+      //   界面看着像卡死。现在失败就地讲清"哪一步错了 + 去哪修"，然后干净退出。
+      let launched;
+      try {
+        launched = await call('launch_official_gui');
+      } catch (err) {
+        const reason = err && err.message ? err.message : String(err);
+        logLine(`   ✗ 拉起 XXMI 失败：${reason}`);
+        logLine('   处理办法：到「依赖」页点「自动安装/更新」把内置 XXMI 装好'
+          + '（或在设置页填你自己的 XXMI Launcher 路径），然后重新点「一键启动」。');
+        setStatus('启动失败：' + reason);
+        await showAlert(
+          `拉起 XXMI 失败：\n${reason}\n\n到「依赖」页点「自动安装/更新」把内置 XXMI 装好，`
+          + '或在设置页填上你自己的 XXMI Launcher 路径，然后重新点「一键启动」。',
+          '启动失败'
+        );
+        return { needsSecondStart: false, gameReason: '启动失败：' + reason };
+      }
       logLine(`   ${launched.message || 'XXMI Launcher 已打开'}`);
       logLine('进游戏后按 Home 打开 ReShade 面板检查插件。');
       setStatus('已拉起 XXMI，请在它的界面点 Start');

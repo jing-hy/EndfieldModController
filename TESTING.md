@@ -445,3 +445,8 @@
 | 159 ★★ | 在资源管理器里**手动删掉** Mod 库里某个已被勾选的 Mod 目录 → 点「一键启动」 | **不再误报"崩溃风险"**：日志里出现「勾选清理：Mod 库里有 N 个勾选项已经不存在…→ 已从勾选里去掉」；库页显示剩下的勾选；`EFMI\Mods` 里那个已删 Mod 的 `MC_*` 也一起消失（不让幽灵 Mod 继续被游戏加载）；**其余 Mod 的文件一个都没少** |
 | 160 ★ | 接 159：把库里的 Mod **全部**删掉 → 点「一键启动」 | 不再弹冲突/崩溃风险弹窗；日志写明"没有勾选任何 Mod → 已清空 staging"；`mod_conflicts.json` 被作废（不会拿着上次的结论吓人） |
 | 161 ★ | 崩一次（皮肤冲突）后导出诊断包 → 打开 `summary.txt` / 看包内文件 | 包里含 `dlss5\endfieldmodcontroller.addon64`、`dlss5\actions.tsv`、`dlss5\panel_info.txt`、`dlss5\modecontroller.addon.log` —— 一眼能看出"面板装没装、ReShade 加载没加载、当时是否处于接管状态" |
+| 162 ★★ | 把设置页的 XXMI Launcher 路径**清空** → 点「一键启动」 | **不再报「没有配置可用的 XXMI Launcher 路径」**：程序自动回落到内置那份（`runtime\builtin\XXMI\Resources\Bin\XXMI Launcher.exe`）；日志里写明用的是内置；界面照常走到"请在 XXMI 里点 Start" |
+| 163 ★★ | 把内置 XXMI 目录整份改名移走（模拟"压根没装"）+ 路径留空 → 点「一键启动」 | 程序**自动下载安装**内置 XXMI（依赖页/日志能看到下载与解压），然后继续启动流程；**不需要用户手填路径**。只有关掉「使用内置 XXMI/EFMI」时才会提示"请自己填路径" |
+| 164 ★★ | 在 XXMI 里看不到终末地的启动按钮时：**先关掉 XXMI** → 点「一键启动」→ 回头看 XXMI | 自检把三个字段补回去：`Launcher.active_importer = EFMI`、`Launcher.enabled_importers` 含 `EFMI`、`Importers.EFMI.Importer.game_folder = <游戏目录>`；**再打开 XXMI 就能看到终末地的启动按钮**。日志里能看到 `XXMI 游戏目录: 已让 XXMI 指向游戏目录（…）` |
+| 165 ★★ | **XXMI 开着的时候**点「一键启动」 | 日志明确写「XXMI 正开着 —— 它退出时会覆盖配置文件，现在写也会被冲掉，请先关掉 XXMI 再点一次」，**不会假装写成功**（写进去也会被 XXMI 退出时覆盖，这次不再骗自己） |
+| 166 ★ | 把内置 XXMI 的 exe 删掉（但目录还在）→ 点启动页的「启动官方 XXMI / EFMI 界面」 | 界面给出**可操作的提示**（去哪里装/怎么填），并且**不会卡在半路**（以前会抛错中断，界面看着像卡死） |

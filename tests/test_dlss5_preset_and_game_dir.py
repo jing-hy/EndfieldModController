@@ -147,7 +147,12 @@ def test_detect_game_dir_falls_back_to_xxmi_log(tmp_path):
 
 def test_ensure_xxmi_game_folder_logs_when_game_dir_unknown(tmp_path, monkeypatch):
     """定位不到 → **必须写日志并带上可读原因**（原来完全静默）。"""
-    config = AppConfig(runtime_dir=str(tmp_path / "runtime"))
+    config = AppConfig(
+        runtime_dir=str(tmp_path / "runtime"),
+        # 内置运行环境也指到 tmp：留空的 `xxmi_launcher` 会回落到内置那份
+        # （2026-10-01 新增行为），这里刻意让它没有可回落的东西。
+        builtin_runtime_dir=str(tmp_path / "runtime" / "builtin"),
+    )
     monkeypatch.setattr(config, "save", lambda: None, raising=False)
     logs: list[str] = []
 
@@ -156,6 +161,28 @@ def test_ensure_xxmi_game_folder_logs_when_game_dir_unknown(tmp_path, monkeypatc
     assert state["ok"] is False
     assert "未配置 XXMI Launcher" in state["message"] or "未定位到游戏目录" in state["message"]
     assert logs and any("XXMI 游戏目录" in line for line in logs)
+
+
+def test_xxmi_launcher_falls_back_to_builtin(tmp_path):
+    """`xxmi_launcher` 留空 → 自动找内置那份（用户 2026-10-01：「xxmi 如果留空应该就找内置
+    正常会放的地方，没有就下载」）。"""
+    from endfieldmodcontroller.config import builtin_xxmi_launcher
+
+    builtin = tmp_path / "runtime" / "builtin" / "XXMI" / "Resources" / "Bin"
+    builtin.mkdir(parents=True)
+    exe = builtin / "XXMI Launcher.exe"
+    exe.write_bytes(b"MZ")
+
+    config = AppConfig(
+        runtime_dir=str(tmp_path / "runtime"),
+        builtin_runtime_dir=str(tmp_path / "runtime" / "builtin"),
+    )
+    assert config.xxmi_launcher_path == exe
+    assert builtin_xxmi_launcher(tmp_path / "runtime" / "builtin") == exe
+
+    # 填了但文件已经不在（被删/被整合包挪走）→ 也回落到内置，而不是直接报"找不到"
+    config.xxmi_launcher = str(tmp_path / "gone" / "XXMI Launcher.exe")
+    assert config.xxmi_launcher_path == exe
 
 
 def test_ensure_xxmi_game_folder_writes_fields_and_backfills(tmp_path, monkeypatch):

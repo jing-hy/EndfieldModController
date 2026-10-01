@@ -23,6 +23,31 @@ def _detect_project_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+# 内置 XXMI 里 Launcher exe 的已知布局（先精确、后兜底）。
+# 用户 2026-10-01：「xxmi 如果留空应该就找内置正常会放的地方，没有就下载」。
+_BUILTIN_XXMI_EXE_NAMES = ("XXMI Launcher.exe", "XXMI-Launcher.exe")
+
+
+def builtin_xxmi_launcher(builtin_runtime_root: Path) -> Path | None:
+    """在内置运行环境里找 XXMI Launcher（找不到返回 None，调用方会去下载）。"""
+    root = Path(builtin_runtime_root) / "XXMI"
+    if not root.is_dir():
+        return None
+    candidates: list[Path] = []
+    for name in _BUILTIN_XXMI_EXE_NAMES:
+        candidates.append(root / "Resources" / "Bin" / name)
+        candidates.append(root / name)
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    # 兜底：XXMI 换过目录布局（Resources/Bin 之外），浅层扫两层即可，不做全盘扫描
+    for name in _BUILTIN_XXMI_EXE_NAMES:
+        for hit in sorted(root.glob(f"*/{name}")) + sorted(root.glob(f"*/*/{name}")):
+            if hit.is_file():
+                return hit
+    return None
+
+
 PROJECT_ROOT = _detect_project_root()
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config.json"
 DEFAULT_DATA_ROOT = PROJECT_ROOT / "runtime"
@@ -358,7 +383,23 @@ class AppConfig:
 
     @property
     def xxmi_launcher_path(self) -> Path | None:
-        return self.resolve_path(self.xxmi_launcher) if self.xxmi_launcher else None
+        """XXMI Launcher 的 exe。
+
+        用户 2026-10-01 反馈：「显示 xxmi 找不到卡死，**xxmi 如果留空应该就找内置正常会
+        放的地方，没有就下载**」。所以这里不再"留空就返回 None 把锅丢给界面"，而是：
+
+        ① 填了且文件在 → 用它；
+        ② 填了但文件不在了（被删/被整合包挪走）→ 也走内置回落，而不是直接报"找不到"；
+        ③ 留空 → 在内置运行环境里按已知布局找（`XXMI\\Resources\\Bin\\XXMI Launcher.exe`
+           等）；
+        ④ 都没有 → 返回 None，调用方（`launcher.ensure_xxmi_available`）据此**自动下载**
+           内置 XXMI。
+        """
+        if self.xxmi_launcher:
+            resolved = self.resolve_path(self.xxmi_launcher)
+            if resolved.is_file():
+                return resolved
+        return builtin_xxmi_launcher(self.builtin_runtime_path)
 
     @property
     def migoto_loader_path(self) -> Path | None:

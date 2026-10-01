@@ -814,6 +814,69 @@ def dlss5_injection_status(config: AppConfig) -> dict[str, Any]:
     return status
 
 
+def xxmi_process_running(config: AppConfig) -> bool:
+    """XXMI Launcher 进程当前在不在跑（用 exe 的映像名判断）。"""
+    path = config.xxmi_launcher_path
+    if path is None:
+        return False
+    return bool(_image_pids(Path(str(path)).name))
+
+
+def ensure_xxmi_available(config: AppConfig) -> dict[str, Any]:
+    """确保有一个能用的 XXMI Launcher：留空 → 找内置；内置没有 → **自动下载安装**。
+
+    用户 2026-10-01 原话：「显示 xxmi 找不到卡死，**xxmi 如果留空应该就找内置正常会放的
+    地方，没有就下载**」。以前 `xxmi_launcher` 一边是空就直接抛
+    「没有配置可用的 XXMI Launcher 路径」，用户既看不懂、也不知道该去哪装 —— 而内置那份
+    本来就是我们自己负责装的东西，没有理由让他去手填路径。
+    """
+    path = config.xxmi_launcher_path
+    if path is not None and Path(path).is_file():
+        return {"ok": True, "path": str(path), "installed": False, "changed": False}
+
+    if not getattr(config, "use_builtin_runtime", True):
+        return {
+            "ok": False,
+            "path": "",
+            "installed": False,
+            "changed": False,
+            "message": ("没有可用的 XXMI Launcher：当前关掉了「使用内置 XXMI/EFMI」，"
+                        "程序不会自动下载 —— 请在设置页填上你自己的 XXMI Launcher 路径，"
+                        "或者把「使用内置 XXMI/EFMI」打开"),
+        }
+
+    from . import runtime_deps
+
+    try:
+        result = runtime_deps.ensure_xxmi(config)
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "ok": False,
+            "path": "",
+            "installed": False,
+            "changed": False,
+            "message": f"内置 XXMI 缺失且自动下载失败：{exc}（可到「依赖」页点「自动安装/更新」重试）",
+        }
+
+    path = config.xxmi_launcher_path
+    if path is None or not Path(path).is_file():
+        return {
+            "ok": False,
+            "path": "",
+            "installed": True,
+            "changed": True,
+            "message": "内置 XXMI 装完却找不到 Launcher exe（安装包结构可能变了），请到「依赖」页重新安装",
+        }
+    return {
+        "ok": True,
+        "path": str(path),
+        "installed": True,
+        "changed": True,
+        "message": f"已自动安装内置 XXMI：{path}",
+        "version": str(getattr(result, "version", "") or ""),
+    }
+
+
 def ensure_injections(config: AppConfig) -> dict[str, Any]:
     """一键启动前的完整自检。
 
@@ -831,6 +894,19 @@ def ensure_injections(config: AppConfig) -> dict[str, Any]:
     # （用户 2026-10-01：「我说的第一次启动是在拉起 xxmi 之后再谈，选项应该是
     #   再次启动和先不启动」）。
     xxmi_bootstrapped = False
+
+    # ⓪ **先确保有一个能用的 XXMI Launcher**（用户 2026-10-01：「xxmi 如果留空应该就找内置
+    #    正常会放的地方，没有就下载」）。留空 → 内置；内置不在 → 自动下载安装。
+    #    以前这一步缺失，`xxmi_launcher` 一旦为空就直接抛「没有配置可用的 XXMI Launcher
+    #    路径」，用户看到的是一句看不懂的报错 + 界面像卡住了。
+    try:
+        available = ensure_xxmi_available(config)
+        if available.get("changed"):
+            actions.append(str(available.get("message") or "已安装内置 XXMI"))
+        elif not available.get("ok"):
+            warnings.append(str(available.get("message") or "找不到可用的 XXMI Launcher"))
+    except Exception as exc:  # noqa: BLE001
+        warnings.append(f"准备 XXMI Launcher 失败: {exc}")
 
     # ① **XXMI 的配置文件本身必须先存在** —— 它是 XXMI 首次运行时生成的，空环境里没有，
     #    于是下面所有写入（game_folder / enabled_importers / 签名 / extra_libraries）
@@ -928,6 +1004,11 @@ def ensure_injections(config: AppConfig) -> dict[str, Any]:
 
     for action in actions:
         _append_log(config, f"注入自检: {action}")
+    # ⚠ **失败原因也必须落进日志文件**（rules：批处理失败原因不能只写在内存里）。
+    #   2026-10-01 现场：「XXMI 里没有终末地启动按钮」在 launch.log 里**一个字都没有** ——
+    #   因为 warnings 只回给前端日志窗、没写盘，事后完全查不出是哪一步没写成功。
+    for warning in warnings:
+        _append_log(config, f"WARN 注入自检: {warning}")
     return {
         "ok": not warnings,
         "actions": actions,
@@ -1075,6 +1156,16 @@ def ensure_xxmi_game_folder(config: AppConfig, *, log: Callable[[str], None] | N
         message = "未配置 XXMI Launcher，跳过「让 XXMI 指向游戏目录」"
         _log(f"XXMI 游戏目录: {message}")
         return {"ok": False, "changed": False, "message": message}
+    # ⚠ **XXMI 正在跑的时候写配置等于白写**（2026-10-01 现场实证）：XXMI 退出时会把自己
+    #   内存里的整份配置写回去（它的日志就是 `ApplicationEvents.Close` → `Saving config...`），
+    #   我们在它运行期间写的 `game_folder` / `enabled_importers` / `active_importer`
+    #   会被一并覆盖 —— 用户看到的现象是"重下 XXMI 之后终末地的启动按钮没了"。
+    #   所以这里宁可**先不写**并说清怎么办，也不做这种看着成功、实际被冲掉的写入。
+    if xxmi_process_running(config):
+        message = ("XXMI 正开着 —— 它退出时会用自己内存里的状态覆盖配置文件，现在写也会被冲掉。"
+                   "请先关掉 XXMI，再点一次「一键启动」（或「检查/修复完整性」）即可自动补好。")
+        _log(f"WARN XXMI 游戏目录: {message}")
+        return {"ok": False, "changed": False, "message": message, "xxmi_running": True}
     game_dir = reshade_integration.detect_game_dir(config)
     if game_dir is None:
         message = ("未定位到游戏目录，所以没能把游戏路径写进 XXMI 配置"
@@ -1132,6 +1223,26 @@ def ensure_xxmi_game_folder(config: AppConfig, *, log: Callable[[str], None] | N
         config_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     except OSError as exc:
         return {"ok": False, "changed": False, "message": f"写入 XXMI 配置失败：{exc}"}
+    # **写完必须回读校验**（2026-10-01 现场教训：写入"成功"但用户那头配置里还是空的 ——
+    # 「重下 XXMI 之后终末地的启动按钮没了」。宁可当场报出来，也不要写了个寂寞）。
+    try:
+        back = json.loads(config_path.read_text(encoding="utf-8"))
+        back_importer = ((back.get("Importers") or {}).get("EFMI") or {}).get("Importer") or {}
+        back_launcher = back.get("Launcher") or {}
+        back_enabled = back_launcher.get("enabled_importers") or []
+        if (str(back_importer.get("game_folder") or "") != str(game_dir)
+                or back_launcher.get("active_importer") != "EFMI"
+                or "EFMI" not in (back_enabled if isinstance(back_enabled, list) else [])):
+            _log("WARN XXMI 游戏目录: 写进去的内容回读不一致（可能有 XXMI 实例正在运行并覆盖配置）")
+            return {
+                "ok": False,
+                "changed": True,
+                "game_dir": str(game_dir),
+                "message": ("已尝试写入 XXMI 配置，但回读不一致 —— 多半是有 XXMI 实例正开着"
+                            "（它退出时会覆盖）。请关掉 XXMI 再点一次「一键启动」。"),
+            }
+    except (OSError, json.JSONDecodeError) as exc:
+        return {"ok": False, "changed": True, "message": f"回读 XXMI 配置失败：{exc}"}
     return {"ok": True, "changed": True, "game_dir": str(game_dir),
             "message": f"已让 XXMI 指向游戏目录（{', '.join(changed)}）"}
 
@@ -1440,9 +1551,34 @@ def launch_official_gui(config: AppConfig) -> dict[str, Any]:
     else:
         _append_log(config, "未选择任何 Mod，跳过 staging（Mods 目录保持原样）")
 
+    # 拉起 XXMI **之前最后一刻**再做两件事（2026-10-01 现场加固，对应 memory 0mup0ktzd
+    # 记的"写早了会被 XXMI 退出时覆盖"）：
+    #   ① 兜住 Launcher 路径：留空/被删 → 找内置 → 没有就自动下载（用户明确要求）；
+    #   ② 把 game_folder / active_importer / enabled_importers 再确认一次 ——
+    #      顺序必须是「我们写 → 它启动 → 它保存」，反了就等于没写。
+    try:
+        available = ensure_xxmi_available(config)
+        if available.get("changed"):
+            _append_log(config, f"拉起 XXMI 前: {available.get('message')}")
+        elif not available.get("ok"):
+            _append_log(config, f"WARN 拉起 XXMI 前: {available.get('message')}")
+    except Exception as exc:  # noqa: BLE001
+        _append_log(config, f"拉起 XXMI 前准备 Launcher 失败（继续）: {exc}")
+    try:
+        folder_state = ensure_xxmi_game_folder(config, log=lambda m: _append_log(config, m))
+        if folder_state.get("changed"):
+            _append_log(config, f"拉起 XXMI 前补写配置: {folder_state.get('message')}")
+        elif not folder_state.get("ok"):
+            _append_log(config, f"WARN 拉起 XXMI 前: {folder_state.get('message')}")
+    except Exception as exc:  # noqa: BLE001
+        _append_log(config, f"拉起 XXMI 前补写 XXMI 配置失败（继续）: {exc}")
+
     launcher = config.xxmi_launcher_path
     if launcher is None or not launcher.is_file():
-        raise LaunchError("没有配置可用的 XXMI Launcher 路径")
+        raise LaunchError(
+            "找不到可用的 XXMI Launcher。到「依赖」页点「自动安装/更新」装好内置 XXMI，"
+            "或在设置页填上你自己的 XXMI Launcher 路径。"
+        )
 
     # 用 os.startfile 启动 = **字面意义上的"双击"**：Windows 走 shell 关联，
     # 工作目录 / 权限 / 环境变量全部按系统默认来，不再受本 Python 进程影响。
