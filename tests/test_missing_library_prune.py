@@ -125,5 +125,86 @@ class MissingLibraryFileTests(unittest.TestCase):
         self.assertEqual(risks["conflicts"], [])
 
 
+class ManualModsSafetyTests(unittest.TestCase):
+    """**绝不删用户手动放进 Mods 的目录**（数据安全红线，2026-10-01 加固）。
+
+    背景：`staging_mods_dir` 可以指向用户自己那份 XXMI 的 Mods 目录（一份真实诊断包就是
+    `F:\\XXMI Launcher\\EFMI\\Mods`），而那里可能躺着用户手工放进去的皮肤。以前的清理是
+    "清空 staging 里所有 Mod"，一次"库为空的一键启动"就会把那些皮肤删光。
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory(prefix="mc-manual-mods-")
+        self.root = Path(self.tmp.name)
+        self.library = self.root / "library"
+        self.runtime = self.root / "runtime"
+        self.staging = self.root / "external-xxmi" / "EFMI" / "Mods"
+        self.staging.mkdir(parents=True)
+        # 我们生成的产物
+        (self.staging / "MC_佩丽卡_Alice").mkdir()
+        (self.staging / "MC_佩丽卡_Alice" / "mod.ini").write_text("namespace = A\n", encoding="utf-8")
+        # 用户手工放进来的（不是控制器生成的名字）
+        manual = self.staging / "ManualSkin"
+        manual.mkdir()
+        (manual / "mod.ini").write_text("namespace = M\n", encoding="utf-8")
+        (manual / "texture.buf").write_bytes(b"x" * 32)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_stage_empty_keeps_manual_dirs(self) -> None:
+        from endfieldmodcontroller import activation
+
+        result = activation.stage_and_prepare(
+            self.library, self.staging, self.runtime, selected_ids=[]
+        )
+        self.assertTrue((self.staging / "ManualSkin" / "mod.ini").is_file(),
+                        "用户手动放进 Mods 的目录被删了")
+        self.assertTrue((self.staging / "ManualSkin" / "texture.buf").is_file())
+        self.assertFalse((self.staging / "MC_佩丽卡_Alice").exists(), "我们自己的产物应该被清掉")
+        self.assertEqual(result.get("kept_manual"), ["ManualSkin"])
+
+    def test_stage_and_prepare_keeps_manual_dirs(self) -> None:
+        from endfieldmodcontroller import activation
+
+        result = activation.stage_and_prepare(
+            self.library, self.staging, self.runtime, selected_ids=["whatever-missing-id"]
+        )
+        self.assertTrue((self.staging / "ManualSkin").is_dir())
+        self.assertIn("ManualSkin", result.get("kept_manual") or [])
+
+    def test_library_empty_with_stale_mc_no_longer_reports_conflict(self) -> None:
+        """反馈者现场：库里 0 个 Mod、`EFMI\\Mods` 里却有一堆上次的 `MC_*` → 以前会弹冲突。"""
+        (self.staging / "MC_小羊_小羊").mkdir()
+        (self.staging / "MC_杰哥_杰哥").mkdir()
+        config_path = self.root / "config.json"
+        config = AppConfig(
+            library_dir=str(self.library),
+            runtime_dir=str(self.runtime),
+            staging_mods_dir=str(self.staging),
+            dependency_manifest=str(PROJECT_ROOT / "dependencies.json"),
+        )
+        config.selected_mods = ["2057639959", "220189310"]   # 库里已经没有这些 id 了
+        config.save(config_path)
+        state_path = self.runtime / "_state" / "mod_conflicts.json"
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_text(json.dumps({
+            "at": 1, "at_text": "2026-10-01 14:14:53", "ok": False,
+            "detail": "两个 Mod 覆盖同一批资源", "conflicts": ["冲突"],
+            "groups": [{"text": "冲突", "names": ["MC_小羊_小羊", "MC_杰哥_杰哥"]}],
+            "mods": ["MC_小羊_小羊", "MC_杰哥_杰哥"],
+        }, ensure_ascii=False), encoding="utf-8")
+
+        api = EndfieldModControllerApi(config_path)
+        risks = api.prelaunch_risks()
+
+        self.assertFalse(risks["blocking"], risks)
+        self.assertEqual(api.config.selected_mods, [])
+        leftovers = sorted(p.name for p in self.staging.iterdir() if p.name.startswith("MC_"))
+        self.assertEqual([n for n in leftovers if n != "MC_Controller"], [])
+        # 手工目录照样留着
+        self.assertTrue((self.staging / "ManualSkin").is_dir())
+
+
 if __name__ == "__main__":
     unittest.main()

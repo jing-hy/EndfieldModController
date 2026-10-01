@@ -311,18 +311,30 @@ class EndfieldModControllerApi:
         current = [str(item) for item in (self.config.selected_mods or [])]
         kept = [item for item in current if item in existing]
         dropped = [item for item in current if item not in existing]
-        if not dropped:
+        # 第二种现场（2026-10-01 一份真实反馈的诊断包）：**Mod 库里一个都没有**，
+        # 可 `EFMI\Mods` 里还躺着一堆上次生成的 `MC_*` —— 自检拿它们互相一比就报
+        # "Mod 资源冲突"，启动前弹窗，用户看到的是"我库里没有皮肤也报错"。
+        # 所以除了勾选，还要看 staging 跟当前选择是否还对得上。
+        stale = self._stale_staging(set(kept))
+        if not dropped and not stale:
             return []
-        self.config.selected_mods = kept
-        try:
-            self.config.save()
-        except (OSError, ValueError):
-            pass
-        launcher._append_log(
-            self.config,
-            f"勾选清理：Mod 库里有 {len(dropped)} 个勾选项已经不存在（文件被删/改名）"
-            f"→ 已从勾选里去掉；剩余 {len(kept)} 个",
-        )
+        if dropped:
+            self.config.selected_mods = kept
+            try:
+                self.config.save()
+            except (OSError, ValueError):
+                pass
+            launcher._append_log(
+                self.config,
+                f"勾选清理：Mod 库里有 {len(dropped)} 个勾选项已经不存在（文件被删/改名）"
+                f"→ 已从勾选里去掉；剩余 {len(kept)} 个",
+            )
+        if stale:
+            launcher._append_log(
+                self.config,
+                f"staging 与当前选择不一致：{len(stale)} 个上次生成的 MC_* 还留在 "
+                f"{self.config.staging_mods_path}（库里已没有对应 Mod）→ 一起收掉",
+            )
         # 旧的冲突结论不再对应当前这套 Mod → 作废，否则会被当成"仍然有风险"
         try:
             diagnostics.mod_conflict_state_path(self.config).unlink()
@@ -331,7 +343,7 @@ class EndfieldModControllerApi:
         # staging 必须跟选择对齐：库里的文件被删了，可 `MC_<它>` 还在 Mods 里 —— 那份
         # 产物照样会被 EFMI 加载，于是"界面上没这个 Mod、游戏里却还在"。
         try:
-            activation.stage_and_prepare(
+            result = activation.stage_and_prepare(
                 self.config.library_path,
                 self.config.staging_mods_path,
                 self.config.runtime_path,
@@ -341,10 +353,45 @@ class EndfieldModControllerApi:
                 self.config,
                 "已按剩下的勾选重建 staging（未勾选时清空；Mod 库未动）",
             )
+            kept_manual = [str(name) for name in (result.get("kept_manual") or [])]
+            if kept_manual:
+                # 数据安全：这些是**用户自己**放进 Mods 的目录，我们一律不动，但要说出来
+                launcher._append_log(
+                    self.config,
+                    f"保留 {len(kept_manual)} 个不是控制器生成的目录（你自己放进 Mods 的）："
+                    + "、".join(kept_manual[:6])
+                    + ("…" if len(kept_manual) > 6 else ""),
+                )
         except Exception as exc:  # noqa: BLE001
             launcher._append_log(self.config, f"重建 staging 失败（已跳过）: {exc}")
         self._invalidate_mods()
         return dropped
+
+    def _stale_staging(self, kept_ids: set[str]) -> list[str]:
+        """staging 里那些**与当前勾选对不上**的 `MC_*` 目录名（空勾选时 = 全部）。"""
+        root = self.config.staging_mods_path
+        if not root.is_dir():
+            return []
+        try:
+            current = [
+                item.name for item in root.iterdir()
+                if item.is_dir() and item.name.startswith("MC_") and item.name != "MC_Controller"
+            ]
+        except OSError:
+            return []
+        if not current:
+            return []
+        if not kept_ids:
+            return current
+        try:
+            expected = {
+                f"MC_{core.safe_name(mod.group)}_{core.safe_name(mod.name)}"
+                for mod in self._mods()
+                if str(mod.id) in kept_ids
+            }
+        except Exception:  # noqa: BLE001 - 反查失败就不动 staging（宁可留着）
+            return []
+        return [name for name in current if name not in expected]
 
     def conflict_groups(self) -> dict[str, Any]:
         """当前 Mod 资源冲突的**结构化**列表（每组含涉及的 Mod 名与库内 id）。

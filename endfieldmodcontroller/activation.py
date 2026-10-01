@@ -369,13 +369,30 @@ def _stage_empty(library_root: Path, staging_root: Path, runtime_dir: Path,
         raise LibraryGuardError(
             f"拒绝清空 staging：{conflict}。这会动到你的 Mod 库，已中止（库内文件一个都没动）。"
         )
+    # ⚠️ 与 stage_and_prepare 同一条红线（2026-10-01 加固）：**只清我们自己的产物**
+    #    （`MC_` 前缀 / manifest 里记过的路径）。用户手动放进 Mods 的目录留着 ——
+    #    `staging_mods_dir` 可能就是他自己那份 XXMI 的 Mods，删了就真没了。
+    kept_manual: list[str] = []
+    manifest_targets: list[str] = []
+    manifest_path = staging_root / MANAGED_DIR_NAME / "active_targets.json"
+    if manifest_path.is_file():
+        try:
+            manifest_targets = [
+                str(Path(item).resolve())
+                for item in json.loads(manifest_path.read_text(encoding="utf-8"))
+            ]
+        except Exception:
+            manifest_targets = []
     try:
         for child in list(staging_root.iterdir()):
             if child.is_dir() and child.name not in keep:
                 if not fsutil.is_library_safe(library_root, child):
                     continue                      # 双保险：绝不删库里的任何东西
-                shutil.rmtree(child, ignore_errors=True)
-                cleared += 1
+                if child.name.startswith("MC_") or str(child.resolve()) in manifest_targets:
+                    shutil.rmtree(child, ignore_errors=True)
+                    cleared += 1
+                else:
+                    kept_manual.append(child.name)
             elif child.is_file() and child.name.startswith("MC_"):
                 try:
                     child.unlink()
@@ -405,6 +422,8 @@ def _stage_empty(library_root: Path, staging_root: Path, runtime_dir: Path,
         "action_count": 0,
         "cleared": cleared,
         "controller_dir": str(controller_dir),
+        # 用户手动放进 Mods 的目录（不是我们生成的）—— 保留原样，交给调用方提示
+        "kept_manual": kept_manual,
     }
 
 
@@ -465,14 +484,18 @@ def stage_and_prepare(
 
     managed_root = staging_root / MANAGED_DIR_NAME
     previous_manifest = managed_root / "active_targets.json"
+    manifest_targets: list[str] = []
     if previous_manifest.is_file():
         try:
-            for old_target in json.loads(previous_manifest.read_text(encoding="utf-8")):
-                if not fsutil.is_library_safe(library_root, Path(old_target)):
-                    continue          # 清单里的路径若指向库（历史配置变化），一律不删
-                shutil.rmtree(Path(old_target), ignore_errors=True)
+            manifest_targets = [
+                str(Path(item)) for item in json.loads(previous_manifest.read_text(encoding="utf-8"))
+            ]
         except Exception:
-            pass
+            manifest_targets = []
+    for old_target in manifest_targets:
+        if not fsutil.is_library_safe(library_root, Path(old_target)):
+            continue          # 清单里的路径若指向库（历史配置变化），一律不删
+        shutil.rmtree(Path(old_target), ignore_errors=True)
     for legacy_name in ("_endfieldmodcontroller_managed", "EndfieldModControllerManaged"):
         legacy = staging_root / legacy_name
         if legacy.exists() and fsutil.is_library_safe(library_root, legacy):
@@ -488,14 +511,19 @@ def stage_and_prepare(
                 shutil.rmtree(child, ignore_errors=True)
     except OSError:
         pass
-    # 清空 staging 目录里**所有** Mod（含有人手动放进去的）—— 控制器是 Mods 目录的
-    # 唯一管理者：这里最终只应该存在"用户在 Mod 库勾选的那些"的 MC_* 产物。
-    # 2026-09-27 踩过两次：残留的旧 MC_ 或手动放的 Mod 会与本次 staging 形成
-    # **同角色成对**，EFMI 同时加载两个同角色 Mod 直接崩游戏。
-    #
-    # ⚠️ 但**永远不许**因为这条规则碰到用户的 Mod 库（用户 2026-10-01 硬规则）：
-    # 每个待删目录都先过 `is_library_safe`，库内/库本身/库的上级一律跳过。
-    keep = {"MC_Controller", ADDON_DISABLED_DIR if False else "DISABLED"}
+    # ⚠️ **只清「我们自己的产物」**（2026-10-01 数据安全加固）：
+    #    以前这里是"清空 staging 目录里**所有** Mod（含有人手动放进去的）"，理由是
+    #    "控制器是 Mods 目录的唯一管理者"。这条在真实环境里会咬人：`staging_mods_dir`
+    #    完全可以指向**用户自己那份 XXMI 的 Mods**（一份真实诊断包就是
+    #    `F:\XXMI Launcher\EFMI\Mods`），而那里躺着用户手工放进去的皮肤 —— 一次
+    #    "库为空的一键启动"就会把它们删光（用户红线：「任何情况（除用户手动点击移出库外）
+    #    都不要动用户的 mod 库」）。
+    #    判据改成两者之一才算我们的：① 名字以 `MC_` 开头（`stage_and_prepare` 的命名）；
+    #    ② 在 `active_targets.json` 里记录过（我们上次复制进去的）。其余一律**保留**，
+    #    并在结果里列出来，由收编流程/自检提示用户处置 —— 宁可留着让他自己删，也不静默删他文件。
+    keep = {"MC_Controller", "DISABLED"}
+    previous_targets = {str(Path(item).resolve()) for item in manifest_targets}
+    kept_manual: list[str] = []
     try:
         for child in list(staging_root.iterdir()):
             if not child.is_dir() or child.name in keep:
@@ -505,8 +533,10 @@ def stage_and_prepare(
             if child.name in ("_endfieldmodcontroller_managed", "EndfieldModControllerManaged", "ModeControllerManaged"):
                 shutil.rmtree(child, ignore_errors=True)
                 continue
-            # 非 MC_ 前缀 = 手动放的；MC_ 前缀 = 上次 staging 的产物 —— 都清掉
-            shutil.rmtree(child, ignore_errors=True)
+            if child.name.startswith("MC_") or str(child.resolve()) in previous_targets:
+                shutil.rmtree(child, ignore_errors=True)
+                continue
+            kept_manual.append(child.name)
     except OSError:
         pass
     # 顺手清掉散落的 ini/tsv（保持目录干净）
@@ -612,4 +642,6 @@ def stage_and_prepare(
         "controller_dir": str(controller_dir),
         "reshade_dir": str(reshade_dir),
         "user_ini_path": str(user_ini_path),
+        # 手动放进 Mods（不是我们生成的）的目录 —— 我们**不删**，交给调用方提示/收编
+        "kept_manual": kept_manual,
     }
