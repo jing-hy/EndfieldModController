@@ -6,6 +6,7 @@ import {
 import { store, refreshState, applyTheme, currentTheme, THEMES } from "./store.js";
 import { waitForBridge, reportFrontendError } from "./lib/bridge.js";
 import { loadSettings } from "./lib/settings.js";
+import { dragHasFiles, importDroppedFile } from "./lib/importMod.js";
 import DialogHost from "./components/DialogHost.vue";
 import ToastHost from "./components/ToastHost.vue";
 import AboutPage from "./pages/AboutPage.vue";
@@ -28,6 +29,20 @@ const tabs = [
   { id: "about", name: "说明", icon: Info },
 ];
 const theme = ref(currentTheme());
+// 拖放导入：提示层**松开鼠标就消失**（用户要求「应该是释放就消失」），拖拽计数避免子元素抖动
+const dragging = ref(false);
+let dragDepth = 0;
+async function onDrop(event) {
+  event.preventDefault();
+  dragDepth = 0;
+  dragging.value = false;
+  const files = Array.from((event.dataTransfer && event.dataTransfer.files) || []);
+  for (const file of files) {
+    await importDroppedFile(file, {
+      onDone: async () => { await refreshState(); loadSettings(); },
+    });
+  }
+}
 const themeOpen = ref(false);
 const currentPage = computed(() => pages[store.tab]);
 const currentName = computed(() => tabs.find((t) => t.id === store.tab)?.name || "");
@@ -39,6 +54,23 @@ function pickTheme(name) {
 }
 
 onMounted(async () => {
+  // 拖放导入（全局：任何页都能拖）
+  window.addEventListener("dragenter", (e) => {
+    if (!dragHasFiles(e)) return;
+    e.preventDefault();
+    dragDepth += 1;
+    dragging.value = true;
+  });
+  window.addEventListener("dragover", (e) => {
+    if (!dragHasFiles(e)) return;
+    e.preventDefault();                       // 不 preventDefault 就不会派发 drop
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+  });
+  window.addEventListener("dragleave", () => {
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) dragging.value = false;
+  });
+  window.addEventListener("drop", onDrop);
   window.addEventListener("error", (e) => reportFrontendError("window.error", e.message || ""));
   window.addEventListener("unhandledrejection", (e) =>
     reportFrontendError("unhandledrejection", String((e.reason && e.reason.message) || e.reason)));
@@ -104,6 +136,15 @@ onMounted(async () => {
         </div>
       </div>
     </main>
+
+    <!-- 拖放提示层：松手即消失，职责只是"告诉你松手就能导入" -->
+    <div v-if="dragging" class="fixed inset-0 z-[70] flex items-center justify-center"
+         style="background: rgba(0,0,0,.35)">
+      <div class="card px-6 py-4 text-center shadow-lg">
+        <div class="font-medium">松手即可导入 Mod</div>
+        <div class="text-xs mt-1" style="color: var(--text-muted)">支持 .zip / .7z / .rar（进度显示在顶部提示条）</div>
+      </div>
+    </div>
 
     <DialogHost />
     <ToastHost />

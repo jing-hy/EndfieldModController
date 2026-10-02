@@ -11,13 +11,17 @@ import { humanSize } from "../lib/util.js";
 import Card from "../components/ui/Card.vue";
 import Btn from "../components/ui/Btn.vue";
 import Switch from "../components/ui/Switch.vue";
-import { showAlert, showConfirm, showModalDialog, showToast } from "../lib/dialog.js";
+import { showAlert, showModalDialog, showToast } from "../lib/dialog.js";
+import { setStatus } from "../lib/status.js";
 
 const urls = ref("");
 const dl = ref({ items: [], counts: {}, done: true, total_bytes: 0, done_bytes: 0, speed_bps: 0 });
 const dlStatus = ref("");
 const covers = ref({});
 const busy = ref(false);
+// 「⋯ 更多」：就地弹出的小菜单（用户准则：⋯ 要就地弹小菜单，不要弹窗）
+const menu = ref(null);          // { id, name, x, y }
+const chars = ref([]);           // 已知角色（用于"更换归属"）
 let timer = null, dlTimer = null;
 
 const selected = computed(() => new Set((store.state.selected || []).map(String)));
@@ -68,6 +72,63 @@ async function toggleMod(mod) {
     await refreshState();
     loadSettings();
   } catch (e) { /* call 已弹窗 */ }
+}
+
+function openMenu(mod, event) {
+  event.stopPropagation();
+  const box = event.currentTarget.getBoundingClientRect();
+  // ⚠️ 坐标必须在**脚本**里算好：Vue 模板作用域拿不到 window（写了会直接报错）。
+  const width = 172;
+  const x = Math.max(8, Math.min(box.right - width, (window.innerWidth || 1200) - width - 8));
+  const y = Math.min(box.bottom + 4, (window.innerHeight || 800) - 190);
+  menu.value = { id: String(mod.id), name: mod.name, x, y };
+}
+function closeMenu() { menu.value = null; }
+
+async function menuAct(act) {
+  const m = menu.value;
+  if (!m) return;
+  closeMenu();
+  try {
+    if (act === "fix") {
+      const r = await call("fix_mod", m.id);
+      if (r && r.ok === false) await showAlert("修复失败", r.message || "未知原因");
+      else setStatus(`已修复 ${m.name}`);
+    } else if (act === "rollback") {
+      const r = await call("rollback_mod", m.id);
+      if (r && r.ok === false) await showAlert("回滚失败", r.message || "未知原因");
+      else setStatus(`已回滚 ${m.name}`);
+    } else if (act === "delete") {
+      // 破坏性动作：默认聚焦安全项、按钮文字自解释（用户准则）
+      const ok = await showModalDialog({
+        title: `把这个 Mod 移出库？`,
+        message: `${m.name}\n\n它会被移到 runtime\\backups\\mod-trash\\（可找回），原库不再显示。`,
+        okText: "移出库", cancelText: "算了",
+      });
+      if (!ok) return;
+      const r = await call("delete_mod", m.id);
+      if (r && r.ok === false) await showAlert("移出失败", r.message || "未知原因");
+      else setStatus(r && r.moved_to ? `已移出库：${r.moved_to}` : "已移出 Mod 库");
+    } else if (act === "character") {
+      if (!chars.value.length) {
+        const r = await call("known_characters");
+        chars.value = (r && (r.characters || r.items)) || [];
+      }
+      const pick = await showModalDialog({
+        title: `「${m.name}」归到哪个角色？`,
+        message: "输入角色名（留空 = 保持未分类）。已知角色：" + chars.value.slice(0, 40).join("、"),
+        okText: "设定归属", cancelText: "取消",
+      });
+      if (pick === false) return;
+      const r = await call("set_mod_character", m.id, pick === true ? "" : String(pick));
+      if (r && r.ok === false) await showAlert("设定失败", r.message || "未知原因");
+    } else if (act === "open") {
+      const mod = (store.state.mods || []).find((x) => String(x.id) === m.id);
+      if (mod && mod.path) await call("open_path_in_explorer", mod.path);
+    }
+    await refreshState();
+    loadSettings();
+  } catch (e) { /* call() 已经弹过窗 */ }
 }
 
 async function scan() { busy.value = true; try { await call("scan"); await refreshState();
@@ -198,14 +259,33 @@ onUnmounted(() => { if (timer) clearInterval(timer); if (dlTimer) clearInterval(
                 <img v-if="covers[m.id]" :src="covers[m.id]" class="w-full h-full object-cover" alt="" />
                 <span v-else class="text-xs" style="color: var(--text-muted)">无预览图</span>
               </div>
-              <div class="font-medium truncate text-sm">{{ m.name }}</div>
-              <div class="text-xs mt-0.5" style="color: var(--text-muted)">
-                {{ selected.has(String(m.id)) ? "已勾选" : "未勾选" }}
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0">
+                  <div class="font-medium truncate text-sm">{{ m.name }}</div>
+                  <div class="text-xs mt-0.5" style="color: var(--text-muted)">
+                    {{ selected.has(String(m.id)) ? "已勾选" : "未勾选" }}
+                  </div>
+                </div>
+                <button class="btn btn-mini shrink-0" title="更多：更换归属 / 修复 / 回滚 / 移出库"
+                        @click="openMenu(m, $event)">⋯</button>
               </div>
             </div>
           </div>
         </div>
       </div>
     </Card>
+
+    <!-- ⋯ 就地小菜单（浮层，点空白处关闭） -->
+    <div v-if="menu" class="fixed inset-0 z-40" @click="closeMenu"></div>
+    <div v-if="menu" class="fixed z-50 card py-1 shadow-lg" style="min-width: 168px"
+         :style="{ left: menu.x + 'px', top: menu.y + 'px' }">
+      <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('character')">更换归属…</button>
+      <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('fix')">修复（实验性）</button>
+      <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('rollback')">回滚</button>
+      <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('open')">打开所在目录</button>
+      <div style="height:1px;background:var(--border)" class="my-1"></div>
+      <button class="w-full text-left px-3 py-1.5 text-sm" style="color: var(--danger)"
+              @click="menuAct('delete')">移出 Mod 库</button>
+    </div>
   </div>
 </template>
