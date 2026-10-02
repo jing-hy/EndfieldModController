@@ -5,6 +5,7 @@ import {
 } from "lucide-vue-next";
 import { store, refreshState, applyTheme, currentTheme, THEMES } from "./store.js";
 import { waitForBridge, reportFrontendError } from "./lib/bridge.js";
+import { loadSettings } from "./lib/settings.js";
 import DialogHost from "./components/DialogHost.vue";
 import ToastHost from "./components/ToastHost.vue";
 import AboutPage from "./pages/AboutPage.vue";
@@ -45,6 +46,9 @@ onMounted(async () => {
   if (await waitForBridge()) {
     try {
       await refreshState();
+      // ⚠️ 必须把 config 灌进 settings —— 否则所有设置项/开关都显示成空（2026-10-02 实测：
+      // 注入开关全显示"关"，因为 settings 从没被填充过）。
+      loadSettings();
       // 旧版会记住上次停留的页签（config.last_tab）；带 hash 深链时以 hash 为准
       if (!location.hash && store.state.config && store.state.config.last_tab) {
         store.tab = store.state.config.last_tab;

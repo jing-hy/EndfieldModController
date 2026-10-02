@@ -34,8 +34,13 @@ const THEME_OPTIONS = [
   { value: "violet", label: "紫罗兰" }, { value: "emerald", label: "翡翠" },
 ];
 
-const paths = computed(() => store.state.paths || {});
-const lineStatus = computed(() => store.state.download_lines || []);
+// state 里没有 paths：运行目录由 data_root + config 里的相对/绝对路径拼出来
+const paths = computed(() => {
+  const c = store.state.config || {};
+  const root = store.state.data_root || "";
+  return { controller: root, reshade: c.reshade_dll || "", staging: c.staging_mods_dir || "", mod_backup: c.mod_backup_dir || "" };
+});
+const lineStatus = computed(() => []);
 
 async function changeTheme(v) { await saveSetting("theme", v); applyTheme(v); }
 async function run(method, ...args) { try { return await call(method, ...args); } catch (e) { return null; } }
@@ -133,6 +138,38 @@ async function openPath(kind) { await run("open_path_in_explorer", kind); }
         <Btn variant="primary" @click="run('game_clean_backup_and_clean')">备份并净化游戏目录</Btn>
         <Btn @click="run('game_clean_restore')">从备份还原游戏目录</Btn>
         <span class="text-xs self-center" style="color: var(--text-muted)">只移动不删除：先把非原版文件整体备份，再让本体回到原版状态。</span>
+      </div>
+    </Card>
+
+    <Card title="运行状态">
+      <div class="space-y-1.5 text-sm">
+        <div class="flex items-center gap-2">
+          <span class="w-32 shrink-0" style="color: var(--text-muted)">控制器</span>
+          <Badge :tone="store.state.controller_ready ? 'success' : 'warn'">
+            {{ store.state.controller_ready ? "已生成 controller.ini" : "还没生成（点启动页「生成控制器」）" }}
+          </Badge>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="w-32 shrink-0" style="color: var(--text-muted)">渲染 API</span>
+          <Badge tone="muted">{{ store.state.render_api || "unknown" }}</Badge>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="w-32 shrink-0" style="color: var(--text-muted)">ReShade 面板</span>
+          <Badge :tone="store.state.reshade_addon_ready ? 'success' : 'warn'">
+            {{ store.state.reshade_addon_ready ? "已就位" : "未就位" }}
+          </Badge>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="w-32 shrink-0" style="color: var(--text-muted)">统一快捷键面板</span>
+          <span class="text-xs" style="color: var(--text-muted)">{{ (store.state.hotkey_panel || {}).message || "—" }}</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="w-32 shrink-0" style="color: var(--text-muted)">Mod 备份仓</span>
+          <span class="text-xs" style="color: var(--text-muted)">
+            {{ (store.state.mod_backup || {}).count || 0 }} 个 · {{ (store.state.mod_backup || {}).size_text || "0 B" }}
+          </span>
+        </div>
+        <div v-if="store.state.warming" class="text-xs" style="color: var(--text-muted)">后台预热中…（预热完会自动刷新）</div>
       </div>
     </Card>
 

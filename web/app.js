@@ -2020,6 +2020,8 @@ async function restoreGameInjections() {
 // 用户 2026-10-02：「在 mod 库页按钮下面加一个 mod 下载…」→「换成卡片，放按钮下面」
 // →「**不是这样的，是直接在卡片内放一个输入框**」⇒ 输入框就在卡片里，不再有弹窗。
 let modDownloadTimer = null;
+// 下载收尾只做一次（旧版漏了这行声明，点了下载就报 modDownloadFinished is not defined）
+let modDownloadFinished = false;
 let modDownloadReminded = false;       // 「香蕉网访问不上」只弹一次
 let modDownloadSlowReminded = false;   // 「下载太慢，建议开 VPN」只弹一次
 let modDownloadManualReminded = false; // 「需手动解压」弹窗只弹一次

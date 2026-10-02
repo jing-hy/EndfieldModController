@@ -3,6 +3,7 @@
 import { ref } from "vue";
 import { call } from "../lib/bridge.js";
 import { settings, saveSetting } from "../lib/settings.js";
+import { store } from "../store.js";
 import Card from "../components/ui/Card.vue";
 import Btn from "../components/ui/Btn.vue";
 import Switch from "../components/ui/Switch.vue";
@@ -24,8 +25,10 @@ async function oneClick() {
   running.value = true;
   try {
     const result = await call("launch");
-    consoleLog.value = (result && result.message) || "已发起启动。";
-    renderApi.value = (result && result.render_api) || "";
+    // launch 的返回就是 launcher.launch(...) 的字典（没有统一的 message 字段），
+    // 所以这里如实把结果打印出来；渲染 API 从 state 里取。
+    consoleLog.value = "已发起启动。\n" + JSON.stringify(result, null, 2).slice(0, 1200);
+    renderApi.value = store.state.render_api || "";
   } catch (e) {
     consoleLog.value = "启动失败：" + (e && e.message ? e.message : String(e));
   } finally {

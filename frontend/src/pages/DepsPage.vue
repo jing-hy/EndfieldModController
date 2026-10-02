@@ -4,6 +4,7 @@
 import { ref, computed, onMounted, onUnmounted } from "vue";
 import { call } from "../lib/bridge.js";
 import { store, refreshState } from "../store.js";
+import { loadSettings } from "../lib/settings.js";
 import Card from "../components/ui/Card.vue";
 import Btn from "../components/ui/Btn.vue";
 import Badge from "../components/ui/Badge.vue";
@@ -15,8 +16,12 @@ const percent = ref(0);
 const progressText = ref("0/0");
 let timer = null;
 
-const deps = computed(() => store.state.dependencies || []);
-const results = computed(() => store.state.dep_results || []);
+// 真实结构：get_state().dependency_report = { required:[], manifest:{key:{display,status,version,install_dir,present,needed}}, unknown:[] }
+const deps = computed(() => {
+  const m = (store.state.dependency_report || {}).manifest || {};
+  return Object.entries(m).map(([key, v]) => ({ key, ...v }));
+});
+const required = computed(() => (store.state.dependency_report || {}).required || []);
 
 function tone(state) {
   return state === "ok" ? "success" : state === "missing" ? "danger" : "muted";
@@ -24,11 +29,11 @@ function tone(state) {
 
 async function refresh() {
   try {
-    const data = await call("dependency_status");
-    if (!data) return;
-    items.value = data.items || data.components || [];
-    if (data.log && data.log.length) logLines.value = data.log;
-    if (data.message) status.value = data.message;
+    await refreshState();
+    loadSettings();
+    const total = deps.value.length;
+    const ok = deps.value.filter((d) => d.status === "已安装").length;
+    status.value = total ? `${ok}/${total} 个组件已就位` : "";
   } catch (e) { /* call 已弹窗 */ }
 }
 
@@ -73,18 +78,20 @@ onUnmounted(() => { if (timer) clearInterval(timer); });
 
     <Card v-if="deps.length" title="组件状态">
       <div class="divide-y" style="border-color: var(--border)">
-        <div v-for="d in deps" :key="d.key || d.name" class="py-2.5 flex items-center justify-between gap-4">
+        <div v-for="d in deps" :key="d.key" class="py-2.5 flex items-center justify-between gap-4">
           <div class="min-w-0">
-            <div class="font-medium truncate">{{ d.name }}</div>
-            <div class="text-xs mt-0.5" style="color: var(--text-muted)">{{ d.version || "" }} {{ d.install_dir || "" }}</div>
+            <div class="font-medium truncate">{{ d.display || d.key }}</div>
+            <div class="text-xs mt-0.5" style="color: var(--text-muted)">{{ d.version || "" }}</div>
           </div>
           <Badge :tone="tone(d.status)">{{ d.status || "未知" }}</Badge>
         </div>
       </div>
     </Card>
 
-    <Card v-if="results.length" title="上次结果">
-      <div v-for="(r, i) in results" :key="i" class="text-sm py-1">{{ r }}</div>
+    <Card v-if="required.length" title="被引用的依赖名">
+      <div class="flex flex-wrap gap-1.5">
+        <Badge v-for="r in required" :key="r" tone="muted">{{ r }}</Badge>
+      </div>
     </Card>
   </div>
 </template>

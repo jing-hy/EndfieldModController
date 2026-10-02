@@ -33,15 +33,15 @@ WEB_DIR = _resource_root() / "web"
 
 
 def _index_html() -> Path:
-    """窗口要加载的页面。
+    """窗口要加载的页面：有 Vite 产物就用它，否则回退原生页面。
 
-    **默认继续用原生页面**；只有 Vite 产物就绪、**并且**放了接管标记（`web/dist/.ready`）时才切过去。
-    这样 Phase 1 做到一半也不会让人看到半成品界面，切换与回退都只是删/加一个标记文件的事。
+    ⚠️ 判据**不能**用额外的"接管标记"文件：`vite build` 的 `emptyOutDir` 会把 `web/dist/`
+    整个清掉重建，标记文件每次构建都会消失（2026-10-02 踩到：程序静默退回旧界面，
+    而旧前端里恰好有个我漏声明的变量，于是日志里报 `modDownloadFinished is not defined`）。
+    现在只看产物在不在：构建失败 → dist 不存在 → 自动回退旧页面，依然是安全的。
     """
-    dist = WEB_DIR / "dist"
-    if (dist / ".ready").is_file() and (dist / "index.html").is_file():
-        return dist / "index.html"
-    return WEB_DIR / "index.html"
+    dist = WEB_DIR / "dist" / "index.html"
+    return dist if dist.is_file() else WEB_DIR / "index.html"
 
 
 def _already_running() -> bool:

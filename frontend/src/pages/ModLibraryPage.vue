@@ -5,6 +5,7 @@
 import { ref, computed, onMounted, onUnmounted } from "vue";
 import { call } from "../lib/bridge.js";
 import { store, refreshState } from "../store.js";
+import { loadSettings } from "../lib/settings.js";
 import { settings, saveSetting } from "../lib/settings.js";
 import { humanSize } from "../lib/util.js";
 import Card from "../components/ui/Card.vue";
@@ -41,7 +42,8 @@ async function loadCover(id) {
   if (covers.value[id]) return;
   try {
     const r = await call("get_mod_cover", id);
-    if (r && r.ok && r.data) covers.value[id] = r.data;
+    const uri = r && (r.data || r.uri || r.image || r.base64);
+    if (r && r.ok && uri) covers.value[id] = uri;
   } catch (e) { /* 没有封面很正常 */ }
 }
 
@@ -64,10 +66,12 @@ async function toggleMod(mod) {
   try {
     await call("save_config", { selected_mods: Array.from(ids) });
     await refreshState();
+    loadSettings();
   } catch (e) { /* call 已弹窗 */ }
 }
 
-async function scan() { busy.value = true; try { await call("scan"); await refreshState(); } catch (e) {} finally { busy.value = false; } }
+async function scan() { busy.value = true; try { await call("scan"); await refreshState();
+    loadSettings(); } catch (e) {} finally { busy.value = false; } }
 async function prepare() { busy.value = true; try { await call("prepare"); } catch (e) {} finally { busy.value = false; } }
 async function fixAll() { try { await call("fix_all_mods"); } catch (e) {} }
 
@@ -88,7 +92,8 @@ async function pollDownload() {
     if (!s) return;
     dl.value = s;
     if (!s.done && !dlTimer) dlTimer = setInterval(pollDownload, 1000);
-    if (s.done && dlTimer) { clearInterval(dlTimer); dlTimer = null; await refreshState(); }
+    if (s.done && dlTimer) { clearInterval(dlTimer); dlTimer = null; await refreshState();
+    loadSettings(); }
   } catch (e) { /* 忽略 */ }
 }
 

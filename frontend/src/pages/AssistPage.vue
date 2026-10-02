@@ -6,8 +6,9 @@ import { store } from "../store.js";
 import Card from "../components/ui/Card.vue";
 import Btn from "../components/ui/Btn.vue";
 
-const list = computed(() => store.state.assist_mods || []);
-const status = computed(() => store.state.assist_status || "把 .zip / .7z / .rar 拖到页面任意处即可导入。");
+// state 里没有独立的 assist 列表：辅助 Mod 就是 mods 里 kind === "assist" 的那些
+const list = computed(() => (store.state.mods || []).filter((m) => m.kind === "assist"));
+const status = "把 .zip / .7z / .rar 拖到页面任意处即可导入。";
 
 async function rescan() { try { await call("scan"); } catch (e) { /* call 已弹窗 */ } }
 async function openLib() { try { await call("open_path_in_explorer", "library"); } catch (e) {} }
@@ -28,7 +29,7 @@ async function openLib() { try { await call("open_path_in_explorer", "library");
         <div v-for="m in list" :key="m.id" class="py-2.5 flex items-center justify-between gap-4">
           <div class="min-w-0">
             <div class="font-medium truncate">{{ m.name }}</div>
-            <div class="text-xs mt-0.5" style="color: var(--text-muted)">{{ m.kind || "辅助" }}</div>
+            <div class="text-xs mt-0.5" style="color: var(--text-muted)">{{ m.group || "辅助" }}</div>
           </div>
         </div>
       </div>
