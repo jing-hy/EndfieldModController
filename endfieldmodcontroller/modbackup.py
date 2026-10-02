@@ -30,6 +30,8 @@ from . import core
 from .config import AppConfig
 
 INDEX_NAME = "_index.json"
+# 备份仓的默认名字（数据根下）；设置页留空就是它
+DEFAULT_DIR_NAME = "mod-backup"
 # 复制时顺手跳过的垃圾（不影响 Mod 本体）
 _SKIP_SUFFIXES = (".tmp", ".mc.tmp")
 _SKIP_NAMES = {"desktop.ini", "thumbs.db"}
@@ -37,10 +39,15 @@ _SKIP_NAMES = {"desktop.ini", "thumbs.db"}
 _TMP_PREFIX = "_copying_"
 
 
+def configured_dir(config: AppConfig) -> str:
+    """config 里写的备份目录（空串 = 用默认）。设置页输入框回填用这个。"""
+    return str(getattr(config, "mod_backup_dir", "") or "").strip()
+
+
 def backup_dir(config: AppConfig) -> Path:
     """备份仓目录（默认 `<数据根>\\mod-backup`）。"""
-    value = str(getattr(config, "mod_backup_dir", "") or "").strip()
-    return config.resolve_path(value) if value else (config.base_dir / "mod-backup")
+    value = configured_dir(config)
+    return config.resolve_path(value) if value else (config.base_dir / DEFAULT_DIR_NAME)
 
 
 def index_path(config: AppConfig) -> Path:
@@ -249,4 +256,41 @@ def status(config: AppConfig) -> dict[str, Any]:
         "updated": str(data.get("updated") or ""),
         "overlaps_library": _overlaps_library(config, target),
     }
+
+
+def set_backup_dir(config: AppConfig, value: str | Path | None) -> dict[str, Any]:
+    """改 Mod 备份目录（设置页输入框与「选择文件夹」都走这一个入口）。
+
+    用户 2026-10-02 原话：「**需要加个那个 mod 备份在设置里能自行选择备份目录**」。
+    规则：
+    * **留空 = 回到默认**（数据根下的 `mod-backup\\`）；相对路径照旧按数据根解析；
+    * **先按新位置做重叠校验**：落在 Mod 库 / 中转目录里一律**拒绝并保持原值**
+      （否则备份会滚进库里，既占地方又会被当 Mod 扫到）；
+    * **只改这一个字段**：旧目录里已有的备份**原地不动**（"只增不减"是这条功能的红线），
+      新目录里还是空的，下一次扫描会重新整份复制一份过去 —— 所以返回值里带 `changed`，
+      界面据此把"会重新备份一次"说清楚。
+    """
+    previous_value = configured_dir(config)
+    previous_dir = backup_dir(config)
+    text = "" if value is None else str(value).strip()
+    config.mod_backup_dir = text or DEFAULT_DIR_NAME
+    target = backup_dir(config)
+    changed = str(target) != str(previous_dir)
+
+    if _overlaps_library(config, target):
+        config.mod_backup_dir = previous_value
+        return {"ok": False, "changed": False, "reason": "backup_dir_overlaps_library",
+                "dir": str(previous_dir), "target": str(target),
+                "message": f"这个位置在 Mod 库/中转目录里面，不能拿来放备份：{target}"}
+    try:
+        config.save()
+    except OSError as exc:
+        config.mod_backup_dir = previous_value
+        return {"ok": False, "changed": False, "dir": str(previous_dir),
+                "message": f"保存配置失败：{exc}"}
+    state = status(config)
+    state.update({"ok": True, "changed": changed, "previous": str(previous_dir),
+                  "configured": configured_dir(config)})
+    return state
+
 

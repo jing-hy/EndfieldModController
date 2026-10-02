@@ -1398,14 +1398,73 @@ def _mod_conflict_summary(config: AppConfig, mods_dir: Path, names: list[str]) -
     return groups
 
 
+# RenoDX DLSS5 addon 自己的配置段。它在日志里写死过一句：
+#   "RenoDX.DLSS5 NRStyle=2 is set -- this crashed at startup on the reference machine
+#    (null read on the present path, blamed on whichever module presents next).
+#    If this game crashes on launch, set NRStyle=0 in ReShade.ini's [RenoDX.DLSS5] section."
+# `NRStyle=2` = 预发布字段 `DLSSNR.Style` 选「神经渲染模型 C」（0/1/2 = 模型 A/B/C，
+# 见 addon 自带汉化 translations.txt）—— **不是"电影风格"**。
+#
+# ⚠️ **2026-10-02 起：只如实报告、绝不改动**。
+#    曾经写过"命中崩溃记忆就把 2 改回 0"的自动修复 → 先按用户要求降级成死代码
+#    （原话「你先把那个整段变成死代码，**先保留判断机制**，等后面结果出来了说不定还能用」），
+#    结果出来后他说「**先把之前那个 nr 风格的死代码删掉**」→ **整段已删除**。
+#    依据：实测把它改成 0 之后**照样崩在同一处**；而且当天更晚定案的真正崩因是
+#    **RabbitFX 进了 staging**（见 topic 记忆），与 NRStyle 无关。
+NRSTYLE_SECTION = "RenoDX.DLSS5"
+NRSTYLE_BAD_VALUE = "2"
+
+
+def _check_dlss5_nrstyle(config: AppConfig, report: Report, log: Callable[[str], None] | None) -> None:
+    """**只报告** `[RenoDX.DLSS5] NRStyle` 的当前值，不做任何改动。"""
+    ini = config.dlss5_ini_path
+    if not ini.is_file():
+        report.add("dlss5:nrstyle", True, "还没有 ReShade.ini（跳过 NRStyle 检查）")
+        return
+    try:
+        text = ini.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        report.add("dlss5:nrstyle", False, f"读取 ReShade.ini 失败: {exc}", manual=True)
+        return
+    block = re.search(
+        rf"\[{re.escape(NRSTYLE_SECTION)}\](.*?)(?=\n\s*\[|\Z)", text, re.S | re.I
+    )
+    current = ""
+    if block:
+        found = re.search(r"^\s*NRStyle\s*=\s*(\S+)\s*$", block.group(1), re.M | re.I)
+        if found:
+            current = found.group(1).strip()
+    if current != NRSTYLE_BAD_VALUE:
+        report.add(
+            "dlss5:nrstyle",
+            True,
+            f"NRStyle={current or '未设置'}（不是会崩的 {NRSTYLE_BAD_VALUE}）",
+        )
+        return
+    # NRStyle=2 = 预发布字段 `DLSSNR.Style` 选「神经渲染模型 C」（0/1/2 = 模型 A/B/C）。
+    # **这是用户自己的设置，一律保留不动**（2026-10-02 定案：它既不是这里的崩因，
+    # 也没有任何证据支持去改它）。
+    report.add(
+        "dlss5:nrstyle",
+        True,
+        f"NRStyle={NRSTYLE_BAD_VALUE} 是「神经渲染模型 C」（预发布字段 DLSSNR.Style，"
+        "不是电影风格）—— 这是你的设置，**保留不动**",
+    )
+
+
 def _check_bundled_versions(config: AppConfig, report: Report, log: Callable[[str], None] | None) -> None:
-    """随包组件基线校验：`runtime\\dlss5` 里那几个文件是不是「我们实测可用的那一版」。
+    """随包组件基线校验 + **自动修复**。
 
     为什么要有这一项（2026-09-30 一个 issue 的教训）：玩家很容易拿别处的「DLSS5 整合包」
     覆盖 `runtime\\dlss5\\` —— 其中 `nvngx_dlssnr.dll`（NR 的签名运行时）被换掉或删掉时，
     DLSS5 面板会显示「NR 未绑定 / 成功 NR 帧 0 / 最新 NR NGX 结果 0xBAD00001」，而文件
-    看着都齐、shader 也编得过，极难排查（2026-09-30 issue #3 正是）。这里**只提示、
-    不自动覆盖**用户文件（他的东西他做主）。
+    看着都齐、shader 也编得过，极难排查（2026-09-30 issue #3 正是）。
+
+    **2026-10-02 升级为"自动修复"**：用户当天的现场是"配套里有文件偏离基线 ⇒ 游戏每次启动
+    几十秒后崩在 `nvgpucomp64`"，而这里原先**只提示不修**，他最后只能自己把整个 `runtime\\`
+    删掉重下才好。⇒ 随包组件坏掉就**按基线自动重展开**（先把原文件备份成
+    `.bak-before-baseline-restore`，随时可还原）。**在线组件**（`dlss5-feed.addon64`）
+    **不自动修** —— 它本来就允许被更新成上游最新版（已知可用集合见 `runtime_assets`）。
 
     `check_hash=True`：**小文件**逐个校验 sha256，"大小对但内容被换过"也能查出来；
     59/165 MB 的 nvngx 只比大小（全量哈希会把一键启动拖慢几秒，见 runtime_assets）。
@@ -1413,15 +1472,39 @@ def _check_bundled_versions(config: AppConfig, report: Report, log: Callable[[st
     from . import runtime_assets
 
     try:
-        summary = runtime_assets.baseline_summary(config, check_hash=True)
+        bad = runtime_assets.baseline_mismatches(config, check_hash=True)
     except Exception as exc:  # noqa: BLE001
         report.add("bundled_versions", False, f"随包组件基线校验失败: {exc}", manual=True)
         return
-    if summary["ok"]:
-        report.add("bundled_versions", True, f"随包组件与基线一致（{summary['total']} 项）")
+    if not bad:
+        total = len(runtime_assets.manifest_entries(config)) + 1
+        report.add("bundled_versions", True, f"随包组件与基线一致（{total} 项）")
         return
-    report.add("bundled_versions", False, str(summary["detail"]), manual=True)
-    report.action("随包组件与基线不一致（见上）：把 runtime\\dlss5 改名备份后重跑「一键启动」会重新展开随包版本")
+    repairable = [item for item in bad if str(item.get("group") or "") != "online"]
+    online = [item for item in bad if str(item.get("group") or "") == "online"]
+    if not repairable:
+        report.add(
+            "bundled_versions", True,
+            "随包组件一致；在线组件：" + "；".join(item["message"] for item in online),
+        )
+        return
+    result = runtime_assets.repair_mismatched(config, repairable, log=log)
+    detail = str(result.get("message") or "")
+    if online:
+        detail += "。在线组件（按设计不改）：" + "；".join(item["message"] for item in online)
+    report.add(
+        "bundled_versions",
+        bool(result.get("ok")),
+        detail,
+        fixed=bool(result.get("repaired")),
+        manual=not bool(result.get("ok")),
+    )
+    if result.get("repaired"):
+        report.action(
+            "随包组件与基线不一致，已自动重新展开："
+            + "、".join(result["repaired"])
+            + "（原文件备份为 *.bak-before-baseline-restore）"
+        )
 
 
 def _check_mod_conflicts(config: AppConfig, report: Report, log: Callable[[str], None] | None) -> None:
@@ -1626,7 +1709,7 @@ def _check_controller(config: AppConfig, report: Report, log: Callable[[str], No
     # 否则会把整个 library stage 进 Mods，并把用户自己放进去的 Mod 全部清掉
     # （2026-09-27 实测：这个调用点导致"用控制器启动就崩、手动启动正常"，
     #  因为每次启动都因 controller.ini 缺失而重新 stage 全部 21 个 Mod）。
-    if not config.selected_mods:
+    if not config.effective_selected_mods:
         report.add("controller", True, "未选择任何 Mod，跳过控制器生成（Mods 目录保持原样）")
         return
     try:
@@ -1636,9 +1719,12 @@ def _check_controller(config: AppConfig, report: Report, log: Callable[[str], No
             config.library_path,
             config.staging_mods_path,
             config.runtime_path,
-            selected_ids=config.selected_mods,
+            selected_ids=config.effective_selected_mods,
             hotkey_takeover=launcher.resolve_hotkey_takeover(config, config.controller_dir, log=log),
             allow_same_character=bool(getattr(config, "allow_same_character_mods", False)),
+            prefer_internal_dependencies=bool(
+                getattr(config, "prefer_internal_dependencies", True)
+            ),
         )
         report.add("controller", True, f"已重新生成控制器（staging {result.get('patch_count', 0)} 个 Mod）", fixed=True)
         report.action("重新生成控制器与 staging")
@@ -1690,7 +1776,7 @@ def _check_hotkey_panel(config: AppConfig, report: Report, log: Callable[[str], 
 
 def _check_staging(config: AppConfig, report: Report, log: Callable[[str], None] | None) -> None:
     """选中的 Mod 必须有对应的 MC_ staging 目录，否则服装 Mod 不会生效。"""
-    if not config.selected_mods:
+    if not config.effective_selected_mods:
         report.add("staging", True, "没有选中任何 Mod（跳过）")
         return
     mods_dir = config.staging_mods_path
@@ -1705,9 +1791,12 @@ def _check_staging(config: AppConfig, report: Report, log: Callable[[str], None]
             config.library_path,
             config.staging_mods_path,
             config.runtime_path,
-            selected_ids=config.selected_mods,
+            selected_ids=config.effective_selected_mods,
             hotkey_takeover=launcher.resolve_hotkey_takeover(config, config.controller_dir, log=log),
             allow_same_character=bool(getattr(config, "allow_same_character_mods", False)),
+            prefer_internal_dependencies=bool(
+                getattr(config, "prefer_internal_dependencies", True)
+            ),
         )
         report.add("staging", True, f"已重新 staging {result.get('patch_count', 0)} 个 Mod", fixed=True)
         report.action("重新 staging 选中的 Mod")
@@ -1739,6 +1828,8 @@ def ensure_all(config: AppConfig, log: Callable[[str], None] | None = None) -> d
     _check_dlss5_nr_binding(config, report, log)
     # 游戏自带 DLSS → 自动停用「喂帧组件」（设置页有开关，默认开启）
     _check_dlss5_feed_redundant(config, report, log)
+    # NRStyle=2 是 RenoDX DLSS5 作者标记"启动就崩"的档位（2026-10-02 用户实测撞上）→ 自动改回 0
+    _check_dlss5_nrstyle(config, report, log)
     _check_game_libs(config, report, log)
     _check_bundled_versions(config, report, log)
     _check_controller(config, report, log)

@@ -269,6 +269,10 @@ def test_ensure_xxmi_game_folder_writes_fields_and_backfills(tmp_path, monkeypat
     config = AppConfig(runtime_dir=str(tmp_path / "runtime"),
                        xxmi_launcher=str(launcher_exe), game_exe="")
     monkeypatch.setattr(config, "save", lambda: None, raising=False)
+    # ⚠ 被测代码会**探测真实进程**：XXMI 正在运行时它会**故意拒绝写配置**（正确行为，
+    #   见 launcher.ensure_xxmi_game_folder 的说明）。不打桩的话，"开发机上恰好开着 XXMI"
+    #   就会变成随机假失败 —— 2026-10-02 实测撞上（同族教训：探测真实环境的分支必须打桩）。
+    monkeypatch.setattr(launcher, "xxmi_process_running", lambda _cfg: False)
 
     state = launcher.ensure_xxmi_game_folder(config, log=lambda _m: None)
 
@@ -288,6 +292,7 @@ def test_ensure_xxmi_game_folder_does_not_overwrite_user_game_exe(tmp_path, monk
     config = AppConfig(runtime_dir=str(tmp_path / "runtime"),
                        xxmi_launcher=str(launcher_exe), game_exe=r"D:\my\own\Endfield.exe")
     monkeypatch.setattr(config, "save", lambda: None, raising=False)
+    monkeypatch.setattr(launcher, "xxmi_process_running", lambda _cfg: False)
 
     launcher.ensure_xxmi_game_folder(config, log=lambda _m: None)
 

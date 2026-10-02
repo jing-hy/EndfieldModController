@@ -156,6 +156,12 @@ MAX_HASH_BYTES = 16 << 20
 FEED_NAME = "dlss5-feed.addon64"
 FEED_BASELINE_SIZE = 76_800
 FEED_BASELINE_SHA256 = "6ea59b3237ed9f1e2bdc6e258518347ccb7e03dfdc2f96fc08addc8974527dad"
+# **已知可用的 feed 版本集合**（按字节数认）。它是在线组件，「一键安装/更新全部组件」
+# 本来就会装上游最新版 —— 所以"**不等于随包那一版**"**不算异常**，只有落在集合之外才提醒。
+#   76,800  = 0.1.0（随包那一版，"built Aug 29"）
+#   332,800 = 1.18.0-beta.1（上游最新版；2026-09-30 与 10-02 两次实测在终末地上都正常出帧）
+# 用户 2026-10-02 反馈这条每次自检都报、纯属噪音 → 改成集合法。
+FEED_KNOWN_GOOD_SIZES = (76_800, 332_800)
 
 
 def baseline_mismatches(config: AppConfig, *, check_hash: bool = False) -> list[dict[str, Any]]:
@@ -200,16 +206,15 @@ def baseline_mismatches(config: AppConfig, *, check_hash: bool = False) -> list[
     feed = target_root / FEED_NAME
     if feed.is_file():
         size = feed.stat().st_size
-        if size != FEED_BASELINE_SIZE:
+        if size not in FEED_KNOWN_GOOD_SIZES:
             mismatches.append({
                 "name": FEED_NAME, "group": "online", "kind": "size",
                 "expected": FEED_BASELINE_SIZE, "actual": size,
-                "message": (f"{FEED_NAME} 与随包的版本不同（当前 {size:,} B，随包 {FEED_BASELINE_SIZE:,} B 的 0.1.0）—— "
-                            f"它是在线组件，「一键安装/更新全部组件」本来就会装上游最新版，"
-                            f"实测 1.18.0-beta.1（332,800 B）在终末地上也能正常出帧，所以这条只是提示差异；"
-                            f"真的不出帧时再看 runtime\\dlss5\\dlss5-feed.log 与面板里的「成功NR帧」"),
+                "message": (f"{FEED_NAME} 是 {size:,} 字节，**不在已知可用的版本**里"
+                            f"（随包 {FEED_BASELINE_SIZE:,} = 0.1.0；上游 1.18.0-beta.1 = 332,800）—— "
+                            f"若面板「成功NR帧」长期为 0，点「一键安装/更新全部组件」换回上游版"),
             })
-        elif check_hash:
+        elif check_hash and size == FEED_BASELINE_SIZE:
             got = sha256_file(feed)
             if got and got.lower() != FEED_BASELINE_SHA256:
                 mismatches.append({
@@ -230,6 +235,120 @@ def baseline_summary(config: AppConfig, *, check_hash: bool = False) -> dict[str
         "mismatches": mismatches,
         "detail": "；".join(item["message"] for item in mismatches),
     }
+
+
+# 运行时清单里算 sha256 的上限。比 `MAX_HASH_BYTES` 大得多：`nvngx_dlssnr.dll` 有 165 MB，
+# 而它恰恰是最需要留指纹的那个（2026-09-30 一整轮误判就是因为它被换过）。
+INVENTORY_HASH_LIMIT = 512 << 20
+
+
+def repair_mismatched(
+    config: AppConfig,
+    mismatches: list[dict[str, Any]],
+    *,
+    log: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
+    """把"与基线不一致的**随包**组件"重新展开（原文件先备份一份）。
+
+    用户 2026-10-02 的现场：配套里有文件偏离了随包基线 ⇒ 游戏每次启动后几十秒崩在
+    `nvgpucomp64`，而自检**只提示、不修**，他最后只能自己把整个 `runtime\\` 删掉重下才好。
+    ⇒ 我们自己发出去的组件坏掉，必须**自动修**（准则：「能自动处理的故障，不要用提示来交付」）。
+
+    **在线组件（`dlss5-feed.addon64`）不在这里修** —— 它本来就允许被更新成上游最新版。
+    **备份**：`<文件名>.bak-before-baseline-restore`（只留第一份 —— 那才是用户当时在用的）。
+    """
+    import shutil
+
+    targets = sorted({str(item.get("name")) for item in mismatches
+                      if str(item.get("group") or "") != "online"})
+    if not targets:
+        return {"ok": True, "repaired": [], "failed": [], "message": "没有需要自动修复的随包组件"}
+    entries = {
+        name: (group, root, entry) for group, root, name, entry in manifest_entries(config)
+    }
+    target_root = Path(config.dlss5_path)
+    repaired: list[str] = []
+    failed: list[str] = []
+    for name in targets:
+        dest = target_root / name
+        found = entries.get(name)
+        if found is None:
+            failed.append(f"{name}（随包资产里没有这一项，只能手动处理）")
+            continue
+        group, root, entry = found
+        if dest.is_file():
+            backup = dest.with_name(dest.name + ".bak-before-baseline-restore")
+            try:
+                if not backup.exists():
+                    shutil.copy2(dest, backup)
+            except OSError as exc:
+                failed.append(f"{name}（备份失败：{exc}，为安全起见没有覆盖它）")
+                continue
+        try:
+            result = ensure_file(config, name, entry, root, group=group, force=True, log=log)
+        except Exception as exc:  # noqa: BLE001
+            failed.append(f"{name}（重新展开失败：{exc}）")
+            continue
+        status = str(getattr(result, "status", "") or "")
+        if status in ("present", "extracted"):
+            repaired.append(name)
+            _log(log, f"随包组件已按基线重新展开: {name}")
+        else:
+            failed.append(f"{name}（{getattr(result, 'message', '') or status or '未知'}）")
+    parts: list[str] = []
+    if repaired:
+        parts.append("已按随包基线重新展开 " + "、".join(repaired))
+    if failed:
+        parts.append("以下项需要手动处理：" + "；".join(failed))
+    return {
+        "ok": not failed,
+        "repaired": repaired,
+        "failed": failed,
+        "message": "；".join(parts) or "无需修复",
+    }
+
+
+def runtime_inventory(config: AppConfig, *, with_hash: bool = True) -> list[dict[str, Any]]:
+    """**运行时组件清单**：文件名 / 字节 / sha256 / 与随包基线是否一致。
+
+    给崩溃包与诊断包用（用户 2026-10-01 要求「一次抓全」）。2026-10-02 的现场里正是
+    因为它缺失，才回答不了"崩溃那一刻装的是哪一版组件" —— 用户把 runtime 删掉重下之后，
+    旧现场连清单都不剩，崩因只能停在"配套损坏"这个类别上。
+    """
+    root = Path(config.dlss5_path)
+    if not root.is_dir():
+        return []
+    baseline = {item["name"]: item for item in baseline_mismatches(config, check_hash=with_hash)}
+    rows: list[dict[str, Any]] = []
+    for path in sorted(root.iterdir()):
+        if not path.is_file():
+            continue
+        size = path.stat().st_size
+        row: dict[str, Any] = {"name": path.name, "size": size}
+        if with_hash and size <= INVENTORY_HASH_LIMIT:
+            try:
+                row["sha256"] = sha256_file(path)
+            except OSError:
+                row["sha256"] = ""
+        bad = baseline.get(path.name)
+        row["baseline"] = "ok" if bad is None else f"{bad['kind']}(基线 {bad['expected']:,})"
+        rows.append(row)
+    return rows
+
+
+def inventory_text(config: AppConfig, *, with_hash: bool = True) -> str:
+    """把运行时清单渲染成一段可直接塞进崩溃包 / 诊断包的文本。"""
+    rows = runtime_inventory(config, with_hash=with_hash)
+    if not rows:
+        return "（runtime\\dlss5 目录不存在）"
+    lines = [f"runtime\\dlss5 共 {len(rows)} 个文件（OK=与随包基线一致，!!=偏离基线）", ""]
+    for row in rows:
+        mark = "OK" if row.get("baseline") == "ok" else "!!"
+        sha = str(row.get("sha256") or "")[:16]
+        lines.append(
+            f"{mark}  {row['size']:>13,} B  {sha:<16}  {row['name']}   [{row.get('baseline')}]"
+        )
+    return "\n".join(lines)
 
 
 def sha256_file(path: Path, progress: Callable[[int, int], None] | None = None) -> str:

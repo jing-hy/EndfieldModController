@@ -1239,6 +1239,16 @@ class PatchRecord:
     rel_path: str
 
 
+# 这些段里装的是**要塞进 shader 的汇编文本**（`Pattern` / `Pattern.Replace` /
+# `InsertDeclarations`），不是 ini 的控制流。段内的 `if_nz` / `endif` 都是**汇编指令**，
+# 绝不能按 ini 的 if/endif 去配对 —— 2026-10-02 现场：`CutoutMask.ini` 的
+# `Pattern.Replace` 里每行是 `...\n` 形式的汇编（`if_nz` 开头、`endif\n` 结尾），
+# 被 `sanitize_ini_control_flow()` 当成"不配对的 endif"整段删掉 ⇒ 插进游戏 shader 的
+# 汇编 `if_nz` 不闭合 ⇒ NVIDIA 编译器（`nvgpucomp64`）当场崩。**这是本项目改坏了用户
+# 的 Mod 内容**（库里 59 行 → staging 55 行，而同一份包在 XXMI2 里能正常跑）。
+_ASM_TEXT_SECTION_SUFFIXES = (".pattern", ".pattern.replace", ".insertdeclarations")
+
+
 def sanitize_ini_control_flow(path: Path) -> int:
     """Remove unmatched ``else`` / ``elif`` / ``endif`` lines from a staged INI.
 
@@ -1247,6 +1257,13 @@ def sanitize_ini_control_flow(path: Path) -> int:
     This cleanup is intentionally conservative: it only drops control-flow
     keywords that have no matching ``if`` in the same file.  It is applied to
     the staged copy, never to the user's library download.
+
+    ⚠️ **绝不碰 shader 汇编文本**（2026-10-02 修）：`*.Pattern` /
+    `*.Pattern.Replace` / `*.InsertDeclarations` 段里的内容是要**插进 shader 的汇编**，
+    那里的 `if_nz … endif` 与 ini 的控制流无关。双重保险：① 整段跳过；② 行尾是字面
+    ``\\n`` 的行也跳过（汇编文本的每一行都以它结尾）。**踩过的坑**：这两道闸都没有时，
+    旗袍的 `CutoutMask.ini` 被删掉 4 行 `endif` ⇒ 汇编不闭合 ⇒ 游戏启动几十秒后崩在
+    着色器编译器（而同一个包在别的 XXMI 环境里完好可用）。
     """
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
@@ -1256,9 +1273,18 @@ def sanitize_ini_control_flow(path: Path) -> int:
     out: list[str] = []
     stack: list[str] = []
     removed = 0
+    in_asm_text = False
     for line in lines:
         stripped = line.strip()
         lowered = stripped.lower()
+        if stripped.startswith("["):
+            section = stripped.strip("[]").strip().lower()
+            in_asm_text = section.endswith(_ASM_TEXT_SECTION_SUFFIXES)
+            out.append(line)
+            continue
+        if in_asm_text or line.rstrip("\r\n").endswith("\\n"):
+            out.append(line)          # shader 汇编文本，原样保留
+            continue
         if not stripped or stripped.startswith((";", "//", "#")):
             out.append(line)
             continue
@@ -1748,8 +1774,30 @@ DEFAULT_DEPENDENCIES = {
     "slotfix": {"display": "Slotfix", "kind": "dependency"},
 }
 
+
+def dependency_key_of(name: str) -> str:
+    """这个名字属于哪个已知依赖（`rabbitfx` / `orfix` / `slotfix`）？都不像就返回空串。
+
+    **按"包含"匹配，不是相等**（2026-10-02 用户实测暴露的问题）：用户手动导入库的依赖包
+    往往带前缀/后缀 —— `（重要前置）RabbitFX v24_3d366`、`RabbitFX -ENDMI-`、
+    `（重要前置）RabbitFX+v24_3d366_2` —— 用相等匹配**永远命不中**，于是"按需激活"看着
+    在跑、实际上一个依赖都进不了 staging。
+    """
+    lowered = str(name or "").lower()
+    for key in DEFAULT_DEPENDENCIES:
+        if key in lowered:
+            return key
+    return ""
+
 # ini 内部的命令引用：CommandList\<列表名>\<命令名>（不是外部依赖）
 _COMMANDLIST_REF = re.compile(r"commandlist\\[^\s\"']*", re.IGNORECASE)
+# ini 的行注释（3DMigoto 用 `;` 起）。
+# ⚠️ **必须剔掉**（2026-10-02 用户现场定案）：庄方宜旗袍的 ini 里有一句注释 ——
+# 「Draw-local isolation from **optional RabbitFX** bindings」—— 它其实是在声明
+# "**本 Mod 不依赖 RabbitFX**（并防止它串进来）"，但早期判据扫的是 ini **全文**，
+# 于是把注释里的名字当成了引用 ⇒ 误把 RabbitFX 激活进 staging ⇒ 游戏启动几十秒后
+# 崩在着色器编译器（`nvgpucomp64`）。结论：**判据只看"真的用到"的代码，不看注释里的提及。**
+_COMMENT = re.compile(r";.*$", re.M)
 
 
 def collect_required_dependency_names(mods: Sequence[ModInfo]) -> list[str]:
@@ -1764,10 +1812,12 @@ def collect_required_dependency_names(mods: Sequence[ModInfo]) -> list[str]:
                 texts.append(read_text(ini_path))
             except OSError:
                 continue
-        haystack = "\n".join(texts)
-        # 3DMigoto 的 `CommandList\<列表名>\<命令名>` 是 **ini 内部的命令引用**，不是外部依赖。
-        # 不先剔掉它，像 `pre run = CommandList\SlotFix\SaveDefault` 这样的行会让
-        # "SlotFix" 被误判成缺失依赖（2026-09-27 实测的误报来源）。
+        # ① 先剔**注释**：注释里"提到"某个依赖不等于"用到"它（旗袍那句 isolation 声明
+        #    直接把 RabbitFX 误激活了，见 _COMMENT 的注释）。
+        haystack = _COMMENT.sub("", "\n".join(texts))
+        # ② 3DMigoto 的 `CommandList\<列表名>\<命令名>` 是 **ini 内部的命令引用**，不是外部依赖。
+        #    不先剔掉它，像 `pre run = CommandList\SlotFix\SaveDefault` 这样的行会让
+        #    "SlotFix" 被误判成缺失依赖（2026-09-27 实测的误报来源）。
         haystack = _COMMANDLIST_REF.sub(" ", haystack).lower()
         for dep_id in DEFAULT_DEPENDENCIES:
             if dep_id.lower() in haystack:

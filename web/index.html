@@ -60,10 +60,10 @@
     <section class="panel active" id="tab-library">
       <div class="switch-item" id="mods-master-card">
         <div class="switch-row">
-          <span class="switch-name">开启第三方服装 Mod</span>
+          <span class="switch-name">开启皮肤 Mod</span>
           <label class="switch"><input type="checkbox" id="cfg-third-party-mods" checked><span class="slider"></span></label>
         </div>
-        <div class="switch-desc">总开关：关闭后 EFMI 引擎不再注入，<b>所有</b>服装 Mod 都不生效（Mods 文件保持原样，随时可开回来）。</div>
+        <div class="switch-desc">总开关：关闭后<b>一个皮肤都不加载</b>（Mods 目录会被清空，随时可开回来）。⚠️ 注意这<b>不是</b>停掉 EFMI 注入 —— 实测那样终末地会直接拉不起来；注入照旧，只是没有皮肤。</div>
       </div>
       <div class="switch-item">
         <div class="switch-row">
@@ -127,10 +127,10 @@
         </div>
         <div class="switch-item">
           <div class="switch-row">
-            <span class="switch-name">服装 Mod（EFMI）</span>
+            <span class="switch-name">皮肤 Mod</span>
             <label class="switch"><input type="checkbox" id="cfg-efmi-injection" checked><span class="slider"></span></label>
           </div>
-          <div class="switch-desc">注入 EFMI 的 <code>d3d11.dll</code>，加载 Mods 目录里生效的 Mod</div>
+          <div class="switch-desc">所有皮肤 Mod 的总开关：关掉就<b>一个皮肤都不加载</b>（Mods 清空）。EFMI 的 <code>d3d11.dll</code> <b>始终注入</b> —— 实测不注入它终末地会直接拉不起来。</div>
         </div>
         <div class="switch-item">
           <div class="switch-row">
@@ -187,6 +187,13 @@
         <div class="setting-row">
           <span class="setting-label">Mod 库目录</span>
           <input id="cfg-library_dir" type="text" placeholder="library">
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Mod 备份目录<em>留空 = 主路径下的 mod-backup（只增不减）</em></span>
+          <div class="input-with-button">
+            <input id="cfg-mod_backup_dir" type="text" placeholder="mod-backup">
+            <button id="mod-backup-choose" type="button">选择…</button>
+          </div>
         </div>
         <div class="setting-row">
           <span class="setting-label">Staging Mods 目录<em>EFMI 实际加载的位置</em></span>
@@ -291,6 +298,10 @@
         <div class="setting-row switch-row">
           <span class="setting-label" title="把统一控制面板（自研 ReShade addon）放进 ReShade 真正读取的目录（d3d12.dll 所在处）。关掉后不注入面板；此时「整合 Mod 快捷键」会拒绝锁键，避免出现“键被锁了、面板却不存在”。">注入 ReShade 控制面板</span>
           <label class="switch"><input type="checkbox" id="cfg-inject-reshade-ui" checked><span class="slider"></span></label>
+        </div>
+        <div class="setting-row switch-row">
+          <span class="setting-label" title="RabbitFX 这类依赖：同一时间只允许一份生效（作者说多个实例会导致异常行为与游戏崩溃）。开启时优先用控制器自己维护的 _deps 那份，屏蔽你手动放进库的；关闭则反过来（外部优先）。两侧都有多份时，只启用最后安装的那一份。">依赖优先用内部那份（RabbitFX 等）</span>
+          <label class="switch"><input type="checkbox" id="cfg-prefer-internal-deps" checked><span class="slider"></span></label>
         </div>
         <div class="setting-row switch-row">
           <span class="setting-label" title="ReShade 默认字体只有 ASCII，面板里的中文含义会显示成方块。开启时（仅在 ReShade.ini 的 Font 还为空的情况下）自动指向系统中文字体，写前会备份。">面板使用中文字体（自动，可关）</span>

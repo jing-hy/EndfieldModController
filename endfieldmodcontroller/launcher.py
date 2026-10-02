@@ -725,10 +725,13 @@ def dlss5_injection_targets(config: AppConfig) -> list[str]:
                     or getattr(config, "firstperson_addon_enabled", True))
     if want_base:
         targets.append(str(dll))
-    if getattr(config, "efmi_injection", True):
-        efmi = config.efmi_dll_path
-        if efmi is not None and efmi.is_file():
-            targets.append(str(efmi))
+    # ⚠️ EFMI 的 `d3d11.dll` **永远注入**（2026-10-02 用户实测：「**efmi 关了直接终末地
+    #    拉不起来**」）—— 它不是"皮肤开关"，而是 XXMI 认游戏、加载 Mods 的基础设施。
+    #    真正的「皮肤 Mod」总开关现在只控制**往 staging 里放不放 Mod**
+    #    （`Config.effective_selected_mods`），**不再动注入库**。
+    efmi = config.efmi_dll_path
+    if efmi is not None and efmi.is_file():
+        targets.append(str(efmi))
     # 乳摇：可选用「注入 sbm.dll」的方式（config.secondary_motion_dll 指向短路径下的
     # sbm.dll）。这样游戏目录不用替换 d3dcompiler_47.dll / vulkan-1.dll，
     # 避免和 ReShade/EFMI 抢 D3D 调用链（proxy 方式实测 65 秒崩）。
@@ -1538,28 +1541,35 @@ def launch_official_gui(config: AppConfig) -> dict[str, Any]:
         _append_log(config, f"同步手动 Mod 失败（已跳过，继续启动）: {exc}")
 
     # Mods 目录由控制器全权管理：最终只放"用户在 Mod 库勾选的那些"。
-    # stage_and_prepare 会先清空整个 Mods（含手动放进去的），再按 selected_mods 生成
-    # MC_* 产物 —— 这样绝不会出现同角色成对（踩过两次，见 activation.stage_and_prepare）。
-    # 注意 selected_mods 为空时不能调用：resolve_active_set 里「空列表」= 全部激活。
-    if config.selected_mods and getattr(config, "efmi_injection", True):
-        try:
-            activation.stage_and_prepare(
-                config.library_path,
-                config.staging_mods_path,
-                config.runtime_path,
-                selected_ids=config.selected_mods,
-                hotkey_takeover=resolve_hotkey_takeover(config, config.controller_dir),
-                allow_same_character=bool(getattr(config, "allow_same_character_mods", False)),
-            )
+    # stage_and_prepare 会先清空整个 Mods 里的 `MC_*`（用户手动放的照样保留），再按选择生成。
+    #
+    # ⚠️ **一律 stage**（2026-10-02 改）：以前"没勾选 / 皮肤开关关着就**跳过** staging"，
+    #    结果是**上一次的 `MC_*` 留在 Mods 里照样被 EFMI 加载**（幽灵 Mod）。现在统一传
+    #    `Config.effective_selected_mods` —— 皮肤总开关关着 → 空 → 直接清空 Mods；
+    #    一个都没勾 → 同样清空。
+    selected_now = config.effective_selected_mods
+    if not getattr(config, "efmi_injection", True):
+        _append_log(config, "皮肤 Mod 已关闭：EFMI 照常注入，但不加载任何皮肤（Mods 将清空）")
+    try:
+        activation.stage_and_prepare(
+            config.library_path,
+            config.staging_mods_path,
+            config.runtime_path,
+            selected_ids=selected_now,
+            hotkey_takeover=resolve_hotkey_takeover(config, config.controller_dir),
+            allow_same_character=bool(getattr(config, "allow_same_character_mods", False)),
+            prefer_internal_dependencies=bool(
+                getattr(config, "prefer_internal_dependencies", True)
+            ),
+        )
+        if selected_now:
             # 每次 staging 之后都刷新一次面板与动作清单（面板读的是 base 目录里的
             # actions.tsv —— 不刷新的话它显示的是上一轮选中的 Mod）。
             reshade_integration.deploy_panel(
                 config, config.controller_dir, log=lambda m: _append_log(config, m)
             )
-        except Exception as exc:  # noqa: BLE001
-            _append_log(config, f"暂存所选 mod 失败: {exc}")
-    else:
-        _append_log(config, "未选择任何 Mod，跳过 staging（Mods 目录保持原样）")
+    except Exception as exc:  # noqa: BLE001
+        _append_log(config, f"暂存所选 mod 失败: {exc}")
 
     # 拉起 XXMI **之前最后一刻**再做两件事（2026-10-01 现场加固，对应 memory 0mup0ktzd
     # 记的"写早了会被 XXMI 退出时覆盖"）：
@@ -1798,9 +1808,12 @@ def launch(
             config.library_path,
             config.staging_mods_path,
             config.runtime_path,
-            selected_ids=config.selected_mods,
+            selected_ids=config.effective_selected_mods,
             hotkey_takeover=resolve_hotkey_takeover(config, config.controller_dir),
             allow_same_character=bool(getattr(config, "allow_same_character_mods", False)),
+            prefer_internal_dependencies=bool(
+                getattr(config, "prefer_internal_dependencies", True)
+            ),
         )
 
     problems = config.validate()
@@ -2320,6 +2333,9 @@ def launch_migoto_loader(
         user_ini_path=user_ini,
         hotkey_takeover=resolve_hotkey_takeover(config, config.controller_dir, log=lambda m: _append_log(config, m)),
         allow_same_character=bool(getattr(config, "allow_same_character_mods", False)),
+        prefer_internal_dependencies=bool(
+            getattr(config, "prefer_internal_dependencies", True)
+        ),
     )
     controller_dir = Path(result["controller_dir"])
 

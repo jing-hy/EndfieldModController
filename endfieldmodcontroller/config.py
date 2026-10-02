@@ -125,6 +125,13 @@ class AppConfig:
     # 文件夹只增不减，只要见到新 mod，就打包 zip 放进去」。默认与 `library/` 平级、
     # 就放在数据根下，用户一眼能看到、能自己拷到别处；程序**只往里加，从不删**。
     mod_backup_dir: str = "mod-backup"
+    # **依赖去重与内外优先级**（用户 2026-10-02 要求：「加个去重，在设置里加个内部
+    # RabbitFX 优先，默认开，开的话如果还有外部 RabbitFX 就把外部的屏蔽掉，没开就把
+    # 内部屏蔽掉、就算外部优先，如果外部有多个，按最后安装的优先」）。
+    # True（默认）= 优先用控制器自己维护的 `<库>\_deps\<名字>` 那份，屏蔽你手动放进库的；
+    # 关掉 = 反过来（外部优先）。无论哪种，同一依赖**只允许一份进 staging** ——
+    # RabbitFX 作者在发布页写死过"多个实例会导致异常行为与游戏崩溃"。
+    prefer_internal_dependencies: bool = True
     builtin_runtime_dir: str = "runtime/builtin"
     use_builtin_runtime: bool = True
     staging_mods_dir: str = "runtime/builtin/XXMI/EFMI/Mods"
@@ -143,6 +150,13 @@ class AppConfig:
     dlss5_addon_enabled: bool = True          # RenoDX-DLSS5 神经渲染
     firstperson_addon_enabled: bool = True    # Endfield Enhancer 第一人称
     # 是否把 EFMI 的 d3d11.dll（服装 Mod 引擎）也写进 XXMI 注入库
+    # ⚠️ **语义已改（2026-10-02 用户实测后的要求）**：这个开关**不再**控制"要不要注入
+    #    EFMI 的 `d3d11.dll`"，而是**"要不要加载皮肤 Mod"**。
+    #    原因（用户原话）：①「**efmi 关了直接终末地拉不起来**」—— 注入库空了 XXMI 就认不了
+    #    游戏；②「**我手动关了所有皮肤 mod 就可以进了**」—— 真正该关的是**皮肤**，不是注入。
+    #    现在关掉它的效果：**EFMI 照常注入**（否则游戏起不来），但 staging 里**一个皮肤都不放**
+    #    （`effective_selected_mods` 返回空 → `stage_and_prepare(selected_ids=[])` 清空 Mods）。
+    #    字段名保留（老配置零迁移），但**别再按字面理解成"EFMI 注入开关"**。
     efmi_injection: bool = True
     # DLSS5 素材目录（缺文件时从这里补齐），留空则自动探测
     dlss5_source_dir: str = ""
@@ -420,6 +434,24 @@ class AppConfig:
     @property
     def library_path(self) -> Path:
         return self.resolve_path(self.library_dir)
+
+    @property
+    def effective_selected_mods(self) -> list[str]:
+        """**真正要 stage 的 Mod**：所有"游戏里会加载什么"的入口都必须走这里。
+
+        * 「皮肤 Mod」总开关（`efmi_injection`）关掉时 → **一律空**。
+          注意这**不是**"不注入 EFMI"（那会让终末地直接起不来，用户 2026-10-02 实测：
+          「efmi 关了直接终末地拉不起来」），而是"一个皮肤都不加载"—— 注入照旧、
+          `Mods` 目录清空。用户原话：「**我手动关了所有皮肤 mod 就可以进了**」。
+        * 开关开着时 = 用户在库里勾选的那些。
+
+        为什么要收成一个入口：这个项目里决定 staging 的调用点有 8 处（一键启动、生成控制器、
+        自检补齐、检查修复…），各写各的就会出现"某个入口把皮肤又装回去了"（多入口一致性，
+        2026-10-01 issue #6 的教训）。
+        """
+        if not self.efmi_injection:
+            return []
+        return list(self.selected_mods or [])
 
     @property
     def runtime_path(self) -> Path:

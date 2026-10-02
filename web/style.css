@@ -283,6 +283,19 @@ pre.code-block { max-height: 330px; }
 .oneclick { padding: 10px 22px; font-size: 15px; font-weight: 700; border-radius: var(--radius-sm); margin-bottom: 12px; }
 .oneclick:disabled { opacity: .6; cursor: wait; }
 
+/* ⚠️ **通用滑块样式**（2026-10-02 修）：这套外观以前只写在 `.switch-item`（启动页）与
+   `.mod-card`（Mod 卡片）作用域里，**设置页的 `.switch` 一条都没有** → `<span class="slider">`
+   是个空 inline 元素、根本看不见，只剩被隐藏的 checkbox，看起来就是个"勾选框"。
+   用户原话：「设置页所有勾选的都**对齐启动页，改成滑块**」。现在提升为通用 `.switch`。 */
+.switch { display: inline-flex; align-items: center; width: 46px; height: 24px; position: relative; flex: none; }
+.switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.switch .slider { position: absolute; inset: 0; border: 1px solid var(--line); background: color-mix(in srgb, var(--panel-2) 80%, transparent); border-radius: 999px; cursor: pointer; transition: background .18s ease, border-color .18s ease; }
+.switch .slider:before { content: ""; position: absolute; width: 18px; height: 18px; left: 2px; top: 2px; border-radius: 50%; background: #ffffff; box-shadow: 0 2px 6px rgba(0,0,0,.35); transition: transform .18s ease; }
+.switch input:checked + .slider { background: var(--accent); border-color: var(--accent); }
+.switch input:checked + .slider:before { transform: translateX(22px); }
+.switch input:disabled + .slider { opacity: .55; cursor: not-allowed; }
+.switch input:focus-visible + .slider { outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 2px; }
+
 .switch-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
 .switch-item { background: color-mix(in srgb, var(--panel-strong) 92%, transparent); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 12px 14px; }
 .switch-item .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -361,6 +374,10 @@ pre.code-block { max-height: 330px; }
   background: color-mix(in srgb, var(--accent) 7%, transparent);
   color: var(--muted); cursor: default;
 }
+/* 「输入框 + 选择…」组合（Mod 备份目录那种要挑路径的）：输入框占满，按钮不换行 */
+.input-with-button { display: flex; gap: 8px; align-items: center; min-width: 0; }
+.input-with-button > input { flex: 1 1 auto; min-width: 0; }
+.input-with-button > button { flex: 0 0 auto; white-space: nowrap; }
 @media (max-width: 720px) {
   .setting-row { grid-template-columns: 1fr; }
 }

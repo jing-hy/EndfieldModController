@@ -789,6 +789,18 @@ def create_diagnostic_bundle(config: Any, *, game_dir: Path | None = None, note:
     summary.extend(_xxmi_summary(config))
     summary.extend(_ngx_consumer_summary(game_dir))
     summary.extend(_shader_summary(config))
+    # 运行时组件清单（2026-10-02 加）：文件名 / 字节 / sha256 / 是否偏离随包基线。
+    # 那天用户遇到"配套损坏 ⇒ 游戏启动几十秒后崩"，包里却没有这份清单，
+    # 事后连"装的是哪一版组件"都回答不了（详见 runtime_assets.inventory_text）。
+    try:
+        from . import runtime_assets
+
+        inventory = runtime_assets.inventory_text(config)
+    except Exception as exc:  # noqa: BLE001
+        inventory = f"（收集运行时清单失败：{exc}）"
+    summary.append("")
+    summary.append("-- 运行时组件清单（runtime\\dlss5）--")
+    summary.extend(inventory.splitlines())
     # 设备型号 / 显卡与驱动（用户 2026-10-01 要求）：判断"是不是显卡不支持"就靠这段。
     try:
         from . import deviceinfo
@@ -822,6 +834,7 @@ def create_diagnostic_bundle(config: Any, *, game_dir: Path | None = None, note:
                 pass
         if config_path.is_file():
             _safe_zip_write(archive, config_path, "config.json")
+        archive.writestr("runtime-inventory.txt", inventory + "\n")
         archive.writestr("summary.txt", "\n".join(summary) + "\n")
 
     log_event(config, "诊断包已创建", category="diag", path=out, note=note)

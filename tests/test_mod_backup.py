@@ -150,6 +150,65 @@ class ModBackupTests(unittest.TestCase):
         folders = [p.name for p in modbackup.backup_dir(self.config).iterdir() if p.is_dir()]
         self.assertEqual(len(folders), 1)
 
+    # ------------------------------------------------------------------
+    # 设置页「自行选择备份目录」（用户 2026-10-02 要求）
+    # ------------------------------------------------------------------
+    def test_custom_backup_dir_is_used_and_persisted(self) -> None:
+        elsewhere = self.root / "other-drive" / "mc-backup"
+        source = self._add_mod("Alice")
+        result = self.api.set_mod_backup_dir(str(elsewhere))
+        self.assertTrue(result["ok"], result)
+        self.assertTrue(result["changed"], result)
+        elsewhere.mkdir(parents=True, exist_ok=True)
+        # 注意：api 内部持有**自己加载的那份 config**（与 self.config 不是同一个对象），
+        # 判断生效要看 self.api.config。
+        self.assertTrue(modbackup.backup_dir(self.api.config).samefile(elsewhere), result["dir"])
+        # 落盘了：重新加载配置也指向新目录
+        reloaded = AppConfig.load(self.config_path)
+        self.assertTrue(modbackup.backup_dir(reloaded).samefile(elsewhere))
+        # 备份真的进了新目录，内容与源一致
+        self.api._invalidate_mods()
+        again = self.api._backup_new_mods()
+        self.assertTrue(again["created"], again)
+        self.assertTrue((elsewhere / "Alice" / "mod.ini").is_file())
+        self.assertEqual(
+            (elsewhere / "Alice" / "mod.ini").read_text(encoding="utf-8"),
+            (source / "mod.ini").read_text(encoding="utf-8"),
+        )
+
+    def test_blank_value_restores_default_dir(self) -> None:
+        """留空 = 回到默认（数据根下的 mod-backup）。"""
+        self.api.set_mod_backup_dir(str(self.root / "custom"))
+        result = self.api.set_mod_backup_dir("")
+        self.assertTrue(result["ok"], result)
+        self.assertTrue(result["changed"], result)
+        default_dir = self.root / "mod-backup"
+        default_dir.mkdir(parents=True, exist_ok=True)
+        self.assertTrue(modbackup.backup_dir(self.api.config).samefile(default_dir), result["dir"])
+
+    def test_unchanged_value_reports_not_changed(self) -> None:
+        """填的还是原值 → changed=False（界面据此不提示"会重新备份一次"）。"""
+        result = self.api.set_mod_backup_dir("mod-backup")
+        self.assertTrue(result["ok"], result)
+        self.assertFalse(result["changed"], result)
+
+    def test_backup_dir_change_is_refused_when_inside_library(self) -> None:
+        """落进 Mod 库/中转目录 → 拒绝并保持原值（否则备份会滚进库里）。"""
+        before = modbackup.configured_dir(self.api.config)
+        result = self.api.set_mod_backup_dir(str(self.library / "backup"))
+        self.assertFalse(result["ok"], result)
+        self.assertEqual(result["reason"], "backup_dir_overlaps_library")
+        self.assertEqual(modbackup.configured_dir(self.api.config), before, "被拒绝的值不该留在配置里")
+        self.assertFalse((self.library / "backup").exists())
+
+    def test_choose_dir_without_window_reports_failure(self) -> None:
+        """单测环境没有窗口：如实报失败，且绝不偷偷改配置。"""
+        before = modbackup.configured_dir(self.api.config)
+        result = self.api.choose_mod_backup_dir()
+        self.assertFalse(result["ok"])
+        self.assertTrue(result.get("message"), result)
+        self.assertEqual(modbackup.configured_dir(self.api.config), before)
+
 
 if __name__ == "__main__":
     unittest.main()

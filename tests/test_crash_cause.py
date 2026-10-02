@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 import zipfile
 from pathlib import Path
@@ -27,7 +28,12 @@ def env(tmp_path, monkeypatch):
     config = AppConfig()
     monkeypatch.setattr(AppConfig, "runtime_path", property(lambda self: tmp_path / "runtime"))
     monkeypatch.setattr(AppConfig, "dlss5_path", property(lambda self: tmp_path / "dlss5"))
+    # staging 也要打桩：崩溃记忆会读当前 staging 里的 Mod 名单，不打桩就会读到
+    # **开发机上真实的** `runtime\builtin\XXMI\EFMI\Mods`（同一个坑第三次踩到）。
+    monkeypatch.setattr(AppConfig, "staging_mods_path",
+                        property(lambda self: tmp_path / "runtime" / "EFMI" / "Mods"))
     (tmp_path / "runtime" / "logs").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "runtime" / "EFMI" / "Mods").mkdir(parents=True, exist_ok=True)
     dlss5 = tmp_path / "dlss5"
     dlss5.mkdir(parents=True, exist_ok=True)
     return SimpleNamespace(tmp=tmp_path, config=config, dlss5=dlss5)
@@ -132,19 +138,32 @@ def test_baseline_flags_missing_files(env):
     assert any(item["kind"] == "missing" for item in summary["mismatches"])
 
 
-def test_baseline_flags_replaced_feed(env):
-    """feed 与随包不同（大小 ≠ 76,800）时要被点名。
+def test_baseline_accepts_both_known_feed_versions(env):
+    """**两个已知可用的 feed 版本都不该报警**（2026-10-02 改成"已知可用集合"）。
 
-    ⚠ 只断言"被点名"，**不断言"不会出帧"** —— 2026-09-30 实测 0.1.0（76,800 B）与
-    1.18.0-beta.1（332,800 B）在终末地上都能正常出帧，所以这条只是差异提示。
+    用户反馈这条每次自检都报、纯属噪音 —— 0.1.0（76,800 B）与 1.18.0-beta.1（332,800 B）
+    在终末地上都能正常出帧，装哪个都不算异常。
+    """
+    for size in (76_800, 332_800):
+        sizes = _baseline_sizes(env)
+        sizes[runtime_assets.FEED_NAME] = size
+        _sparse_files(env.dlss5, sizes)
+        summary = runtime_assets.baseline_summary(env.config)
+        assert summary["ok"] is True, f"{size} B 属于已知可用版本，不该报警: {summary['detail']}"
+
+
+def test_baseline_flags_unknown_feed_version(env):
+    """落在已知集合**之外**的 feed 才提醒。
+
+    ⚠ 只断言"被点名"，**不断言"不会出帧"** —— 它是在线组件，允许用户换版本。
     """
     sizes = _baseline_sizes(env)
-    sizes[runtime_assets.FEED_NAME] = 332_800
+    sizes[runtime_assets.FEED_NAME] = 999_999
     _sparse_files(env.dlss5, sizes)
     summary = runtime_assets.baseline_summary(env.config)
     assert summary["ok"] is False
     assert any(item["name"] == runtime_assets.FEED_NAME for item in summary["mismatches"])
-    assert "与随包的版本不同" in summary["detail"]
+    assert "不在已知可用的版本" in summary["detail"]
 
 
 def test_baseline_flags_wrong_sized_addon(env):
@@ -172,3 +191,107 @@ def test_diagnostic_bundle_includes_dlss5_scene(env, monkeypatch):
     assert "dlss5/ReShade.ini" in names
     assert "dlss5/dlss5-feed.cfg" in names
     assert "mod_conflicts.json" in names
+
+
+# --------------------------------------------------- 硬证据优先（2026-10-02 用户反馈后加的）
+def test_dlss5_crash_record_beats_static_conflict(env):
+    """插件自己记下的崩溃（**实测证据**）压过"自检发现资源相交"（静态推测）。
+
+    2026-10-02 用户现场：用 NRStyle=2 崩的那次被归成了"Mod 资源冲突"，弹窗还催他去清理 Mod。
+    """
+    diagnostics.record_mod_conflicts(
+        env.config, ok=False, detail="「MC_A」与「MC_B」覆盖同一批资源",
+        conflicts=["「MC_A」与「MC_B」覆盖同一批资源（2 个独享标识: h:1, h:2…）"],
+    )
+    (env.dlss5 / "dlss5-feed.log").write_text(
+        "11:47:05.434  ### CRASH RECORDED ###  exception 0xC0000005 (reading address 0000000000000020) "
+        "at 00007FFC6E247EC5 in C:\\WINDOWS\\System32\\DriverStore\\FileRepository\\nv_dispi_x\\nvgpucomp64.dll; "
+        "this add-on was last doing: D3D11 output blit complete (later faults in this process are not recorded)\n",
+        encoding="utf-8",
+    )
+    (env.dlss5 / "ReShade.ini").write_text(
+        "[GENERAL]\nA=1\n\n[RenoDX.DLSS5]\nNeuralUplift=1\nNRStyle=2\n", encoding="utf-8",
+    )
+    cause = crashwatch.classify_cause(env.config, _crashed())
+    # ⚠ "是 NRStyle=2 引起这次崩溃"那条**因果断言已删除**（2026-10-02，实测 0 也崩；
+    # 当天更晚定案的真因是 RabbitFX 进了 staging）→ 现在归到"崩在显卡着色器编译器"
+    # 这个**事实陈述**上。
+    assert cause["kind"] == "gpu_compiler"
+    assert "nvgpucomp64" in cause["title"] and "不是 Mod 冲突" in cause["title"]
+    assert cause["conflicts"], "静态检出的相交信息不该丢，只是不再当结论"
+
+
+def test_nrstyle_never_produces_its_own_cause(env):
+    """即使 NRStyle=2 且崩在 nvgpucomp64，也**不再**归因成 `dlss5_nr_style`。"""
+    (env.dlss5 / "dlss5-feed.log").write_text(
+        "11:47:05.434  ### CRASH RECORDED ###  exception 0xC0000005 (reading address 0000000000000020) "
+        "at 00007FFC6E247EC5 in C:\\x\\nvgpucomp64.dll; this add-on was last doing: D3D11 output blit complete\n",
+        encoding="utf-8",
+    )
+    (env.dlss5 / "ReShade.ini").write_text("[RenoDX.DLSS5]\nNRStyle=2\n", encoding="utf-8")
+    cause = crashwatch.classify_cause(env.config, _crashed())
+    assert cause["kind"] == "gpu_compiler"
+    assert "NRStyle" not in cause["title"]
+
+
+def test_gpu_compiler_crash_when_nrstyle_is_not_two(env):
+    (env.dlss5 / "dlss5-feed.log").write_text(
+        "12:00:00.000  ### CRASH RECORDED ###  exception 0xC0000005 (reading address 20) "
+        "at 00007FFC6E247EC5 in C:\\x\\nvgpucomp64.dll; this add-on was last doing: D3D11 output blit complete\n",
+        encoding="utf-8",
+    )
+    (env.dlss5 / "ReShade.ini").write_text("[RenoDX.DLSS5]\nNRStyle=0\n", encoding="utf-8")
+    cause = crashwatch.classify_cause(env.config, _crashed())
+    assert cause["kind"] == "gpu_compiler"
+    assert "nvgpucomp64" in cause["title"]
+
+
+def test_stale_crash_record_is_not_counted(env):
+    """日志里那条记录是**上一次**崩溃留下的 → 不能算到这次头上。"""
+    log = env.dlss5 / "dlss5-feed.log"
+    log.write_text(
+        "### CRASH RECORDED ###  exception 0xC0000005 at 0x1 in C:\\x\\nvgpucomp64.dll\n",
+        encoding="utf-8",
+    )
+    old = time.time() - 3600
+    os.utime(log, (old, old))
+    cause = crashwatch.classify_cause(env.config, _crashed())
+    assert cause["kind"] == "crash"
+
+
+def test_dlss5_crash_record_helper_parses_module(env):
+    (env.dlss5 / "dlss5-feed.log").write_text(
+        "### CRASH RECORDED ###  exception 0xC0000005 (reading address 0000000000000020) "
+        "at 00007FFC6E247EC5 in D:\\x\\nvgpucomp64.dll; this add-on was last doing: D3D11 output blit complete\n",
+        encoding="utf-8",
+    )
+    record = crashwatch.dlss5_crash_record(env.config)
+    assert record and record["module"].lower() == "nvgpucomp64.dll"
+    assert record["gpu_compiler"] is True
+    assert "D3D11 output blit" in record["doing"]
+
+
+def test_gpu_compiler_crash_is_still_remembered(env, monkeypatch):
+    """**归因类型不该决定"记不记"**：`gpu_compiler` 也要进崩溃记忆。
+
+    2026-10-02 现场踩到：归因新增 `gpu_compiler` 后，那两类崩溃一条都没被记下来
+    （`crash_memory.json` 里没有新条目），因为白名单还是 `{"crash", "mod_conflict"}`。
+    """
+    (env.tmp / "runtime" / "EFMI" / "Mods" / "MC_佩丽卡_皮肤").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(crashwatch, "collect_game_logs", lambda config, dest: [])
+    monkeypatch.setattr(crashwatch, "injection_snapshot", lambda config: {})
+    monkeypatch.setattr(crashwatch, "_crash_root", lambda: env.tmp / "no-crashes")
+    monkeypatch.setattr(crashwatch, "_crash_sight_lines", lambda config, since=None, limit=4: ["uploadCrash"])
+    monkeypatch.setattr(crashwatch, "_crash_sight_upload_lines", lambda config, since=None: ["uploadCrash"])
+    monkeypatch.setattr(crashwatch, "_extract_game_errors", lambda config, limit=20: [])
+    (env.dlss5 / "dlss5-feed.log").write_text(
+        "### CRASH RECORDED ###  exception 0xC0000005 (reading address 20) "
+        "at 0x7FF in C:\\x\\nvgpucomp64.dll; this add-on was last doing: D3D11 output blit complete\n",
+        encoding="utf-8",
+    )
+    evidence = crashwatch.collect_evidence(env.config)
+    bundle = crashwatch.make_bundle(env.config, evidence)
+    assert (bundle.get("cause") or {}).get("kind") == "gpu_compiler"
+    saved = crashwatch.read_crash_memory(env.config)
+    assert saved, "gpu_compiler 这类崩溃也必须进崩溃记忆"
+    assert saved[0]["mods"] == ["MC_佩丽卡_皮肤"]

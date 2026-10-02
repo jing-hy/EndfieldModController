@@ -156,11 +156,14 @@ def repair_integrity(config: AppConfig, log: Callable[[str], None] | None = None
         config.library_path,
         config.staging_mods_path,
         config.runtime_path,
-        selected_ids=config.selected_mods,
+        selected_ids=config.effective_selected_mods,
         # 「修复」这条链路必须与「一键启动」完全一致（issue #6 的教训）：
         # 同样先确认面板可用再决定要不要锁 Mod 热键。
         hotkey_takeover=launcher_mod.resolve_hotkey_takeover(config, config.controller_dir, log=note),
         allow_same_character=bool(getattr(config, "allow_same_character_mods", False)),
+        prefer_internal_dependencies=bool(
+            getattr(config, "prefer_internal_dependencies", True)
+        ),
     )
     try:
         panel = reshade_integration.deploy_panel(config, config.controller_dir, log=note)

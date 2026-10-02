@@ -150,6 +150,69 @@ def is_crash(evidence: dict[str, Any]) -> bool:
 # ---------------------------------------------------------------------------
 # 崩溃归因：Mod 冲突 vs 其它（用户要求弹窗要区分）
 # ---------------------------------------------------------------------------
+_CRASH_RECORD_RE = re.compile(r"###\s*CRASH RECORDED\s*###\s*(?P<rest>.+?)\s*$", re.I | re.M)
+# DLSS5 的 NR 风格档里被作者标记"启动就崩"的那个值（预发布字段 DLSSNR.Style 选「模型 C」）。
+# 现在**只用于记录**（崩溃记忆里会带上"当时 NRStyle 是多少"），**不再用于任何归因或改动** ——
+# 2026-10-02 定案：它既不是本项目的崩因（真正原因是 RabbitFX 进了 staging），
+# "NRStyle=2 引起这次崩溃"那条因果归因已按用户要求**整段删除**。
+_NRSTYLE_BAD_VALUE = "2"
+
+
+def dlss5_crash_record(config: AppConfig, started_at: float | None = None) -> dict[str, Any] | None:
+    """读 `runtime\\dlss5\\dlss5-feed.log` 里 **DLSS5 插件自己写的**崩溃记录。
+
+    ```text
+    11:47:05.434  ### CRASH RECORDED ###  exception 0xC0000005 (reading address 0000000000000020)
+                  at 00007FFC6E247EC5 in C:\\…\\nvgpucomp64.dll; this add-on was last doing:
+                  D3D11 output blit complete
+    ```
+
+    为什么把它放在归因的**第一顺位**（2026-10-02 用户反馈）：这是**实测证据** —— 插件就在
+    游戏进程里，它记下了 faulting module、异常码与"自己最后在做什么"；而"自检发现两个 Mod
+    覆盖同一批资源"只是**静态推测**。那天用户的 NRStyle 崩溃就被归成了"Mod 资源冲突"，
+    弹窗还让他去清理 Mod，白折腾。**有硬证据时，硬证据说了算。**
+
+    只认**本次运行**写下的那条（用日志文件 mtime 与 `started_at` 比），否则会把上一次崩溃
+    的记录算到这一次头上。
+    """
+    log = Path(str(getattr(config, "dlss5_path", ""))) / "dlss5-feed.log"
+    if not log.is_file():
+        return None
+    try:
+        stat = log.stat()
+    except OSError:
+        return None
+    if started_at:
+        if stat.st_mtime < float(started_at) - 5:
+            return None
+    elif stat.st_mtime < time.time() - 900:
+        # 没有时间基准时（少数调用点不传 started_at）只认"最近 15 分钟内"的日志 ——
+        # 否则会把**上一次**崩溃留下的 CRASH RECORDED 算到这一次头上。
+        return None
+    try:
+        text = log.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    hits = list(_CRASH_RECORD_RE.finditer(text))
+    if not hits:
+        return None
+    line = " ".join(hits[-1].group("rest").split())
+    module = ""
+    found = re.search(r"\bin\s+([^;]+?\.dll)\b", line, re.I)
+    if found:
+        module = Path(found.group(1).strip()).name
+    doing = ""
+    found = re.search(r"last doing:\s*([^;(]+)", line, re.I)
+    if found:
+        doing = found.group(1).strip()
+    return {
+        "line": line,
+        "module": module,
+        "doing": doing,
+        "gpu_compiler": "nvgpucomp64" in module.lower(),
+    }
+
+
 def classify_cause(config: AppConfig, evidence: dict[str, Any], *,
                    started_at: float | None = None) -> dict[str, Any]:
     """给这次退出定性：``mod_conflict`` / ``crash`` / ``exit``。
@@ -171,6 +234,25 @@ def classify_cause(config: AppConfig, evidence: dict[str, Any], *,
             fresh = float(state["at"]) >= float(started_at) - 6 * 3600
         except (TypeError, ValueError):
             fresh = True
+
+    # ── 硬证据优先（2026-10-02 用户反馈后加的）：DLSS5 插件**自己记下的**崩溃是实测证据
+    #    （它就在进程里，记下了 faulting module 与"最后在做什么"），而"自检发现两个 Mod
+    #    覆盖同一批资源"只是**静态推测**。那天用 NRStyle=2 崩的那次被归成了"Mod 资源冲突"，
+    #    弹窗还催用户去清理 Mod —— 白折腾。所以：**有硬证据时，硬证据说了算**；
+    #    静态冲突照旧列出来（可能同时成立），只是不再自动当结论。
+    record = dlss5_crash_record(config, started_at)
+    if crashed and record and record.get("gpu_compiler"):
+        detail = f"DLSS5 插件记录的崩溃：{record.get('line') or ''}"
+        if conflicts:
+            detail += f"（另外自检还检出过 {len(conflicts)} 组资源相交，但那只是静态推测）"
+        return {
+            "kind": "gpu_compiler",
+            "title": "这次崩溃发生在显卡着色器编译器（nvgpucomp64），不是 Mod 冲突",
+            "detail": detail,
+            "conflicts": conflicts,
+            "checked_at": str(state.get("at_text") or "") if state else "",
+            "crashed": True,
+        }
 
     if crashed and has_conflict and fresh:
         return {
@@ -215,8 +297,31 @@ def crash_memory_path(config: AppConfig) -> Path:
     return Path(config.runtime_path) / CRASH_MEMORY_NAME
 
 
-def staging_mods(config: AppConfig) -> list[str]:
-    """当前 staging（EFMI\\Mods）里"用户选的"那些 Mod 名字（排序，排掉控制器自己的东西）。"""
+def _is_dependency_dir(name: str) -> bool:
+    """这个 staging 目录名看着像**依赖**（RabbitFX / Orfix / SlotFix 那类）吗？
+
+    直接复用 `core.dependency_key_of`（按"名字里包含依赖 key"判定），所以
+    `MC_RabbitFX -ENDMI-_RabbitFX -ENDMI-` 会被正确认出来。
+    """
+    try:
+        from . import core
+
+        return bool(core.dependency_key_of(name))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def staging_mods(config: AppConfig, *, include_dependencies: bool = False) -> list[str]:
+    """当前 staging（EFMI\\Mods）里"**用户选的**"那些 Mod 名字（排序，排掉控制器自己的东西）。
+
+    ⚠️ **默认排除依赖**（RabbitFX / Orfix / SlotFix 这类）：它们是被"按需激活"自动带进来的，
+    **不是用户的选择** —— 拿它们参与"崩溃记忆"的组合比对会**误报**。用户 2026-10-02 实测：
+    只勾了佩丽卡一个皮肤，启动前却弹出"佩丽卡 + 旗袍 + RabbitFX"那套旧记录 —— 因为依赖
+    修复之后 RabbitFX 真的会进 staging，两家一凑就满足了 `_same_combo` 的"互为子集"判据。
+    用户原话：「**MC_RabbitFX 不属于 mod，应该算依赖**」。
+
+    需要把依赖也算进去时显式传 `include_dependencies=True`。
+    """
     root = Path(config.staging_mods_path)
     try:
         items = sorted(root.iterdir())
@@ -227,6 +332,8 @@ def staging_mods(config: AppConfig) -> list[str]:
         if not item.is_dir() or item.name in _CONTROLLER_DIRS:
             continue
         if item.name.startswith("MC_Controller") or item.name.startswith("MC_Probe"):
+            continue
+        if not include_dependencies and _is_dependency_dir(item.name):
             continue
         out.append(item.name)
     return out
@@ -243,11 +350,35 @@ def read_crash_memory(config: AppConfig) -> list[dict[str, Any]]:
     return [e for e in (entries or []) if isinstance(e, dict)]
 
 
+def _current_nrstyle(config: AppConfig) -> str:
+    """崩溃那一刻 `ReShade.ini` 里的 `NRStyle`（读不到就返回空串）。
+
+    为什么要记它（用户 2026-10-02 要求）：`NRStyle=2` = 预发布字段 `DLSSNR.Style` 选的
+    「神经渲染模型 C」，**它会在这个人的机器上让启动崩掉**，但用户说"那个我还要用、
+    不要一刀切" —— 所以只在**崩溃记忆命中的那套 Mod 组合**被再次勾选时才自动改回 0。
+    崩溃时把当时的值记下来，是这条链路唯一的判据来源。
+    """
+    ini = Path(str(getattr(config, "dlss5_ini_path", "")))
+    if not ini.is_file():
+        return ""
+    try:
+        text = ini.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    block = re.search(r"\[RenoDX\.DLSS5\](.*?)(?=\n\s*\[|\Z)", text, re.S | re.I)
+    if not block:
+        return ""
+    found = re.search(r"^\s*NRStyle\s*=\s*(\S+)\s*$", block.group(1), re.M | re.I)
+    return found.group(1).strip() if found else ""
+
+
 def remember_crash(config: AppConfig, *, kind: str, detail: str = "",
                    mods: list[str] | None = None, at: float | None = None) -> dict[str, Any]:
     """把"这次崩溃时跑的是哪套 Mod"记下来（只记崩溃，正常退出不记）。
 
     同一套组合只留最近一次 —— 否则反复崩会把列表刷满、把别的组合挤掉。
+    另外记下**崩溃那一刻的 `NRStyle`**（用户 2026-10-02 要求：那种崩溃要能"记一下"，
+    之后只在同一套 Mod 被勾选时才自动改回 0）。
     """
     import json
 
@@ -258,6 +389,7 @@ def remember_crash(config: AppConfig, *, kind: str, detail: str = "",
         "kind": str(kind or "crash"),
         "detail": str(detail or "")[:400],
         "mods": sorted({str(m) for m in (staging_mods(config) if mods is None else mods)}),
+        "nrstyle": _current_nrstyle(config),
     }
     entries = [e for e in read_crash_memory(config)
                if sorted(str(x) for x in (e.get("mods") or [])) != entry["mods"]]
@@ -284,6 +416,11 @@ def _same_combo(history: list[str], now: list[str]) -> bool:
     if len(a) < 2 or len(b) < 2:
         return False
     return a <= b or b <= a
+
+
+# 公开别名：`initialize._check_dlss5_nrstyle` 要拿它判断"现在这套 Mod 崩过没有"
+# （决定要不要动用户的 NRStyle，见那边的注释）。
+same_combo = _same_combo
 
 
 def prelaunch_risks(config: AppConfig) -> dict[str, Any]:
@@ -874,6 +1011,19 @@ def make_bundle(config: AppConfig, evidence: dict[str, Any] | None = None,
 
     # ④ 环境信息
     (bundle_dir / "environment.txt").write_text(_environment_text(config), encoding="utf-8")
+    # 运行时组件清单（用户 2026-10-02 要求「一次抓全」）：文件名 / 字节 / sha256 / 是否偏离基线。
+    # 之前缺了它，"崩溃那一刻装的是哪一版组件"根本无从回答 —— 2026-10-02 那天用户把 runtime
+    # 整个删掉重下，旧现场连清单都没留下，崩因只能停在"配套损坏"这个类别上。
+    try:
+        from . import runtime_assets
+
+        (bundle_dir / "runtime-inventory.txt").write_text(
+            runtime_assets.inventory_text(config), encoding="utf-8"
+        )
+    except Exception as exc:  # noqa: BLE001
+        (bundle_dir / "runtime-inventory.txt").write_text(
+            f"（收集运行时清单失败：{exc}）", encoding="utf-8"
+        )
 
     # ④-b DLSS5 现场 + 崩溃归因
     #   * `dlss5-feed.log` 是"神经渲染到底有没有出帧、卡在哪一步"的直接证据；
@@ -924,7 +1074,13 @@ def make_bundle(config: AppConfig, evidence: dict[str, Any] | None = None,
         pass
 
     # 崩溃记忆：记下"这次崩的时候跑的是哪套 Mod"，一键启动前就能预警（用户 2026-09-30 要求）
-    if str(cause.get("kind")) in {"crash", "mod_conflict"}:
+    #
+    # ⚠️ 判据改成看 `crashed`（2026-10-02 修）：以前是 `kind in {"crash", "mod_conflict"}`，
+    #    而归因后来新增了 `gpu_compiler`（以及当时还有、现已删除的 `dlss5_nr_style`）——
+    #    于是那两类崩溃**一条都没被记下来**（用户现场：12:53 那次崩完，
+    #    `crash_memory.json` 里没有新条目）。
+    #    "算不算一次崩溃"与"崩因是哪一类"是两件事，不该用后者当前者的开关。
+    if cause.get("crashed") or str(cause.get("kind")) in {"crash", "mod_conflict"}:
         try:
             remember_crash(config, kind=str(cause.get("kind")),
                            detail=str(cause.get("detail") or ""), mods=staging_mods(config))

@@ -113,12 +113,73 @@ class EndfieldModControllerApi:
         from . import modbackup
 
         data = modbackup.status(self.config)
+        data["configured"] = modbackup.configured_dir(self.config)
         data["running"] = self._modbackup_running
         try:
             data["pending"] = len(modbackup.pending(self.config, self._mods()))
         except Exception:  # noqa: BLE001
             data["pending"] = 0
         return data
+
+    def set_mod_backup_dir(self, value: str = "") -> dict[str, Any]:
+        """设置页「Mod 备份目录」（用户 2026-10-02 要求：备份目录能自行选择）。
+
+        留空 = 回到默认（数据根下的 `mod-backup\\`）。校验、落盘、重叠拒绝都在
+        `modbackup.set_backup_dir` 里做，这里只负责写日志并把最新状态回给界面。
+        """
+        from . import modbackup
+
+        result = modbackup.set_backup_dir(self.config, value)
+        if result.get("ok"):
+            if result.get("changed"):
+                launcher._append_log(
+                    self.config,
+                    f"Mod 备份目录已改为 {result['dir']}"
+                    "（新目录里还没有备份，下次扫描后会把库里每个 Mod 整份复制过去；"
+                    f"旧目录 {result.get('previous')} 里的备份原样留着）",
+                )
+            else:
+                launcher._append_log(self.config, f"Mod 备份目录未变：{result['dir']}")
+        elif result.get("message"):
+            launcher._append_log(self.config, f"WARN Mod 备份目录未改：{result['message']}")
+        return {**self.mod_backup_status(), **result}
+
+    def choose_mod_backup_dir(self) -> dict[str, Any]:
+        """弹系统「选择文件夹」对话框挑备份目录，挑完立即生效。
+
+        用户 2026-10-02 要求「在设置里能自行选择备份目录」—— 手填路径与点按钮挑都支持。
+        没有窗口 / 没有 pywebview 时如实返回失败，让用户改用手填（不做静默兜底）。
+        """
+        from . import modbackup
+
+        try:
+            import webview  # type: ignore
+        except Exception:  # noqa: BLE001
+            return {"ok": False, "message": "当前环境没有 pywebview，请直接在输入框里填路径"}
+        window = None
+        try:
+            windows = list(getattr(webview, "windows", []) or [])
+            window = windows[0] if windows else None
+        except Exception:  # noqa: BLE001
+            window = None
+        if window is None:
+            return {"ok": False, "message": "窗口还没就绪，请直接在输入框里填路径"}
+        current = modbackup.backup_dir(self.config)
+        try:
+            current.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+        try:
+            try:
+                picked = window.create_file_dialog(webview.FOLDER_DIALOG, directory=str(current))
+            except TypeError:  # 老版本 pywebview 不接受 directory 参数
+                picked = window.create_file_dialog(webview.FOLDER_DIALOG)
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "message": f"打开文件夹选择框失败：{exc}"}
+        if not picked:
+            return {"ok": False, "cancelled": True, "message": "已取消"}
+        chosen = picked[0] if isinstance(picked, (list, tuple)) else picked
+        return self.set_mod_backup_dir(str(chosen))
 
     def open_mod_backup_dir(self) -> dict[str, Any]:
         """打开备份文件夹（不存在就先建出来，免得点了没反应）。"""
@@ -458,6 +519,7 @@ class EndfieldModControllerApi:
                 self.config.staging_mods_path,
                 self.config.runtime_path,
                 selected_ids=kept,
+                prefer_internal_dependencies=self.config.prefer_internal_dependencies,
             )
             launcher._append_log(
                 self.config,
@@ -1016,22 +1078,18 @@ class EndfieldModControllerApi:
         return {"ok": False, "message": "mod not found"}
 
     def prepare(self, active_ids: list[str] | None = None) -> dict[str, Any]:
-        # active_ids 为 None 时沿用当前选择，避免无参调用（CLI / 自检）把选择清空。
-        # 但**空列表不能直接传给 stage_and_prepare**：activation 里空列表语义是
-        # 「全部激活」，会把 library 里所有 Mod 都 stage 成 MC_*（同角色重复 → 崩游戏）。
+        # active_ids 为 None 时沿用**"真正要 stage 的"选择**（`effective_selected_mods`：
+        # 「皮肤 Mod」总开关关掉时返回空），避免无参调用（CLI / 自检）把选择清空，
+        # 也避免"一键启动关了皮肤、再点一次生成控制器又把它装回去"。
         if active_ids is None:
-            active_ids = list(self.config.selected_mods or [])
-        if not active_ids:
-            launcher._append_log(self.config, "未选择任何 Mod，跳过 staging")
-            return {
-                "activation": {"active": [], "report": "skipped"},
-                "patch_count": 0,
-                "action_count": 0,
-                "controller_dir": str(self.config.controller_dir),
-                "reshade_dir": "",
-                "user_ini_path": str(self.config.user_ini_path),
-                "reshade_addon": "",
-            }
+            active_ids = list(self.config.effective_selected_mods)
+        if not getattr(self.config, "efmi_injection", True):
+            launcher._append_log(
+                self.config, "皮肤 Mod 已关闭：本次生成控制器不放入任何皮肤（Mods 会清空）"
+            )
+        # ⚠️ 空列表**照样往下走**：`stage_and_prepare` 对显式空列表会清空 Mods
+        #    （`_stage_empty`），而"全部激活"只在 `all_when_empty=True` 时才发生。
+        #    以前这里"跳过 staging"，结果上一次的 `MC_*` 留着照样被 EFMI 加载（幽灵 Mod）。
         try:
             result = activation.stage_and_prepare(
                 self.config.library_path,
@@ -1042,6 +1100,10 @@ class EndfieldModControllerApi:
                 hotkey_takeover=bool(getattr(self.config, "hotkey_takeover", False)),
                 # 默认 False：保留同角色互斥；用户打开"强行关闭互斥"拨钮后放行同角色多个 Mod
                 allow_same_character=bool(getattr(self.config, "allow_same_character_mods", False)),
+                # 依赖去重/内外优先级（用户 2026-10-02）：默认内部（`_deps\`）优先
+                prefer_internal_dependencies=bool(
+                    getattr(self.config, "prefer_internal_dependencies", True)
+                ),
             )
         except activation.LibraryGuardError as exc:
             # "不要动用户的 Mod 库"（用户 2026-10-01 硬规则）：staging 与库重叠时拒绝执行。
@@ -1058,17 +1120,32 @@ class EndfieldModControllerApi:
                 "user_ini_path": str(self.config.user_ini_path),
                 "reshade_addon": "",
             }
-        self.config.selected_mods = list(active_ids)
+        # 皮肤总开关关掉时 `active_ids` 是空的（那是"不加载"的意思）——
+        # **别把用户自己的勾选清掉**，否则他在界面上会看到勾选全没了。
+        if getattr(self.config, "efmi_injection", True):
+            self.config.selected_mods = list(active_ids)
         self.config.save()
-        reshade_info = launcher.prepare_reshade_runtime(self.config, Path(result["controller_dir"]))
-        launcher._append_log(self.config, f"prepare complete: actions={len(result['actions_manifest']['actions'])} patches={result['patch_count']}")
+        # 依赖的账要写进日志（用户 2026-10-02 要求"去重 + 内外部优先级"）：用了哪一份、
+        # 屏蔽了哪几份、为什么 —— 不写的话界面上只会"少一个 Mod"，用户无从判断。
+        for line in activation.dependency_note(result.get("activation") or {}):
+            launcher._append_log(self.config, line)
+        # ⚠️ 空选择（皮肤总开关关掉 / 一个都没勾）时 `stage_and_prepare` 走的是 `_stage_empty`
+        #    分支，**返回的字典里没有 `actions_manifest`** —— 以前这里能早退，所以从没暴露；
+        #    现在改成"一律往下走清空"，就必须容错（2026-10-02 被新测试当场逮到）。
+        actions = ((result.get("actions_manifest") or {}).get("actions")) or []
+        controller_dir = result.get("controller_dir") or str(self.config.controller_dir)
+        reshade_info = launcher.prepare_reshade_runtime(self.config, Path(controller_dir))
+        launcher._append_log(
+            self.config,
+            f"prepare complete: actions={len(actions)} patches={int(result.get('patch_count') or 0)}",
+        )
         return {
-            "activation": result["activation"],
-            "patch_count": result["patch_count"],
-            "action_count": len(result["actions_manifest"]["actions"]),
-            "controller_dir": result["controller_dir"],
-            "activation_reshade_dir": result["reshade_dir"],
-            "user_ini_path": result["user_ini_path"],
+            "activation": result.get("activation") or {},
+            "patch_count": int(result.get("patch_count") or 0),
+            "action_count": len(actions),
+            "controller_dir": controller_dir,
+            "activation_reshade_dir": result.get("reshade_dir") or "",
+            "user_ini_path": result.get("user_ini_path") or str(self.config.user_ini_path),
             "reshade_addon": reshade_info.get("addon", ""),
             # 注意：这个键原先在同一个 dict 字面量里出现两次（371 行被 374 行静默覆盖），
             # staging 的结果永远看不到 —— 2026-10-01 拆成 activation_reshade_dir + reshade_dir。

@@ -98,7 +98,16 @@ global persist $enabled = 1
     def test_dependency_detection_from_ini_text(self) -> None:
         mods = core.scan_library(self.library, self.staging)
         summer = next(m for m in mods if m.name == "夏日")
-        (summer.path / "README.ini").write_text("; requires RabbitFX\n", encoding="utf-8")
+        # ⚠️ 2026-10-02 改：引用必须写在**正文**里 —— 只写在**注释**里不算引用。
+        # 旗袍那句「Draw-local isolation from optional RabbitFX bindings」就是在声明
+        # "不依赖"，早期判据扫全文把它当成引用 ⇒ 误激活 RabbitFX ⇒ 游戏崩在着色器编译器
+        # （用户移走 RabbitFX 后「现在可以进入了，确认生效」）。所以这条测试现在**同时**
+        # 钉住两件事：注释不算、正文算。
+        (summer.path / "README.ini").write_text(
+            "; note: this mod deliberately does NOT use RabbitFX\n"
+            "Resource\\RabbitFX\\FXMap = ref Resource-mask\n",
+            encoding="utf-8",
+        )
         names = core.collect_required_dependency_names([])
         self.assertEqual(names, [])
         mods = core.scan_library(self.library, self.staging)

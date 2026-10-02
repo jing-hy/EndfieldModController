@@ -29,6 +29,10 @@ def env(tmp_path, monkeypatch):
     staging.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(AppConfig, "runtime_path", property(lambda self: tmp_path / "runtime"))
     monkeypatch.setattr(AppConfig, "staging_mods_path", property(lambda self: staging))
+    # `dlss5_path` 也要打桩：崩溃归因现在会读 `runtime\dlss5\dlss5-feed.log` 里插件自己写的
+    # CRASH RECORDED，不打桩就会读到**开发机上真实的**那份日志（2026-10-02 实测踩到）。
+    monkeypatch.setattr(AppConfig, "dlss5_path",
+                        property(lambda self: tmp_path / "runtime" / "dlss5"))
     return SimpleNamespace(config=config, staging=staging, tmp=tmp_path)
 
 
@@ -114,6 +118,34 @@ def test_single_mod_combo_never_matches(env):
     _mk(env, "MC_A")
     crashwatch.remember_crash(env.config, kind="crash", detail="单 Mod 崩过", mods=["MC_A"])
     assert crashwatch.prelaunch_risks(env.config)["blocking"] is False
+
+
+def test_staging_mods_excludes_dependencies_by_default(env):
+    """**依赖不算"用户选的 Mod"**（用户 2026-10-02：「MC_RabbitFX 不属于 mod，应该算依赖」）。"""
+    _mk(env, "MC_佩丽卡_佩丽卡-OL装", "MC_RabbitFX -ENDMI-_RabbitFX -ENDMI-")
+    assert crashwatch.staging_mods(env.config) == ["MC_佩丽卡_佩丽卡-OL装"]
+    assert crashwatch.staging_mods(env.config, include_dependencies=True) == [
+        "MC_RabbitFX -ENDMI-_RabbitFX -ENDMI-",
+        "MC_佩丽卡_佩丽卡-OL装",
+    ]
+
+
+def test_no_false_alarm_when_only_one_skin_with_a_dependency(env):
+    """只勾一个皮肤时，不该因为"按需激活把 RabbitFX 带进了 staging"而命中旧的三件套记忆。"""
+    _mk(env, "MC_佩丽卡_佩丽卡-OL装", "MC_RabbitFX -ENDMI-_RabbitFX -ENDMI-")
+    crashwatch.remember_crash(
+        env.config, kind="crash",
+        mods=["MC_RabbitFX -ENDMI-_RabbitFX -ENDMI-", "MC_佩丽卡_佩丽卡-OL装", "MC_庄方宜_旗袍"],
+    )
+    risks = crashwatch.prelaunch_risks(env.config)
+    assert risks["blocking"] is False, risks
+    # 但真把三个都选上时，仍然要能命中那条记忆（别把功能一起修没了）
+    _mk(env, "MC_庄方宜_旗袍")
+    crashwatch.remember_crash(
+        env.config, kind="crash",
+        mods=["MC_RabbitFX -ENDMI-_RabbitFX -ENDMI-", "MC_佩丽卡_佩丽卡-OL装", "MC_庄方宜_旗袍"],
+    )
+    assert crashwatch.prelaunch_risks(env.config)["blocking"] is True
 
 
 # --------------------------------------------------------------- 崩溃时自动记忆

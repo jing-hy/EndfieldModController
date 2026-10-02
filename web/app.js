@@ -1183,6 +1183,9 @@ async function refreshPaths(config) {
   $('path-reshade').textContent = info.reshade;
   $('path-staging').textContent = info.staging;
   $('cfg-library_dir').value = config.library_dir || '';
+  // Mod 备份目录（用户 2026-10-02 要求「在设置里能自行选择备份目录」）：
+  // 留空 = 主路径下的 mod-backup；填的值原样回显，方便他改到别的盘。
+  if ($('cfg-mod_backup_dir')) $('cfg-mod_backup_dir').value = config.mod_backup_dir || '';
   $('cfg-staging_mods_dir').value = config.staging_mods_dir || '';
   $('cfg-runtime_dir').value = config.runtime_dir || '';
   $('cfg-xxmi_launcher').value = config.xxmi_launcher || '';
@@ -1206,6 +1209,10 @@ async function refreshPaths(config) {
   }
   if ($('cfg-download_boost')) $('cfg-download_boost').value = config.download_boost || 'auto';
   if ($('cfg-download_line')) $('cfg-download_line').value = config.download_line || 'auto';
+  // 「依赖优先用内部那份」（RabbitFX 等）：默认开 —— config 缺字段时按 true 显示
+  if ($('cfg-prefer-internal-deps')) {
+    $('cfg-prefer-internal-deps').checked = config.prefer_internal_dependencies !== false;
+  }
   refreshDownloadStatus();
 }
 
@@ -1253,12 +1260,30 @@ async function saveConfig() {
     auto_update_dependencies: $('cfg-auto_update_dependencies').checked,
     require_admin: $('cfg-require_admin').checked,
     auto_disable_feed_on_native_dlss: $('cfg-auto-disable-feed') ? $('cfg-auto-disable-feed').checked : true,
+    prefer_internal_dependencies: $('cfg-prefer-internal-deps') ? $('cfg-prefer-internal-deps').checked : true,
     download_boost: $('cfg-download_boost') ? $('cfg-download_boost').value : 'auto',
     download_line: $('cfg-download_line') ? $('cfg-download_line').value : 'auto',
   };
   await call('save_config', data);
+  // Mod 备份目录单独走 set_mod_backup_dir：它要按新位置校验"别落进 Mod 库/中转目录"，
+  // 校验不过后端会保持原值并给出原因（用户 2026-10-02 要求：设置里能自行选择备份目录）。
+  let backupNote = '';
+  const backupInput = $('cfg-mod_backup_dir');
+  if (backupInput) {
+    const wanted = backupInput.value.trim();
+    const current = (state.config && state.config.mod_backup_dir) || '';
+    if ((wanted || 'mod-backup') !== current) {
+      const result = await call('set_mod_backup_dir', { value: wanted });
+      if (result && result.ok === false) {
+        backupNote = `　⚠ ${result.message || 'Mod 备份目录没改'}`;
+        backupInput.value = current;
+      } else if (result && result.changed) {
+        backupNote = `　Mod 备份目录已改为 ${result.dir}（旧目录里的备份原样保留，新目录会在下次扫描后重新整份备份一次）`;
+      }
+    }
+  }
   await refreshFromState();
-  $('settings-status').textContent = '设置已保存';
+  $('settings-status').textContent = '设置已保存' + backupNote;
 }
 
 async function refreshFromState() {
@@ -2010,6 +2035,27 @@ function bind() {
     };
   }
 
+  // 「选择…」：弹系统文件夹选择框挑 Mod 备份目录，挑完立刻生效（用户 2026-10-02 要求）
+  if ($('mod-backup-choose')) {
+    $('mod-backup-choose').onclick = async () => {
+      try {
+        const result = await call('choose_mod_backup_dir');
+        if (!result || result.ok === false) {
+          setStatus((result && result.cancelled) ? '已取消选择' : ((result && result.message) || '选择备份目录失败'));
+          return;
+        }
+        if ($('cfg-mod_backup_dir')) $('cfg-mod_backup_dir').value = result.configured || '';
+        if ($('path-mod-backup')) $('path-mod-backup').textContent = result.dir || '';
+        await refreshFromState();
+        setStatus(result.changed
+          ? `Mod 备份目录已改为 ${result.dir}（旧目录备份保留）`
+          : `Mod 备份目录未变：${result.dir}`);
+      } catch (err) {
+        setStatus('选择备份目录失败：' + (err && err.message ? err.message : err));
+      }
+    };
+  }
+
   // ── 「整合 Mod 快捷键」：一个开关同时做两件事（锁 Mod 按键 + 注入 ReShade 面板）──
   // 后端 set_hotkey_takeover 会把面板铺好并回报"实际能不能用"；不能用时如实提示，
   // 而且启动链路不会锁键 —— 不允许出现"键锁死了、面板却不存在"（2026-10-01 事故）。
@@ -2173,6 +2219,8 @@ function bind() {
       //   ⚠ 本弹窗用 textContent 纯文本渲染，不要写 markdown 记号（会原样显示星号）。
       const risks = await call('prelaunch_risks');
       if (risks && risks.blocking) {
+        const hasConflicts = (risks.conflicts || []).length > 0;
+        const hasMemories = (risks.memories || []).length > 0;
         const rl = ['这套 Mod 组合有崩溃风险，建议先处理再启动：', ''];
         if ((risks.conflicts || []).length) {
           rl.push('【资源冲突】自检发现这些 Mod 覆盖同一批游戏资源：');
@@ -2187,7 +2235,12 @@ function bind() {
           }
           rl.push('');
         }
-        rl.push('建议：到「Mod 库」页把冲突项取消勾选一个 → 点「生成控制器」→ 再启动。');
+        if (hasConflicts) {
+          rl.push('建议：到「Mod 库」页把冲突项取消勾选一个 → 点「生成控制器」→ 再启动。');
+        } else {
+          rl.push('说明：这里**没有**判定成"资源冲突" —— 只是"这套组合以前崩过"的记录。');
+          rl.push('上次到底为什么崩，看崩溃报告里的「归因」行：可能是 Mod，也可能是 DLSS5 的设置、显卡驱动或显存。');
+        }
         rl.push('也可以选择仍然启动 —— 但游戏有可能在加载过程中闪退。');
         rl.push('');
         rl.push('（这里只做提示。如果进游戏后真的因为皮肤冲突崩了，崩溃弹窗里可以直接一键处理。）');
@@ -2197,18 +2250,24 @@ function bind() {
         // ⚠ 2026-10-01 用户明确要求**这里只做提示**：「我说的自选保留一个 mod 应该在终末地
         //   崩溃而且是皮肤冲突导致的那里，**启动时那个只做提示，不需要只保留一个这个按钮**」
         //   —— 所以这个弹窗里不再有「一键关闭其中一个」，那个入口只在崩溃归因弹窗里。
+        // 标题按**实际情况**说（2026-10-02 用户反馈：DLSS5 的 NRStyle 导致的崩溃被说成
+        // "Mod 冲突风险"，他真去清理 Mod 了，白折腾）：只有**静态检出资源冲突**才叫冲突；
+        // 只是"这套组合以前崩过"就照实说崩过，别冒充冲突。
+        const riskTitle = hasConflicts
+          ? (hasMemories ? '启动前发现 Mod 冲突风险（这套组合以前也崩过）' : '启动前发现 Mod 冲突风险')
+          : '这套 Mod 组合以前崩过';
         const choice = await showModalDialog({
-          title: '启动前发现 Mod 冲突风险',
+          title: riskTitle,
           message: rl.join('\n'),
-          okText: '先去清理，不启动',
+          okText: hasConflicts ? '先去清理，不启动' : '先去调整，不启动',
           cancelText: '仍然启动',
         });
         if (choice === true) {
-          logLine('   风险确认：你选择先去清理');
-          setStatus('已取消启动（先处理 Mod 冲突）');
-          logLine('   已取消启动 —— 处理完冲突再点「一键启动」即可');
+          logLine('   风险确认：你选择先去处理');
+          setStatus(hasConflicts ? '已取消启动（先处理 Mod 冲突）' : '已取消启动（先换一套组合看看）');
+          logLine('   已取消启动 —— 处理完再点「一键启动」即可');
           showTab('library');
-          return { needsSecondStart: false, gameReason: '已取消：启动前检测到 Mod 冲突风险' };
+          return { needsSecondStart: false, gameReason: '已取消：启动前检测到风险' };
         }
         logLine('   风险确认：你选择仍然启动');
       }
@@ -2358,18 +2417,23 @@ function bind() {
     };
   }
 
-  // 服装 Mod 总闸：Mod 库页的「开启第三方服装 Mod」与启动页的「服装 Mod（EFMI）」是同一个开关
+  // 「皮肤 Mod」总开关：Mod 库页那一行与启动页那个滑块是**同一个开关**。
+  // ⚠️ 2026-10-02 语义改了（用户实测）：「**efmi 关了直接终末地拉不起来**」—— 所以现在
+  //    **不再去动注入库**（EFMI 的 d3d11.dll 一直注入），关掉它只表示"一个皮肤都不加载"；
+  //    用户原话「**我手动关了所有皮肤 mod 就可以进了**」—— 真正该关的是皮肤，不是注入。
   async function applyModsMaster(enabled) {
-    setStatus(enabled ? '正在开启第三方服装 Mod…' : '正在关闭第三方服装 Mod…');
+    setStatus(enabled ? '正在开启皮肤 Mod…' : '正在关闭皮肤 Mod…');
     try {
       await call('save_config', { efmi_injection: enabled });
-      await call('set_dlss5_injection', true);   // 按新状态重写注入库（去掉 / 带上 EFMI d3d11.dll）
-      const st = await call('dlss5_status');
-      const n = (st.extra_libraries || '').split('\n').filter((x) => x.trim()).length;
-      logLine(`第三方服装 Mod: ${enabled ? '已开启' : '已关闭'}  |  XXMI 注入库 ${n} 条`);
-      setStatus(enabled ? '服装 Mod 已开启' : '服装 Mod 已关闭：所有服装 Mod 不生效');
+      // 立刻反映到 staging（后端走 effective_selected_mods：关掉 → 清空 Mods）
+      const prepared = await call('prepare').catch(() => null);
+      logLine(`皮肤 Mod: ${enabled ? '已开启' : '已关闭'}`
+        + (prepared && prepared.patch_count !== undefined ? `  |  staging ${prepared.patch_count} 个` : ''));
+      setStatus(enabled
+        ? '皮肤 Mod 已开启（下次一键启动会按勾选装入）'
+        : '皮肤 Mod 已关闭：一个皮肤都不加载（EFMI 照常注入，否则游戏起不来）');
     } catch (err) {
-      logLine(`✗ 服装 Mod 总闸切换失败: ${err.message || err}`);
+      logLine(`✗ 皮肤 Mod 总开关切换失败: ${err.message || err}`);
       setStatus(`切换失败: ${err.message || err}`);
     }
     await refreshFromState();
@@ -2966,9 +3030,11 @@ function showCrashModal(bundle) {
   // 标题/说明/按钮按**归因**切换：确定是 Mod 冲突就走另一套（用户要求区分开）
   if ($('crash-modal-title')) $('crash-modal-title').textContent = cause.title || '检测到终末地异常退出';
   if ($('crash-modal-hint')) {
-    $('crash-modal-hint').textContent = isConflict
-      ? '自检记录到 Mod 资源冲突，游戏随后在加载过程中退出。建议先清冲突（这一步最可能一步解决），诊断包仍会照常生成。'
-      : '已自动把「控制器日志 + 终末地自己的日志 + 崩溃转储」收集并打包。把这个 zip 发到本项目的 issue 或 QQ 群即可，里面已经包含定位所需的一切（记得附上现象：崩溃前你在做什么）。';
+    if (isConflict) {
+      $('crash-modal-hint').textContent = '自检记录到 Mod 资源冲突，游戏随后在加载过程中退出。建议先清冲突（这一步最可能一步解决），诊断包仍会照常生成。';
+    } else {
+      $('crash-modal-hint').textContent = '已自动把「控制器日志 + 终末地自己的日志 + 崩溃转储」收集并打包。把这个 zip 发到本项目的 issue 或 QQ 群即可，里面已经包含定位所需的一切（记得附上现象：崩溃前你在做什么）。';
+    }
   }
   if ($('crash-conflict-block')) {
     $('crash-conflict-block').style.display = isConflict ? '' : 'none';
@@ -3004,9 +3070,9 @@ function showCrashModal(bundle) {
   const lines = [
     `时间      : ${bundle.created_at || '-'}`,
     `崩溃判定  : ${bundle.crashed ? 'CrashSight 记录到异常' : '未检测到崩溃记录（可能是正常退出）'}`,
-    `归因      : ${cause.kind === 'mod_conflict'
-      ? 'Mod 资源冲突（自检记录）'
-      : (bundle.crashed ? '其它原因（看包里的 controller-crash-report.log）' : '未崩溃')}`,
+    `归因      : ${bundle.crashed
+      ? (cause.title || '其它原因（看包里的 controller-crash-report.log）')
+      : '未崩溃'}`,
     `收进包的终末地日志 (${(bundle.game_logs || []).length} 份):`,
     ...(bundle.game_logs || []).slice(0, 12).map((n) => `   ${n}`),
     '',

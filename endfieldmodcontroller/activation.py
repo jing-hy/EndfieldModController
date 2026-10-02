@@ -43,9 +43,117 @@ class ActivationReport:
     dropped: list[dict[str, str]] = field(default_factory=list)
     dependencies: list[str] = field(default_factory=list)
     missing_dependencies: list[str] = field(default_factory=list)
+    # 2026-10-02：依赖**去重与内外优先级**的账 —— 哪些候选被屏蔽了、为什么。
+    # 前端/日志靠它说清"你库里有两个 RabbitFX，按'内部优先'只启用了内部那份"。
+    dependency_choices: dict[str, str] = field(default_factory=dict)
+    blocked_dependencies: list[dict[str, str]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+# 内部依赖 = 位于 `<库>\_deps\<名字>` 下（控制器自己下载/维护的那一份）
+_INTERNAL_DEPS_DIRNAME = "_deps"
+
+
+def _installed_at(mod: Any) -> int:
+    """「最后安装」的判据 = 目录**创建时间**（Windows 上 `st_ctime` 就是创建时间）。
+
+    用户 2026-10-02 要求「如果外部有多个，按最后安装的优先」—— 目录 mtime 会被复制/解压
+    工具带着源时间戳改写，创建时间才稳定地反映"这份是什么时候进库的"。
+    用**纳秒**（`st_ctime_ns`）：同一批导入的几份可能只差几毫秒，秒级浮点分不出来。
+    """
+    try:
+        st = Path(str(getattr(mod, "path", ""))).stat()
+    except OSError:
+        return 0
+    return int(getattr(st, "st_ctime_ns", 0) or getattr(st, "st_mtime_ns", 0) or 0)
+
+
+def _is_internal_dependency(mod: Any) -> bool:
+    try:
+        return Path(str(getattr(mod, "path", ""))).parent.name.lower() == _INTERNAL_DEPS_DIRNAME
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def plan_dependencies(
+    mods: Iterable[mc_core.ModInfo],
+    keys: Iterable[str],
+    *,
+    prefer_internal: bool = True,
+) -> tuple[dict[str, mc_core.ModInfo], list[dict[str, str]]]:
+    """为每个"需要的依赖"挑**唯一一份**，其余记成"已屏蔽"。
+
+    用户 2026-10-02 原话：「加个去重，在设置里加个**内部 RabbitFX 优先，默认开**，开的话
+    如果还有外部 RabbitFX 就把**外部的屏蔽掉**，没开就把**内部屏蔽掉、就算外部优先**，
+    如果**外部有多个，按最后安装的优先**。」
+    ⇒ 规则：① 开关决定"内部 / 外部"哪一侧优先；② **优先侧有就只从这一侧取**，另一侧
+    整侧屏蔽；③ 同一侧有多份时**只留最后安装的那一份**；④ 优先侧没有才退到另一侧
+    （同样只留最后安装的那一份）；⑤ 两侧都没有 → 不在这里决定（调用方按"缺失"报）。
+
+    ⚠️ **为什么必须有"只留一份"**：RabbitFX 作者在 GameBanana 页面上写死过
+    「Having multiple RabbitFXs will cause unexpected behaviours and game crashes…
+    only ever have **one instance**」。
+    """
+    internal: dict[str, list[mc_core.ModInfo]] = {}
+    external: dict[str, list[mc_core.ModInfo]] = {}
+    for mod in mods:
+        key = mc_core.dependency_key_of(getattr(mod, "name", ""))
+        if not key:
+            continue
+        (internal if _is_internal_dependency(mod) else external).setdefault(key, []).append(mod)
+
+    chosen: dict[str, mc_core.ModInfo] = {}
+    blocked: list[dict[str, str]] = []
+    for key in sorted({str(k).lower() for k in keys}):
+        if key not in mc_core.DEFAULT_DEPENDENCIES:
+            continue                    # 未知依赖：不在这里处理（调用方按 missing 报）
+        ins = sorted(internal.get(key, []), key=_installed_at)
+        outs = sorted(external.get(key, []), key=_installed_at)
+        keep, drop = (ins, outs) if prefer_internal else (outs, ins)
+        keep_side, drop_side = ("内部", "外部") if prefer_internal else ("外部", "内部")
+        pool = keep or drop
+        if not pool:
+            continue
+        picked = pool[-1]               # 同侧多份 → 最后安装的那份
+        chosen[key] = picked
+        for mod in pool[:-1]:
+            blocked.append({
+                "name": str(getattr(mod, "name", "")),
+                "path": str(getattr(mod, "path", "")),
+                "reason": f"{keep_side}优先：同一侧有多份，只启用最后安装的「{picked.name}」",
+            })
+        if keep and drop:
+            for mod in drop:
+                blocked.append({
+                    "name": str(getattr(mod, "name", "")),
+                    "path": str(getattr(mod, "path", "")),
+                    "reason": f"{keep_side}优先：已屏蔽{drop_side}的「{mod.name}」",
+                })
+    return chosen, blocked
+
+
+def dependency_note(report: dict[str, Any]) -> list[str]:
+    """把"依赖用了哪一份、屏蔽了哪几份、缺了谁"翻译成给人看的日志行。
+
+    用户 2026-10-02 要求依赖去重 + 内外优先级；做完必须**说出来** —— 否则界面上只是
+    "少了一个 Mod"，用户无从判断是被屏蔽了还是丢了。
+    """
+    lines: list[str] = []
+    choices = report.get("dependency_choices") or {}
+    if choices:
+        lines.append(
+            "依赖启用：" + "；".join(f"{key} → {name}" for key, name in sorted(choices.items()))
+        )
+    for item in report.get("blocked_dependencies") or []:
+        lines.append(f"依赖去重：屏蔽「{item.get('name')}」（{item.get('reason')}）")
+    missing = sorted({str(x) for x in (report.get("missing_dependencies") or [])})
+    if missing:
+        lines.append(
+            "依赖缺失：" + "、".join(missing) + "（库里没有；用到它的 Mod 可能显示不正常）"
+        )
+    return lines
 
 
 def resolve_active_set(
@@ -53,6 +161,7 @@ def resolve_active_set(
     selected_ids: Iterable[str] | None = None,
     *,
     allow_same_character: bool = False,
+    prefer_internal_dependencies: bool = True,
 ) -> tuple[list[mc_core.ModInfo], ActivationReport]:
     """解析"最终要生效的 Mod 集合"。
 
@@ -63,7 +172,6 @@ def resolve_active_set(
     """
     selected_ids = set(selected_ids or [])
     mods = list(mods)
-    available_deps = {m.name.lower(): m for m in mods if m.is_dependency}
     candidates = [m for m in mods if not m.is_dependency and (not selected_ids or m.id in selected_ids)]
 
     chosen: dict[str, mc_core.ModInfo] = {}
@@ -91,24 +199,53 @@ def resolve_active_set(
     # `_deps` 下的**全部**依赖都 stage 进去，与用户选了什么无关。于是哪怕只选一个
     # 根本不需要依赖的 Mod，也会被动背上会改写游戏 shader 的库（例如 RabbitFX 的
     # `[ShaderRegex*]` 段），游戏直接闪退；而手动放 Mod 时这些依赖并不存在，所以不崩。
+    #
+    # 2026-10-02 再修（用户当场实测暴露的"下载了不生效"）：
+    # ① **判据统一** —— 以前这里只读 `mod.requires`（sidecar 文件，库里几乎没人写），
+    #    而"要不要下载这个依赖"那条链路用的是 `collect_required_dependency_names()`
+    #    （**会扫 ini 文本**）。两条链路两套判据 ⇒ 依赖下得来、进不去。现在共用同一判据。
+    # ② **候选按名字"包含"来找**（`core.dependency_key_of`）—— 用户手动导入的
+    #    `（重要前置）RabbitFX v24_3d366` / `RabbitFX -ENDMI-` 用相等匹配永远命不中。
+    # ③ **同一依赖只允许一份进 staging**（`plan_dependencies`）—— RabbitFX 作者写死过
+    #    "多个实例会导致异常行为与游戏崩溃"；按用户要求"内部优先（默认）/ 外部优先，
+    #    同侧多份取最后安装的"。
     needed: dict[str, mc_core.ModInfo] = {}
-    queue = [req.lower() for mod in chosen.values() for req in mod.requires]
-    while queue:
-        name = queue.pop()
-        if name in needed:
-            continue
-        dep = available_deps.get(name)
-        if dep is None:
-            continue
-        needed[name] = dep
-        queue.extend(req.lower() for req in dep.requires)
+    blocked: list[dict[str, str]] = []
+    # 每个 Mod 只扫一次 ini（`collect_required_dependency_names` 会读它全部 ini 文本）
+    cache: dict[str, list[str]] = {}
+
+    def _needs(mod: mc_core.ModInfo) -> list[str]:
+        cache_key = str(mod.id)
+        if cache_key not in cache:
+            cache[cache_key] = mc_core.collect_required_dependency_names([mod])
+        return cache[cache_key]
+
+    pending = list(chosen.values())
+    for _round in range(4):             # 传递依赖：依赖自己引用的依赖，最多跟四层
+        keys = {str(name).lower() for mod in pending for name in _needs(mod)} - set(needed)
+        if not keys:
+            break
+        picked, dropped = plan_dependencies(
+            mods, keys, prefer_internal=prefer_internal_dependencies
+        )
+        blocked.extend(dropped)
+        pending = []
+        for key, dep in picked.items():
+            if key in needed:
+                continue
+            needed[key] = dep
+            pending.append(dep)
 
     report.dependencies = [m.id for m in needed.values()]
+    report.dependency_choices = {key: mod.name for key, mod in needed.items()}
+    report.blocked_dependencies = blocked
 
     for mod in list(chosen.values()) + list(needed.values()):
-        for req in mod.requires:
-            if req.lower() not in needed:
-                report.missing_dependencies.append(req)
+        for name in _needs(mod):
+            key = str(name).lower()
+            if key in mc_core.DEFAULT_DEPENDENCIES and key not in needed:
+                if name not in report.missing_dependencies:
+                    report.missing_dependencies.append(name)
 
     active = list(needed.values()) + list(chosen.values())
     return active, report
@@ -436,6 +573,7 @@ def stage_and_prepare(
     all_when_empty: bool = False,
     hotkey_takeover: bool = False,
     allow_same_character: bool = False,
+    prefer_internal_dependencies: bool = True,
 ) -> dict[str, Any]:
     """Plan, stage, patch and generate controller files for the selected mods.
 
@@ -479,7 +617,10 @@ def stage_and_prepare(
     # First scan only to obtain metadata/identity.
     provisional = mc_core.scan_library(library_root, staging_root)
     active_plan, activation_report = resolve_active_set(
-        provisional, selected_ids, allow_same_character=allow_same_character
+        provisional,
+        selected_ids,
+        allow_same_character=allow_same_character,
+        prefer_internal_dependencies=prefer_internal_dependencies,
     )
 
     managed_root = staging_root / MANAGED_DIR_NAME
