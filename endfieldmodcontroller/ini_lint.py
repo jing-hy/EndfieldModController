@@ -40,7 +40,12 @@ VK_NAMES |= set("abcdefghijklmnopqrstuvwxyz") | set("0123456789")
 MODIFIER_WORDS = {"no_modifiers", "no_ctrl", "no_alt", "no_shift", "no_lwin", "no_rwin",
                   "no_control", "ctrl", "alt", "shift", "control", "lctrl", "rctrl", "lalt",
                   "ralt", "lshift", "rshift", "lwin", "rwin"}
-VALID_NAME_RE = re.compile(r"^\$[a-z_][a-z0-9_]*$")
+# 变量名：**只要求以 `$` 开头、不含空白**。
+# ⚠️ 曾经按"源码规则"写成 `^\$[a-z_][a-z0-9_]*$`（全小写、不含反斜杠），结果在本仓库实测里
+# **全是误报**：Mod 生态大量使用驼峰名（`$backSkirt`）与带路径的跨命名空间名
+# （`$\EFMIv1\required_version`，EFMI 官方模板就这么写）—— 而且它们**都能正常工作**。
+# 会误报的检查器只会训练人去忽略它（比没有更糟），所以放宽到这条几乎不可能误报的判据。
+VALID_NAME_RE = re.compile(r"^\$\S+$")
 
 
 def valid_variable_name(name: str) -> bool:

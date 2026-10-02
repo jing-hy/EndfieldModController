@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from endfieldmodcontroller import activation, core
 
@@ -122,8 +123,16 @@ global persist $enabled = 1
             self.assertNotIn("vk_f24", text, f"{path} 的热键不该被改写")
             self.assertIn("no_modifiers vk_9", text)      # 测试 Mod 自带的键保持原样
 
-    def test_hotkey_takeover_still_available_when_asked(self) -> None:
-        """显式打开接管时，行为与以前一致（等控制面板做好后要用这条路）。"""
+    def test_hotkey_lock_applies_when_asked_and_switch_is_on(self) -> None:
+        """开关打开时**真的锁键**（2026-10-02 晚恢复「Mod 快捷键锁定」，默认开）。
+
+        锁键 = 把 Mod 的 `key` 行改写成 `no_modifiers vk_f24`，手按原键失效、操作集中到
+        游戏内面板 —— 这样**多个 Mod 抢同一个真实键**时不会互相干扰（用户原话：
+        「解释为 mod 间快捷键可能冲突，上锁可以从 mod 菜单调整，避免冲突」）。
+
+        面板现在走 **F13..F24 内部通道**（切档逻辑注入在 Mod 自己的 ini 里），
+        **与 Mod 的 `key` 段无关** ⇒ 锁键不影响面板（这正是它今天能重新启用的原因）。
+        """
         self.staging.mkdir(parents=True, exist_ok=True)
         mods = core.scan_library(self.library, self.staging)
         summer = next(m for m in mods if m.name == "夏日")
@@ -134,7 +143,31 @@ global persist $enabled = 1
         self.assertGreaterEqual(result["patch_count"], 1)
         staged_text = "\n".join(p.read_text(encoding="utf-8") for p in self.staging.rglob("mod.ini"))
         self.assertIn("key = no_modifiers vk_f24", staged_text.lower())
-        self.assertEqual((summer.path / "mod.ini").read_bytes().decode("utf-8").lower().count("vk_f24"), 0)
+        # 无论如何，用户的 Mod 库原件一个字节都不许动
+        self.assertEqual(
+            (summer.path / "mod.ini").read_text(encoding="utf-8").lower().count("vk_f24"), 0
+        )
+
+    def test_hotkey_lock_off_keeps_original_keys(self) -> None:
+        """开关关掉（或总闸 `HOTKEY_LOCK_ENABLED` 关掉）时**一个键都不许改写** ——
+        用户要留后路：不想锁就完全恢复成"手按原键"。
+        """
+        self.staging.mkdir(parents=True, exist_ok=True)
+        mods = core.scan_library(self.library, self.staging)
+        summer = next(m for m in mods if m.name == "夏日")
+        for takeover, enabled in ((False, True), (True, False)):
+            with self.subTest(takeover=takeover, lock_enabled=enabled):
+                with mock.patch.object(core, "HOTKEY_LOCK_ENABLED", enabled):
+                    result = activation.stage_and_prepare(
+                        self.library, self.staging, self.runtime,
+                        selected_ids=[summer.id], hotkey_takeover=takeover,
+                    )
+                self.assertEqual(result["patch_count"], 0)
+                staged_text = "\n".join(
+                    p.read_text(encoding="utf-8") for p in self.staging.rglob("mod.ini")
+                )
+                self.assertNotIn("vk_f24", staged_text.lower())
+                self.assertIn("no_modifiers vk_9", staged_text.lower())
 
     def test_allow_same_character_keeps_all(self) -> None:
         """**强行关闭角色 Mod 互斥**后，同角色的 Mod 全部保留（用户 2026-10-01 要求：

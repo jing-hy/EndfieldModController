@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .config import AppConfig, resource_root
+from . import core
 
 MANIFEST_NAME = "existing_reshade_files.json"
 ADDON_NAME = "endfieldmodcontroller.addon64"
@@ -290,7 +291,15 @@ def deploy_panel(
             note(f"写入 user_ini_path.txt 失败 {base}: {exc}")
 
     possible, reason = takeover_possible(config)
-    takeover = bool(getattr(config, "hotkey_takeover", False)) and possible
+    # `panel_info.txt` 的 `takeover` 字段只有**一个**含义：Mod 原键到底有没有被锁住 ——
+    # 面板靠它决定要不要显示"原键被锁、面板按键不会生效"那条橙色警告。
+    # 2026-10-02：锁键动作已停用（见 `core.HOTKEY_LOCK_ENABLED` 的说明）⇒ 恒为 0，
+    # 于是面板不会误报"按键不会生效"（它现在是直接发原键的遥控器）。
+    takeover = (
+        core.HOTKEY_LOCK_ENABLED
+        and bool(getattr(config, "hotkey_takeover", False))
+        and possible
+    )
     action_count = 0
     if actions_source.is_file():
         try:

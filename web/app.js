@@ -1334,7 +1334,7 @@ async function refreshFromState() {
   if ($('cfg-reshade-panel-font')) {
     $('cfg-reshade-panel-font').checked = s.config.reshade_panel_font !== false;
   }
-  // 「整合 Mod 快捷键」滑块 + 面板现状：后端 panel_status 是唯一判据，别在前端另写一套。
+  // 「游戏内 Mod 面板」滑块 + 面板现状：后端 panel_status 是唯一判据，别在前端另写一套。
   if ($('cfg-unified-hotkeys')) {
     $('cfg-unified-hotkeys').checked = s.config.hotkey_takeover === true;
   }
@@ -1342,12 +1342,12 @@ async function refreshFromState() {
   if ($('hotkey-panel-status') && panel) {
     if (s.config.hotkey_takeover !== true) {
       $('hotkey-panel-status').textContent = panel.addon_present
-        ? `面板已就位（${panel.base_dir}）；当前未接管，Mod 自带按键照常生效。`
+        ? `面板文件在（${panel.base_dir}），但开关是关的 —— 打开后下次「一键启动」会重新铺好。`
         : '';
     } else if (!panel.possible) {
-      $('hotkey-panel-status').textContent = `⚠ 面板不可用：${panel.reason}。已保持 Mod 自带按键不被锁死。`;
+      $('hotkey-panel-status').textContent = `⚠ 面板不可用：${panel.reason}。Mod 自带按键照常生效。`;
     } else if (panel.ready) {
-      $('hotkey-panel-status').textContent = `面板已注入 ReShade（${panel.base_dir}）。进游戏按 Home 打开。`;
+      $('hotkey-panel-status').textContent = `✅ 已上锁：Mod 自带按键已交给游戏内面板（${panel.base_dir}）。进游戏按 Home → ModeController；点一下按钮 = 切到下一档，Mod 之间不会再抢键。`;
     } else {
       $('hotkey-panel-status').textContent = '⚠ 开关是开的，但面板还没写就位 —— 下次「一键启动」会重试。';
     }
@@ -2016,6 +2016,332 @@ async function restoreGameInjections() {
   setStatus(result.ok ? '已撤销注入清理' : (result.message || '撤销失败'));
 }
 
+// ── Mod 下载：卡片里直接填网址 → 并行下载 → 能解压的自动解压进库 ─────────────
+// 用户 2026-10-02：「在 mod 库页按钮下面加一个 mod 下载…」→「换成卡片，放按钮下面」
+// →「**不是这样的，是直接在卡片内放一个输入框**」⇒ 输入框就在卡片里，不再有弹窗。
+let modDownloadTimer = null;
+let modDownloadReminded = false;       // 「香蕉网访问不上」只弹一次
+let modDownloadSlowReminded = false;   // 「下载太慢，建议开 VPN」只弹一次
+let modDownloadManualReminded = false; // 「需手动解压」弹窗只弹一次
+const modDownloadLogSeen = {};         // 任务状态变化 → 往日志框追加一行（避免每秒刷屏）
+
+async function startModDownload() {
+  const text = ($('mod-download-urls') && $('mod-download-urls').value) || '';
+  const result = await call('start_mod_download', text);
+  if (!result || result.ok === false) {
+    showAlert('下载 Mod', (result && result.message) || '发起下载失败');
+    return;
+  }
+  if ($('mod-download-list')) $('mod-download-list').innerHTML = '';
+  if ($('dep-download-list')) $('dep-download-list').innerHTML = '';
+  modDownloadReminded = false;
+  modDownloadSlowReminded = false;
+  modDownloadManualReminded = false;
+  Object.keys(modDownloadLogSeen).forEach(key => delete modDownloadLogSeen[key]);
+  setStatus(`已开始 ${result.total} 个下载任务（并行）`);
+  appendDownloadLog(`Mod 下载: 开始 ${result.total} 个任务（并行）`);
+  // **点下载就跳到依赖页**（用户 2026-10-02：「下载点了之后可以跳到依赖页，去显示日志进度条等」）
+  showTab('dependencies');
+  setTimeout(() => {
+    const block = $('dep-download-block');
+    if (block && block.scrollIntoView) block.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, 150);
+  pollModDownload();
+}
+
+let modDownloadLastState = null;   // mcAskExit 要用最近一次的进度数字
+
+async function pollModDownload() {
+  const state = await call('mod_download_progress');
+  if (!state || state.ok === false) return;
+  renderModDownload(state);
+  // 香蕉网访问不上 → **按用户要求弹窗**提示（正文纯文本，弹窗用 textContent 渲染）
+  const unreachable = (state.items || []).filter(item => item.unreachable);
+  if (unreachable.length && !modDownloadReminded) {
+    modDownloadReminded = true;
+    showAlert('访问不上香蕉网', [
+      `有 ${unreachable.length} 个香蕉网（GameBanana）链接打不开。`,
+      '',
+      '这通常是网络问题（该站点在国内常需要代理 / 加速器）。',
+      '建议检查 VPN 或加速器是否开启，然后重新点「开始下载」。',
+      '',
+      '文件本身没问题，链接也可以直接在浏览器里试一次。',
+    ].join('\n'));
+  }
+  // 「慢到被 fastnet 放弃」也弹一次 —— 用户 2026-10-02：「这么低速明显是没开 vpn，
+  // 应该弹窗建议开 vpn 而不是纯失败」。
+  const slow = (state.items || []).filter(item => item.slow);
+  if (slow.length && !modDownloadSlowReminded) {
+    modDownloadSlowReminded = true;
+    showAlert('下载太慢 —— 多半是没开加速器', [
+      `有 ${slow.length} 个任务因为速度太低而失败。`,
+      '',
+      '程序实测到这条线路的速度低于可用阈值（日志里会写明，例如「探测速度仅 0.01 MB/s，低于 0.3 MB/s 可用线，放弃这条线路」）。这类站点（GameBanana / GitHub）在国内通常需要代理。',
+      '',
+      '建议：打开 VPN / 加速器（你平时用的 Steam++ 也行），再回来点一次「开始下载」。',
+      '',
+      '文件和 Mod 库都没被动过，可以放心重试。',
+    ].join('\n'));
+  }
+  // 「需手动解压」→ **弹窗 + 一键跳过去**（用户 2026-10-02：「需手动解压应该是弹窗，
+  // 点个按钮就能过去解压」）。按钮文字自解释、主选项在右（沿用项目里那条准则）。
+  const manual = (state.items || []).filter(item => item.status === '需手动解压');
+  if (manual.length && !modDownloadManualReminded) {
+    modDownloadManualReminded = true;
+    const lines = manual.map(item => `· ${item.name || item.url}：${item.message || '需要手动解压'}`);
+    const dir = state.dir || '';
+    showModalDialog({
+      title: `有 ${manual.length} 个文件需要你自己解压一下`,
+      message: [
+        ...lines,
+        '',
+        '文件都在下载目录里，解压后把里面的文件夹拖进 Mod 库即可（拖到页面任意处就会导入）。',
+        dir ? `下载目录：${dir}` : '',
+      ].filter(Boolean).join('\n'),
+      okText: '打开下载目录',
+      cancelText: '待会儿自己弄',
+    }).then(open => {
+      if (open) call('open_download_dir');
+    });
+  }
+  // 下载期间把**总进度 + 速度**写到依赖页那根进度条上（用户 2026-10-02：
+  // 「下载过程要有进度条显示速度，现在进度条不走，显示 0/0」—— 那根条原本只服务依赖任务）。
+  if (!state.done) {
+    const total = state.total_bytes || 0;
+    const done = state.done_bytes || 0;
+    const speed = state.speed_bps || 0;
+    const bar = $('dep-progress');
+    if (bar) {
+      bar.max = 100;
+      bar.value = total ? Math.round(done * 100 / total) : 0;
+    }
+    const text = $('dep-progress-text');
+    if (text) {
+      // 速度**始终显示**（哪怕是 0 B/s）—— 用户 2026-10-02：「而且还是没有下载速度」。
+      // 总量还不知道时（服务器没给 Content-Length / 还在探测）说清楚是在等，别只给一个 0/0。
+      const speedText = speed > 1 ? `${humanSize(speed)}/s` : '0 B/s';
+      text.textContent = total
+        ? `${humanSize(done)} / ${humanSize(total)} · ${Math.round(done * 100 / total)}% · ${speedText}`
+        : (done ? `已下 ${humanSize(done)} · ${speedText}` : `等待服务器响应… · ${speedText}`);
+    }
+  }
+  const running = !state.done;
+  if (running && !modDownloadTimer) {
+    modDownloadTimer = setInterval(pollModDownload, 1000);
+  } else if (!running && modDownloadTimer) {
+    clearInterval(modDownloadTimer);
+    modDownloadTimer = null;
+  }
+  // ⚠️ **收尾必须在定时器分支之外**：下载很快就结束时（第一次轮询 done 就为 true），
+  // 上面那个 setInterval 从来没建立过 ⇒ 收尾逻辑会被整个跳过 ⇒ "入库了但 Mod 库不刷新"
+  // （2026-10-02 用户实测报的 bug）。用一个独立标志保证只收尾一次。
+  if (!running && !modDownloadFinished) {
+    modDownloadFinished = true;
+    const counts = state.counts || {};
+    if (counts.total) {
+      setStatus(`下载结束：入库 ${counts.imported} · 需手动解压 ${counts.manual} · 失败 ${counts.failed}`);
+      if ($('mod-download-status')) {
+        $('mod-download-status').textContent =
+          `上次：共 ${counts.total} 个 · 入库 ${counts.imported} · 需手动解压 ${counts.manual} · 失败 ${counts.failed}`;
+      }
+      // 有入库的就把库刷新出来（新 Mod 立刻可见）—— 认不出角色的那种还会弹确认窗
+      if (counts.imported) {
+        await refreshFromState();
+        const needConfirm = (state.items || []).filter(item => item.need_confirm);
+        if (needConfirm.length && !modDownloadConfirmReminded) {
+          modDownloadConfirmReminded = true;
+          showAlert('有 Mod 需要确认角色归属', [
+            `已入库 ${counts.imported} 个，其中 ${needConfirm.length} 个没认出是哪个角色。`,
+            '',
+            '去 Mod 库页点那些带黄色提示的卡片「确认角色归属」选一下就行（不选也能用，只是不会自动参与同角色互斥）。',
+          ].join('\n'));
+        }
+      }
+    }
+  }
+  if (running) modDownloadFinished = false;
+}
+
+function renderModDownload(state) {
+  const items = state.items || [];
+  const counts = state.counts || {};
+  // "还需要用户看一眼"的结果（失败 / 需手动解压）才值得把列表留着；
+  // 没任务、或这批任务已经干净收尾 → 整块不显示（用户 2026-10-02：
+  // 「mod库的下载mod一栏还是有一个共 1 个 · 下载中 1 …的卡片，这个卡片要去掉」）。
+  const paused = items.filter(i => i.status === '已暂停' || i.status === '已终止').length;
+  const attention = (counts.manual || 0) + (counts.failed || 0) + paused;
+  const worthShowing = items.length > 0 && !(state.done && !attention);
+  const depBlock = $('dep-download-block');
+  if (depBlock) depBlock.style.display = worthShowing ? '' : 'none';
+  if (!worthShowing) {
+    // 卡片里那份**也**清掉（之前只对依赖页做了隐藏，卡片会留一行陈旧的"进行中"）
+    renderDownloadHtmlInto('mod-download-list', '');
+    renderDownloadHtmlInto('dep-download-list', '');
+    return;
+  }
+  const head = `<div class="download-head"><span class="hint">共 ${counts.total || items.length} 个 · 下载中 ${counts.downloading || 0}`
+    + ` · 已入库 ${counts.imported || 0} · 需手动解压 ${counts.manual || 0} · 失败 ${counts.failed || 0}`
+    + `${state.done ? '' : ' · 进行中…'}</span>`
+    + (state.done
+        ? (items.some(i => i.status === '已暂停' || i.status === '已终止')
+            ? `<button class="mini" id="mod-download-resume">继续</button>` : '')
+        : `<button class="mini" id="mod-download-pause">暂停</button>`
+          + `<button class="mini" id="mod-download-cancel">终止</button>`)
+    + `<button class="mini" id="mod-download-clear">清除记录</button></div>`;
+  // 同一份数据渲染两种详略：**Mod 库页的卡片只要进度**（用户 2026-10-02：
+  // 「下载mod界面就不需要mod名和图片了」），依赖页那份保留封面与香蕉网标题（那是详情视图）。
+  const rowHtml = (item, detail) => {
+    const pct = Math.max(0, Math.min(100, item.percent || 0));
+    const size = item.size ? `${humanSize(item.received)} / ${humanSize(item.size)}` : (item.received ? humanSize(item.received) : '');
+    const speed = (!state.done && item.speed_bps > 1) ? ` · ${humanSize(item.speed_bps)}/s` : '';
+    const bar = item.status === '下载中' ? `<progress max="100" value="${pct}"></progress>` : '';
+    const msg = item.message ? `<div class="hint">${escapeHtml(item.message)}</div>` : '';
+    const cover = (detail && item.cover_data) ? `<img class="download-cover" src="${item.cover_data}" alt="">` : '';
+    const note = (detail && item.note) ? `<div class="hint">${escapeHtml(item.note)}</div>` : '';
+    const cls = item.status === '失败' ? ' style="color:var(--danger)"'
+      : (item.status === '需手动解压' ? ' style="color:var(--warn,#d97706)"' : '');
+    const title = detail ? (item.title || item.name || item.url) : (item.name || item.url);
+    return `<div class="download-item">
+      <div class="download-head">
+        <b>${escapeHtml(title)}</b>
+        <span class="hint"${cls}>${escapeHtml(item.status || '')}${pct && item.status === '下载中' ? ' ' + pct + '%' : ''} ${size}${speed}</span>
+      </div>
+      ${cover}${note}${bar}${msg}</div>`;
+  };
+  renderDownloadHtmlInto('mod-download-list', head + items.map(item => rowHtml(item, false)).join(''));
+  renderDownloadHtmlInto('dep-download-list', head + items.map(item => rowHtml(item, true)).join(''));
+  logDownloadStatusChanges(items);
+}
+
+function renderDownloadHtmlInto(id, html) {
+  const box = $(id);
+  if (box) box.innerHTML = html;
+}
+
+/** 往依赖页的日志框**追加**一行（那个框是依赖任务整体覆盖式写入的，所以只追加、不接管）。 */
+function appendDownloadLog(line) {
+  const box = $('dep-log');
+  if (!box || !line) return;
+  const current = box.textContent && box.textContent.startsWith('等待开始') ? '' : box.textContent;
+  box.textContent = (current ? current + '\n' : '') + line;
+  box.scrollTop = box.scrollHeight;
+}
+
+/** 任务状态**变化**时往日志写一行（每个任务每一种状态只写一次，避免每秒刷屏）。 */
+function logDownloadStatusChanges(items) {
+  items.forEach((item, index) => {
+    const key = `${index}:${item.url}`;
+    const status = item.status || '';
+    if (!status || modDownloadLogSeen[key] === status) return;
+    modDownloadLogSeen[key] = status;
+    const name = item.title || item.name || item.url;
+    appendDownloadLog(`Mod 下载 · ${name} → ${status}${item.message ? '：' + item.message : ''}`);
+  });
+}
+
+function humanSize(bytes) {
+  const n = Number(bytes) || 0;
+  if (n >= 1048576) return (n / 1048576).toFixed(1) + ' MB';
+  if (n >= 1024) return (n / 1024).toFixed(0) + ' KB';
+  return n + ' B';
+}
+
+// ── 依赖清空重新下载（设置页最上面那个红按钮）────────────────────────────────
+// 用户 2026-10-02：「设置页做一个依赖清空重新下载，红色，放在最上面，按了之后清空除了
+// mod 库和 exe 的所有文件和文件夹，然后还原终末地本体，然后跳转到依赖页开始一键下载依赖」
+async function resetDependencies() {
+  const ok = await showModalDialog({
+    title: '依赖清空重新下载',
+    message: [
+      '会依次做三件事：',
+      '',
+      '1) 还原终末地本体：把注入到游戏目录的第三方文件移走 / 还原成原版；',
+      '2) 清空程序自己的运行数据：runtime\\ 整个目录 + assets\\ 随包资产 + 配置文件（组件、缓存、日志、游戏备份全部重来）；',
+      '3) 回到依赖页，自动开始「一键下载依赖」重新装一遍 —— 包括把 assets 那约 130 MB 从 Release 重新下载展开。',
+      '',
+      '【会保留】Mod 库、Mod 备份仓、程序 exe 本身。',
+      '【也不会丢】库路径、备份仓路径、游戏目录这些设置 —— 清配置前会先记住再写回。',
+      '',
+      '⚠️ 第 3 步要重新下载 100+ MB，国内建议先开加速器（否则可能很慢或失败）。',
+      '⚠️ 正在被程序占用的个别文件（比如当前日志）可能要等下次启动才会清掉，届时会在结果里列出来。',
+    ].join('\n'),
+    okText: '清空并重新下载',
+    cancelText: '取消',
+  });
+  if (!ok) return;
+  setStatus('正在还原游戏本体并清空运行数据…');
+  const result = await call('reset_dependencies_and_redownload');
+  if (!result || result.ok === false) {
+    showAlert('清空失败', (result && result.message) || '未知错误');
+    return;
+  }
+  // **跳到依赖页并开始一键下载**（用户要求的第三步）
+  showTab('dependencies');
+  const failed = result.failed || [];
+  if (failed.length) {
+    setStatus(`已清空（有 ${failed.length} 项被占用，下次启动会清掉），正在重新下载依赖…`);
+  } else {
+    setStatus('已清空运行数据，正在重新下载依赖…');
+  }
+  startFullUpdate(false);
+}
+
+async function callThenPoll(method, okText) {
+  const result = await call(method);
+  if (result && result.ok === false) {
+    showAlert('没成功', result.message || '未知原因');
+    return;
+  }
+  setStatus(okText);
+  pollModDownload();
+}
+
+// **下载中关窗口要问一句**（用户 2026-10-02）：后端在 closing 事件里拦住关闭并调这个函数。
+window.mcAskExit = async function () {
+  const state = modDownloadLastState || {};
+  const counts = state.counts || {};
+  const ok = await showModalDialog({
+    title: '正在下载，仍要退出吗？',
+    message: [
+      `还有 ${counts.downloading || 0} 个任务在下（总共 ${counts.total || 0} 个）。`,
+      '',
+      '现在退出会**中断**它们；已经下完的不会丢，但没下完的部分要重新来过。',
+      '（想留着断点下次接着下，就先点「暂停」再退出。）',
+    ].join('\n'),
+    okText: '仍然退出',
+    cancelText: '继续下载',
+  });
+  if (ok) await call('confirm_exit');
+};
+
+// 「清除记录」：把卡片/依赖页里残留的任务行扫掉（用户 2026-10-02：「这个卡片要去掉」）。
+// 用**事件委托**绑定在容器上 —— 列表 HTML 每秒重渲染，直接绑按钮会立刻失效。
+async function clearModDownloads() {
+  const result = await call('clear_mod_downloads');
+  if (!result || result.ok === false) {
+    showAlert('暂时不能清除', (result && result.message) || '还有任务在跑，等它们结束再清。');
+    return;
+  }
+  renderDownloadHtmlInto('mod-download-list', '');
+  renderDownloadHtmlInto('dep-download-list', '');
+  const depBlock = $('dep-download-block');
+  if (depBlock) depBlock.style.display = 'none';
+  setStatus('已清除下载任务记录。');
+}
+
+function bindDownloadListClicks() {
+  ['mod-download-list', 'dep-download-list'].forEach(id => {
+    const box = $(id);
+    if (box) box.addEventListener('click', event => {
+      const id = event.target && event.target.id;
+      if (id === 'mod-download-clear') clearModDownloads();
+      if (id === 'mod-download-pause') callThenPoll('pause_mod_downloads', '已暂停（保留断点，点「继续」接着下）');
+      if (id === 'mod-download-cancel') callThenPoll('cancel_mod_downloads', '已终止下载');
+      if (id === 'mod-download-resume') callThenPoll('resume_mod_downloads', '已继续下载（断点续传）');
+    });
+  });
+}
+
 function bind() {
   document.querySelectorAll('.tab').forEach(tab => tab.onclick = () => showTab(tab.dataset.tab));
   $('scan-btn').onclick = scan;
@@ -2026,6 +2352,19 @@ function bind() {
       'open_path_in_explorer', (state.config && state.config.library_dir) || '');
   }
   $('prepare-btn').onclick = prepare;
+  // 依赖清空重新下载（设置页最上面，红色）
+  if ($('settings-reset-deps-btn')) $('settings-reset-deps-btn').onclick = resetDependencies;
+  bindDownloadListClicks();
+  // ── Mod 下载（用户 2026-10-02：卡片内**直接放输入框**，不是弹窗）──
+  if ($('mod-download-start')) $('mod-download-start').onclick = startModDownload;
+  if ($('mod-download-open-dir')) {
+    $('mod-download-open-dir').onclick = async () => {
+      const res = await call('open_download_dir');
+      if (res && res.ok === false) showAlert('打开下载目录', res.message || '打不开');
+    };
+  }
+  // 卡片是常驻的（不像弹窗每次重开），所以进界面时把上一次的任务结果带出来
+  setTimeout(pollModDownload, 1200);
   $('dep-scan-btn').onclick = async () => { await refreshFromState(); setStatus('依赖状态已刷新'); };
   $('dep-check-btn').onclick = () => startFullUpdate(true);
   $('dep-update-all-btn').onclick = () => startFullUpdate(false);
@@ -2118,9 +2457,10 @@ function bind() {
     };
   }
 
-  // ── 「整合 Mod 快捷键」：一个开关同时做两件事（锁 Mod 按键 + 注入 ReShade 面板）──
-  // 后端 set_hotkey_takeover 会把面板铺好并回报"实际能不能用"；不能用时如实提示，
-  // 而且启动链路不会锁键 —— 不允许出现"键锁死了、面板却不存在"（2026-10-01 事故）。
+  // ── 「游戏内 Mod 面板」：一个开关 = 把面板注入 ReShade ──
+  // 2026-10-02 语义变更：面板改成**直接发 Mod 自己的原键**（点一下 = 按一次那个键），
+  // 所以它不再需要"锁住 Mod 按键"，后端也已经停用了锁键动作（core.HOTKEY_LOCK_ENABLED）。
+  // 后端 set_hotkey_takeover 会把面板铺好并回报"实际能不能用"；不能用时如实提示。
   if ($('cfg-unified-hotkeys')) {
     $('cfg-unified-hotkeys').onchange = async () => {
       const toggle = $('cfg-unified-hotkeys');
@@ -2129,13 +2469,13 @@ function bind() {
       try {
         const result = await call('set_hotkey_takeover', enabled);
         state.config.hotkey_takeover = enabled;
-        setStatus(result.message || (enabled ? '整合 Mod 快捷键已打开' : '整合 Mod 快捷键已关闭'));
+        setStatus(result.message || (enabled ? '游戏内 Mod 面板已打开' : '游戏内 Mod 面板已关闭'));
         if ($('hotkey-panel-status')) {
           $('hotkey-panel-status').textContent = !enabled
             ? ''
             : (result.possible
-              ? `面板已就位（${(result.panel || {}).base_dir || ''}）。进游戏按 Home 打开。`
-              : `⚠ 面板不可用：${result.reason}。已保持 Mod 自带按键不被锁死。`);
+              ? `✅ 已上锁：Mod 自带按键已交给游戏内面板（${(result.panel || {}).base_dir || ''}）。进游戏按 Home → ModeController。`
+              : `⚠ 面板不可用：${result.reason} —— 所以**没有上锁**，Mod 自带按键照常生效。`);
         }
         if (enabled && result.possible && !result.game_running) {
           // 重新生成控制器会重写 staging，刷新一下库/状态，避免界面显示旧状态

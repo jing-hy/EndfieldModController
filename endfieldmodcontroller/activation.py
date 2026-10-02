@@ -17,6 +17,14 @@ from . import fsutil
 
 MANAGED_DIR_NAME = "EndfieldModControllerManaged"
 
+# ---------------------------------------------------------------------------
+# 「锁 Mod 热键」动作总开关：**唯一来源在 `core.HOTKEY_LOCK_ENABLED`**
+# （2026-10-02 停用；为什么停用、怎么复活，那段说明写在 core.py 那里）。
+# ⚠ 这里**不做值拷贝**（不写 `HOTKEY_LOCK_ENABLED = mc_core.HOTKEY_LOCK_ENABLED`）——
+#   拷贝会让"把开关翻回 True"的复活测试失效（改了 core 的常量，这边还是旧值）。
+#   所有判断点一律现读 `mc_core.HOTKEY_LOCK_ENABLED`。
+# ---------------------------------------------------------------------------
+
 
 class LibraryGuardError(RuntimeError):
     """staging 与用户的 **Mod 库** 重叠时抛这个 —— 拒绝执行，宁可什么都不做。
@@ -640,11 +648,9 @@ def stage_and_prepare(
 
     ⚠ 关于 ``hotkey_takeover``：**默认 False = 不改写 Mod 自带热键**（2026-10-01 用户
     拍板：「那个控制面板还没做好，在此之前先恢复快捷键」）。改写热键本意是把操作权交给
-    控制器面板（`EndfieldModController.addon` + `controller.ini` 的合成键协议），但那个
-    addon 既没随包、也没装进 ReShade 真正读取的目录（它只在 d3d12.dll 所在目录搜 addon），
-    结果就是：**键被改死了（全变 `VK_F24`）、面板却不存在** —— Mod 自带的快捷键与
-    `CTRL 0`/`ALT 1` 那类控制菜单全都弹不出来。所以默认保留原键；等面板做好，
-    把 ``config.hotkey_takeover`` 打开即可恢复接管。
+    控制器面板，但面板 2026-10-02 已改成**直接发 Mod 自己的原键**（见 `vkey_inject.h`），
+    锁键会反过来让面板失效 —— 所以动作由模块开关 `HOTKEY_LOCK_ENABLED` 统一停用
+    （判据与代码都保留，见文件顶部那段注释）。
     """
     library_root = library_root.resolve()
     staging_root = staging_root.resolve()
@@ -798,9 +804,10 @@ def stage_and_prepare(
 
     backup_root = runtime_dir / "backups" / "hotkey_patch"
     patch_records: list[mc_core.PatchRecord] = []
-    if hotkey_takeover:
-        # 只有显式打开接管时才改写 Mod 热键 —— 默认保留原键，让 readme 里写的快捷键
-        # 与 Mod 自带的控制菜单都能用（见函数 docstring）。
+    if hotkey_takeover and mc_core.HOTKEY_LOCK_ENABLED:
+        # 只有显式打开接管**且**锁键动作没被停用时才改写 Mod 热键 —— 默认保留原键，
+        # 让 readme 里写的快捷键、Mod 自带的控制菜单、以及面板发原键都能用
+        # （`HOTKEY_LOCK_ENABLED` 为什么是 False 见文件顶部）。
         for mod in staged_mods:
             if mod.is_dependency:
                 continue
@@ -820,7 +827,9 @@ def stage_and_prepare(
         user_ini_path = staging_root.parent / "d3dx_user.ini"
     else:
         user_ini_path = Path(user_ini_path)
-    manifest = mc_core.generate_controller_mod(staged_mods, controller_dir, user_ini_path=user_ini_path)
+    manifest = mc_core.generate_controller_mod(
+        staged_mods, controller_dir, user_ini_path=user_ini_path, library_root=library_root
+    )
     try:
         apply_default_action_states(Path(user_ini_path), manifest)
     except OSError:

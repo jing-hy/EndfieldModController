@@ -128,6 +128,10 @@ def _http_get(
     timeout: int = DEFAULT_TIMEOUT,
     chunk_callback: Callable[[int, int], None] | None = None,
     expected_sha256: str = "",
+    log: Callable[[str], None] | None = None,
+    policy: str = "",
+    dead_mbps: float | None = None,
+    cancel: Callable[[], bool] | None = None,
 ) -> bytes | Path:
     # **一律走 fastnet**：它是唯一会在直连不通时自动换镜像线路的通道。
     # 这里以前是裸 urllib，于是 XXMI Libraries 的 `Manifest.json`（走本函数下载）
@@ -151,7 +155,8 @@ def _http_get(
     dest = Path(dest)
     report = fastnet.download(
         url, dest, timeout=min(timeout, 60), progress=chunk_callback,
-        expected_sha256=expected_sha256,
+        expected_sha256=expected_sha256, log=log, policy=policy, dead_mbps=dead_mbps,
+        cancel=cancel,
     )
     if not report.ok:
         raise urllib.error.URLError(report.message)

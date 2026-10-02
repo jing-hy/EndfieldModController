@@ -671,45 +671,158 @@ def _check_dlss5_ngx_consumer(config: AppConfig, report: Report,
     report.add("dlss5:ngx_consumer", True, "未检测到第三方 NGX 接管（走 ReShade 自己的 NGX hook 路线）")
 
 
+def _pe_imports_name_bytes(data: bytes, name: str) -> bool | None:
+    """PE 字节流的**导入表**里有没有某个函数名（True / False / None = 不是 PE）。"""
+    if len(data) < 0x40 or data[0:2] != b"MZ":
+        return None
+    e_lfanew = int.from_bytes(data[0x3C:0x40], "little")
+    if e_lfanew <= 0 or e_lfanew + 24 > len(data) or data[e_lfanew:e_lfanew + 4] != b"PE\0\0":
+        return None
+    coff = e_lfanew + 4
+    n_sections = int.from_bytes(data[coff + 2:coff + 4], "little")
+    opt_size = int.from_bytes(data[coff + 16:coff + 18], "little")
+    opt = coff + 20
+    if opt + 2 > len(data):
+        return None
+    magic = int.from_bytes(data[opt:opt + 2], "little")
+    is64 = magic == 0x20B
+    dd = opt + (112 if is64 else 96)
+    if dd + 16 > len(data):
+        return None
+    imp_rva = int.from_bytes(data[dd + 8:dd + 12], "little")   # 数据目录 1 = 导入表
+    if imp_rva == 0:
+        return False
+
+    sections: list[tuple[int, int, int]] = []
+    sec_off = opt + opt_size
+    for index in range(n_sections):
+        base = sec_off + index * 40
+        if base + 40 > len(data):
+            break
+        vsize = int.from_bytes(data[base + 8:base + 12], "little")
+        va = int.from_bytes(data[base + 12:base + 16], "little")
+        raw_size = int.from_bytes(data[base + 16:base + 20], "little")
+        raw_ptr = int.from_bytes(data[base + 20:base + 24], "little")
+        sections.append((va, max(vsize, raw_size), raw_ptr))
+
+    def to_offset(rva: int) -> int | None:
+        for va, size, raw in sections:
+            if va <= rva < va + size:
+                return raw + (rva - va)
+        return None
+
+    table_off = to_offset(imp_rva)
+    if table_off is None:
+        return None
+    target = name.encode("ascii").lower()
+    step = 8 if is64 else 4
+    # ⚠ `IMAGE_THUNK_DATA.u1.AddressOfData` 是**完整的**指针宽度值（RVA），
+    #   别再按"前 4 字节"去截（2026-10-02 自测里踩过：加偏移会让每个名字都读飞）。
+    ordinal_flag = 1 << (63 if is64 else 31)
+    mask = ordinal_flag - 1
+
+    off = table_off
+    for _ in range(4096):                      # 导入描述符数组，以全 0 项结尾
+        if off + 20 > len(data) or data[off:off + 20] == b"\0" * 20:
+            break
+        first_thunk = int.from_bytes(data[off + 16:off + 20], "little")
+        lookup = int.from_bytes(data[off:off + 4], "little") or first_thunk
+        thunk_off = to_offset(lookup)
+        if thunk_off is not None:
+            for index in range(8192):
+                pos = thunk_off + index * step
+                if pos + step > len(data):
+                    break
+                value = int.from_bytes(data[pos:pos + step], "little")
+                if value == 0:
+                    break
+                if value & ordinal_flag:
+                    continue
+                name_off = to_offset(value & mask)
+                if name_off is None or name_off + 2 > len(data):
+                    continue
+                end = data.find(b"\0", name_off + 2)
+                if end < 0:
+                    continue
+                if data[name_off + 2:end].lower() == target:
+                    return True
+        off += 20
+    return False
+
+
+def _pe_imports_name(path: Path, name: str) -> bool | None:
+    """PE 文件的导入表里有没有某个函数名（None = 读不了或不是 PE）。
+
+    只读文件头 + 导入表，不加载、不执行 —— 用来回答"这个 dll 靠什么读键"这类事实问题
+    （面板能不能生效就取决于 EFMI 的 d3d11.dll 里有没有 `GetAsyncKeyState` 这个入口，
+    见 `reshade_addon/src/vkey_inject.h`）。
+    """
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return None
+    return _pe_imports_name_bytes(data, name)
+
+
 def _check_panel_hotkey_conflicts(config: AppConfig, report: Report,
                                   log: Callable[[str], None] | None) -> None:
-    """面板发的合成键，有没有和别的 addon / ReShade 自带快捷键撞车。
+    """游戏内 Mod 面板的**按键链路**体检。
 
-    2026-10-01 用户实测撞过（面板刚打通就中招）：旧协议用 `Ctrl+Alt+Shift+F1..F12`，而
-    **DLSS5 的 NR 开关就是 F6**、**第一人称切换就是 F7** —— 那些 addon 自己读键状态、
-    **不看修饰键**，所以点面板等于在按 F6/F7：现象是「按开关外套会切换第一人称 /
-    按切换头发会开关 DLSS5」。协议键已整体挪到 **F13..F24**（标准键盘上根本没有这些键）。
-    这里再兜一层：要是还有谁绑了这批键，就报出来。
+    面板 2026-10-02 换了形态（用户：「让面板走 mod 的按键」「不要用开关或滑块，都是一个键」）：
+    它不再锁 Mod 热键、也不再发合成输入，而是**在游戏进程内让 EFMI 的
+    `GetAsyncKeyState` 轮询读到"按下"**（`reshade_addon/src/vkey_inject.h`）。
+    这条链路有一个**能提前查、而且一坏就全坏**的前提，所以放在自检里：
+
+    ① **EFMI 的 `d3d11.dll` 必须导入 `GetAsyncKeyState`** —— 直接读它的 PE 导入表。
+       没有这个入口 = 面板所有按钮都会"点了没反应"（真 EFMI 实测有且只有这一个键盘入口）。
+
+    ② **保留的旧判据**：ReShade / 其它 addon 有没有绑 `F13..F24`。
+       旧合成协议键（`Ctrl+Alt+Shift+F13..F24`）已经退役、面板不再发送，
+       `controller.ini` 里那批 `[KeyMC_*]` 段仍原样保留 —— 判据不删，继续报，
+       免得将来谁又用起来时重演 2026-10-01 那次撞车（F6 = DLSS5 的 NR 开关、
+       F7 = 第一人称切换，那些 addon 只轮询主键、不看修饰键）。
     """
     staged = config.staging_mods_path / "MC_Controller" / "controller.ini"
-    if not getattr(config, "hotkey_takeover", False):
-        report.add("panel:hotkey_conflicts", True, "未开启「整合 Mod 快捷键」（跳过协议键冲突检查）")
-        return
+    efmi_dll = config.staging_mods_path.parent / "d3d11.dll"
+
+    # ① 面板按键通路（新判据）
+    injection: bool | None
+    if efmi_dll.is_file():
+        injection = _pe_imports_name(efmi_dll, "GetAsyncKeyState")
+    else:
+        injection = None
+    if injection is True:
+        note_ok = "面板按键通路 OK（EFMI 的 d3d11.dll 有 GetAsyncKeyState 读键入口）"
+    elif injection is False:
+        note_ok = ("面板按键通路**断了**：EFMI 的 d3d11.dll 里没有 GetAsyncKeyState 入口 —— "
+                   "面板按钮会点了没反应（EFMI 大概换了读键方式，请把这条反馈给我们）")
+    elif efmi_dll.is_file():
+        note_ok = f"面板按键通路：读不了 {efmi_dll.name} 的导入表，无法确认"
+    else:
+        note_ok = "面板按键通路：还没装 EFMI（面板要靠它在游戏里读键）"
+
+    # ② 旧协议键位的撞车兜底（判据保留）
     ini = config.dlss5_ini_path
-    if not ini.is_file():
-        report.add("panel:hotkey_conflicts", True, "还没有 ReShade.ini（跳过协议键冲突检查）")
-        return
-    try:
-        text = ini.read_text(encoding="utf-8", errors="replace")
-    except OSError as exc:
-        report.add("panel:hotkey_conflicts", True, f"读不到 ReShade.ini（{exc}）")
-        return
     conflicts: list[str] = []
-    for line in text.splitlines():
-        line = line.strip()
-        if not line or line.startswith(";") or line.startswith("[") or "=" not in line:
-            continue
-        name, _, value = line.partition("=")
-        name = name.strip()
-        if not (name.lower().startswith("key") or "shortcut" in name.lower()):
-            continue
-        first = value.split(",")[0].strip()
-        if not first.isdigit():
-            continue
-        code = int(first)
-        if 124 <= code <= 135:                     # VK_F13..VK_F24
-            conflicts.append(f"{name}=F{code - 111}")
-    # 顺带看一眼控制器有没有还停在旧键位（旧版 staging 不会自己变）
+    if ini.is_file():
+        try:
+            text = ini.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            text = ""
+        for line in text.splitlines():
+            line = line.strip()
+            if not line or line.startswith(";") or line.startswith("[") or "=" not in line:
+                continue
+            name, _, value = line.partition("=")
+            name = name.strip()
+            if not (name.lower().startswith("key") or "shortcut" in name.lower()):
+                continue
+            first = value.split(",")[0].strip()
+            if not first.isdigit():
+                continue
+            code = int(first)
+            if 124 <= code <= 135:                 # VK_F13..VK_F24
+                conflicts.append(f"{name}=F{code - 111}")
     legacy: list[str] = []
     if staged.is_file():
         try:
@@ -718,25 +831,60 @@ def _check_panel_hotkey_conflicts(config: AppConfig, report: Report,
             current = ""
         if current and "VK_F13" not in current:
             legacy.append(str(staged))
+
     if conflicts:
         report.add(
             "panel:hotkey_conflicts", False,
-            "面板的合成键（`Ctrl+Alt+Shift+F13..F24`）和这些快捷键撞了：" + "、".join(conflicts)
-            + " —— 面板操作会顺带触发它们。请把这几项改到别的键"
-              "（它们在 `runtime\\dlss5\\ReShade.ini` 的 `[INPUT]` / 各 addon 段里），"
-              "否则点一次面板就会连带触发对应功能。",
+            f"{note_ok}；另外，这些快捷键占用了旧协议键位 F13..F24：" + "、".join(conflicts)
+            + " —— 协议键已退役（面板不再发它们），但 `controller.ini` 里的 `[KeyMC_*]` 段还在，"
+              "将来谁再启用就会互相触发。要彻底干净就把这几项改到别的键"
+              "（在 `runtime\\dlss5\\ReShade.ini` 的 `[INPUT]` / 各 addon 段里）。",
             manual=True,
         )
         return
     if legacy:
         report.add(
             "panel:hotkey_conflicts", True,
-            "控制器的合成键位还是旧版（`F1..F12`，会撞 DLSS5 的 F6 / 第一人称的 F7）—— "
-            "下次「一键启动」会自动重写成 `F13..F24`；想立刻生效就在启动页把「整合 Mod 快捷键」"
-            "关一次再打开。",
+            f"{note_ok}；控制器的合成键位还是旧版（`F1..F12`）—— 下次「一键启动」会自动重写成 `F13..F24`。",
         )
         return
-    report.add("panel:hotkey_conflicts", True, "面板合成键（Ctrl+Alt+Shift+F13..F24）没有与任何已装快捷键冲突")
+    if injection is False:
+        report.add("panel:hotkey_conflicts", False, note_ok, manual=True)
+        return
+    report.add("panel:hotkey_conflicts", True, note_ok)
+
+
+
+def _check_panel_protocol_lint(config: AppConfig, report: Report,
+                               log: Callable[[str], None] | None) -> None:
+    """面板协议的**语法**体检：读生成 controller.ini 时一起产出的 `controller.lint.txt`。
+
+    2026-10-02 那一版踩的坑：跨命名空间引用写成了大写（`$\\mods\\MC_...\\0.ini\\coat`），
+    3DMigoto 按小写登记变量名 ⇒ 那行赋值被**静默丢弃**。诡异之处在于"提交确实执行了"
+    （同段里本就小写的 `$mc_action_seen` 正常自增），光看这个会误判成链路通了 ——
+    所以生成时就用 3DMigoto 的源码规则体检一遍，并在这里报出来。
+    """
+    lint_file = config.staging_mods_path / "MC_Controller" / "controller.lint.txt"
+    if not lint_file.is_file():
+        report.add("panel:protocol_lint", True,
+                   "还没有 controller.lint.txt（先跑一次「一键启动」/「生成控制器」）")
+        return
+    try:
+        text = lint_file.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError as exc:
+        report.add("panel:protocol_lint", False, f"读不到 controller.lint.txt（{exc}）", manual=True)
+        return
+    if not text or text.startswith("OK"):
+        report.add("panel:protocol_lint", True, "面板协议体检通过（没有会被 3DMigoto 静默跳过的行）")
+        return
+    lines = [line for line in text.splitlines() if line.strip()]
+    report.add(
+        "panel:protocol_lint", False,
+        f"面板协议有 {len(lines)} 处会被 3DMigoto **静默跳过**的行（面板点了会没反应）："
+        + "；".join(lines[:3])
+        + f"（完整清单见 {lint_file}）",
+        manual=True,
+    )
 
 
 def _check_dlss5_nr_binding(config: AppConfig, report: Report,
@@ -1934,6 +2082,8 @@ def ensure_all(config: AppConfig, log: Callable[[str], None] | None = None) -> d
     _check_dlss5_ngx_consumer(config, report, log)
     # 面板合成键有没有和别的 addon 快捷键撞车（F6/F7 撞车事故的兜底检查）
     _check_panel_hotkey_conflicts(config, report, log)
+    # 面板协议的**语法**体检（生成 controller.ini 时同时产出的 controller.lint.txt）
+    _check_panel_protocol_lint(config, report, log)
     # DLSS5 的 NR 上次到底绑上没有（游戏内超分档位选成"原生/DLAA"时它永远绑不上）
     _check_dlss5_nr_binding(config, report, log)
     # 游戏自带 DLSS → 自动停用「喂帧组件」（设置页有开关，默认开启）

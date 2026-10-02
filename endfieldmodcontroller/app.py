@@ -153,7 +153,7 @@ def main(argv: list[str] | None = None) -> int:
     theme = str(getattr(api.config, "theme", "light") or "light")
     window_bg = "#eef2f7" if theme == "light" else "#0a0e13"
 
-    webview.create_window(
+    window = webview.create_window(
         WINDOW_TITLE,
         str(WEB_DIR / "index.html"),
         js_api=api,
@@ -165,6 +165,30 @@ def main(argv: list[str] | None = None) -> int:
         # pywebview 默认 text_select=False，会在 WebView2 层禁掉选择，CSS 压不住。
         text_select=True,
     )
+
+    # **下载中关窗口要拦一下**（用户 2026-10-02：「如果在下载的时候关闭 mod 管理器，
+    # 要弹窗提示」）：`closing` 返回 False 就取消关闭，同时让界面弹一个确认框；
+    # 用户在框里选"仍然退出"时前端会调 `api.confirm_exit()`，那时这里就放行。
+    def _on_closing():
+        try:
+            if api.exit_confirmed:
+                return True
+            if not api.has_active_downloads():
+                return True
+        except Exception:  # noqa: BLE001 —— 判据出问题不该把程序卡住关不掉
+            return True
+        try:
+            window.evaluate_js("window.mcAskExit && window.mcAskExit()")
+        except Exception:  # noqa: BLE001
+            pass
+        return False
+
+    try:
+        events = getattr(window, "events", None)
+        if events is not None and hasattr(events, "closing"):
+            events.closing += _on_closing
+    except Exception:  # noqa: BLE001
+        pass
     webview.start()
     # 关闭窗口后必须真的退出：后台还可能有下载/监控类工作线程，
     # 用 os._exit 兜底，避免 pythonw 变成关不掉的僵尸进程（占着端口）。

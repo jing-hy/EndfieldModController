@@ -339,6 +339,10 @@ class AppConfig:
     # 两者都是"按需临时启用、用完即放"，不常驻、不改系统（见 fastnet）。
     download_boost: str = "auto"
     download_line: str = "auto"
+    # 下载用的代理（留空 = 自动：环境变量 → 系统代理 → 直连）。
+    # 用户 2026-10-02 实测：VPN 只对浏览器生效时，本程序是**直连**，于是出现
+    # "浏览器秒下、程序慢得动不了" ⇒ 让他把代理地址填这儿（如 http://127.0.0.1:7890）。
+    download_proxy: str = ""
     # 防多开：检测到终末地已在运行时**阻止**再启动一个实例。
     # 两个游戏实例同时被注入，Mod/ReShade 会互相抢资源，表现为随机崩溃或 Mod 不生效。
     prevent_game_multi_instance: bool = True

@@ -292,13 +292,17 @@ def resolve_hotkey_takeover(
     """「整合 Mod 快捷键」到底能不能接管？能就先把面板铺好，再返回 True。
 
     用户 2026-10-01 的需求是「开了要**锁 mod 快捷键**，**注入 reshade**」——这两件事
-    必须绑在一起做：先把面板放进 ReShade 真正会读的目录（见
+    原本必须绑在一起做：先把面板放进 ReShade 真正会读的目录（见
     `reshade_integration.panel_base_dirs` 的说明），确认这条路可用之后，**才**允许把
     Mod 自己的热键改写成 `VK_F24`。反过来（钥匙收了、门没有）就是 2026-10-01 那次
     事故：用户的按键全失效、面板却不存在。
 
-    所以这里的返回值就是 `stage_and_prepare(hotkey_takeover=...)` 该用的值：
-    配置开着但面板不可用时**返回 False**，并在启动日志里写清原因。
+    **2026-10-02 变更**：面板改成**直接发 Mod 自己的原键**（用户：「让面板走 mod 的按键」
+    「不要用开关或滑块，都是一个键，做切换的按键就行」），而锁键恰恰会让这条链路失效
+    （见 `activation.HOTKEY_LOCK_ENABLED` 的说明）。所以：**面板照铺，锁键动作停用**，
+    本函数在锁键被停用时返回 False（返回值就是
+    `stage_and_prepare(hotkey_takeover=...)` 该用的值）。配置项语义相应变成
+    「游戏内 Mod 面板：要不要注入这个面板」，默认仍为开（零配置即用）。
     """
     enabled = bool(getattr(config, "hotkey_takeover", False))
     if not enabled:
@@ -322,6 +326,13 @@ def resolve_hotkey_takeover(
         return False
     if not result.get("deployed"):
         note("整合 Mod 快捷键已打开，但面板文件一个都没写成功 → **本次不改写 Mod 热键**")
+        return False
+    if not core.HOTKEY_LOCK_ENABLED:
+        note(
+            "游戏内 Mod 面板已就位: "
+            + "、".join(result.get("deployed", [])[:2])
+            + "；**不改写 Mod 热键** —— 面板直接发 Mod 自己的按键（游戏内按 Home 打开）"
+        )
         return False
     note(
         "整合 Mod 快捷键已接管: 面板已就位 "

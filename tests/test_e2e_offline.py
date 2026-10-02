@@ -71,24 +71,27 @@ $hat = 0,1
         original = (self.library / "陈" / "夏日" / "mod.ini").read_text(encoding="utf-8")
         self.assertIn("key = no_modifiers VK_9", original)
 
-        # Managed staging：**「整合 Mod 快捷键」现在默认开启**（2026-10-01 用户要求
-        # 「把快捷键整合设为默认开启」）→ 面板能就位时会把 Mod 自带热键锁成 `VK_F24`；
-        # 关掉这个开关则应恢复 Mod 自带热键。两个方向都要验。
+        # Managed staging：开关默认开 ⇒ **Mod 自带热键被锁定**（写成 `no_modifiers vk_f24`），
+        # 手按原键失效、操作集中到游戏内面板 —— 治"多个 Mod 抢同一个键"。
+        # 2026-10-02 晚恢复（面板已改走 F13..F24 内部通道，锁键不再影响它）。
         managed = api.config.managed_mods_path
         self.assertTrue(managed.is_dir())
         self.assertTrue((api.config.controller_dir / "controller.ini").is_file())
         staged_text = "\n".join(p.read_text(encoding="utf-8") for p in api.config.staging_mods_path.rglob("mod.ini"))
         self.assertIn("key = no_modifiers vk_f24", staged_text.lower())
-        self.assertEqual(prepare["patch_count"], 1)   # 默认开启 → 这一轮锁了 1 个 Mod 的键
+        self.assertNotIn("key = no_modifiers vk_9", staged_text.lower())
+        self.assertGreaterEqual(prepare["patch_count"], 1)
+        # 用户的 Mod 库原件一个字节都不许动
+        self.assertIn("key = no_modifiers VK_9", original)
 
+        # 关掉开关 ⇒ 完全放手：一个键都不改写，手按原键照常（留后路）
         api.config.hotkey_takeover = False
         api.config.save()
         restored = api.prepare([summer["id"]])
         staged_text = "\n".join(p.read_text(encoding="utf-8") for p in api.config.staging_mods_path.rglob("mod.ini"))
         self.assertIn("key = no_modifiers vk_9", staged_text.lower())
         self.assertNotIn("vk_f24", staged_text.lower())
-        self.assertIn("[key", staged_text.lower())
-        self.assertEqual(restored["patch_count"], 0)   # 关掉后不再改写任何键
+        self.assertEqual(restored["patch_count"], 0)
 
         # ReShade add-on and action list are deployed outside the game dir —— 且必须落在
         # **ReShade 真正会读的目录**：xxmi_extra 注入方式下就是 d3d12.dll 所在的 dlss5

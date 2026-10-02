@@ -29,7 +29,28 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any, Iterator, Sequence
 
+from . import fsutil
 from . import hotkey_hints
+
+
+# ---------------------------------------------------------------------------
+# 「锁 Mod 热键」动作总开关 —— **2026-10-02 晚重新启用**（用户原话：
+# 「还有做一下锁，那个启动页的内部 mod 菜单改成 **mod 快捷键锁定**，**默认开**，
+#   解释为 **mod 间快捷键可能冲突**，上锁可以从 mod 菜单调整，避免冲突」）
+#
+# **它做什么**：`patch_mod_hotkeys()` 把每个 Mod（staging 副本）里 `[Key*]` 的 `key = ...`
+# 统一改写成 `no_modifiers VK_F24` —— 手按原来的键不再生效，操作集中到游戏内面板。
+#
+# **为什么现在能开**（当天早些时候曾停用，理由已消失）：
+#   * 当时停用是因为"面板要发 Mod 自己的原键，锁了键面板就没人接"；
+#   * 现在面板走 **F13..F24 内部通道**（把切档逻辑注入到 Mod 自己的 ini 里，见
+#     `inject_panel_lists`），**与 Mod 的 `[Key*]` 段无关** ⇒ 锁键不影响面板；
+#   * 而且锁键正好治一个真问题：**多个 Mod 抢同一个真实键**（莱万汀 6 个部件都绑 `→`、
+#     佩丽卡也绑 `←`…），手按时互相干扰；锁上之后只有面板能驱动，各 Mod 不再打架。
+#
+# **怎么关**：把这里改成 `False`（判据、代码、备份/回滚链路都原样留着）。
+# ---------------------------------------------------------------------------
+HOTKEY_LOCK_ENABLED = True
 
 
 # ---------------------------------------------------------------------------
@@ -1049,12 +1070,18 @@ def namespaced_section_reference(section: str, namespace: str) -> str:
             return f"{prefix}\\{ns}\\{suffix}"
     return section
 
-def _enrich_action(action: Action, ini_lines: Sequence[str], var_names: Sequence[str]) -> Action:
+def _enrich_action(action: Action, ini_lines: Sequence[str], var_names: Sequence[str],
+                   *, needs_rabbitfx: bool = False) -> Action:
     """给一个动作补上统一面板要用的展示字段（推测含义 / 键位 / 证据）。
 
     中文推不出时**不回退成编造的中文**，而是给出变量名清洗后的英文短语 ——
     用户 2026-10-01 的原则是"那些滑块要真的有用，不要就做表面功夫"，标签同理：
     宁可显示 `head horns` 也不要猜一个错的中文。
+
+    *needs_rabbitfx* = 这个 ini **正文里真的调用了 RabbitFX**
+    （``run = CommandList\\RabbitFX\\SetTextures``）。那种包在 RabbitFX 不加载时，
+    **部件切了也不会有画面** —— 面板上直接标出来（用户 2026-10-02 实测：
+    「全裸那些还是切不了，而且似乎原生按键也切不了」就是这个原因，与面板无关）。
     """
     tokens: list[str] = []
     for name in var_names:
@@ -1066,7 +1093,52 @@ def _enrich_action(action: Action, ini_lines: Sequence[str], var_names: Sequence
     action.hint = hotkey_hints.hint_for(primary, section=action.section, tokens=tokens)
     action.var_phrase = hotkey_hints.var_phrase(primary) if primary else ""
     action.key_label = hotkey_hints.key_labels(action.original_keys)
+    if needs_rabbitfx and action.hint:
+        action.hint = f"{action.hint}（需 RabbitFX）"
     return action
+
+
+def internal_marker_vars(text: str) -> set[str]:
+    """找出「内部标记」变量（**不该出现在面板上**的那些）。
+
+    现场例子（莱万汀 as 2B 那个 Mod）：`$creditinfo` 在**每个** `[Key*]` 段里都跟着一句
+    `$creditinfo = 0`，Mod 自己的注释写着
+    ``; This acts as the "lock" for the UI notification`` —— 它是 Mod 内部的 UI 通知锁，
+    不是给用户用的开关，摆在面板上只会让人困惑（用户 2026-10-02：「creditinfo 要过滤掉」）。
+
+    判据（保守，尽量不误伤真开关）：
+      * 变量在 `[Constants]` 里**没有** `persist`；
+      * 在同一个文件里被**赋值 ≥3 次**，且**每次都是单值**（没有 `0, 1` 这种逗号列表）。
+
+    实测校准（莱万汀 2B 那个 Mod）：`$creditinfo` 出现 15 次、值是 `{0,1}`（不是恒定单值，
+    所以"值恒定"那条判据**不成立** —— 第一版就是这么漏掉它的）。真开关要么带 `persist`
+    （`$backSkirt`、`$mode` 都是），要么在自己的段里写成逗号列表（`$coat = 0, 1, 2`）——
+    两者都不会命中。
+    """
+    persisted: set[str] = set()
+    listed: set[str] = set()          # 出现过"逗号列表"赋值的变量（真开关的写法）
+    counts: dict[str, int] = {}
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith((";", "//", "#")):
+            continue
+        lowered = stripped.lower()
+        if lowered.startswith("global") and "persist" in lowered:
+            match = re.search(r"(\$[^\s=]+)", stripped)
+            if match:
+                persisted.add(match.group(1).lstrip("$").lower())
+        match = _VAR_ASSIGN_RE.match(line)
+        if not match:
+            continue
+        short = match.group(1).rpartition("\\")[2].lstrip("$").lower()
+        counts[short] = counts.get(short, 0) + 1
+        if "," in match.group(2):
+            listed.add(short)
+
+    return {
+        name for name, count in counts.items()
+        if name not in persisted and name not in listed and count >= 3
+    }
 
 
 def parse_mod_actions(mod_dir: Path, mods_root: Path) -> list[Action]:
@@ -1081,6 +1153,16 @@ def parse_mod_actions(mod_dir: Path, mods_root: Path) -> list[Action]:
         except OSError:
             continue
         ini_lines = text.splitlines()
+        # 「内部标记」变量的名单（例如每个 Key 段里都跟着的 `$creditinfo = 0`）——
+        # 这类东西不是给用户用的开关，面板上不该出现（用户 2026-10-02：「creditinfo 要过滤掉」）
+        internal_markers = internal_marker_vars(text)
+        # 正文里**真的**调用了 RabbitFX？（注释里提到不算 —— `; Draw-local isolation from
+        # optional RabbitFX bindings` 那种是"声明不依赖"）—— 那种包在 RabbitFX 不加载时
+        # 部件切了也没有画面，面板上要如实标出来
+        needs_rabbitfx = any(
+            "rabbitfx" in line.lower() and not line.strip().startswith(";")
+            for line in ini_lines
+        )
         ini_rel = str(ini_path.relative_to(mod_dir)).replace("\\", "/")
         namespace = parse_namespace(text) or _namespace_from_ini_path(ini_path, mods_root)
         _, sections = split_ini(text)
@@ -1154,6 +1236,11 @@ def parse_mod_actions(mod_dir: Path, mods_root: Path) -> list[Action]:
                     ), ini_lines, names))
                     continue
 
+            if var_assignments and internal_markers:
+                var_assignments = [
+                    item for item in var_assignments
+                    if item[2].lstrip("$").lower() not in internal_markers
+                ]
             if var_assignments:
                 for target, own_ns, var_name, values in var_assignments:
                     kind = "cycle" if (type_match == "cycle" or len(values) > 1) else "toggle"
@@ -1200,7 +1287,22 @@ def parse_mod_actions(mod_dir: Path, mods_root: Path) -> list[Action]:
                     condition=condition_match,
                     source=str(ini_path),
                     send_index=True,
-                ), ini_lines, []))
+                ), ini_lines, [], needs_rabbitfx=needs_rabbitfx))
+
+    # ── 「辅助开关」屏蔽（用户 2026-10-02 原话：「**mode 是就应该被屏蔽，他是给其他按钮辅助的**」）──
+    # 一个变量若被 **≥2 个别的动作**写在 condition 里（例如 `($mode == 3)` 这种分组条件），
+    # 它自己就不是给用户点的功能，而是"分组 / 前置开关"；面板在切档前**会自动把它设好**
+    # （见 `condition_switches`），所以从面板清单里去掉，免得混在真功能里让人点。
+    condition_refs: dict[str, int] = {}
+    for action in actions:
+        for ref_name, _ref_value in _CONDITION_EQ_RE.findall(action.condition or ""):
+            key = ref_name.lower()
+            condition_refs[key] = condition_refs.get(key, 0) + 1
+    if condition_refs:
+        actions = [
+            action for action in actions
+            if condition_refs.get((action.var_name or "").lstrip("$").lower(), 0) < 2
+        ]
 
     actions.sort(key=lambda a: (a.mod_id, a.ini_rel, a.section, a.id))
     return actions
@@ -1252,8 +1354,34 @@ def _group_action_label(section: str, names: list[str], run_command: str | None)
     return base
 
 
+def normalized_var_name(text: str) -> str:
+    """3DMigoto 的变量名规范化：**只把 ASCII 大写字母变小写**（其余字符原样）。
+
+    **为什么必须有它**（2026-10-02 实测根因，一手证据）：EFMI 把变量名按小写登记 ——
+    `d3dx_user.ini` 里写的是 `$\\mods\\mc_佩丽卡_佩丽卡-ol装_linyoude\\0.ini\\coat`，
+    而我们的 staging 目录名是 `MC_佩丽卡_佩丽卡-OL装_linyoude`。直接拿目录名当命名空间
+    写进 `controller.ini`（`$\\mods\\MC_...\\0.ini\\coat = 1`）会引用一个**不存在的变量**，
+    那行赋值被 3DMigoto 静默丢弃 —— 现象就是：面板点了没反应、`mc_action_seen` 在涨
+    （提交确实执行了）、但 Mod 的变量一直是 0。对照：同一段 `[CommandListMC_Commit]` 里
+    `$mc_action_seen = $mc_action_seen + 1`（本命名空间、本来就小写）**生效**，
+    11 个跨命名空间引用（大写）**全都没生效**。
+
+    只处理 ASCII 是因为 3DMigoto 那边也是 C 的 `::tolower`：中文等多字节字符不受影响
+    （`OL装 → ol装`，中文原样）。
+    """
+    return "".join(ch.lower() if "A" <= ch <= "Z" else ch for ch in text)
+
+
 def absolute_var(namespace: str, var_name: str) -> str:
-    """Build the 3DMigoto absolute variable reference."""
+    """Build the 3DMigoto absolute variable reference（**名字按原样**）。
+
+    ⚠️ **不要在这里做任何大小写规范化**（2026-10-02 更正过一次错误推断）：
+      * ini 层的变量名**大小写敏感** —— Mod 里声明的是 `global persist $backSkirt = 0`，
+        引用写成 `$backskirt` 会被 3DMigoto 当成**未声明变量**、那行被丢弃
+        （`ini_lint` 直接报出来，对照 EFMI 官方模板 `$\\EFMIv1\\required_version` 也是**原样**）；
+      * `d3dx_user.ini` 里之所以全是小写，是**持久化层**的规范化写法（3DMigoto 自己写的
+        文件格式），**不能反推成"ini 里引用变量要写小写"** —— 我把这两层搞混过一次。
+    """
     ns = namespace.strip("\\")
     return f"$\\{ns}\\{var_name}"
 
@@ -1475,6 +1603,198 @@ CONTROLLER_NAMESPACE = "mc_controller"
 CONTROLLER_ACTION_VAR = "controller_action"
 CONTROLLER_VALUE_VAR = "controller_value"
 
+# 面板遥控：往 **Mod 自己的（staging 副本）ini** 里注入的命令列表段名前缀。
+# 为什么注入到 Mod 那边而不是在 controller.ini 里改 Mod 变量 —— 见 `inject_panel_lists`。
+PANEL_LIST_PREFIX = "MC_Panel"
+_PANEL_BEGIN = "; ===== EndfieldModController 面板遥控（自动生成，重新生成控制器时会重写）====="
+_PANEL_END = "; ===== 面板遥控结束 ====="
+
+
+def panel_list_section(wire_id: int) -> str:
+    return f"CommandList{PANEL_LIST_PREFIX}{wire_id}"
+
+
+def _short_var_of(target: str, ini_namespace: str) -> str | None:
+    """绝对变量引用 → **本 ini 命名空间里的短名**（`$\\mods\\mc_x\\0.ini\\coat` → `coat`）。
+
+    命名空间与本 ini 不一致时返回 None（那种引用写短名会指到别的变量上）。
+    """
+    name = target.strip()
+    if not name.startswith("$"):
+        return None
+    if not name.startswith("$\\"):
+        return name[1:]
+    body = name[2:]
+    ns, _, short = body.rpartition("\\")
+    if not short:
+        return None
+    if normalized_var_name(ns) != normalized_var_name(ini_namespace.strip("\\")):
+        return None
+    return short
+
+
+# 条件里形如 `$mode == 3` 的依赖（莱万汀那套 Mod：每个部件只在对应模式下才有反应）
+_CONDITION_EQ_RE = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)\s*==\s*([^)&|]+)")
+
+
+def condition_switches(condition: str, switchable: dict[str, str]) -> list[tuple[str, str]]:
+    """从 `condition` 里挑出**需要先设好的**开关（变量, 值）。
+
+    现场（莱万汀 as 2B）：`backSkirt` 的 condition 是
+    ``($object_detected == 1) && ($mode == 3)`` —— 当前 `mode=0` 时，面板把 `$backSkirt`
+    改对了**游戏里也不会有反应**（那个段根本不参与），用户的手感就是"点了没用"。
+
+    ⇒ 注入段里先把这类"模式开关"设成要求的档位（等同用户手按 ↓ 切好模式、再按 →）。
+    只认**本身也是面板上一个可切换变量**的名字（`$mode` ✓；`$object_detected` / `$active1`
+    这类 EFMI 内建或每帧复位的运行时状态 ✗ —— 绝不能去写）。
+    *switchable* = `{变量名小写: 变量名原样}`（用原样名去写，免得大小写对不上声明）。
+    """
+    if not condition:
+        return []
+    found: list[tuple[str, str]] = []
+    used: set[str] = set()
+    for name, value in _CONDITION_EQ_RE.findall(condition):
+        key = name.lower()
+        if key in switchable and key not in used:
+            used.add(key)
+            found.append((switchable[key], value.strip()))
+    return found
+
+
+def inject_panel_lists(
+    ini_path: Path,
+    entries: Sequence[tuple[int, Sequence[tuple[str, Sequence[str]]], Sequence[tuple[str, str]]]],
+) -> list[str]:
+    """把「切到下一档」的命令列表追加到（**staging 副本**的）Mod ini 末尾。
+
+    **为什么在这里做**（2026-10-02 实测定案）：
+      * `[CommandList]` 里的变量赋值**只认本 ini 声明过的 `$name`**；
+      * 带路径的跨命名空间引用（`$\\mods\\mc_xxx\\0.ini\\coat = 1`）会被**静默丢弃** ——
+        现场证据：同一个段里本命名空间的 `$mc_action_seen = $mc_action_seen + 1` 生效，
+        而 11 个 Mod 变量引用**全部无效**（面板点了没反应）；
+      * 但**跨命名空间调用命令列表是支持的**（`run = CommandList\\<ns>\\<name>`，
+        源码 `ParseRunExplicitCommandList` + `get_namespaced_section_name_lower`）。
+
+    所以"改 Mod 变量"这件事**必须发生在 Mod 自己的命名空间里**：这里把段写进 Mod 的
+    （staging）ini（变量用短名 `$coat`），controller.ini 那边只用 `run =` 呼叫它。
+
+    只改 staging 副本，**库原件一个字节都不动**；每轮 staging 都会重新复制，所以不会累积。
+    返回注入的段名（供 controller.ini 生成 `run =` 引用）。
+    """
+    if not entries:
+        return []
+    try:
+        text = read_text(ini_path)
+    except OSError:
+        return []
+
+    # 防御：同一份 ini 万一被注入过两次，先把上一段摘掉（否则变量/段名重复）
+    if _PANEL_BEGIN in text:
+        head, _, rest = text.partition(_PANEL_BEGIN)
+        _, _, tail = rest.partition(_PANEL_END)
+        text = head.rstrip("\n") + "\n" + tail.lstrip("\n")
+
+    body: list[str] = [_PANEL_BEGIN]
+    names: list[str] = []
+    for wire_id, pairs, presets in entries:
+        section = panel_list_section(wire_id)
+        names.append(section)
+        body.append(f"[{section}]")
+        # 先把"模式开关"设好（例如 `$mode = 3`）—— 否则那个部件的段根本不参与，
+        # 改了变量游戏里也没反应（用户手感就是"点了没用"）。见 condition_switches。
+        for preset_name, preset_value in presets:
+            body.append(f"${preset_name} = {preset_value}")
+        for short_name, values in pairs:
+            body.extend(next_step_lines("$" + short_name, list(values)))
+        body.append("")
+    body.append(_PANEL_END)
+
+    patched = text.rstrip("\n") + "\n\n" + "\n".join(body) + "\n"
+    try:
+        ini_path.write_text(patched, encoding="utf-8", newline="")
+    except OSError:
+        return []
+    return names
+
+
+def inject_panel_lists_for_actions(
+    actions: Sequence["Action"], *, library_root: Path | None = None
+) -> dict[str, str]:
+    """给一组动作注入面板命令列表。
+
+    返回 `{action.id: "CommandList\\<ns>\\MC_Panel<wire>"}`（**只含注入成功的**）——
+    controller.ini 用它生成 `run = …`；没在里面的动作，面板点不动（会在日志里说明）。
+
+    ⚠️ **命名空间要用动作自己带的那个**（`parse_mod_actions` 推出来的）：很多 Mod ini
+    **没有 `namespace =` 行**，命名空间是从**文件路径**推的（`\\mods\\<目录>\\<文件>`）——
+    重新解析 ini 会拿到空值、导致整批被跳过（2026-10-02 踩过）。
+
+    ⚠️ 传了 `library_root` 时会**拒绝写库内文件**（用户的 Mod 库只读是硬红线）。
+    """
+    by_ini: dict[Path, list[Action]] = {}
+    for action in actions:
+        if not action.source or action.wire_id <= 0 or not action.targets:
+            continue
+        by_ini.setdefault(Path(action.source), []).append(action)
+
+    refs: dict[str, str] = {}
+    for ini_path, group in by_ini.items():
+        if library_root is not None:
+            conflict = fsutil.library_conflict(Path(library_root), ini_path)
+            if conflict:
+                continue                      # 绝不碰用户的 Mod 库
+        namespace = (group[0].namespace or "").strip("\\")
+        if not namespace:
+            continue
+        switchable = {a.var_name.lstrip("$").lower(): a.var_name.lstrip("$")
+                      for a in actions if a.var_name}
+        entries: list[tuple[int, Sequence[tuple[str, Sequence[str]]], Sequence[tuple[str, str]]]] = []
+        for action in group:
+            pairs: list[tuple[str, Sequence[str]]] = []
+            for target, values in zip(action.targets, action.option_values):
+                short = _short_var_of(target, namespace)
+                if short and values:
+                    pairs.append((short, list(values)))
+            if pairs:
+                # 条件里若要求"先切模式"（`$mode == N`），注入段里先设好它
+                presets = [
+                    (name, value) for name, value in condition_switches(action.condition, switchable)
+                    if name.lower() != action.var_name.lstrip("$").lower()
+                ]
+                entries.append((action.wire_id, pairs, presets))
+        names = inject_panel_lists(ini_path, entries)
+        for action in group:
+            if panel_list_section(action.wire_id) in names:
+                refs[action.id] = namespaced_section_reference(
+                    panel_list_section(action.wire_id), namespace
+                )
+    return refs
+
+
+def next_step_lines(target: str, values: Sequence[str], *, indent: str = "") -> list[str]:
+    """让一个 Mod 变量**切到下一档**的 3DMigoto 语句（面板协议第二版的核心）。
+
+    面板只发"哪个动作"，档位由这里算：读当前值 → 写列表里的下一个值（末尾回到第一个）。
+    这样面板**不需要知道** Mod 现在在第几档，你在游戏里手按键改过的档位也不会和面板打架。
+
+    * `values` 只有一个值时（复位/命令类动作，例如 `ResetPanel1Pos = 0`）就是"写回它"；
+    * 语法只用 `if` / `else if` / `else` + `endif`（3DMigoto **不认 `elif`**）；
+    * `else` 兜底：当前值不在列表里（用户手改过、或 Mod 换了版本）→ 回到第一个值。
+    """
+    if not values:
+        return []
+    if len(values) == 1:
+        return [f"{indent}{target} = {values[0]}"]
+    out: list[str] = []
+    for index, value in enumerate(values):
+        keyword = "if" if index == 0 else "else if"
+        out.append(f"{indent}{keyword} {target} == {value}")
+        out.append(f"{indent}    {target} = {values[(index + 1) % len(values)]}")
+    out.append(f"{indent}else")
+    out.append(f"{indent}    {target} = {values[0]}")
+    out.append(f"{indent}endif")
+    return out
+
 
 def generate_controller_mod(
     mods: Sequence[ModInfo],
@@ -1482,6 +1802,7 @@ def generate_controller_mod(
     *,
     dry_run: bool = False,
     user_ini_path: Path | None = None,
+    library_root: Path | None = None,
 ) -> dict[str, Any]:
     """Generate controller.ini and actions.json for the active mod set."""
     controller_dir.mkdir(parents=True, exist_ok=True)
@@ -1505,132 +1826,121 @@ def generate_controller_mod(
     for index, action in enumerate(actions, start=1):
         action.wire_id = index
 
+    # 面板遥控：把「切到下一档」注入 **Mod 自己的（staging）ini**，这里只记下 `run =` 要用的引用
+    # （本文件里直接改 Mod 变量会被静默丢弃 —— 见文件头那段说明）。
+    panel_refs: dict[str, str] = (
+        {} if dry_run else inject_panel_lists_for_actions(actions, library_root=library_root)
+    )
+
     lines: list[str] = [
         "; Generated by EndfieldModController PoC. Do not edit by hand.",
+        ";",
+        "; 面板协议（2026-10-02 第三版）—— 面板在**游戏进程内**伪造 EFMI 的读键状态",
+        "; （见 reshade_addon/src/vkey_inject.h），把 F13..F24 标成「按下」：",
+        ";   * **不带任何修饰键**（用户原话：「不要用 alt 这种辅助键」）—— 下面每一行",
+        ";     `key =` 都不写 ctrl / alt / shift，用户想手按时也不必按修饰键。",
+        ";   * F13 以上的键**标准键盘上不存在**，游戏与别的 addon 都不会绑它们",
+        ";     （F6/F7 那批真实键当年被 DLSS5 的 NR 开关与第一人称切换抢走，才整体挪到这儿）。",
+        ";   * 动作号用十进制逐位发送（F13+n 表示数字 n，共 F13..F22），最后按 **F24 提交**。",
+        ";   * 提交后**不是**在这里改 Mod 变量，而是用 `run =` 呼叫**注入在 Mod 自己 ini 里**的那段",
+        ";     （`CommandList\\<Mod 命名空间>\\MC_Panel<动作号>`）。",
+        ";     原因（2026-10-02 实测）：本文件里直接写 `$\\mods\\...\\coat = 1` 这种跨命名空间赋值",
+        ";     **会被静默丢弃** —— 同一段里本命名空间的 `$mc_action_seen` 生效、11 个 Mod 变量引用",
+        ";     全部无效；而跨命名空间**调用命令列表**是 3DMigoto 明确支持的（源码",
+        ";     `ParseRunExplicitCommandList`）。所以「切下一档」的语句跑在 Mod 自己的命名空间里",
+        ";     （短名 `$coat`），本文件只负责呼叫。",
         f"namespace = {CONTROLLER_NAMESPACE}",
         "",
         "[Constants]",
         "global $controller_action = 0",
         "global $controller_value = 0",
         "global $mc_input = 0",
-        "global $mc_pending_action = 0",
-        "global persist $mc_controller_loaded = 20260926",
+        "global persist $mc_controller_loaded = 20261002",
         "global persist $mc_last_wire = 0",
-        "global persist $mc_last_value = 0",
-    ]
-    # ★ 最小探针集（2026-10-01）：保留 4 个关键量 —— `[Present]` 是否在跑、动作号是否非 0、
-    #   Commit 段里 `$controller_action` 到底有没有被写进去、以及"无修饰键"的按键能否触发。
-    # ★ 极简探针（2026-10-01 决定性一轮）：**只留一个诊断变量 + 一个探针段**。
-    #   起因：源码显示 `[Constants]` 段里"解析失败的行"不会被 erase，会在第二遍被当成命令处理，
-    #   可能连带毁掉整段的解析 —— 而此前每次加诊断变量，按键就整体不触发。
-    #   这一版把变量数降到协议必需 + 3 个，用来验证"是不是我加的声明行本身在捣乱"。
-    # 2026-10-02 **探针退役**（用户批准：「探针可以清掉」）：
-    #   * 删 `$mc_dbg_3`（每次 Commit 就写一次）与 `$mc_plain_f24` + `[KeyMC_ProbeCommit]` /
-    #     `[CommandListMC_ProbeCommit]`（当年"无修饰键按键能否触发"的对照探针）—— 那一整轮
-    #     面板按键排查早已结束，而**没有任何消费端读这些值**（消费端只把 `d3dx_user.ini` 里
-    #     含这些名字的行记进日志）。
-    #   * 留下的两个都有诊断价值且**不常驻每帧**：`$mc_action_seen`（面板动作到底有没有送达，
-    #     只在动作发生时才动）+ `$mc_present_frames`（改成每 5 秒记一次）。
-    lines.extend([
         "global persist $mc_present_frames = 0",
         "global persist $mc_present_t = 0",
         "global persist $mc_action_seen = 0",
-    ])
+    ]
     for action in actions:
         lines.append(f"global persist $mc_state_{action.wire_id} = 0")
-    lines.extend([
-        "",
-        "; Synthetic key protocol: Ctrl+Alt+Shift+F13..F24",
-        "; 2026-10-01：数字位从 F1..F10 挪到 **F13..F22**、暂存 F23、提交 F24 ——",
-        "; 旧键位会撞别的 addon（F6 = DLSS5 的 NR 开关、F7 = 第一人称切换，它们不看修饰键），",
-        "; 用户实测「按开关外套会切第一人称 / 按切换头发开关了 DLSS5」就是这么来的。",
-        "; F13 以上的键标准键盘上不存在，插件与游戏都不会绑。",
-    ])
+    lines.append("")
     for digit in range(10):
         lines.extend([
             f"[KeyMC_Digit{digit}]",
-            f"key = ctrl alt shift VK_F{13 + digit}",
+            f"key = VK_F{13 + digit}",
             f"run = CommandListMC_Digit{digit}",
         ])
     lines.extend([
-        "[KeyMC_Stage]",
-        "key = ctrl alt shift VK_F23",
-        "run = CommandListMC_Stage",
         "[KeyMC_Commit]",
-        "key = ctrl alt shift VK_F24",
+        "key = VK_F24",
         "run = CommandListMC_Commit",
         "",
     ])
-    # 2026-10-02：`[KeyMC_ProbeCommit]` / `[CommandListMC_ProbeCommit]` 那对探针段**已退役**
-    #   （它当年用来判"无修饰键的键到底有没有到达 EFMI"，那一轮排查早已结束）。
     for digit in range(10):
         lines.extend([
             f"[CommandListMC_Digit{digit}]",
             "$mc_input = $mc_input * 10" + (f" + {digit}" if digit else ""),
         ])
+    # 提交：动作号到齐 → **把该动作涉及的每个变量切到下一档**。
+    # ⚠️ 用 `if` / `else if` / `else` + 各自的 `endif`：3DMigoto **不认 `elif`**
+    #    （2026-10-01 现场铁证：`elif` 那行被丢弃，它下面的赋值变成"无条件执行"，
+    #     于是"点哪一档都没反应"）。
     lines.extend([
-        "[CommandListMC_Stage]",
-        "$mc_pending_action = $mc_input",
-        "$mc_input = 0",
         "[CommandListMC_Commit]",
-        "$mc_last_wire = $mc_pending_action",
-        "$mc_last_value = $mc_input",
+        "$mc_last_wire = $mc_input",
+        "$mc_input = 0",
+        "if $mc_last_wire != 0",
+        "    $mc_action_seen = $mc_action_seen + 1",
+        "    $controller_action = $mc_last_wire",
     ])
     for action in actions:
-        lines.extend([
-            f"if $mc_pending_action == {action.wire_id}",
-            f"    $mc_state_{action.wire_id} = $mc_input",
-            "endif",
-        ])
+        lines.append(f"    ; {action.label}")
+        lines.append(f"    if $mc_last_wire == {action.wire_id}")
+        ref = panel_refs.get(action.id)
+        if ref:
+            # 呼叫**注入在 Mod 自己 ini 里**的那段（跨命名空间调用命令列表是支持的；
+            # 跨命名空间改变量不支持 —— 这就是为什么"切档"语句要写在 Mod 那边）
+            lines.append(f"        run = {ref}")
+        if action.run_command:
+            lines.append(f"        run = {action.run_command_full or action.run_command}")
+        lines.append("    endif")
     lines.extend([
-        "$controller_action = $mc_pending_action",
-        "$controller_value = $mc_input",
-        "$mc_input = 0",
+        "    $controller_action = 0",
+        "    $mc_last_wire = 0",
+        "endif",
         "",
         "[Present]",
-        "; 探针节流（2026-10-02，用户要求清掉常驻探针）：原来每帧 `+1`，现在每 5 秒记一次 ——",
+        "; 探针节流（2026-10-02，用户要求清掉常驻探针）：每 5 秒记一次 ——",
         "; 「计数在涨」这个判据不变（诊断端只记录它的值），每帧开销归零。",
         "if time > $mc_present_t",
         "    $mc_present_t = time + 5",
         "    $mc_present_frames = $mc_present_frames + 1",
         "endif",
-        "if $controller_action != 0",
-        "    $mc_action_seen = $mc_action_seen + 1",
+        "",
     ])
-
-    for action in actions:
-        lines.append(f"    ; action {action.id} :: {action.label}")
-        lines.append(f"    if $controller_action == {action.wire_id}")
-        if action.targets and action.option_values:
-            for index in range(len(action.values)):
-                # ⚠️ **绝不能用 `elif`**（2026-10-01 现场铁证）：3DMigoto 的条件关键字只有
-                # `if` / `else if` / `else` / `endif` —— `elif` 那一行会被丢弃，于是**它下面的
-                # 赋值语句变成"无条件执行"**。现场证据：面板点「外套」（value=0）时
-                # `$mc_state_2` 正确记录成 0，**但 `[Present]` 写进 Mod 变量的是 1** ——
-                # 因为 `coat = 1` 那行被无条件执行了，所以"点哪一档都没反应"。
-                # 改成**每个档位一个独立的 `if … endif`**（嵌套 if 在任何解析器下都合法）。
-                lines.append(f"        if $controller_value == {index}")
-                for target, values in zip(action.targets, action.option_values):
-                    if index < len(values):
-                        lines.append(f"            {target} = {values[index]}")
-                lines.append("        endif")      # 每个档位各自的 endif（不是一个 if/elif 链共用一个）
-        lines.append(f"        $mc_state_{action.wire_id} = $controller_value")
-        if action.run_command:
-            lines.append(f"        run = {action.run_command_full or action.run_command}")
-        lines.append("        $controller_action = 0")
-        lines.append("    endif")
-
-    lines += ["endif", ""]
     controller_ini = "\n".join(lines)
+    # **生成即安检**（2026-10-02）：按 3DMigoto 的源码规则把刚生成的 controller.ini 体检一遍。
+    # 以前协议写错（变量名大小写、未声明变量、非法键名…）只能等用户进游戏"点了没反应"
+    # 才暴露 —— 那正是这一版踩的坑（跨命名空间引用写了大写 ⇒ 赋值被静默丢弃）。
+    from . import ini_lint
+
+    lint_problems = ini_lint.lint_text(controller_ini)
     actions_manifest = {
         "controller_namespace": CONTROLLER_NAMESPACE,
         "controller_action_var": CONTROLLER_ACTION_VAR,
         "controller_value_var": CONTROLLER_VALUE_VAR,
+        "lint_problems": lint_problems,
         "actions": [a.to_dict() for a in actions],
     }
 
     if not dry_run:
         (controller_dir / "controller.ini").write_text(controller_ini, encoding="utf-8")
+        # 体检结果也落盘一份：出问题时直接看这个文件，不用把 ini 读一遍
+        (controller_dir / "controller.lint.txt").write_text(
+            "\n".join(lint_problems) + "\n" if lint_problems else "OK（没有会被 3DMigoto 静默跳过的行）\n",
+            encoding="utf-8",
+            newline="\n",
+        )
         (controller_dir / "actions.json").write_text(
             json.dumps(actions_manifest, ensure_ascii=False, indent=2),
             encoding="utf-8",
@@ -1704,6 +2014,7 @@ def locate_d3dx_user_ini(efmi_root: Path) -> Path:
 
 
 def _format_user_var(namespace: str, var_name: str, value: str) -> str:
+    # 名字**按原样**写（d3dx_user.ini 的小写是 3DMigoto 自己写回时的规范化，不是书写要求）
     ns = namespace.strip("\\")
     return f"$\\{ns}\\{var_name} = {value}"
 

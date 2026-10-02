@@ -5,13 +5,15 @@ import base64
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
-from . import activation, core, dependencies, diagnostics, dlss5_fetcher, integrity, launcher, reshade, reshade_integration, runtime_assets, runtime_deps, selfupdate
+from . import activation, core, dependencies, diagnostics, dlss5_fetcher, integrity, launcher, moddl, reshade, reshade_integration, runtime_assets, runtime_deps, selfupdate
 from .config import AppConfig, auto_detect_migoto_loader, auto_detect_official_launcher, auto_detect_xxmi, cached_detect
 
 # 拖进 Mod 库页面的压缩包格式（用户 2026-10-01：「需要增加支持拖入 7z」「rar 也要」）。
@@ -31,12 +33,23 @@ class EndfieldModControllerApi:
         self.config.ensure_dirs()
         self._mods_cache = None
         self._dep_task: dict[str, Any] | None = None
+        # Mod 下载（粘贴网址 → 并行下载 → 自动解压入库）：任务表 + 一把入库锁
+        # （下载并行、解压入库串行 —— 用户 2026-10-02 要求"并行多线程下载"）
+        self._mod_dl: dict[str, Any] = {"done": True, "items": [], "cancel": False, "pause": False}
+        # 「下载中关窗口要弹窗提示」用（用户 2026-10-02）：用户在确认框里点了
+        # 「仍然退出」后置 True，closing 事件就放行。
+        self.exit_confirmed = False
+        self._mod_dl_lock = threading.Lock()
         # 把用户的下载加速/线路偏好装进 fastnet（只在下载时生效，用完即放）
         try:
             from . import fastnet
 
             fastnet.set_policy(getattr(self.config, "download_boost", "auto"))
             fastnet.set_line_mode(getattr(self.config, "download_line", "auto"))
+            # 代理：VPN 只对浏览器生效时，程序这边得单独配（用户 2026-10-02 实测确认）
+            fastnet.set_proxy(getattr(self.config, "download_proxy", ""))
+            if fastnet.proxy_in_use():
+                launcher._append_log(self.config, f"下载代理: {fastnet.proxy_in_use()}")
         except Exception:  # noqa: BLE001
             pass
         # **构造函数必须快**：窗口是在它返回之后才创建的，这里做任何全盘扫描都会让
@@ -1008,25 +1021,34 @@ class EndfieldModControllerApi:
         self.config.autofill(deep=False)
         self.config.ensure_dirs()
         self.config.save()
+        # 改了代理/加速偏好要**立刻生效**（不然用户填完还得重启才走代理）
+        try:
+            from . import fastnet
+
+            fastnet.set_policy(getattr(self.config, "download_boost", "auto"))
+            fastnet.set_line_mode(getattr(self.config, "download_line", "auto"))
+            fastnet.set_proxy(getattr(self.config, "download_proxy", ""))
+        except Exception:  # noqa: BLE001
+            pass
         return {"ok": True, "config": self.config.to_dict()}
 
     def set_hotkey_takeover(self, enabled: bool) -> dict[str, Any]:
-        """启动页「整合 Mod 快捷键」滑块的后端。
+        """启动页「游戏内 Mod 面板」开关的后端。
 
-        用户 2026-10-01 原话：「开了要锁 mod 快捷键，注入 reshade」—— 一个开关两件事，
-        所以这里一次做完：① 落盘开关；② 把统一面板部署进 ReShade 会读的目录；
-        ③ 若游戏没在跑，顺手重新生成控制器（让"锁键"立刻在 staging 里生效）。
-        面板用不了时**如实返回 possible=False**，并且启动链路不会锁键 —— 不允许出现
-        "键锁死了、面板却不存在"这种把功能改没的情况。
+        用户 2026-10-01 原话：「开了要锁 mod 快捷键，注入 reshade」—— 而面板 2026-10-02
+        换成了**直接发 Mod 自己原键**的形态（用户：「让面板走 mod 的按键」），锁键会让
+        这条链路直接失效（见 `core.HOTKEY_LOCK_ENABLED` 的说明）。所以这个开关现在
+        只做一件事：**把面板部署进 ReShade 会读的目录**；锁键动作已停用。
         """
         self.config.hotkey_takeover = bool(enabled)
         self.config.save()
-        deploy = reshade_integration.deploy_panel(
-            self.config,
-            self.config.controller_dir,
-            log=lambda message: launcher._append_log(self.config, message),
-        )
+        deploy: dict[str, Any] = {"warnings": [], "deployed": []}
         if enabled:
+            deploy = reshade_integration.deploy_panel(
+                self.config,
+                self.config.controller_dir,
+                log=lambda message: launcher._append_log(self.config, message),
+            )
             # 面板里的中文要靠 ReShade 加载中文字体（默认字体只有 ASCII）
             reshade_integration.ensure_panel_font(
                 self.config, log=lambda message: launcher._append_log(self.config, message)
@@ -1039,27 +1061,26 @@ class EndfieldModControllerApi:
             running = bool(self.game_running().get("running"))
         except Exception:  # noqa: BLE001
             running = False
-        # 开着要立刻锁键，**关掉也要立刻把原键还原** —— staging 里的 `MC_*` 是上一轮被
-        # 改写成 `VK_F24` 的副本，不重新生成的话"关掉开关"这件事在游戏里并不生效
-        # （2026-10-01 自测发现：关掉后 staging 里仍是 F24）。
+        # 开到关 / 关到开都重新生成一次控制器：`actions.tsv` 会随勾选的 Mod 变，
+        # 而且上一版（锁键还生效时）可能已经把 staging 里的 `key` 行改写成 `VK_F24`，
+        # 重铺一次才是"面板拿到的就是现在的库"。
         if status["possible"] and not running:
             try:
                 self.prepare()
                 reprepared = True
             except Exception as exc:  # noqa: BLE001
-                launcher._append_log(self.config, f"切换整合 Mod 快捷键后重新生成控制器失败: {exc}")
+                launcher._append_log(self.config, f"切换游戏内 Mod 面板后重新生成控制器失败: {exc}")
 
         if not enabled:
-            message = ("已关闭：Mod 自带的按键已还原，照常生效"
-                       if reprepared else "已关闭：退出游戏后点「一键启动」即恢复原按键")
+            message = "已关闭：下次启动不再铺面板（已经铺好的那份不删，Mod 自带按键一直照常生效）"
         elif not status["possible"]:
-            message = f"面板用不了（{status['reason']}）—— 已保持 Mod 自带的按键不被锁死"
+            message = f"面板用不了（{status['reason']}）—— Mod 自带按键照常生效"
         elif running:
-            message = "已打开：退出游戏后点「一键启动」，Mod 按键会被锁住、改用游戏内面板（按 Home 打开）"
+            message = "已打开：退出游戏后点「一键启动」才会把面板铺进 ReShade（进游戏按 Home 打开）"
         elif reprepared:
-            message = "已打开：Mod 自带按键已锁住，进游戏后按 Home 打开统一面板操作"
+            message = "已打开：面板已就位 —— 进游戏按 Home 打开，点按钮 = 按一次该 Mod 自己的按键"
         else:
-            message = "已打开：下次「一键启动」时锁住 Mod 自带按键并注入面板"
+            message = "已打开：下次「一键启动」时把面板铺进 ReShade"
 
         return {
             "ok": True,
@@ -2234,6 +2255,386 @@ class EndfieldModControllerApi:
             "pending_total": pending.get("total", 0),
         }
 
+    # ── Mod 下载（粘贴网址 → 并行下载 → 自动解压入库）──────────────────────────
+    # 用户 2026-10-02 原话：「在 mod 库页按钮下面加一个 mod 下载，**下载进临时文件夹**，
+    # **能解压的解压进库**，**不能解压的提示用户需要手动解压**，**并行多线程下载**」；
+    # 下载源 = 「**给个输入框输入网址**」⇒ 这里收的就是用户粘贴的 http(s) 直链。
+    def start_mod_download(self, urls: Any) -> dict[str, Any]:
+        """起一批下载任务：**多任务并行**，每个任务内部再走 fastnet 的并发分块。
+
+        解压/入库复用 `_import_archive_file()`（拖入 zip 那条已验证的链路：zip-slip 校验、
+        自动提层、重名加后缀、收编与角色识别），所以"下载进来"和"拖进来"结果一致。
+        """
+        links = moddl.parse_urls(urls if isinstance(urls, str) else list(urls or []))
+        if not links:
+            return {"ok": False,
+                    "message": "没看到有效的网址 —— 要 http:// 或 https:// 开头的直链，一行一个"}
+        with self._mod_dl_lock:
+            if not self._mod_dl.get("done", True):
+                return {"ok": False, "message": "上一批还在下载中，等它跑完再开新的"}
+            self._mod_dl = {
+                "cancel": False, "pause": False,
+                "started_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "done": False,
+                "dir": str(moddl.downloads_dir(self.config)),
+                "items": [
+                    {"url": link, "origin_url": link,      # origin_url = 用户粘的那个（香蕉网常是页面地址）
+                     "name": moddl.file_name_from(link), "status": "等待中",
+                     "percent": 0, "received": 0, "size": 0, "message": "", "path": ""}
+                    for link in links
+                ],
+            }
+            items = self._mod_dl["items"]
+        launcher._append_log(self.config,
+                             f"Mod 下载: 开始 {len(links)} 个任务（并行）→ {moddl.downloads_dir(self.config)}")
+        threading.Thread(target=self._mod_download_worker, args=(items,), daemon=True).start()
+        return {"ok": True, "total": len(links), "items": items}
+
+    def _mod_download_worker(self, items: list[dict[str, Any]]) -> None:
+        """并行下载；**解压入库串行**（同一把锁）—— 文件系统操作串行更稳，
+        也避免两个包同时往库里写时"重名加后缀"的判断互相打架。"""
+        from concurrent.futures import ThreadPoolExecutor
+
+        dest_dir = moddl.downloads_dir(self.config)
+        try:
+            with ThreadPoolExecutor(max_workers=min(4, max(1, len(items)))) as pool:
+                futures = [pool.submit(self._mod_download_one, item, dest_dir) for item in items]
+                for future in futures:
+                    future.result()          # 异常已在 _mod_download_one 内部吞掉
+                # **封面图一律不留**（用户 2026-10-02：「入库或者中断图片也要删」）——
+                # 放在这里统一做，是因为任务有成功/失败/待手动解压三条出路径，逐条加容易漏。
+                self._cleanup_download_covers(items)
+        finally:
+            with self._mod_dl_lock:
+                self._mod_dl["done"] = True
+                counts = moddl.summarize(items)
+            launcher._append_log(
+                self.config,
+                f"Mod 下载: 全部结束（入库 {counts['imported']}，需手动解压 {counts['manual']}，"
+                f"失败 {counts['failed']}）")
+
+    @staticmethod
+    def _cover_data_uri(path: Any) -> str:
+        """把封面图读成 data URI（WebView2 里 `file://` 读不到本地图，只能内联）。
+
+        封面文件**随后就会被收尾清掉**，所以必须在删之前把它转好并留在任务上
+        （2026-10-02 踩过：先删文件、后按需转 data URI ⇒ 界面上的封面变空白）。
+        """
+        import base64 as _base64
+
+        try:
+            blob = Path(path).read_bytes()
+        except OSError:
+            return ""
+        if not blob or len(blob) > 400_000:
+            return ""
+        return "data:image/jpeg;base64," + _base64.b64encode(blob).decode("ascii")
+
+    def _cleanup_download_covers(self, items: list[dict[str, Any]]) -> None:
+        """清掉这次下载留在临时目录里的**封面图**。
+
+        用户 2026-10-02：「入库或者中断图片也要删」。封面只用于"下载时先看一眼"，入库时
+        已经**拷了一份进 Mod 目录**（`cover.jpg`，Mod 卡片读它），所以临时目录那份不管任务
+        是成功、失败还是待手动解压，都不该留着。
+        ⚠️ 只删任务自己记下的那个文件路径，不扫目录、不碰别的任务的东西。
+        """
+        for item in items:
+            cover = Path(item.get("cover") or "")
+            # **先转成 data URI 再删**：删完文件界面上的封面会变空白（2026-10-02 踩到）
+            if item.get("cover") and "cover_data" not in item:
+                item["cover_data"] = self._cover_data_uri(cover)
+            try:
+                if cover.is_file():
+                    cover.unlink()
+                    item["cover_cleaned"] = True
+            except OSError:
+                pass
+
+    def _mod_download_one(self, item: dict[str, Any], dest_dir: Path) -> None:
+        url = item["url"]
+        item["status"] = "下载中"
+
+        # 速度：滑动窗口（最近 5 秒）算，别用"总字节/总耗时"——那会被开头那段探测拖低，
+        # 也别用瞬时值——那会跳。用户 2026-10-02：「下载过程要有进度条显示速度」。
+        speed_history: list[tuple[float, int]] = []
+
+        def progress(done: int, total: int) -> None:
+            now = time.monotonic()
+            item["received"] = int(done)
+            item["size"] = int(total or 0)
+            item["percent"] = int(done * 100 / total) if total else 0
+            item["last_tick"] = time.time()          # 卡死检测用（见 mod_download_progress）
+            speed_history.append((now, int(done)))
+            while len(speed_history) > 1 and now - speed_history[0][0] > 5:
+                speed_history.pop(0)
+            span_seconds = now - speed_history[0][0]
+            if span_seconds >= 0.5:
+                item["speed_bps"] = max(0, int(done - speed_history[0][1])) / span_seconds
+        item["last_tick"] = time.time()
+
+        # ── 香蕉网（GameBanana）链接：先把页面元数据换成**真实文件直链**，顺手带一张封面 ──
+        # 用户 2026-10-02：「看看能不能看到网址是香蕉网…就拉取资源同时拉取一张图片，
+        # 然后如果访问不上，就弹窗提示无法访问，建议检查 vpn」。
+        banana_id = moddl.gamebanana_id(url)
+        if banana_id is not None:
+            item["status"] = "读取香蕉网信息"
+            try:
+                profile = moddl.gamebanana_profile(banana_id)
+            except moddl.GameBananaUnreachable as exc:
+                # 这里刻意**不**抛给上层：一个任务失败不该影响同一批里的其它任务
+                item["status"] = "失败"
+                item["unreachable"] = True
+                detail = str(exc)[:120]
+                item["message"] = ("访问不上香蕉网（超时 / DNS / 证书 / 地区限制）—— "
+                                   "建议检查 VPN 或加速器后重试。" + (f"（{detail}）" if detail else ""))
+                launcher._append_log(self.config, f"Mod 下载: 香蕉网 {banana_id} 访问失败：{exc}")
+                return
+            files = profile["files"]
+            picked = next((entry for entry in files if not entry.get("archived")), files[0])
+            item["title"] = profile["name"]
+            item["author"] = profile["author"]
+            item["game"] = profile["game"]
+            item["page"] = profile.get("page", "")
+            item["version"] = picked.get("version") or profile.get("version") or ""
+            item["url"] = picked["url"]              # ← 换成真实下载直链
+            item["name"] = picked.get("file") or item.get("name") or ""
+            notes = [f"香蕉网：{profile['name']}"]
+            if profile["author"]:
+                notes.append(f"作者 {profile['author']}")
+            if item["version"]:
+                notes.append(str(item["version"]))
+            if len(files) > 1:
+                notes.append(f"共 {len(files)} 个文件，已取最新那个")
+            item["note"] = " · ".join(notes)
+            if profile["game"] and "endfield" not in profile["game"].lower():
+                item["message"] = f"⚠ 这个 Mod 属于「{profile['game']}」，不是终末地的"
+            if profile["cover"]:
+                cover = moddl.download_cover(profile["cover"], dest_dir)
+                if cover is not None:
+                    item["cover"] = str(cover)
+            item["status"] = "下载中"
+            url = item["url"]
+
+        def cancelled() -> bool:
+            with self._mod_dl_lock:
+                return bool(self._mod_dl.get("cancel") or self._mod_dl.get("pause"))
+
+        path, error, slow = moddl.download(
+            url, dest_dir, progress=progress, name=item.get("name") or "",
+            cancel=cancelled,
+            # 暂停要留断点（下次能续），终止不留
+            keep_partial=bool(self._mod_dl.get("pause")),
+            log=lambda message: launcher._append_log(self.config, message))
+        if path is None:
+            # 「已暂停」/「已终止」不是失败，如实标出来（用户点的，别报成错误）
+            if error in ("已暂停", "已终止"):
+                item["status"] = error
+                item["message"] = "暂停中（点「继续」会从断点接着下）" if error == "已暂停" else "已终止"
+                return
+            item["status"] = "失败"
+            item["message"] = error or "下载失败"
+            # 「慢到被 fastnet 放弃」≠「文件坏了」：前者要提示开 VPN（用户 2026-10-02：
+            # 「这么低速明显是没开 vpn，应该弹窗建议开 vpn 而不是纯失败」）
+            if slow:
+                item["slow"] = True
+            return
+
+        item["name"] = path.name
+        item["path"] = str(path)
+        item["percent"] = 100
+        if not moddl.is_extractable(path.name):
+            # **不去猜**：非 zip/7z/rar 一律留在临时目录，让用户自己解压（用户 2026-10-02 选的方案）
+            item["status"] = "需手动解压"
+            item["message"] = ("这个格式不能自动解压（只支持 " + " / ".join(moddl.EXTRACTABLE_SUFFIXES)
+                               + "），请手动解压后把文件夹拖进 Mod 库")
+            return
+
+        item["status"] = "解压中"
+        try:
+            with self._mod_dl_lock:      # 解压 + 入库串行
+                result = self._import_archive_file(path, path.name)
+        except Exception as exc:  # noqa: BLE001
+            result = {"ok": False, "message": f"解压失败：{exc}"}
+
+        if result.get("ok"):
+            item["status"] = "已入库"
+            item["mod_id"] = result.get("mod_id", "")
+            item["group"] = result.get("group", "")
+            item["need_confirm"] = bool(result.get("need_confirm"))
+            item["message"] = result.get("warning") or result.get("name") or "已解压进 Mod 库"
+            # **入库成功后删掉下载目录里的源包**（用户 2026-10-02：「成功入库就删掉」）——
+            # 内容已经在 Mod 库里了，留着只是占空间。只删这一次下回来的那个文件（`path` 是
+            # download() 返回的、可能已被按内容补过后缀的那个），**绝不碰下载目录里别的东西**；
+            # 删不掉也只是留个文件，不影响任务结果。
+            try:
+                if path.exists():
+                    path.unlink()
+                    item["source_removed"] = True
+                    launcher._append_log(self.config, f"Mod 下载: 已入库，已清理源包 {path.name}")
+            except OSError as exc:
+                launcher._append_log(self.config, f"Mod 下载: 源包没删掉（{exc}），留着不影响使用")
+            # 在这个 Mod **自己的文件夹**里留一份"从哪下的、什么时候下的"
+            # （用户 2026-10-02：「还有每个 mod 文件夹内都要保存下载地址、时间这些信息」）
+            dest_dir = result.get("dest") or ""
+            if dest_dir:
+                written = moddl.write_download_info(
+                    Path(dest_dir),
+                    source_url=item.get("origin_url") or item.get("url") or "",
+                    file_url=item.get("url") or "",
+                    file_name=item.get("name") or "",
+                    title=item.get("title") or "",
+                    author=item.get("author") or "",
+                    version=item.get("version") or "",
+                    game=item.get("game") or "",
+                    page=item.get("page") or "",
+                    site="GameBanana" if item.get("title") else "",
+                )
+                if written is not None:
+                    item["info_file"] = str(written)
+                    launcher._append_log(self.config, f"Mod 下载: 已写入下载信息 {written.name}")
+                # **把香蕉网的封面存成 Mod 目录里的 `cover.<ext>`** —— 这样 Mod 库卡片就有图了
+                # （用户 2026-10-02：「mod库也读不出图片」）。刻意**复用现成通道**而不是另造：
+                # `core.find_cover()` 的 COVER_HINTS 里就有 "cover"，命中后前端 `loadCovers()`
+                # 会通过 `api.get_mod_cover` 把它读出来。
+                cover_source = Path(item.get("cover") or "")
+                if cover_source.is_file():
+                    try:
+                        suffix = cover_source.suffix.lower() or ".jpg"
+                        shutil.copyfile(cover_source, Path(dest_dir) / f"cover{suffix}")
+                        item["cover_saved"] = True
+                    except OSError as exc:
+                        launcher._append_log(self.config, f"Mod 下载: 封面没存进库（{exc}）")
+        else:
+            item["status"] = "需手动解压"
+            item["message"] = result.get("message") or "解压失败，请手动处理"
+
+    def mod_download_progress(self) -> dict[str, Any]:
+        """给前端轮询：任务列表 + 计数（下载中/已入库/需手动解压/失败）。
+
+        香蕉网任务的封面图在这里转成 **data URI** 一并给前端 —— WebView2 里 `file://`
+        读本地图片会被拦，而缩略图只有几十 KB，直接内联最省事（只转一次，结果缓存在任务上）。
+        """
+        import base64
+
+        with self._mod_dl_lock:
+            items = [dict(item) for item in self._mod_dl.get("items", [])]
+            done = bool(self._mod_dl.get("done", True))
+            payload = dict(self._mod_dl)
+        # 总进度（字节口径）—— 依赖页那个进度条在下载期间就显示它 + 速度
+        # （用户 2026-10-02：「下载过程要有进度条显示速度，现在进度条不走，显示 0/0」）。
+        # ⚠️ 体积未知的任务（服务器没给 Content-Length）不参与分母，否则百分比会乱跳。
+        known_total = sum(int(item.get("size") or 0) for item in items)
+        done_bytes = sum(int(item.get("received") or 0) for item in items)
+        payload["done_bytes"] = done_bytes
+        payload["total_bytes"] = known_total
+        payload["speed_bps"] = sum(float(item.get("speed_bps") or 0) for item in items)
+        # **卡死检测**：有任务长时间没有任何数据往来，就判它失败。
+        # 用户 2026-10-02 实测遇到"卡片一直显示下载中、进度条 0/0、速度也没有"——
+        # 那就是下载线程卡在探测/重试里了，界面必须如实收尾，不能永远挂着"进行中"。
+        # 在这里做（前端每秒轮询必然经过）不需要额外线程；只改状态，不强行杀线程。
+        now_wall = time.time()
+        for item in items:
+            if item.get("status") in ("下载中", "解压中") and \
+                    now_wall - float(item.get("last_tick") or now_wall) > moddl.MOD_DOWNLOAD_STALL_SECONDS:
+                item["status"] = "失败"
+                item["message"] = (f"超过 {moddl.MOD_DOWNLOAD_STALL_SECONDS // 60} 分钟没有任何数据往来，"
+                                   f"判定为卡死（线路断了 / 站点不通）—— 可重试，或开加速器后重试")
+                item["stalled"] = True
+                launcher._append_log(
+                    self.config,
+                    f"Mod 下载: {item.get('name') or item.get('url')} 卡死（长时间无数据），已判失败")
+        for item in items:
+            if item.get("cover") and "cover_data" not in item:
+                item["cover_data"] = self._cover_data_uri(item["cover"])
+        counts = moddl.summarize(items)
+        return {
+            "ok": True, "items": items, "done": done, "counts": counts,
+            "dir": payload.get("dir", str(moddl.downloads_dir(self.config))),
+            "started_at": payload.get("started_at", ""),
+        }
+
+    def has_active_downloads(self) -> bool:
+        """有没有正在跑的下载任务 —— 关窗口前要问一句（用户 2026-10-02 要求）。"""
+        with self._mod_dl_lock:
+            return any(item.get("status") in ("等待中", "读取香蕉网信息", "下载中", "解压中")
+                       for item in self._mod_dl.get("items", []))
+
+    def confirm_exit(self) -> dict[str, Any]:
+        """用户在"正在下载，仍要退出吗"的框里点了"仍然退出"。
+
+        直接干净收尾并退出，而不是"只设标志等窗口自己关"：`closing` 那条路是阻塞的、
+        前端弹窗是异步的，只设标志还得用户再点一次关闭。
+        """
+        self.exit_confirmed = True
+        launcher._append_log(self.config, "用户确认在下载中退出程序")
+        try:
+            self.shutdown()
+        except Exception:  # noqa: BLE001
+            pass
+        os._exit(0)
+
+    def cancel_mod_downloads(self) -> dict[str, Any]:
+        """**终止**全部下载（用户 2026-10-02：「下载需要终止和暂停按钮」）。
+
+        置标志位，下载线程会在下一个数据块边界停下来（`fastnet.Cancelled`），
+        半成品由 `moddl` 清掉 —— 终止就是干干净净地停。
+        """
+        with self._mod_dl_lock:
+            self._mod_dl["cancel"] = True
+            self._mod_dl["pause"] = False
+        launcher._append_log(self.config, "Mod 下载: 用户点了终止")
+        return {"ok": True}
+
+    def pause_mod_downloads(self) -> dict[str, Any]:
+        """**暂停**全部下载：停下但**保留断点**，下次「继续」能接着下（fastnet 支持续传）。"""
+        with self._mod_dl_lock:
+            self._mod_dl["pause"] = True
+            self._mod_dl["cancel"] = False
+        launcher._append_log(self.config, "Mod 下载: 用户点了暂停（保留断点）")
+        return {"ok": True}
+
+    def resume_mod_downloads(self) -> dict[str, Any]:
+        """**继续**：清掉暂停标志，并按当前剩余任务重新起一批（断点续传会跳过已下的部分）。"""
+        with self._mod_dl_lock:
+            self._mod_dl["pause"] = False
+            self._mod_dl["cancel"] = False
+            pending = [item for item in self._mod_dl.get("items", [])
+                       if item.get("status") in ("已暂停", "已终止")]
+            if not pending:
+                return {"ok": True, "resumed": 0}
+            for item in pending:
+                item["status"] = "等待中"
+                item["message"] = ""
+            dir_path = str(self._mod_dl.get("dir") or moddl.downloads_dir(self.config))
+        launcher._append_log(self.config, f"Mod 下载: 继续 {len(pending)} 个任务（断点续传）")
+        threading.Thread(target=self._mod_download_worker, args=(pending, Path(dir_path)),
+                         daemon=True).start()
+        return {"ok": True, "resumed": len(pending)}
+
+    def clear_mod_downloads(self) -> dict[str, Any]:
+        """清掉下载任务记录（界面上的「清除记录」按钮）。
+
+        用户 2026-10-02：「这个卡片要去掉」—— 残留的任务行（尤其卡死的那些）得能让用户
+        自己扫掉。**有任务正在跑时拒绝**：清记录不能把正在下的东西也抹掉。
+        """
+        with self._mod_dl_lock:
+            active = [item for item in self._mod_dl.get("items", [])
+                      if item.get("status") in ("等待中", "读取香蕉网信息", "下载中", "解压中")]
+            if active:
+                return {"ok": False, "message": f"还有 {len(active)} 个任务在跑，等它们结束再清"}
+            self._mod_dl = {"items": [], "done": True, "started_at": "", "dir": ""}
+        launcher._append_log(self.config, "Mod 下载: 已清除任务记录")
+        return {"ok": True}
+
+    def open_download_dir(self) -> dict[str, Any]:
+        """打开下载临时目录（"需手动解压"那条提示旁边的按钮用）。"""
+        target = moddl.downloads_dir(self.config)
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            return {"ok": False, "message": f"创建下载目录失败：{exc}"}
+        return self.open_path(str(target))
+
     def _extract_zip_into(self, archive_path: Path, dest: Path) -> None:
         """把 zip 解进 ``dest``，逐条做 zip-slip 校验（任何逃逸条目直接拒绝）。"""
         import zipfile
@@ -2805,6 +3206,102 @@ class EndfieldModControllerApi:
         )
         launcher._append_log(self.config, result.get("message", ""))
         return result
+
+    def reset_dependencies_and_redownload(self) -> dict[str, Any]:
+        """**依赖清空重新下载**（设置页最上面那个红按钮，用户 2026-10-02 要求）。
+
+        用户原话：「设置页做一个依赖清空重新下载，**红色**，放在最上面，按了之后**清空除了
+        mod 库和 exe 的所有文件和文件夹**，然后**还原终末地本体**，然后**跳转到依赖页开始
+        一键下载依赖**」。
+
+        三步（前端负责第三步的跳转与触发，这里做前两步）：
+          ① 还原终末地本体（最近一次净化备份）；
+          ② 清掉程序**自己的**运行数据：`runtime\\`（组件、缓存、日志、游戏备份、状态）
+             与 `config.json`；然后用内存里的配置**原样写回**（路径设置全保留）。
+          ③ 前端跳依赖页并开始「一键下载依赖」。
+
+        ⚠️ 两条安全约束（为什么这里不写成"除了库和 exe 全删"）：
+          * **只删认得的**：数据根里可能有用户自己放的东西（截图、笔记、别的工具），
+            "除 X 全删"会连它们一起干掉；所以白名单只有 `runtime\\`、`assets\\` 与 `config.json*`。
+          * **路径不许丢**：删 `config.json` 前先把库/备份仓/游戏目录这些记下来、马上写回 ——
+            否则把库放在自定义盘的用户重启后会发现"库没了"（数据根换了、路径回到默认）。
+        （用户 2026-10-02 追加：「assets\\ 也要删」—— 那 130 MB 随包资产会在下一步重新下载展开。）
+        """
+        import shutil
+
+        base = Path(self.config.base_dir)
+        runtime = Path(self.config.runtime_path)
+
+        # ① 还原游戏本体（没有过净化备份时它自己会如实报"无需还原"）
+        try:
+            restore_info: dict[str, Any] = self.game_clean_restore("")
+        except Exception as exc:  # noqa: BLE001
+            restore_info = {"ok": False, "message": f"还原时出错：{exc}"}
+
+        # ② 先记住关键路径（删完配置要原样写回）
+        preserved: dict[str, Any] = {}
+        for key in ("library_dir", "mod_backup_dir", "mod_backup_enabled", "game_exe",
+                    "staging_mods_dir", "xxmi_launcher", "reshade_injection"):
+            if hasattr(self.config, key):
+                preserved[key] = getattr(self.config, key)
+
+        removed: list[str] = []
+        failed: list[str] = []
+        if runtime.is_dir():
+            try:
+                shutil.rmtree(runtime)
+                removed.append(str(runtime))
+            except OSError:
+                # 本进程还占着的文件（比如当前正在写的日志）删不掉 —— 逐个再试一遍，
+                # 真删不掉的如实列出来，别假装清干净了
+                for item in sorted(runtime.iterdir(), key=lambda path: (path.is_file(), path.name)):
+                    try:
+                        if item.is_dir():
+                            shutil.rmtree(item)
+                        else:
+                            item.unlink()
+                        removed.append(item.name)
+                    except OSError:
+                        failed.append(item.name)
+        for cfg in list(base.glob("config.json*")):
+            try:
+                cfg.unlink()
+                removed.append(cfg.name)
+            except OSError:
+                failed.append(cfg.name)
+        # ④ 随包资产也清掉（用户 2026-10-02：「assets\\ 也要删」）——
+        #    它会由下一步的「一键下载依赖」从 Release 拉 `assets-bundle.zip` 重新展开
+        #    （约 130 MB，需要网络；国内通常要开加速器）。删不掉就如实说。
+        assets = base / "assets"
+        if assets.is_dir():
+            try:
+                shutil.rmtree(assets)
+                removed.append(str(assets))
+            except OSError as exc:
+                failed.append(f"assets（{exc}）")
+
+        # ③ 用内存里的配置重新落盘（路径保留；组件标记原本就在 runtime 里、已随它删掉）
+        try:
+            for key, value in preserved.items():
+                setattr(self.config, key, value)
+            self.config.ensure_dirs()
+            self.config.save()
+            self._mods_cache = None
+        except Exception as exc:  # noqa: BLE001
+            failed.append(f"写回配置失败：{exc}")
+
+        launcher._append_log(
+            self.config,
+            f"依赖清空: 已删除 {len(removed)} 项，未删掉 {len(failed)} 项"
+            + (f"（{', '.join(failed[:5])}）" if failed else "")
+            + "；接着会重新下载依赖")
+        return {
+            "ok": True,
+            "removed": removed,
+            "failed": failed,
+            "restore": restore_info,
+            "kept": ["Mod 库", "Mod 备份仓", "程序 exe", "路径设置"],
+        }
 
     def game_clean_restore(self, stamp: str = "") -> dict[str, Any]:
         """从备份还原游戏目录（回到净化前）。"""

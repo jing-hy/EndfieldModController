@@ -67,7 +67,11 @@ $undefined_var = $known
         self.assertTrue(any("undefined_var" in item for item in found), found)
 
     def test_linter_allows_expressions_and_namespaced_targets(self) -> None:
-        """不许误报：右值表达式、跨命名空间左值都是合法的（初版误报了 25 处）。"""
+        """不许误报：右值表达式、跨命名空间左值都是合法的（初版误报了 25 处）。
+
+        大小写**按原样**（`SomeMod` 不是笔误）—— ini 层变量名大小写敏感，3DMigoto 的
+        `d3dx_user.ini` 里那些小写只是**持久化层**的写法，不能反推成"引用要写小写"。
+        """
         ok = """[Constants]
 global persist $mc_input = 0
 global persist $mc_last_wire = 0

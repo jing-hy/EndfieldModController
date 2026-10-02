@@ -58,31 +58,63 @@
 
   <main>
     <section class="panel active" id="tab-library">
-      <div class="switch-item" id="mods-master-card">
-        <div class="switch-row">
-          <span class="switch-name">开启皮肤 Mod</span>
-          <label class="switch"><input type="checkbox" id="cfg-third-party-mods" checked><span class="slider"></span></label>
+      <!-- 分区卡片：大标题 + 卡片（用户 2026-10-02：「mod库页还是有重叠，卡片间距拉大，
+           完全对齐依赖页，说明也按大标题分成卡片」）。原先这些卡片直接塞在 section 里、
+           没有 .switch-list 包裹 ⇒ **卡片之间零间距**，看着就"贴在一起/重叠"。 -->
+      <div class="section-card">
+        <div class="section-title">皮肤 Mod</div>
+        <div class="switch-item" id="mods-master-card">
+          <div class="switch-row">
+            <span class="switch-name">开启皮肤 Mod</span>
+            <label class="switch"><input type="checkbox" id="cfg-third-party-mods" checked><span class="slider"></span></label>
+          </div>
+          <div class="switch-desc">总开关：关闭后<b>一个皮肤都不加载</b>（Mods 目录会被清空，随时可开回来）。⚠️ 注意这<b>不是</b>停掉 EFMI 注入 —— 实测那样终末地会直接拉不起来；注入照旧，只是没有皮肤。</div>
         </div>
-        <div class="switch-desc">总开关：关闭后<b>一个皮肤都不加载</b>（Mods 目录会被清空，随时可开回来）。⚠️ 注意这<b>不是</b>停掉 EFMI 注入 —— 实测那样终末地会直接拉不起来；注入照旧，只是没有皮肤。</div>
-      </div>
-      <div class="switch-item">
-        <div class="switch-row">
-          <span class="switch-name">强行关闭角色 Mod 互斥</span>
-          <label class="switch"><input type="checkbox" id="cfg-allow-same-character"><span class="slider"></span></label>
+        <div class="switch-item">
+          <div class="switch-row">
+            <span class="switch-name">强行关闭角色 Mod 互斥</span>
+            <label class="switch"><input type="checkbox" id="cfg-allow-same-character"><span class="slider"></span></label>
+          </div>
+          <div class="switch-desc">
+            便于<b>部分同角色但不冲突的 Mod</b>：开启后，勾选一个 Mod 不会再把同角色的其它 Mod 自动取消，生成控制器时也不再按角色去重。
+            <b>默认关闭</b> —— 同角色的两个 Mod 同时生效常常会让游戏崩，只在确认它们改的不是同一批资源时再打开。
+          </div>
         </div>
-        <div class="switch-desc">
-          便于<b>部分同角色但不冲突的 Mod</b>：开启后，勾选一个 Mod 不会再把同角色的其它 Mod 自动取消，生成控制器时也不再按角色去重。
-          <b>默认关闭</b> —— 同角色的两个 Mod 同时生效常常会让游戏崩，只在确认它们改的不是同一批资源时再打开。
+      </div>
+
+      <div class="section-card">
+        <div class="section-title">下载 Mod</div>
+        <!-- 下载入口：卡片内**直接放输入框**（用户 2026-10-02：「不是这样的，是直接在卡片内放一个输入框」）。
+             刻意**不做** sticky/固定定位 —— 用户要求「能在 mod 卡片滑动时跟随滑动，不锁定」。 -->
+        <div class="switch-item" id="mod-download-card">
+          <div class="switch-row">
+            <span class="switch-name">粘贴网址下载</span>
+            <button id="mod-download-start" class="primary">开始下载</button>
+          </div>
+          <div class="switch-desc">
+            粘贴网址，<b>一行一个</b> → <b>并行下载</b>；能解压的（zip / 7z / rar）<b>自动解压进 Mod 库</b>并识别角色，不能解压的留在临时目录并告诉你路径。
+            直接支持<b>香蕉网（GameBanana）页面地址</b>：会自动换成真实文件直链，并带出<b>封面、作者与版本</b>；打不开时会提示检查 VPN。
+          </div>
+          <textarea id="mod-download-urls" rows="2" placeholder="https://gamebanana.com/mods/721442&#10;https://example.com/another-mod.7z"></textarea>
+          <div class="download-tools">
+            <button id="mod-download-open-dir">打开下载目录</button>
+            <span class="hint" id="mod-download-status"></span>
+          </div>
+          <div id="mod-download-list" class="download-list"></div>
         </div>
       </div>
-      <div class="toolbar">
-        <button id="scan-btn">重新扫描</button>
-        <button id="prepare-btn" class="primary">生成控制器</button>
-        <button id="fix-all-mods-btn">一键修复所有 Mod（实验性）</button>
-        <span class="hint" id="mutual-hint">同角色自动互斥，选择自动保存。把 .zip / .7z / .rar 拖到页面任意处即可导入。</span>
+
+      <div class="section-card">
+        <div class="section-title">Mod 列表</div>
+        <div class="toolbar">
+          <button id="scan-btn">重新扫描</button>
+          <button id="prepare-btn" class="primary">生成控制器</button>
+          <button id="fix-all-mods-btn">一键修复所有 Mod（实验性）</button>
+          <span class="hint" id="mutual-hint">同角色自动互斥，选择自动保存。把 .zip / .7z / .rar 拖到页面任意处即可导入。</span>
+        </div>
+        <div id="library-status" class="hint"></div>
+        <div id="mod-list" class="mod-groups"></div>
       </div>
-      <div id="library-status" class="hint"></div>
-      <div id="mod-list" class="mod-groups"></div>
     </section>
 
     <section class="panel" id="tab-assist">
@@ -103,6 +135,15 @@
       <div id="dep-status" class="hint"></div>
       <div class="progress-row"><progress id="dep-progress" max="100" value="0"></progress><span id="dep-progress-text" class="hint">0/0</span></div>
       <pre id="dep-log" class="dep-log" aria-live="polite">等待开始…（这里会显示下载线路尝试、断点续传、组件安装等详细过程）</pre>
+      <!-- Mod 下载的进度 / 封面 / 结果也放这里（用户 2026-10-02：「下载点了之后可以跳到依赖页，
+           去显示日志进度条等，图片和名字也可以在日志中显示」） -->
+      <div class="download-block" id="dep-download-block">
+        <div class="download-block-head">
+          <b>Mod 下载</b>
+          <span class="hint" id="dep-download-note">点「开始下载」后，这里显示每个任务的进度、封面与结果。</span>
+        </div>
+        <div id="dep-download-list" class="download-list"></div>
+      </div>
       <div id="dep-list" class="dep-list"></div>
       <div id="dep-results" class="dep-results"></div>
     </section>
@@ -148,11 +189,11 @@
         </div>
         <div class="switch-item">
           <div class="switch-row">
-            <span class="switch-name">整合 Mod 快捷键</span>
+            <span class="switch-name">Mod 快捷键锁定</span>
             <label class="switch"><input type="checkbox" id="cfg-unified-hotkeys"><span class="slider"></span></label>
           </div>
-          <div class="switch-desc">打开后：把各 Mod 自带的按键<b>锁住</b>，操作统一到游戏内的 ReShade 面板（进游戏按 <code>Home</code> → <b>ModeController</b> 页）。面板按角色分组、开关用滑块，每项都标出<b>变量名</b>、<b>推测含义</b>与<b>原快捷键</b>。<br>
-            不开就保持现在的样子：Mod 自带的快捷键与控制菜单直接生效。<b>面板装不上时不会锁键</b>（会在这里告诉你原因）。<br>
+          <div class="switch-desc"><b>为什么要锁</b>：Mod 之间常常抢同一个键（好几个 Mod 都用 <code>→</code>、<code>←</code>、<code>↓</code>…），手按时会互相干扰、也不知道触发了哪一个。<b>上锁后这些键交给游戏内的统一面板</b>（进游戏按 <code>Home</code> → <b>ModeController</b> 页，按角色分组，每一项一个按钮，点一下 = 切到下一档；旁边标出变量名与生效条件），<b>从面板里调整就不会撞键</b>。<br>
+            面板走内部通道，不碰游戏自己的按键；<b>Mod 自带按键会被锁定</b>（原始的 <code>key =</code> 行可一键还原）。装不上时会在这里告诉你原因。<br>
             <span id="hotkey-panel-status" class="hint"></span></div>
         </div>
       </div>
@@ -171,6 +212,7 @@
 
     <section class="panel" id="tab-settings">
       <div class="settings-head">
+        <button id="settings-reset-deps-btn" class="danger">依赖清空重新下载</button>
         <button id="settings-export-diagnostics-btn" class="primary">一键导出诊断包</button>
         <button id="init-check-btn" class="primary">一键检测全部</button>
         <button id="game-restore-btn">一键还原游戏本体</button>
@@ -263,6 +305,14 @@
 
       <div class="settings-group">
         <h3>④ 下载与网络</h3>
+        <div class="setting-row">
+          <span class="setting-label">下载代理</span>
+          <input id="cfg-download_proxy" placeholder="留空即自动（环境变量 → 系统代理 → 直连）">
+        </div>
+        <div class="setting-row">
+          <span class="setting-label"></span>
+          <span class="hint">VPN / 加速器大多<b>只对浏览器生效</b> —— 那样本程序就是直连，会出现"浏览器秒下、程序慢得动不了"。把它的本地代理地址填在这里即可，例如 Clash 的 <code>http://127.0.0.1:7890</code>、v2rayN 的 <code>http://127.0.0.1:10809</code>。填完直接生效，不用重启。</span>
+        </div>
         <div class="setting-row">
           <span class="setting-label">下载加速</span>
           <select id="cfg-download_boost">
@@ -425,6 +475,7 @@
       </ul>
     </section>
   </main>
+
 
   <div id="feedback-modal" class="modal hidden">
     <div class="modal-content" style="width:min(660px,92vw)">

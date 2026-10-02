@@ -165,12 +165,21 @@ button.primary {
   border-color: transparent;
 }
 button.primary:hover { box-shadow: 0 10px 26px color-mix(in srgb, var(--accent) 28%, transparent); }
+/* 危险动作按钮（用户 2026-10-02：「依赖清空重新下载，**红色**，放在最上面」） */
+button.danger {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 60%, var(--line));
+  background: color-mix(in srgb, var(--danger) 14%, var(--panel-strong));
+}
+button.danger:hover { border-color: var(--danger); box-shadow: 0 8px 22px color-mix(in srgb, var(--danger) 30%, transparent); }
 button:disabled { opacity: .5; cursor: not-allowed; transform: none; box-shadow: none; }
 
 .hint { color: var(--muted); font-size: 13px; }
 .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 14px; }
 label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 13px; font-weight: 600; }
-input, select {
+/* textarea 也吃同一套输入框样式（用户 2026-10-02：「mod下载输入框太丑了，换成设置写路径的
+   那个样式」—— 设置页那些路径框用的就是下面这套）。 */
+input, select, textarea {
   background: color-mix(in srgb, var(--panel-strong) 86%, transparent);
   border: 1px solid var(--line);
   color: var(--text);
@@ -180,8 +189,9 @@ input, select {
   outline: none;
   transition: border-color .15s ease, box-shadow .15s ease;
 }
-input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
+input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
 input[type="text"] { width: 100%; }
+textarea { width: 100%; box-sizing: border-box; font-family: inherit; line-height: 1.55; }
 .checkbox-row { flex-direction: row; align-items: center; gap: 8px; }
 
 .mod-groups { display: block; }
@@ -202,13 +212,12 @@ input[type="text"] { width: 100%; }
 .group-controls .cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .mod-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
 .mod-card {
-  background: color-mix(in srgb, var(--panel-strong) 92%, transparent);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
   padding: 12px;
   transition: transform .15s ease, border-color .15s ease, box-shadow .15s ease;
   min-width: 0;
 }
+/* 分组外框里的 Mod 卡：底色跟外框区分开，免得"框套框"糊成一片（截图里看出来的） */
+.group-block .mod-card { background: color-mix(in srgb, var(--panel) 78%, var(--panel-strong)); }
 .mod-card:hover { transform: translateY(-3px); border-color: var(--line-strong); box-shadow: 0 16px 34px color-mix(in srgb, var(--accent) 10%, transparent); }
 .mod-card.disabled { opacity: .62; }
 .mod-card .cover { width: 100%; height: 170px; border-radius: 8px; overflow: hidden; background: color-mix(in srgb, var(--bg) 88%, transparent); margin-bottom: 10px; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 12px; }
@@ -266,6 +275,27 @@ pre.code-block { max-height: 330px; }
 .dep-item .missing { color: var(--danger); font-weight: 700; }
 .progress-row { display: flex; align-items: center; gap: 10px; margin: 12px 0; }
 .progress-row progress { width: min(430px, 55vw); height: 12px; accent-color: var(--accent); }
+/* Mod 下载任务列表（用户 2026-10-02）：每个任务一行，失败/需手动解压各自的颜色在上面用内联样式区分 */
+.download-list { margin: 12px 0; display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto; }
+/* 下载任务列表标题行 + 「清除记录」小按钮（用户 2026-10-02：「这个卡片要去掉」） */
+.download-list .download-head { align-items: center; }
+button.mini { padding: 2px 10px 4px; font-size: 12px; line-height: 1.5; border-radius: 8px; flex: none; }
+
+/* 下载任务行：外观由上面那组"卡片"统一定义（磨砂/虚影/圆角），这里只留它特有的排版 */
+.download-item { padding: 10px 12px; }
+/* 依赖页里的「Mod 下载」块（用户 2026-10-02：下载后跳这里看进度/日志/封面，观感对齐依赖页） */
+.download-block { margin-top: 12px; }
+.download-block-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
+/* 工具栏与下载块里的提示文字**单独占一行**，别跟按钮/标题挤在一起
+   （用户 2026-10-02：「mod库按钮有点重叠」「这个文字出去了」） */
+.toolbar .hint, .download-block-head .hint { flex: 1 1 100%; overflow-wrap: anywhere; }
+.download-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; margin-bottom: 6px; word-break: break-all; }
+.download-item progress { width: 100%; height: 10px; accent-color: var(--accent); }
+/* 香蕉网 Mod 的封面缩略图（后端转 data URI 送过来） */
+.download-cover { display: block; max-width: 100%; max-height: 180px; margin: 6px 0; border-radius: var(--radius-sm); border: 1px solid var(--line); }
+/* 下载卡片：输入框就在卡片里（用户 2026-10-02「直接在卡片内放一个输入框」） */
+#mod-download-card textarea { margin-top: 9px; font-size: 13px; resize: vertical; min-height: 52px; }
+.download-tools { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 9px; flex-wrap: wrap; }
 
 .modal { position: fixed; inset: 0; background: rgba(0, 0, 0, .58); display: flex; align-items: center; justify-content: center; z-index: 999; backdrop-filter: blur(8px); }
 .modal.hidden { display: none; }
@@ -297,7 +327,7 @@ pre.code-block { max-height: 330px; }
 .switch input:focus-visible + .slider { outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 2px; }
 
 .switch-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
-.switch-item { background: color-mix(in srgb, var(--panel-strong) 92%, transparent); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 12px 14px; }
+.switch-item { padding: 12px 14px; }
 .switch-item .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .switch-item .switch-name { font-size: 15px; font-weight: 600; color: var(--text); }
 .switch-item .switch-desc { margin-top: 5px; font-size: 12px; color: var(--muted); line-height: 1.5; }
@@ -411,13 +441,43 @@ input[type="text"]:focus, select:focus {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 24%, transparent);
 }
 
-.dep-item, .card {
+/* ⚠️ 凡是"卡片"都进这一组（用户 2026-10-02：「所有卡片都对齐那个」——即以依赖页那张
+   EndfieldModController 卡片的观感为准）：磨砂 + 顶部边缘光 + 柔和投影（"虚影"）+ 大圆角。
+   `.switch-item`（启动页/设置页/库页的开关卡）、`.mod-card`（角色 Mod 卡）、`.dep-item`
+   （依赖项）、`.download-item` / `.download-block`（Mod 下载）都在这里。 */
+.dep-item, .card, .download-item, .download-block, .section-card,
+.switch-item, .mod-card, #mod-download-card {
   background: var(--panel);
   backdrop-filter: blur(10px) saturate(140%);
   -webkit-backdrop-filter: blur(10px) saturate(140%);
   border: 1px solid var(--line);
   box-shadow: inset 0 1px 0 var(--line-strong), 0 6px 18px rgba(0, 0, 0, .18);
   border-radius: var(--radius, 16px);
+}
+
+/* ── 库页的分区卡片（大标题 + 里面若干卡片）────────────────────────────────
+   用户 2026-10-02：「mod库页还是有重叠，卡片间距拉大，完全对齐依赖页，说明也按大标题分成卡片」。
+   原先库页的卡片直接塞在 section 里、没有 .switch-list 包裹 ⇒ **卡片之间零间距**。 */
+.section-card { padding: 15px 17px 17px; margin-bottom: 18px; }
+.section-title {
+  display: flex; align-items: center; gap: 9px;
+  margin: 0 0 13px; font-size: 15px; font-weight: 700; letter-spacing: .3px; color: var(--text);
+}
+.section-title::before { content: ""; width: 3px; height: 15px; border-radius: 2px; background: var(--accent); }
+/* 分区里的子卡片：底色与外层区分，且**彼此留出明显间距** */
+.section-card .switch-item { margin-bottom: 12px; background: color-mix(in srgb, var(--panel) 76%, var(--panel-strong)); }
+.section-card .switch-item:last-child { margin-bottom: 0; }
+.section-card .toolbar { margin-bottom: 12px; }
+
+/* ⚠️ **只有最外层做阴影，嵌套的全部平面**（用户 2026-10-02：「只有第一次做阴影效果，
+   后面的全都做平面」）—— 卡片套卡片时层叠虚影会把界面糊成一片；里层只靠
+   底色 + 边框跟外层区分就够了。 */
+.section-card .switch-item,
+.section-card .group-block,
+.section-card #mod-download-card,
+.group-block .mod-card,
+.download-block .download-item {
+  box-shadow: none;
 }
 
 /* 顶部气泡（替代右上角灰字状态） */

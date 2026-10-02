@@ -1,7 +1,14 @@
-// EndfieldModController ReShade add-on —— 统一 Mod 控制面板
+// EndfieldModController ReShade add-on —— 统一 Mod 控制面板（"遥控器"）
 //
 // 用户 2026-10-01 的需求原话：「做统一面板，**需要注入到 reshade**，ui 尽量做好一点，
-// **开关式的就用滑块**，**要标明原快捷键**，**要自动识别那个变量的名称，推测含义**」。
+// **要标明原快捷键**，**要自动识别那个变量的名称，推测含义**」；
+// 2026-10-02 追加两条（本文件当前形态的依据）：
+//   ①「**不要用开关或滑块，都是一个键，做切换的按键就行**」——
+//      面板不再画滑块/开关，每一项就是**一个按钮**，点一下 = 按一次这个 Mod 自己的原键
+//      （Mod 内部自己切换档位；面板不假装知道状态，也不做"表面功夫"）。
+//   ②「**你看看能不能通过其他路径注入模拟按键**」——
+//      合成输入（SendInput）在终末地里被吞（见 vkey_inject.h 里的排查结论），
+//      现在改为**在游戏进程内让 EFMI 的 GetAsyncKeyState 轮询读到"按下"**。
 //
 // 外部程序（控制器）负责把这几样东西放进 ReShade 的 base 目录
 // （= d3d12.dll 所在处；xxmi_extra 注入方式下就是 `<数据根>\runtime\dlss5`）：
@@ -11,9 +18,15 @@
 //   user_ini_path.txt               EFMI 的 d3dx_user.ini 路径
 //   panel_info.txt                  面板状态（是否已接管 / 生成时间）
 //
-// 操作路径：点/拖控件 → 发合成键 `Ctrl+Alt+Shift+F<wire>`（数字键逐位）+ F23 暂存 +
-// F24 提交 → EFMI 里 controller.ini 的 `[KeyMC_*]` 把它变成 `$mc_state_N` →
-// `[Present]` 段按 `$controller_action` 写回 Mod 自己的变量（`$ear` 之类），立刻生效。
+// 操作路径：点按钮 → `vkey::press_all()` 把该动作的原键标成"按下 180ms" →
+// EFMI（3DMigoto）每帧轮询 `GetAsyncKeyState` 读到它 → 走 Mod 自己那条 `[Key*]`
+// 分支切换 → 立刻生效。
+//
+// 历史（**别往回走**）：这里原先走的是自造的 `Ctrl+Alt+Shift+F13..F24` 合成键协议 +
+//   `controller.ini` 的 `[KeyMC_*]` + `[Present]` 写回变量。那条路依赖 SendInput，
+//   在终末地里**从未成功过一次**（三批对照探针全 0），且带出过两个副作用
+//   （F6/F7 撞 DLSS5 与第一人称的开关）。协议段与 controller.ini 仍留在后端生成里
+//   （旧版本兼容），但**面板不再使用它**。
 //
 // ⚠ 面板**只能**待在这儿：ReShade 6.8 的日志写死了它只搜 `d3d12.dll` 所在目录
 //   （`Searching for add-ons (*.addon, *.addon64) in '<base>'`）。放到别处 = 用户按
@@ -26,6 +39,8 @@
 
 #include <reshade.hpp>
 
+#include "vkey_inject.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
@@ -37,7 +52,6 @@
 #include <mutex>
 #include <sstream>
 #include <string>
-#include <thread>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -63,6 +77,8 @@ struct ActionEntry
     int wire_id = 0;
     bool send_index = true;
     bool merged = false;
+    // 2026-10-02：`original_keys` 解析出来的虚拟键（点按钮时伪造按下的就是它们）
+    std::vector<int> vks;
     // 2026-10-01 新增列（Python 侧 core.generate_controller_mod 写入）
     std::string hint;            // 推测含义（中文；推不出时是变量名的英文短语）
     std::string key_label;       // 原快捷键可读写法（`VK_LEFT` → `←`）
@@ -75,16 +91,17 @@ static std::recursive_mutex g_actions_mutex;
 static fs::path g_base_path;
 static fs::path g_user_ini_path;
 static bool g_paths_loaded = false;
-static std::map<int, int> g_selected_index;      // action id -> 当前档位（用户改过之后）
 static bool g_takeover = false;
 static std::string g_generated;
 static int g_expected_actions = 0;
 static std::mutex g_log_mutex;
 static bool g_cjk_checked = false;
 static bool g_cjk_ok = false;
+static DWORD g_hook_retry_tick = 0;              // hook 未装上时的重试节流
 
 static void addon_log(const std::string &message);
 static fs::path addon_log_path();
+static int collect_virtual_keys(const std::string &spec, int *out, int max_out);
 
 // 中文字形检测：ReShade 默认字体（ProggyClean）只有 ASCII，装不了中文含义。
 // 检测不到就整体降级成英文标签 —— **面板永远要能读**，不能因为字体变成一堆方块。
@@ -175,7 +192,6 @@ static void load_actions()
 {
     std::lock_guard<std::recursive_mutex> lock(g_actions_mutex);
     g_actions.clear();
-    g_selected_index.clear();
     g_takeover = false;
     g_expected_actions = 0;
     g_generated.clear();
@@ -271,24 +287,25 @@ static void load_actions()
 
         if (entry.kind.empty())
             entry.kind = "toggle";
+
+        // 2026-10-02：解析出"点这个按钮要按哪个键"（面板只发 Mod 自己的原键，见文件头）。
+        int parsed[16] = {};
+        const int parsed_count = collect_virtual_keys(entry.original_keys, parsed, 16);
+        entry.vks.assign(parsed, parsed + parsed_count);
+        if (parsed_count == 0)
+            addon_log("load_actions: id=" + std::to_string(entry.id)
+                      + " 没有可用原键，original_keys='" + entry.original_keys + "'");
+
         g_actions.push_back(std::move(entry));
     }
 
-    // 用清单里的 current 初始化滑块位置（current 是**档位序号**）
+    int usable = 0;
     for (const auto &action : g_actions)
-    {
-        int index = 0;
-        if (!action.current.empty())
-        {
-            try { index = std::stoi(action.current); }
-            catch (...) { index = 0; }
-        }
-        if (!action.values.empty())
-            index = std::max(0, std::min(index, static_cast<int>(action.values.size()) - 1));
-        g_selected_index[action.id] = index;
-    }
+        if (!action.vks.empty())
+            ++usable;
 
-    addon_log("load_actions: loaded " + std::to_string(g_actions.size()) + " actions, takeover="
+    addon_log("load_actions: loaded " + std::to_string(g_actions.size()) + " actions, usable="
+              + std::to_string(usable) + ", takeover="
               + (g_takeover ? "1" : "0") + ", generated=" + g_generated);
 }
 
@@ -329,118 +346,36 @@ static void load_paths()
 }
 
 // ---------------------------------------------------------------------------
-// 合成键协议（沿用既有实现；改的是 UI，不是协议）
+// 按键注入（2026-10-02 换路：不再发合成输入）
+//
+// 这一节原来是一整套 `SendInput` 合成键协议（`Ctrl+Alt+Shift+F13..F24` 逐位编码 +
+// F23 暂存 + F24 提交，还带两批对照探针）。它**在终末地里实测从未成功过一次**
+// （三批对照探针全 0 触发，而手按 Mod 自带键一切正常）—— 根因与"为什么必须换路"
+// 写在 `vkey_inject.h` 顶部。整套 SendInput 代码已删，只留下这条结论。
+//
+// 现在的做法：**点一个按钮 = 按一次这个 Mod 自己那一项的原键**
+// （actions.tsv 的 `original_keys`，例如 `no_ctrl no_shift right`）。
+// 键不是"发"出去的，而是在**游戏进程内**让 EFMI 的 `GetAsyncKeyState` 轮询
+// 读到"这个键被按住了" —— 见 vkey_inject.h。
+//
+// 为什么发原键（用户 2026-10-01 的原话：「让面板走 mod 的按键」）：
+//   * 复用 Mod 作者已经验证过的链路，面板不需要自造协议、不需要锁键；
+//   * 用户手按原来的键照常工作 —— 面板只是多一个"遥控器"。
 // ---------------------------------------------------------------------------
 
-static std::mutex g_key_mutex;
 
-static void send_key_combo(WORD vk)
-{
-    INPUT down[4] = {};
-    INPUT up[4] = {};
-    const WORD modifiers[] = { VK_CONTROL, VK_MENU, VK_SHIFT };
-    for (int i = 0; i < 3; ++i)
-    {
-        down[i].type = INPUT_KEYBOARD;
-        down[i].ki.wVk = modifiers[i];
-        up[i].type = INPUT_KEYBOARD;
-        up[i].ki.wVk = modifiers[i];
-        up[i].ki.dwFlags = KEYEVENTF_KEYUP;
-    }
-    down[3].type = INPUT_KEYBOARD;
-    down[3].ki.wVk = vk;
-    up[3].type = INPUT_KEYBOARD;
-    up[3].ki.wVk = vk;
-    up[3].ki.dwFlags = KEYEVENTF_KEYUP;
-
-    // ⚠️ 按下时长（2026-10-01 现场定案）：EFMI **每帧轮询** `GetAsyncKeyState` 读键，
-    // 而帧率会波动（装了 debug 日志时能掉到十几帧 → 一帧 70~100ms）。
-    // 原来只按下 70ms，**整帧被错过就丢一个数字位**，于是"动作号变成 0、面板看起来没反应"
-    // （现场：`mc_state_1 = 1` 说明有时是成功的，`mc_last_wire = 0` 说明有时动作号丢了）。
-    // 这里把按下保持到 160ms、键间隔 60ms —— 一次动作慢一点（约 0.9 秒），但**可靠**。
-    SendInput(ARRAYSIZE(down), down, sizeof(INPUT));
-    Sleep(160);
-    SendInput(ARRAYSIZE(up), up, sizeof(INPUT));
-    Sleep(60);
-}
-
-// **关键对照（2026-10-01）**：只发主键、**不带任何修饰键**。
-// 用户实测「F12 有反应」——而 EFMI 自带的键写的是 `key = no_modifiers VK_F12`（不许按修饰键）。
-// 我们一直发的是 `ctrl alt shift + 键`。`GetAsyncKeyState` 读的是**物理键盘的异步状态**，
-// 而 `SendInput` 注入的是合成输入：单键我实测过能读回，**但注入的修饰键未必**——
-// 若是如此，我们那条"三个修饰键都按下"的条件永远不成立，键就永不触发。
-// 这一批专门验证它。
-static void send_key_combo_nomod(WORD vk)
-{
-    INPUT down[1] = {};
-    INPUT up[1] = {};
-    down[0].type = INPUT_KEYBOARD;
-    down[0].ki.wVk = vk;
-    up[0].type = INPUT_KEYBOARD;
-    up[0].ki.wVk = vk;
-    up[0].ki.dwFlags = KEYEVENTF_KEYUP;
-    SendInput(1, down, sizeof(INPUT));
-    Sleep(160);
-    SendInput(1, up, sizeof(INPUT));
-    Sleep(60);
-}
-
-static void send_digit_key_plain(int digit)
-{
-    if (digit < 0 || digit > 9)
-        return;
-    send_key_combo_nomod(static_cast<WORD>(VK_F13 + digit));
-}
-
-// 对照实验用（2026-10-01，用户建议"一批绑 F1..F12、一批绑 F13..F24 对比"）：
-// 同一个动作**额外再发一遍低位键**（数字位 F1..F10、暂存 F11、提交 F12）。
-// F1..F12 是键盘上真实存在的键，F13..F24 不是 —— 两批各自在自己那套 ini 探针里
-// 记数，游戏退出后落进 d3dx_user.ini，于是"EFMI 到底认哪一批"一目了然。
-static void send_digit_key_low(int digit)
-{
-    if (digit < 0 || digit > 9)
-        return;
-    send_key_combo(static_cast<WORD>(VK_F1 + digit));
-}
-
-static void send_digit_key(int digit)
-{
-    if (digit < 0 || digit > 9)
-        return;
-    // 数字位用 **F13..F22**（= VK_F13 + digit）：这些键**键盘上根本不存在**，
-    // 任何游戏、任何 addon 都不会去绑它们 —— 见下面 send_action_keys 的注释。
-    send_key_combo(static_cast<WORD>(VK_F13 + digit));
-}
-
-// 2026-10-01 修：**协议键必须用键盘上不存在的键**。
-//
-// 用户实测报告（打通面板后立刻撞了）：
-//   ①「按开关外套的时候会切换第一人称」—— 第一人称 addon 的 `ShortcutFirstPerson=112`
-//      就是 **VK_F7**，而我们旧协议的数字位 6 = `VK_F1 + 6` = F7 → 一点面板就切第一人称；
-//   ②「按切换头发会开关 dlss5」—— DLSS5 addon 的 NR 开关是 **F6**，数字位 5 = F6 → 中招。
-//   这些 addon 是**自己读键状态**的（不看修饰键），所以带 Ctrl+Alt+Shift 也照样触发。
-//   现在数字位整体挪到 **F13..F22**、暂存 **F23**、提交 **F24**：
-//   * F13 以上的键在标准键盘上不存在，插件/游戏/系统都不会绑定；
-//   * EFMI（3DMigoto）里 `key = ctrl alt shift VK_F13` 能正常解析（它支持到 VK_F24）；
-//   * 与 `patch_mod_hotkeys` 锁键用的 `no_modifiers VK_F24` **不冲突**：那条要求
-//     "一个修饰键都不许按"，而我们的提交键必须带 Ctrl+Alt+Shift —— 两者互斥，不会误触。
-// ---------------------------------------------------------------------------
-// **2026-10-01 方向调整（用户拍板）**：面板不再发自造的 F13..F24 协议键，
-// 而是**直接发这个 Mod 自己那一项的原按键**（actions.tsv 的 `original_keys` 列，
-// 例如 `vk_right` / `vk_left` / `backspace`）。
-//
-// 为什么：F13..F24 在标准键盘上**不存在** ⇒ SendInput 用虚拟键形式发它们时，
-// 系统不生成扫描码 ⇒ Unity + 反作弊的游戏进程**收不到**（现场：所有探针 0 触发，
-// 而用户手按 Mod 自带键一切正常；用户的实证是「Alt+Ctrl+Shift+Win 与单按 Win 效果一致」，
-// 即修饰键在游戏里被吞）。而方向键/退格是**真实键、有扫描码**，游戏一定认。
-//
-// 因此这里改用 **KEYEVENTF_SCANCODE**（并给方向键等加 KEYEVENTF_EXTENDEDKEY）。
-// ---------------------------------------------------------------------------
-
+// 历史留档（选键时的两条硬教训，**换路之后依然成立**）：
+//   ① **协议键别用键盘上存在的键**。旧协议的数字位曾是 `VK_F1 + n`，撞上了 DLSS5 的
+//      NR 开关（F6）与第一人称切换（F7）—— 用户实测「按开关外套会切第一人称 /
+//      按切换头发开关了 DLSS5」。那些 addon **只轮询主键、根本不看修饰键**，
+//      所以"我加了 Ctrl+Alt+Shift"并不构成保护。
+//   ② 现在既然发的是 **Mod 自己的原键**，撞车面就回到"和手按一模一样"，
+//      面板既不新增键位、也不锁键。
+// 
 static WORD vk_from_name(const std::string &raw)
 {
     std::string name = trim(raw);
-    // 只取第一个（original_keys 可能是 `a, b` 形式）
+    // 只取第一个（`a, b` 这种写法里逗号后面的是另一个键）
     const auto comma = name.find(',');
     if (comma != std::string::npos)
         name = trim(name.substr(0, comma));
@@ -494,114 +429,195 @@ static WORD vk_from_name(const std::string &raw)
     return 0;
 }
 
-static bool is_extended_key(WORD vk)
+// 把 3DMigoto 的 `key = ...` 表达式解析成**要伪造按下的虚拟键**列表。
+//
+// 语法（3DMigoto 的 `key` 行，actions.tsv 里多个 key 行用 `;` 连接）：
+//   * `no_ctrl` / `no_shift` / `no_alt` / `no_modifiers` / `no_win` = "按这个键时不许
+//     按着这些" ⇒ 是**限制**而非要按的键，忽略。
+//     （真修饰键状态由我们的 hook 原样透传给 EFMI，所以用户真按着 Ctrl 时，
+//      行为与他手按完全一致：不触发。）
+//   * `alt` / `ctrl` / `shift` / `win` = 需要**按住**的修饰键（例如庄方宜的 `ALT 0`）
+//     ⇒ 一并伪造。
+//   * 其余 token = 主键（`vk_right` / `right` / `backspace` / `0` / `a`）。
+//   * 一行里的多个 token **全部伪造**：无论 EFMI 那侧是"任一命中"还是"必须同时按住"
+//     的语义，我们这条都成立。
+//
+// 修复记录（2026-10-02）：旧实现直接把整串丢给 `vk_from_name`，而它只看**逗号前的第一段**
+// ⇒ `no_ctrl no_shift right` 里第一段是 `no_ctrl` ⇒ 一个键都解析不出来，
+// 面板只能回退到那套无效的合成协议键（addon 日志里成片的
+// 「原按键无法解析 'no_ctrl no_shift right'，回退协议键」就是这么来的）。
+static int collect_virtual_keys(const std::string &spec, int *out, int max_out)
 {
-    switch (vk) {
-    case VK_LEFT: case VK_RIGHT: case VK_UP: case VK_DOWN:
-    case VK_INSERT: case VK_DELETE: case VK_HOME: case VK_END:
-    case VK_PRIOR: case VK_NEXT: case VK_NUMLOCK: case VK_DIVIDE:
-    case VK_SNAPSHOT: case VK_RCONTROL: case VK_RMENU:
-        return true;
-    default:
-        return false;
-    }
-}
-
-// 发一个**真实键**：用扫描码形式（游戏认），按下保持 160ms 再释放（跨帧，EFMI 每帧轮询）。
-static void send_real_key(WORD vk)
-{
-    if (vk == 0)
-        return;
-    const UINT sc = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
-    const DWORD extra = is_extended_key(vk) ? KEYEVENTF_EXTENDEDKEY : 0;
-
-    INPUT down[1] = {};
-    INPUT up[1] = {};
-    down[0].type = INPUT_KEYBOARD;
-    down[0].ki.wScan = static_cast<WORD>(sc);
-    down[0].ki.dwFlags = KEYEVENTF_SCANCODE | extra;
-    if (sc == 0) {                       // 没有扫描码的键退回虚拟键形式
-        down[0].ki.wVk = vk;
-        down[0].ki.dwFlags = extra;
-    }
-    up[0] = down[0];
-    up[0].ki.dwFlags |= KEYEVENTF_KEYUP;
-
-    SendInput(1, down, sizeof(INPUT));
-    Sleep(160);
-    SendInput(1, up, sizeof(INPUT));
-    Sleep(60);
-}
-
-static void send_action_keys(const std::string &original_keys, int wire_id, int value_index)
-{
-    // **优先发 Mod 自己的原按键**（真实键、有扫描码 ⇒ 游戏一定认）。
-    // 解析不出时（键名没收录）才回退到旧的自造协议键。
-    const WORD real = vk_from_name(original_keys);
-    if (real != 0)
+    int count = 0;
+    size_t line_start = 0;
+    bool done = false;
+    while (!done && count < max_out)
     {
-        addon_log("key_protocol: real key vk=" + std::to_string(real)
-                  + " from '" + original_keys + "'");
-        send_real_key(real);
+        size_t line_end = spec.find(';', line_start);
+        if (line_end == std::string::npos)
+        {
+            line_end = spec.size();
+            done = true;
+        }
+        const std::string line = spec.substr(line_start, line_end - line_start);
+        line_start = line_end + 1;
+
+        size_t pos = 0;
+        while (pos < line.size() && count < max_out)
+        {
+            while (pos < line.size() &&
+                   (std::isspace(static_cast<unsigned char>(line[pos])) || line[pos] == '+'))
+                ++pos;
+            size_t token_end = pos;
+            while (token_end < line.size() &&
+                   !std::isspace(static_cast<unsigned char>(line[token_end])) && line[token_end] != '+')
+                ++token_end;
+            if (token_end == pos)
+                break;
+            const std::string token = line.substr(pos, token_end - pos);
+            pos = token_end;
+
+            std::string low = token;
+            for (auto &ch : low)
+                ch = static_cast<char>(::tolower(static_cast<unsigned char>(ch)));
+            if (low.rfind("no_", 0) == 0)
+                continue;                       // "不许按"的限制，不是要按的键
+
+            const WORD vk = vk_from_name(token);
+            if (vk == 0)
+                continue;                       // 认不出的键名（例如 Mod 自定义别名）
+            bool duplicate = false;
+            for (int i = 0; i < count; ++i)
+                if (out[i] == static_cast<int>(vk)) { duplicate = true; break; }
+            if (!duplicate)
+                out[count++] = static_cast<int>(vk);
+        }
+    }
+    return count;
+}
+
+// ---------------------------------------------------------------------------
+// 面板发键：**F13..F24 内部通道**（2026-10-02 第二版，不带任何修饰键）
+//
+// 用户原话：「不要用开关或滑块，都是一个键，做切换的按键就行」+「再测一下 f13 到 f24，
+// **不要用 alt 这种辅助键**」。所以：
+//   * 面板**不去伪造 Mod 的原键**（那些是 `→` / `0` / `Alt+0` 这类真实键：游戏自己在用，
+//     别的 addon 也在轮询它们 —— 当年 F6/F7 撞车就是这么来的）；
+//   * 改发 `controller.ini` 里那套内部频道的键：**动作号的十进制各位 = F13..F22**，
+//     最后按 **F24 提交**，全程不带 ctrl/alt/shift。F13 以上的键标准键盘上不存在，
+//     除了我们的 `[KeyMC_*]` 段没人会接。
+//   * EFMI 每帧轮询，所以必须**一个键一个键地发**（同时按下两位数字会被当成一次组合、
+//     数字位错乱）⇒ 这里做成"待发序列 + 下一步时间点"，由 draw_overlay 每帧推进。
+//     不阻塞 UI、不用线程；发送期间再点按钮就把动作**追加到队尾**（连点 = 连切几档）。
+// ---------------------------------------------------------------------------
+static std::vector<int> g_pending_keys;      // 还要发的键（可能排了多个动作）
+static size_t g_pending_index = 0;
+static DWORD g_pending_next_tick = 0;
+static long long g_sent_actions = 0;         // 面板一共发出过多少个动作（状态行显示）
+
+static const DWORD KEY_HOLD_MS = 160;        // 单键按下时长（跨帧：30fps 下也有 4~5 帧）
+static const DWORD KEY_GAP_MS = 140;         // 键与键之间的间隔（确保上一键先被看到"释放"）
+
+static bool sequence_busy()
+{
+    return g_pending_index < g_pending_keys.size();
+}
+
+// 内部通道：把动作号排进 F13..F24 的发送队列（面板当前走这条路，见 press_action）
+static void enqueue_action_keys(int wire_id)
+{
+    if (wire_id <= 0)
+        return;
+    const std::string digits = std::to_string(wire_id);
+    for (const char ch : digits)
+        if (ch >= '0' && ch <= '9')
+            g_pending_keys.push_back(VK_F13 + (ch - '0'));   // 数字 n → F13+n
+    g_pending_keys.push_back(VK_F24);                        // 提交
+    if (!sequence_busy())
+        g_pending_next_tick = GetTickCount();                // 空队列：第一步立刻发
+}
+
+// 每帧推进一步（由 draw_overlay 调用）。发送期间这里不做别的。
+static void pump_key_sequence()
+{
+    if (!sequence_busy())
+        return;
+    const DWORD now = GetTickCount();
+    if (static_cast<LONG>(now - g_pending_next_tick) < 0)
+        return;                                              // 还没到下一步
+    const int vk = g_pending_keys[g_pending_index++];
+    vkey::press(vk, KEY_HOLD_MS);
+    if (!sequence_busy())
+    {
+        ++g_sent_actions;
+        g_pending_keys.clear();
+        g_pending_index = 0;
+        addon_log("key_sequence: 一组动作已发完（F13..F24 通道，不带修饰键）");
+        return;
+    }
+    g_pending_next_tick = now + KEY_HOLD_MS + KEY_GAP_MS;
+}
+
+// 面板发键走哪条路（2026-10-02）：
+//   true  = **内部通道**（当前）：发 `F13..F24`（动作号逐位 + F24 提交），由 controller.ini
+//           用 `run =` 呼叫**注入在 Mod 自己 ini 里**的命令列表来切档。**不碰任何真实按键**，
+//           所以不会连带触发别的 Mod / 别的插件（同一个真实键被多个 Mod 绑定时尤其重要）。
+//   false = **发原键**（兜底，用户实测可用）：直接伪造这个 Mod 自己的按键。
+// 想快速切回去就把这里改成 false 重新编译一次（其余代码不用动）。
+static constexpr bool kUseInternalChannel = true;
+
+static bool action_usable(const ActionEntry &action)
+{
+    if (kUseInternalChannel)
+        return action.wire_id > 0;      // 内部通道只要求"有动作号"
+    return !action.vks.empty();          // 发原键要求"解析得出原键"
+}
+
+// 点一下按钮。两条路都**只**在游戏进程内伪造 EFMI 读到的键状态，不发任何输入事件。
+//
+// 2026-10-02 的三次迭代（留着，别再绕）：
+//   ① 发 `F13..F24` + 在本文件里改 Mod 变量 ⇒ **失败**：`[CommandList]` 的变量赋值只认本 ini
+//      声明过的 `$name`，跨命名空间引用（`$\mods\...\coat = 1`）被静默丢弃（同段里本命名空间的
+//      `$mc_action_seen` 却正常自增 —— 假绿灯）；
+//   ② 改成发 Mod 原键 ⇒ 能用（用户实测"这个可以"），但会连带触发绑同一个真实键的别的 Mod；
+//   ③ 现在这版：`F13..F24` + **把"切下一档"注入进 Mod 自己的 ini**，controller.ini 只负责
+//      `run = CommandList\<Mod 命名空间>\MC_Panel<动作号>` 呼叫它（跨命名空间**调用**是支持的）。
+static void press_action(const ActionEntry &action)
+{
+    if (!action_usable(action))
+    {
+        addon_log("press_action: 这一项面板发不了 id=" + std::to_string(action.id)
+                  + " wire=" + std::to_string(action.wire_id)
+                  + " original_keys='" + action.original_keys + "'");
         return;
     }
 
-    addon_log("key_protocol: 原按键无法解析 '" + original_keys + "'，回退协议键");
-    const std::string wire = std::to_string(wire_id > 0 ? wire_id : 1);
-    const std::string value = std::to_string(value_index >= 0 ? value_index : 0);
-    for (const char ch : wire)
-        if (ch >= '0' && ch <= '9')
-            send_digit_key(ch - '0');
-    send_key_combo(VK_F23); // 暂存动作号
-    for (const char ch : value)
-        if (ch >= '0' && ch <= '9')
-            send_digit_key(ch - '0');
-    send_key_combo(VK_F24); // 提交动作号 + 档位
-
-    // ── 对照：低位键那一批（只为让对应的探针计数器涨，不参与真正的协议）──
-    for (const char ch : wire)
-        if (ch >= '0' && ch <= '9')
-            send_digit_key_low(ch - '0');
-    send_key_combo(VK_F11); // 低位·暂存
-    for (const char ch : value)
-        if (ch >= '0' && ch <= '9')
-            send_digit_key_low(ch - '0');
-    send_key_combo(VK_F12); // 低位·提交
-
-    // ── 第三批：**不带修饰键**的 F13..F24（验证"注入的修饰键是否读不到"）──
-    for (const char ch : wire)
-        if (ch >= '0' && ch <= '9')
-            send_digit_key_plain(ch - '0');
-    send_key_combo_nomod(VK_F23);
-    for (const char ch : value)
-        if (ch >= '0' && ch <= '9')
-            send_digit_key_plain(ch - '0');
-    send_key_combo_nomod(VK_F24);
-}
-
-static void queue_action(reshade::api::effect_runtime *runtime, const ActionEntry &action, int value_index)
-{
-    (void)runtime;
-    addon_log("queue_action: id=" + std::to_string(action.id) + " wire=" + std::to_string(action.wire_id)
-              + " value=" + std::to_string(value_index));
-
-    // 2026-10-01 修：**不要再自动关面板**。
-    // 旧实现每次操作都 `runtime->open_overlay(false, …)`，用户的实际感受是
-    // 「按一个键就会退出 ReShade 页面」—— 想在面板里连点几个开关根本做不到。
-    // 现在面板保持打开；合成键走 SendInput，EFMI 是**轮询** `GetAsyncKeyState` 读键状态的，
-    // 与 ReShade 的输入拦截（拦的是窗口消息）不是一条路，所以照样能读到。
-    const int wire_id = action.wire_id > 0 ? action.wire_id : action.id;
-    const std::string original_keys = action.original_keys;   // 线程里按值捕获
-    std::thread([wire_id, value_index, original_keys]()
+    if (kUseInternalChannel)
     {
-        std::lock_guard<std::mutex> lock(g_key_mutex);
-        Sleep(80);
-        addon_log("key_protocol: sending original_keys='" + original_keys + "'"
-                  + " (wire=" + std::to_string(wire_id) + " value=" + std::to_string(value_index) + ")");
-        send_action_keys(original_keys, wire_id, value_index);
-        addon_log("key_protocol: done");
-    }).detach();
+        addon_log("press_action: id=" + std::to_string(action.id) + " wire=" + std::to_string(action.wire_id)
+                  + "（内部通道 F13..F24）");
+        enqueue_action_keys(action.wire_id);
+        return;
+    }
+
+    std::string keys;
+    for (size_t i = 0; i < action.vks.size(); ++i)
+    {
+        if (i != 0)
+            keys += ",";
+        keys += std::to_string(action.vks[i]);
+    }
+    addon_log("press_action: id=" + std::to_string(action.id) + " 发原键 vk=[" + keys + "]"
+              + " original_keys='" + action.original_keys + "'");
+    vkey::press_all(action.vks.data(), action.vks.size());
+    ++g_sent_actions;
 }
+
+// （`queue_action` 已删：2026-10-01 那版在后台线程里 `Sleep(80)` + `SendInput`，
+//   一次动作要 0.9 秒；现在 `press_action` 是同步的微秒级操作，不需要线程，
+//   也**不再自动关面板**——旧实现每次操作都 `runtime->open_overlay(false, …)`，
+//   用户的实际感受是「按一个键就会退出 ReShade 页面」，想在面板里连点几下都做不到。）
+
 
 // ---------------------------------------------------------------------------
 // 绘制
@@ -635,20 +651,6 @@ static std::string action_title(const ActionEntry &action)
     return std::string(T("动作 ", "action ")) + std::to_string(action.id);
 }
 
-static int current_index(const ActionEntry &action)
-{
-    const auto it = g_selected_index.find(action.id);
-    if (it != g_selected_index.end())
-        return it->second;
-    int index = 0;
-    if (!action.current.empty())
-    {
-        try { index = std::stoi(action.current); }
-        catch (...) { index = 0; }
-    }
-    return index;
-}
-
 static std::string detail_line(const ActionEntry &action)
 {
     std::string text;
@@ -658,12 +660,18 @@ static std::string detail_line(const ActionEntry &action)
     {
         if (!text.empty())
             text += "   ";
-        text += std::string(T("原键 ", "key ")) + action.key_label;
+        // 这一行原本是「手按 ←」= 你不用面板、直接按这个键也能切换。
+        // 锁键模式（默认）下原键已被改写成 `VK_F24`，手按**不再生效**，所以如实改成「原键 ←（已锁）」，
+        // 免得用户以为还能手按（面板走内部通道，照常能用 —— 见文件头那段）。
+        text += g_takeover
+            ? std::string(T("原键 ", "was ")) + action.key_label + std::string(T("（已锁）", " (locked)"))
+            : std::string(T("手按 ", "manual ")) + action.key_label;
     }
     if (!action.condition.empty())
     {
         if (!text.empty())
             text += "   ";
+        // 条件就是"为什么按了没反应"的答案（例如 `($mode == 3)`）——原样显示，比藏起来有用。
         text += std::string(T("条件 ", "only when ")) + action.condition;
     }
     if (text.empty() && !action.section.empty())
@@ -671,56 +679,58 @@ static std::string detail_line(const ActionEntry &action)
     return text;
 }
 
-static void draw_action_control(reshade::api::effect_runtime *runtime, const ActionEntry &action)
+// 面板上的一项 = **一个按钮**。
+//
+// 用户 2026-10-02 原话：「**不要用开关或滑块，都是一个键，做切换的按键就行**」。
+// 点一下 = 按一次这个 Mod 自己的原键，下一步切到哪一档由 Mod 内部决定。
+//
+// 为什么不做开关/滑块：面板**读不到** Mod 的真实状态（那些变量活在 3DMigoto 的内存里，
+// 只有游戏退出时才会写回 `d3dx_user.ini`），所以任何"开 / 关"显示都是编的 ——
+// 用户对"表面功夫"的容忍度是零（「那些滑块要真的有用」）。按钮没有状态，就不会说谎。
+static void draw_action_button(const ActionEntry &action, int shared_key_count)
 {
     ImGui::PushID(action.id);
 
-    const int count = static_cast<int>(action.values.size());
-    const bool is_command = (action.kind == "command" || count == 0);
-
     if (ImGui::BeginTable("row", 2, ImGuiTableFlags_SizingFixedFit, ImVec2(0.0f, 0.0f), 0.0f))
     {
-        ImGui::TableSetupColumn("name", ImGuiTableColumnFlags_WidthStretch, 0.0f, 0);
-        ImGui::TableSetupColumn("control", ImGuiTableColumnFlags_WidthFixed, 300.0f, 0);
+        ImGui::TableSetupColumn("button", ImGuiTableColumnFlags_WidthFixed, 250.0f, 0);
+        ImGui::TableSetupColumn("detail", ImGuiTableColumnFlags_WidthStretch, 0.0f, 0);
         ImGui::TableNextRow(0, 0.0f);
+        ImGui::TableNextColumn();
+
+        const bool usable = action_usable(action);
+        if (!usable)
+            ImGui::BeginDisabled();
+        if (ImGui::Button(action_title(action).c_str(), ImVec2(230.0f, 0.0f)))
+            press_action(action);
+        if (!usable)
+            ImGui::EndDisabled();
 
         ImGui::TableNextColumn();
-        ImGui::TextUnformatted(action_title(action).c_str());
-        const std::string detail = detail_line(action);
-        if (!detail.empty())
-            ImGui::TextDisabled("%s", detail.c_str());
-
-        ImGui::TableNextColumn();
-        if (is_command)
+        if (!usable)
         {
-            if (ImGui::Button(T("执行", "Run"), ImVec2(150.0f, 0.0f)))
-                queue_action(runtime, action, 0);
+            ImGui::TextDisabled("%s", T("（这一项没有动作号，发不了 —— 在控制器里重新生成一次控制器）",
+                                        "(no action id: regenerate the controller mod)"));
         }
         else
         {
-            int index = current_index(action);
-            const bool as_switch = (count == 2);
-            // 「开关式的就用滑块」：两档 → 滑块两端写"关/开"；多档 → 滑块上显示当前档位名
-            const std::string format = as_switch
-                ? std::string(T("关 ——— 开", "off ——— on"))
-                : (index >= 0 && index < count ? action.values[static_cast<size_t>(index)] : std::string("%d"));
-
-            ImGui::SetNextItemWidth(200.0f);
-            // ⚠️ `ImGuiSliderFlags_NoInput`（2026-10-01 用户反馈）：ImGui 的滑块**默认**支持
-        // "Ctrl+点击 / 双击 → 变成输入框直接键入数值"。用户的实际感受是
-        // 「**那个滑钮点着点着就变成输入框了，不需要变输入框**」—— 面板上这些滑块
-        // 本来就只是"拨到某一档"，不该有键入模式，所以显式关掉它。
-        if (ImGui::SliderInt("##value", &index, 0, std::max(0, count - 1), format.c_str(),
-                             ImGuiSliderFlags_NoInput))
+            const std::string detail = detail_line(action);
+            if (!shared_key_count || shared_key_count <= 1)
             {
-                g_selected_index[action.id] = index;
-                queue_action(runtime, action, index);
+                if (!detail.empty())
+                    ImGui::TextDisabled("%s", detail.c_str());
             }
-            ImGui::SameLine();
-            if (as_switch)
-                ImGui::TextDisabled("%s", index != 0 ? T("已开", "ON") : T("已关", "OFF"));
             else
-                ImGui::TextDisabled("%d/%d", index + 1, count);
+            {
+                // 同一个键被这个 Mod 的多项共用（3DMigoto 里一个键可以分别命中若干
+                // `if` 条件不同的段）——点哪一项发出去的都是同一个键，说清楚，
+                // 免得用户以为"点这一项没反应、点那一项才有"。
+                const std::string note = std::to_string(shared_key_count);
+                ImGui::TextDisabled("%s%s%s", detail.c_str(), detail.empty() ? "" : "   ",
+                                    (std::string(T("（本 Mod 共 ", "(")) + note +
+                                     T(" 项共用这个键，按一下切到下一档）",
+                                       " actions share this key; one press cycles)")).c_str());
+            }
         }
 
         ImGui::EndTable();
@@ -729,10 +739,44 @@ static void draw_action_control(reshade::api::effect_runtime *runtime, const Act
     ImGui::PopID();
 }
 
+// 顶部状态行：注入到底接上 EFMI 没有、被读到多少次、面板发了多少次。
+// 这一行是**可自动验证的证据**：点按钮后 "命中" 会涨 ⇒ hook 确实走在 EFMI 的读键路径上；
+// 一直是 0 ⇒ 面板得换一条路（日志里有原因）。
+static void draw_injection_status()
+{
+    const vkey::HookStatus &state = vkey::status();
+    if (state.installed)
+    {
+        ImGui::TextDisabled("%s%lld%s%lld%s%s", T("注入 OK · EFMI 命中 ", "injection OK · hits "),
+                            vkey::stat_hits().load(std::memory_order_relaxed),
+                            T(" · 面板已发 ", " · sent "),
+                            g_sent_actions,
+                            T(" 次", ""),
+                            sequence_busy() ? T(" · 发送中…", " · sending…") : "");
+    }
+    else
+    {
+        ImGui::TextColored(ImVec4(0.95f, 0.55f, 0.25f, 1.0f), "%s",
+                           T("注入没生效 —— 面板按键不会起作用（原因见 modecontroller.addon.log）",
+                             "injection not active: panel keys will not work (see modecontroller.addon.log)"));
+    }
+}
+
 static void draw_overlay(reshade::api::effect_runtime *runtime)
 {
     runtime->block_input_next_frame();
     check_cjk_font();
+
+    // hook 没装上就每 2 秒重试一次：正常时序里 EFMI 的 d3d11.dll 先加载、面板后加载，
+    // 但"用户中途换过注入方式 / 面板先起来"的情况下，靠重试能自愈。
+    if (!vkey::status().installed && (GetTickCount() - g_hook_retry_tick) > 2000)
+    {
+        g_hook_retry_tick = GetTickCount();
+        vkey::install();
+    }
+
+    // 每帧推进一步按键序列（F13..F24 内部通道，见文件里 pump_key_sequence 的说明）
+    pump_key_sequence();
 
     static bool overlay_logged = false;
     if (!overlay_logged)
@@ -750,16 +794,31 @@ static void draw_overlay(reshade::api::effect_runtime *runtime)
         load_paths();
         load_actions();
     }
+    draw_injection_status();
 
     if (!g_paths_loaded)
         ImGui::TextDisabled("%s", T("（未找到 d3dx_user.ini 路径：先运行控制器的一键启动）",
                                     "(user_ini_path.txt missing: run the launcher once)"));
     else
-        ImGui::TextDisabled("%s", g_takeover
-            ? T("已接管：Mod 自带的按键被锁住，操作都在这个面板里",
-                "Takeover ON: the mods' own hotkeys are locked; use this panel")
-            : T("未接管：Mod 自带的按键照常生效（这个面板只是对照表）",
-                "Takeover OFF: mods keep their own hotkeys (panel is read-only info)"));
+        ImGui::TextDisabled("%s", kUseInternalChannel
+            ? T("点一下按钮 = 切到下一档（走面板内部通道，不碰游戏真实按键）",
+                "Click a button = one step (via the panel's internal channel; real game keys untouched)")
+            : T("点一下按钮 = 按一次这个 Mod 自己的按键（Mod 内部切到下一档）",
+                "Click a button = press the mod's own key (cycles one step)"));
+
+    if (g_takeover)
+    {
+        // 锁键模式 = **预期状态**（2026-10-02 重新启用「Mod 快捷键锁定」，默认开）：
+        // Mod 的 `key` 行被改写成 `no_modifiers VK_F24`，手按原键不再生效，
+        // 操作集中到本面板 —— 这样多个 Mod 抢同一个键时就不会互相干扰。
+        // 面板走的是内部通道（F13..F24 + 注入在 Mod ini 里的切档列表），**不受锁键影响**。
+        ImGui::TextColored(ImVec4(0.45f, 0.85f, 0.45f, 1.0f), "%s",
+                           T("Mod 自带按键已锁定（防止 Mod 之间抢同一个键）—— 请用本面板切换。"
+                             "想改回手动按键：在控制器里关掉「Mod 快捷键锁定」。",
+                             "Mod hotkeys are locked (so mods can't fight over the same keys) — "
+                             "use this panel. Turn off 'lock mod hotkeys' in the controller to revert."));
+    }
+
     if (!g_generated.empty() || g_expected_actions > 0)
     {
         ImGui::TextDisabled("%s%zu %s%s", T("清单 ", "actions "), g_actions.size(),
@@ -801,8 +860,16 @@ static void draw_overlay(reshade::api::effect_runtime *runtime)
                 header += "  ·  " + mod.second.front()->description;
             ImGui::TextDisabled("%s", header.c_str());
             ImGui::Spacing();
+
+            // 同一个 `key` 行被这个 Mod 的多项共用是常态（一个键分别命中若干条件不同的段），
+            // 统计出次数是为了在按钮旁边说清楚"点哪一项发的都是同一个键"。
+            std::map<std::string, int> shared_keys;
             for (const ActionEntry *action : mod.second)
-                draw_action_control(runtime, *action);
+                shared_keys[action->original_keys] += 1;
+
+            for (const ActionEntry *action : mod.second)
+                draw_action_button(*action, shared_keys[action->original_keys]);
+
             ImGui::Spacing();
             ImGui::Unindent(14.0f);
         }
@@ -816,15 +883,21 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
     case DLL_PROCESS_ATTACH:
         g_base_path = get_base_path();
         addon_log("DllMain attach: base=" + g_base_path.string());
+        // 键注入的日志并进同一份 addon 日志，排查时一个文件看全。
+        vkey::set_logger([](const char *message) { addon_log(message); });
         load_actions();
         addon_log("actions loaded: " + std::to_string(g_actions.size()));
         load_paths();
+        // 接上 EFMI 的读键路径（失败也不影响面板显示；draw_overlay 会每 2 秒重试）
+        vkey::install();
         if (!reshade::register_addon(hModule))
             return FALSE;
         reshade::register_overlay("ModeController", draw_overlay);
         break;
     case DLL_PROCESS_DETACH:
         addon_log("DllMain detach");
+        // 先拆 hook 再卸 overlay：addon 被卸载后 EFMI 绝不能还指着我们的函数
+        vkey::uninstall();
         reshade::unregister_overlay("ModeController", draw_overlay);
         reshade::unregister_addon(hModule);
         break;

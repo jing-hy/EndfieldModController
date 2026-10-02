@@ -55,6 +55,16 @@ PROBE_TIMEOUT = 8
 PROBE_SECONDS = 12
 # 探测速度低于此值就直接放弃这条线路（连并发都不值得起）
 DEAD_MBPS = 0.3
+# 低于这个速度**连并发都别上**：实测（2026-10-02，用户开 VPN 的家宽）同一个 6.6 MB 文件，
+# 探测 0.036 MB/s 时 —— 单连接 0.229 MB/s、8 连接只有 0.174 MB/s（**并发反而慢 24%**）。
+# 并发只对"本来就还行、只是慢"的线路有效（历史上 0.71 → 3.96 MB/s 那次），
+# 对**极慢**的线路纯粹是抢带宽 + 反复建连。
+BOOST_FLOOR_MBPS = 0.1
+# 并发**试用窗口**：上并发先跑这么久，然后拿实测速度跟单连接探测值比 ——
+# 不划算就切回单连接（用户 2026-10-02：「应该动态，慢就并发，更慢就切回来」）。
+BOOST_TRIAL_SECONDS = 12
+# 并发要"值得继续"至少得比单连接快这么多倍（1.1 = 快 10%）
+BOOST_KEEP_RATIO = 1.1
 # 多线路时单条线路的等待上限
 LINE_TIMEOUT_MULTI = 15
 # 某条线路失败后多久再试
@@ -175,12 +185,57 @@ def _log(log: Log, message: str) -> None:
         log(message)
 
 
+# ---------------------------------------------------------------------------
+# 代理：VPN / 加速器大多**只对浏览器生效**（浏览器插件代理，或者系统代理开关没开）
+# —— 那样本程序的下载就是**直连**，于是出现"浏览器秒下、程序慢得动不了"。
+# 用户 2026-10-02 实机确认：`ProxyEnable=0`、无环境变量、`getproxies()` 为空 ⇒ 程序当时
+# 确实没走任何代理。这里给出三条来源（优先级从高到低）：
+#   ① 用户在设置页填的「下载代理」；
+#   ② 环境变量 `HTTPS_PROXY` / `HTTP_PROXY`（命令行党的标准做法）；
+#   ③ 系统代理（`urllib.request.getproxies()`，含 Windows 的 IE 代理设置）。
+# 一条都没有 ⇒ 直连（保持原行为）。
+# ---------------------------------------------------------------------------
+_PROXY: str = ""
+
+
+def set_proxy(value: str | None) -> None:
+    """设置下载用的代理（`http://127.0.0.1:7890` 这种；留空 = 回到自动判断）。"""
+    global _PROXY
+    _PROXY = (value or "").strip()
+
+
+def get_proxy() -> str:
+    """当前生效的代理：用户填的 → 环境变量 → 系统代理 → 空（直连）。"""
+    if _PROXY:
+        return _PROXY
+    for name in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"):
+        value = (os.environ.get(name) or "").strip()
+        if value:
+            return value
+    try:
+        proxies = urllib.request.getproxies()
+    except Exception:  # noqa: BLE001
+        return ""
+    return (proxies.get("https") or proxies.get("http") or "").strip()
+
+
+def proxy_in_use() -> str:
+    """给界面/日志用：现在到底走不走代理、走哪条。"""
+    return get_proxy()
+
+
 def _mbps(size: int, seconds: float) -> float:
     return (size / 1048576.0 / seconds) if seconds > 0 else 0.0
 
 
 def _open(url: str, *, headers: dict[str, str] | None = None, timeout: int = 30):
     request = urllib.request.Request(url, headers={**BASE_HEADERS, **(headers or {})})
+    proxy = get_proxy()
+    if proxy:
+        # 显式走代理：http 与 https 都指到同一个地址（本地代理一般都同时支持 CONNECT）
+        opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
+        return opener.open(request, timeout=timeout)
     return urllib.request.urlopen(request, timeout=timeout)
 
 
@@ -238,6 +293,10 @@ def fetch(
     raise OSError(f"所有线路都取不到 {url}：{last_error}")
 
 
+class Cancelled(Exception):
+    """用户主动停下（点了「终止」或「暂停」）—— 不是网络故障，别当失败上报。"""
+
+
 def _download_sequential(
     url: str,
     dest: Path,
@@ -249,6 +308,7 @@ def _download_sequential(
     log: Log = None,
     stop_after: int = 0,
     deadline_seconds: float = 0,
+    cancel: Callable[[], bool] | None = None,
 ) -> tuple[int, bool, str]:
     """单连接下载（offset 起）。
 
@@ -256,6 +316,7 @@ def _download_sequential(
     stop_after > 0 时下够这么多字节就主动停下（用于测速探测）；
     deadline_seconds > 0 时超过该秒数也停下 —— 慢线路（实测直连 0.05 MB/s
     下 1 MB 要 20 秒）不能让它把探测拖成几十秒。
+    cancel 返回 True 时抛 `Cancelled`（每个数据块检查一次，够快也够省）。
     """
     headers = {"Range": f"bytes={offset}-"} if offset else {}
     written = 0
@@ -265,6 +326,8 @@ def _download_sequential(
         with _open(url, headers=headers, timeout=timeout) as response:
             with open(dest, mode) as fh:
                 while True:
+                    if cancel and cancel():
+                        raise Cancelled("用户终止")
                     chunk = response.read(READ_CHUNK)
                     if not chunk:
                         break
@@ -340,10 +403,14 @@ def _download_parallel(
     timeout: int = 60,
     progress: Progress = None,
     log: Log = None,
+    max_seconds: float = 0,
+    cancel: Callable[[], bool] | None = None,
 ) -> int:
     """并发分块下载，**块级断点续传**：已完成的块记在 sidecar 里，中断后不重下。
 
     start：没有块记录时（单连接顺序下载的残留）把前 start 字节视为已完成。
+    max_seconds > 0：**试用窗口** —— 到点就不再提交新块（在跑的让它跑完），
+    用于"先试试并发到底有没有用，没用就切回单连接"（见 `_attempt_line` 的②段）。
     """
     spans = [(pos, min(pos + chunk - 1, size - 1)) for pos in range(0, size, chunk)]
     done_spans = _load_parts(dest, size)
@@ -366,6 +433,8 @@ def _download_parallel(
         begin, end = span
         last_error: Exception | None = None
         for attempt in range(4):
+            if cancel and cancel():
+                raise Cancelled("用户终止")
             try:
                 headers = {"Range": f"bytes={begin}-{end}"}
                 with _open(url, headers=headers, timeout=timeout) as response:
@@ -392,7 +461,15 @@ def _download_parallel(
 
     if todo:
         with ThreadPoolExecutor(max_workers=max(1, min(threads, len(todo)))) as pool:
-            list(pool.map(fetch, todo))
+            futures = []
+            deadline = (time.time() + max_seconds) if max_seconds else 0.0
+            for index, span in enumerate(todo):
+                # 试用窗口到点：不再提交新块（已经在跑的等它跑完），剩下的留给调用方决定
+                if deadline and index >= max(1, min(threads, len(todo))) and time.time() > deadline:
+                    break
+                futures.append(pool.submit(fetch, span))
+            for future in futures:
+                future.result()
     if len(done_spans) >= len(spans):
         _clear_parts(dest)      # 块齐了才算下完
     return state["retries"]
@@ -542,6 +619,8 @@ def download(
     expected_size: int = 0,
     expected_sha256: str = "",
     line_mode: str = "",
+    dead_mbps: float | None = None,
+    cancel: Callable[[], bool] | None = None,
 ) -> DownloadReport:
     """下载一个文件；慢/抖时**临时**启用并发分块，直连不通时**临时**换镜像线路。
 
@@ -559,6 +638,10 @@ def download(
     mode = (line_mode or get_line_mode() or "auto").lower()
     if mode not in LINE_MODES:
         mode = "auto"
+    # 「低于这个速度就放弃这条线路」的阈值在这里先归一化 —— **必须在任何分支之前**，
+    # 因为 `policy="always"`（强制并发）会跳过下面整段探测逻辑，那里面才赋值的话
+    # 就会 UnboundLocalError（2026-10-02 当场踩到）。
+    dead_mbps = DEAD_MBPS if dead_mbps is None else max(0.0, float(dead_mbps))
 
     dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -575,6 +658,7 @@ def download(
             line.apply(url), dest, line=line,
             log=log, progress=progress, timeout=line_timeout, policy=policy,
             expected_size=expected_size, expected_sha256=expected_sha256,
+            dead_mbps=dead_mbps, cancel=cancel,
         )
         if report.ok:
             _remember_line(line.name, True, report.mbps)
@@ -630,6 +714,8 @@ def _attempt_line(
     policy: str = "auto",
     expected_size: int = 0,
     expected_sha256: str = "",
+    dead_mbps: float = DEAD_MBPS,
+    cancel: Callable[[], bool] | None = None,
 ) -> DownloadReport:
     """在**一条**线路上完成下载；慢/抖时临时上并发。不负责计时汇总与日志收尾。"""
     report = DownloadReport(path=str(dest))
@@ -730,7 +816,7 @@ def _attempt_line(
             try:
                 report.retries = _download_parallel(
                     url, work, size=size, start=resume_from, threads=threads,
-                    timeout=timeout, progress=progress, log=log)
+                    timeout=timeout, progress=progress, log=log, cancel=cancel)
             finally:
                 with _STATE_LOCK:
                     _STATE["active"] = max(0, int(_STATE.get("active") or 0) - 1)
@@ -750,7 +836,7 @@ def _attempt_line(
             # 已有部分数据时按追加写（不截断），否则从头写
             written, stalled, note = _download_sequential(
                 url, work, offset=partial if (supports_range and partial) else 0,
-                total=size, timeout=timeout, progress=progress, log=log)
+                total=size, timeout=timeout, progress=progress, log=log, cancel=cancel)
             total_written = (partial if (supports_range and partial) else 0) + written
             report.bytes = total_written
             if size and total_written != size:
@@ -765,23 +851,41 @@ def _attempt_line(
         probe_target = PROBE_BYTES if size > MIN_PARALLEL_BYTES else size
         written, stalled, note = _download_sequential(
             url, work, total=size, timeout=timeout, progress=progress, log=log,
-            stop_after=probe_target, deadline_seconds=PROBE_SECONDS)
+            stop_after=probe_target, deadline_seconds=PROBE_SECONDS, cancel=cancel)
         probe_seconds = max(time.time() - started, 1e-6)
         report.probe_mbps = _mbps(written, probe_seconds)
         # 探测**极慢**就放弃这条线路，别硬起并发死磕：实测直连 0.05 MB/s 时上了 17 个连接，
         # 每块重试 4 次全失败，白耗 83 秒；换到 gh.xmly.dev 后 3.5 秒就下完了剩下的 26 MB。
-        if report.probe_mbps < DEAD_MBPS and policy != "always":
-            raise OSError(f"探测速度仅 {report.probe_mbps:.2f} MB/s（低于 {DEAD_MBPS} MB/s 可用线），"
+        #
+        # `dead_mbps` 由调用方覆盖（用户 2026-10-02：「这个限速感觉有点高了」）——
+        # GitHub 组件那边有镜像可换，用默认 0.3 让"极慢的直连"尽早换线路是对的；
+        # 而 Mod 下载（香蕉网之类**没有镜像**的站点）宁可慢也不该直接判死，所以传更宽松的值。
+        # `policy="always"`（并行加速）下**根本不判这条**。阈值在函数开头已归一化。
+        if report.probe_mbps < dead_mbps and policy != "always":
+            raise OSError(f"探测速度仅 {report.probe_mbps:.2f} MB/s（低于 {dead_mbps} MB/s 可用线），"
                           f"放弃这条线路")
         slow = report.probe_mbps < SLOW_MBPS
-        need_boost = policy == "always" or slow or stalled
+        # 极慢线路**别并发**（见 BOOST_FLOOR_MBPS 的实测数据）：这里把并发压回单连接，
+        # 但**不判死** —— 慢慢下也比下不到强。
+        too_slow_to_boost = 0 < report.probe_mbps < BOOST_FLOOR_MBPS
+        need_boost = (policy == "always" or slow or stalled) and not too_slow_to_boost
+        if too_slow_to_boost:
+            _log(log, f"线路很慢（探测 {report.probe_mbps:.3f} MB/s）→ 用单连接继续下，不并发")
 
         if not need_boost:
             # 链路够快：接着单连接把剩下的下完（不折腾）
-            report.reason = f"单连接 {report.probe_mbps:.2f} MB/s（够快，不启用加速）"
+            # ⚠️ 也可能是"太慢到连并发都别上"（too_slow_to_boost）—— 两种情况要分开说，
+            # 否则会打出"0.01 MB/s（够快）"这种自相矛盾的日志。
+            report.reason = (
+                f"线路很慢（{report.probe_mbps:.3f} MB/s）→ 单连接慢慢下"
+                f"（并发在这种线路上反而更慢）"
+                if too_slow_to_boost else
+                f"单连接 {report.probe_mbps:.2f} MB/s（够快，不启用加速）"
+            )
             _log(log, report.reason)
             rest, stalled2, note2 = _download_sequential(
-                url, work, offset=written, total=size, timeout=timeout, progress=progress, log=log)
+                url, work, offset=written, total=size, timeout=timeout, progress=progress,
+                log=log, cancel=cancel)
             report.bytes = written + rest
             if size and report.bytes != size:
                 raise OSError(f"下载不完整：{report.bytes:,} / {size:,} 字节")
@@ -791,23 +895,47 @@ def _attempt_line(
             return report
 
         # ② 慢/抖 → 临时上并发分块（真正的"加速"）
+        #
+        # **动态**：先并发**试一小段**，跟单连接的探测速度比一比（用户 2026-10-02 原话：
+        # 「应该动态，慢就并发，更慢就切回来」）—— 实测过 8 连接反而比单连接慢 24% 的情况，
+        # 所以并发不是"开了就好"，得看这条线路吃不吃多连接。
         threads = recommended_threads(size - written)
         report.boosted = True
         report.threads = threads
         report.resumed_from = written
         report.reason = (
-            f"探测速度 {report.probe_mbps:.2f} MB/s（低于 {SLOW_MBPS} MB/s 阈值）→ 临时启用 {threads} 连接并发"
+            f"探测速度 {report.probe_mbps:.2f} MB/s（低于 {SLOW_MBPS} MB/s 阈值）→ 先试 {threads} 连接并发"
             if slow else
-            (f"单连接中断 → 临时启用 {threads} 连接并发续传" if stalled else
+            (f"单连接中断 → 先试 {threads} 连接并发续传" if stalled else
              f"已按设置强制启用 {threads} 连接并发")
         )
         _log(log, report.reason)
         with _STATE_LOCK:
             _STATE["active"] = int(_STATE.get("active") or 0) + 1
         try:
+            trial_started = time.time()
             report.retries = _download_parallel(
                 url, work, size=size, start=written, threads=threads,
-                timeout=timeout, progress=progress, log=log)
+                timeout=timeout, progress=progress, log=log,
+                max_seconds=BOOST_TRIAL_SECONDS, cancel=cancel)          # 试用窗口：到点不再提交新块
+            done_now = sum(b - a + 1 for a, b in _load_parts(work, size))
+            if size and done_now < size and done_now > written:
+                boost_mbps = _mbps(done_now - written, max(time.time() - trial_start, 1e-6))
+                if boost_mbps < report.probe_mbps * BOOST_KEEP_RATIO:
+                    # **并发没变快 → 切回单连接**（threads=1 仍走块机制，已下的块不重下）
+                    _log(log, f"并发只有 {boost_mbps:.3f} MB/s（单连接探测 {report.probe_mbps:.3f}）"
+                              f"→ 切回单连接继续下剩下的")
+                    report.reason += f"；实测并发更慢（{boost_mbps:.3f} MB/s）→ 已切回单连接"
+                    report.threads = 1
+                    report.retries += _download_parallel(
+                        url, work, size=size, start=done_now, threads=1,
+                        timeout=timeout, progress=progress, log=log, cancel=cancel)
+                else:
+                    _log(log, f"并发有效（{boost_mbps:.3f} MB/s ＞ 单连接 {report.probe_mbps:.3f}）"
+                              f"→ 继续用 {threads} 连接下完")
+                    report.retries += _download_parallel(
+                        url, work, size=size, start=done_now, threads=threads,
+                        timeout=timeout, progress=progress, log=log, cancel=cancel)
         finally:
             with _STATE_LOCK:
                 _STATE["active"] = max(0, int(_STATE.get("active") or 0) - 1)

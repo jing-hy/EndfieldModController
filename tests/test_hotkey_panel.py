@@ -45,6 +45,34 @@ if $ear == 1
 endif
 """
 
+MARKER_INI = """
+namespace = MarkerDemo
+[Constants]
+global persist $coat = 0
+global $creditinfo = 0
+global $active1 = 0
+
+[KeyCoatA]
+key = vk_a
+type = cycle
+$coat = 0, 1
+
+[KeyCoatB]
+key = vk_b
+$creditinfo = 0
+$active1 = 1
+
+[KeyCoatC]
+key = vk_c
+$creditinfo = 0
+$active1 = 0
+
+[KeyCoatD]
+key = vk_d
+$creditinfo = 0
+$active1 = 1
+"""
+
 ABS_VAR_INI = """
 namespace = FangyiKey
 [KeyHelp]
@@ -130,6 +158,23 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(ear.condition, "$active1 == 1")
         self.assertEqual(ear.targets, ["$\\mods\\demo.ini\\ear"])
 
+    def test_internal_markers_are_filtered_out(self) -> None:
+        """「内部标记」变量不该出现在面板上（用户 2026-10-02：「creditinfo 要过滤掉」）。
+
+        现场两种形态：
+          * 某 Mod 在每个 `[Key*]` 段里都跟着一句 `$creditinfo = 0`（Mod 注释：
+            ``; This acts as the "lock" for the UI notification``）；
+          * 另一个 Mod 用 `$active1 = 0/1` 标记"这个部件这一帧画没画"（`[Present]` 里
+            `post $active1 = 0` 每帧清零）。
+        判据 = **非 persist** + 同文件里被赋值 **≥3 次** + **从不写成逗号列表**（真开关的写法）。
+        """
+        (self.mod / "marker.ini").write_text(MARKER_INI, encoding="utf-8")
+        actions = core.parse_mod_actions(self.mod, self.mod)
+        names = {a.var_name for a in actions}
+        self.assertIn("coat", names)            # 真开关（persist + 逗号列表）保留
+        self.assertNotIn("creditinfo", names)   # 内部标记：过滤
+        self.assertNotIn("active1", names)
+
     def test_absolute_namespace_variables(self) -> None:
         (self.mod / "key.ini").write_text(ABS_VAR_INI, encoding="utf-8")
         actions = core.parse_mod_actions(self.mod, self.mod)
@@ -138,6 +183,8 @@ class ParseTests(unittest.TestCase):
         # `type = hold` 的瞬时状态不该变成开关
         self.assertNotIn("isMouseButtonDown", names)
         opened = next(a for a in actions if a.var_name == "open")
+        # **原样大小写**（`FangyiVar` 不是笔误）：ini 层变量名大小写敏感；`d3dx_user.ini`
+        # 里的小写只是持久化层的写法，别拿它当书写规范（2026-10-02 更正过一次误判）。
         self.assertEqual(opened.target_absolute, "$\\FangyiVar\\open")
         self.assertEqual(opened.key_label, "Alt+6")
 
@@ -248,13 +295,18 @@ class PanelDeployTests(unittest.TestCase):
         self.assertIn("ReShade", reason)
 
     def test_resolve_takeover_false_keeps_hotkeys(self) -> None:
+        # 面板用不了 → 绝不允许锁键（老红线不变：不能出现"锁了键却没面板"）
         self.config.hotkey_takeover = True
         self.config.reshade_injection = "none"
-        applied = launcher.resolve_hotkey_takeover(self.config, self.controller)
-        self.assertFalse(applied)   # 面板用不了 → 绝不允许锁键
+        self.assertFalse(launcher.resolve_hotkey_takeover(self.config, self.controller))
+        # 2026-10-02 晚恢复「Mod 快捷键锁定」（默认开）：面板可用 + 开关开着 ⇒ 真的锁键
         self.config.reshade_injection = "xxmi_extra"
-        applied = launcher.resolve_hotkey_takeover(self.config, self.controller)
-        self.assertTrue(applied)
+        self.assertTrue(launcher.resolve_hotkey_takeover(self.config, self.controller))
+        self.assertTrue((self.dlss5 / reshade_integration.ADDON_NAME).is_file(),
+                        "锁键的同时必须把面板铺进 ReShade")
+        # 关掉开关 ⇒ 一个键都不改写（留后路：想手按就关掉）
+        self.config.hotkey_takeover = False
+        self.assertFalse(launcher.resolve_hotkey_takeover(self.config, self.controller))
 
     def test_panel_status_reports_readiness(self) -> None:
         before = reshade_integration.panel_status(self.config)
@@ -417,71 +469,106 @@ class HotkeySwitchTests(unittest.TestCase):
                         keys.append(stripped.split("=", 1)[1].strip().lower())
         return keys
 
-    def test_switch_locks_and_restores(self) -> None:
+    def test_switch_deploys_panel_and_locks_mod_keys(self) -> None:
+        """开关打开 = **铺面板 + 锁 Mod 按键**（2026-10-02 晚恢复的「Mod 快捷键锁定」）。
+
+        锁键是为了治"多个 Mod 抢同一个真实键"：Mod 的 `key` 行被改写成
+        `no_modifiers vk_f24`，手按原键失效，操作集中到游戏内面板。面板本身走
+        **F13..F24 内部通道**（切档逻辑注入在 Mod 自己的 ini 里），与 `key` 段无关，
+        所以锁键不影响面板 —— 这正是它今天能重新启用的原因。
+        """
         self.api.prepare()
         self.assertTrue(self._staged_keys())
         self.assertTrue(all("vk_left" in key for key in self._staged_keys()))
 
         opened = self.api.set_hotkey_takeover(True)
         self.assertTrue(opened["ready"])
-        self.assertTrue(all("vk_f24" in key for key in self._staged_keys()),
-                        self._staged_keys())
         self.assertTrue((self.dlss5 / reshade_integration.ADDON_NAME).is_file())
+        # 开关打开 ⇒ Mod 原键被锁定（防抢键）
+        self.assertTrue(all("vk_f24" in key for key in self._staged_keys()), self._staged_keys())
+        # `panel_info.txt` 的 takeover 含义：Mod 原键**是否真被锁住** ⇒ 这里应为 1
         self.assertIn("takeover=1", (self.dlss5 / "panel_info.txt").read_text(encoding="utf-8"))
-        # 控制器自己的合成键不受影响（否则面板点不动任何东西）
+
+        # 面板通道（2026-10-02 第二版）：**F13..F24，不带任何修饰键** ——
+        # 用户原话「不要用 alt 这种辅助键」。红线依旧：绝不落在 F1..F12
+        # （2026-10-01 实测 F6 = DLSS5 的 NR 开关、F7 = 第一人称切换）。
         controller_ini = self.staging / "MC_Controller" / "controller.ini"
         ini_text = controller_ini.read_text(encoding="utf-8")
-        self.assertIn("ctrl alt shift VK_F23", ini_text)
-        self.assertIn("ctrl alt shift VK_F24", ini_text)
-        # **协议键绝不能落在 F1..F12**：2026-10-01 用户实测撞键 —— F6 是 DLSS5 的 NR 开关、
-        # F7 是第一人称切换（那些 addon 自己读键状态、不看修饰键），表现为"按开关外套会切
-        # 第一人称 / 按切换头发会开关 DLSS5"。数字位整体挪到 F13..F22 就是为了根治它。
-        self.assertIn("ctrl alt shift VK_F13", ini_text)   # Digit0
-        self.assertIn("ctrl alt shift VK_F22", ini_text)   # Digit9
-        # ⚠️ 判据要**只看真正的协议段**（`KeyMC_Digit*` / `KeyMC_Stage` / `KeyMC_Commit`）：
-        # 2026-10-01 加过一批**诊断对照探针**（`KeyMC_Low*`，故意用 F1..F12 来对比
-        # "EFMI 认哪一批键"），它们用 F1..F12 是**有意为之**，不该被这条红线拦住。
-        import re as _re  # 就地导入
-        # 按行解析（不依赖 \n / \r\n）
-        protocol_keys: dict[str, str] = {}
-        _lines = ini_text.splitlines()
-        for _i in range(len(_lines) - 1):
-            _m = _re.match(r"^\[(KeyMC_[A-Za-z0-9_]+)\]$", _lines[_i].strip())
-            _nxt = _lines[_i + 1].strip()
-            if _m and _nxt.lower().startswith("key ="):
-                protocol_keys[_m.group(1)] = _nxt.split("=", 1)[1].strip()
-        protocol_keys = {k: v for k, v in protocol_keys.items()
-                         if k.startswith(("KeyMC_Digit", "KeyMC_Stage", "KeyMC_Commit"))}
-        self.assertTrue(protocol_keys, "没解析到协议键段")
-        for name, key in protocol_keys.items():
-            for clash in range(1, 13):
-                # ⚠️ 必须按**词边界**匹配：`VK_F13` 里含子串 `VK_F1`，用 assertNotIn 会误判
-                self.assertNotRegex(key, rf"\bVK_F{clash}\b",
-                                    f"{name} 用了 VK_F{clash} —— 会撞别的 addon 的快捷键（F6=DLSS5、F7=第一人称）")
-        # 被锁的 Mod 热键用 `no_modifiers VK_F24`（在 Mod 自己的 ini 里，不在 controller.ini）：
-        # 与我们带修饰的 F24 互斥（那条要求"一个修饰键都不许按"），不会误触
-        self.assertTrue(all("vk_f24" in key for key in self._staged_keys()))
-        mod_ini = "\n".join(
-            p.read_text(encoding="utf-8", errors="replace")
-            for p in self.staging.rglob("*.ini")
-        )
-        self.assertIn("no_modifiers VK_F24", mod_ini)
+        self.assertIn("key = VK_F13", ini_text)
+        self.assertIn("key = VK_F24", ini_text)
+        key_lines = [line.strip().lower() for line in ini_text.splitlines()
+                     if line.strip().lower().startswith("key =")]
+        self.assertTrue(key_lines, "controller.ini 里应该有 key 行")
+        for line in key_lines:
+            for modifier in ("ctrl", "alt", "shift", "no_modifiers"):
+                self.assertNotIn(modifier, line,
+                                 f"面板通道不该带修饰键：{line}（用户：「不要用 alt 这种辅助键」）")
+        self.assertNotRegex(ini_text, r"key = VK_F1\b")
 
         closed = self.api.set_hotkey_takeover(False)
-        self.assertNotIn("vk_f24", " ".join(self._staged_keys()))
-        self.assertIn("还原", closed["message"])
-        self.assertIn("takeover=0", (self.dlss5 / "panel_info.txt").read_text(encoding="utf-8"))
+        self.assertTrue(all("vk_left" in key for key in self._staged_keys()))
+        self.assertIn("已关闭", closed["message"])
 
 
-class PanelKeyConflictTests(unittest.TestCase):
-    """面板合成键与别的插件快捷键的冲突检查（2026-10-01 撞车事故的兜底）。"""
+def _mini_pe64(import_name: str, dll_name: str = "FAKE.dll") -> bytes:
+    """造一个最小可解析的 PE64（一节 `.rdata`，里面放一个导入表）。
+
+    `initialize._pe_imports_name_bytes()` 的判据是 PE 结构本身（"这个 dll 有没有导入
+    某个函数"），所以这里直接按结构拼一个出来，不依赖机器上恰好装着哪个 dll。
+    """
+    section_va = 0x1000
+    raw_ptr = 0x200
+    rdata = bytearray(0x200)
+    desc = 0x00          # IMAGE_IMPORT_DESCRIPTOR（20 字节；后面紧跟全 0 结束项）
+    thunk = 0x40         # INT / IAT 数组
+    name_ref = 0x60      # 来源 dll 名
+    hint_name = 0x80     # IMAGE_IMPORT_BY_NAME（hint(2) + 名字 + \0）
+
+    def put(offset: int, value: int, size: int) -> None:
+        rdata[offset:offset + size] = value.to_bytes(size, "little")
+
+    put(desc + 0, section_va + thunk, 4)          # OriginalFirstThunk
+    put(desc + 12, section_va + name_ref, 4)      # Name
+    put(desc + 16, section_va + thunk + 16, 4)    # FirstThunk（IAT）
+    put(thunk + 0, section_va + hint_name, 8)     # INT[0]
+    put(thunk + 16, section_va + hint_name, 8)    # IAT[0]
+    rdata[name_ref:name_ref + len(dll_name) + 1] = dll_name.encode("ascii") + b"\0"
+    rdata[hint_name:hint_name + 2] = b"\0\0"
+    payload = import_name.encode("ascii") + b"\0"
+    rdata[hint_name + 2:hint_name + 2 + len(payload)] = payload
+
+    headers = bytearray(raw_ptr)
+    headers[0:2] = b"MZ"
+    headers[0x3C:0x40] = (0x80).to_bytes(4, "little")     # e_lfanew
+    headers[0x80:0x84] = b"PE\0\0"
+    coff = 0x84
+    headers[coff:coff + 2] = (0x8664).to_bytes(2, "little")            # machine = x64
+    headers[coff + 2:coff + 4] = (1).to_bytes(2, "little")             # NumberOfSections
+    headers[coff + 16:coff + 18] = (240).to_bytes(2, "little")         # SizeOfOptionalHeader
+    opt = coff + 20
+    headers[opt:opt + 2] = (0x20B).to_bytes(2, "little")               # PE32+
+    dd = opt + 112                                                     # DataDirectory 起点
+    headers[dd + 8:dd + 12] = (section_va + desc).to_bytes(4, "little")   # [1] = 导入表 RVA
+    section = dd + 16 * 8
+    headers[section:section + 6] = b".rdata"
+    headers[section + 8:section + 12] = (len(rdata)).to_bytes(4, "little")   # VirtualSize
+    headers[section + 12:section + 16] = section_va.to_bytes(4, "little")    # VirtualAddress
+    headers[section + 16:section + 20] = (len(rdata)).to_bytes(4, "little")  # SizeOfRawData
+    headers[section + 20:section + 24] = raw_ptr.to_bytes(4, "little")       # PointerToRawData
+    return bytes(headers) + bytes(rdata)
+
+
+class PanelKeyLinkTests(unittest.TestCase):
+    """面板按键链路体检：① EFMI 读键入口（2026-10-02 新判据）② 旧协议键位撞车（保留）。"""
 
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory(prefix="mc-keyconf-")
         self.root = Path(self.tmp.name)
         self.dlss5 = self.root / "runtime" / "dlss5"
         self.dlss5.mkdir(parents=True)
-        self.staging = self.root / "runtime" / "EFMI" / "Mods"
+        self.efmi = self.root / "runtime" / "EFMI"
+        self.staging = self.efmi / "Mods"
+        self.staging.mkdir(parents=True)
         from endfieldmodcontroller.config import AppConfig
 
         self.config = AppConfig(
@@ -502,8 +589,30 @@ class PanelKeyConflictTests(unittest.TestCase):
         initialize._check_panel_hotkey_conflicts(self.config, report, None)
         return next(c for c in report.to_dict()["checks"] if c["key"] == "panel:hotkey_conflicts")
 
+    def _write_efmi(self, import_name: str) -> None:
+        (self.efmi / "d3d11.dll").write_bytes(_mini_pe64(import_name))
+
+    def test_reports_when_efmi_is_not_installed(self) -> None:
+        check = self._check()
+        self.assertTrue(check["ok"])
+        self.assertIn("还没装 EFMI", check["message"])
+
+    def test_reports_broken_key_path(self) -> None:
+        # EFMI 没有 `GetAsyncKeyState` 入口 = 面板所有按钮都会点了没反应
+        self._write_efmi("SomethingElse")
+        check = self._check()
+        self.assertFalse(check["ok"])
+        self.assertIn("没有 GetAsyncKeyState", check["message"])
+
+    def test_ok_when_efmi_polls_getasynckeystate(self) -> None:
+        self._write_efmi("GetAsyncKeyState")
+        check = self._check()
+        self.assertTrue(check["ok"], check["message"])
+        self.assertIn("通路 OK", check["message"])
+
     def test_dlss5_and_firstperson_keys_do_not_conflict(self) -> None:
         # F6 = DLSS5 的 NR 开关、F7 = 第一人称切换 —— 旧协议正是撞在这两个键上
+        self._write_efmi("GetAsyncKeyState")
         self.ini.write_text(
             "[INPUT]\nKeyOverlay=36,0,0,0\nKeyScreenshot=44,0,0,0\n"
             "[RenoDX.DLSS5]\nNRToggleKey=117\n",
@@ -512,6 +621,7 @@ class PanelKeyConflictTests(unittest.TestCase):
         self.assertTrue(self._check()["ok"], self._check())
 
     def test_conflict_on_f13_plus_is_reported(self) -> None:
+        self._write_efmi("GetAsyncKeyState")
         self.ini.write_text("[OTHER.ADDON]\nOtherToggleKey=124\nSomeShortcut=135\n", encoding="utf-8")
         check = self._check()
         self.assertFalse(check["ok"])
@@ -519,6 +629,7 @@ class PanelKeyConflictTests(unittest.TestCase):
         self.assertIn("F24", check["message"])
 
     def test_legacy_staging_keys_are_flagged(self) -> None:
+        self._write_efmi("GetAsyncKeyState")
         self.ini.write_text("[INPUT]\nKeyOverlay=36,0,0,0\n", encoding="utf-8")
         controller = self.staging / "MC_Controller"
         controller.mkdir(parents=True)
@@ -529,6 +640,36 @@ class PanelKeyConflictTests(unittest.TestCase):
 
         (controller / "controller.ini").write_text("key = ctrl alt shift VK_F13\n", encoding="utf-8")
         self.assertNotIn("旧版", self._check()["message"])
+
+
+class PeImportScanTests(unittest.TestCase):
+    """`initialize._pe_imports_name_bytes()` —— 上面那条新判据的底层能力。"""
+
+    def test_finds_function_in_import_table(self) -> None:
+        from endfieldmodcontroller import initialize
+
+        blob = _mini_pe64("GetAsyncKeyState")
+        self.assertTrue(initialize._pe_imports_name_bytes(blob, "GetAsyncKeyState"))
+
+    def test_reports_false_when_absent(self) -> None:
+        from endfieldmodcontroller import initialize
+
+        blob = _mini_pe64("GetAsyncKeyState")
+        self.assertFalse(initialize._pe_imports_name_bytes(blob, "NopeNotHere"))
+
+    def test_reports_none_for_non_pe(self) -> None:
+        from endfieldmodcontroller import initialize
+
+        self.assertIsNone(initialize._pe_imports_name_bytes(b"not a pe at all", "GetAsyncKeyState"))
+
+    def test_real_efmi_dll_if_present(self) -> None:
+        """本机真装着 EFMI 时顺手核一遍：**真 dll 里确实有这个入口**（判据的现实依据）。"""
+        from endfieldmodcontroller import initialize
+
+        candidate = Path(core.__file__).parents[1] / "runtime" / "builtin" / "XXMI" / "EFMI" / "d3d11.dll"
+        if not candidate.is_file():
+            self.skipTest("本机没有内置 EFMI 的 d3d11.dll")
+        self.assertTrue(initialize._pe_imports_name(candidate, "GetAsyncKeyState"))
 
 
 class HintsFileTests(unittest.TestCase):
@@ -587,7 +728,71 @@ class ControllerIniSyntaxTests(unittest.TestCase):
         self.assertGreater(ifs, 0)
 
     def test_each_value_gets_its_own_if_block(self) -> None:
+        """「切到下一档」的分支写在**注入到 Mod ini 的那段**里，链式写法只用 `else if`。
+
+        面板协议第三版：controller.ini 只负责 `run =` 呼叫，真正改变量的语句跑在 Mod 自己的
+        命名空间里（带路径的跨命名空间赋值会被 3DMigoto 静默丢弃）。
+        """
+        self._generate()
+        injected = (self.mod_dir / "mod.ini").read_text(encoding="utf-8")
+        self.assertIn("[CommandListMC_Panel1]", injected)
+        self.assertRegex(injected, r"(?m)^\s*if \$coat == 0\s*$")
+        self.assertRegex(injected, r"(?m)^\s*else if \$coat == 1\s*$")
+        self.assertRegex(injected, r"(?m)^\s*else\s*$")
+        self.assertRegex(injected, r"(?m)^\s*endif\s*$")
+        self.assertNotIn("elif", injected)
+
+    def test_commit_reads_the_action_number_and_cycles(self) -> None:
+        """提交段：读动作号 → `run =` 呼叫注入在 Mod ini 里的那段（本文件不改 Mod 变量）。"""
         text = self._generate()
-        # 档位分支必须写成 `if ... == N` + 自己的 endif，而不是 if/elif 链
-        self.assertRegex(text, r"(?m)^\s*if \$controller_value == 0\s*$")
-        self.assertNotIn("else if $controller_value", text)
+        self.assertIn("$mc_last_wire = $mc_input", text)
+        self.assertIn("if $mc_last_wire == 1", text)
+        self.assertIn("run = CommandList\\mods\\demo.ini\\MC_Panel1", text)
+        # 本文件里**不许**再出现跨命名空间的变量赋值（那条路已被实测证否）
+        self.assertNotRegex(text, r"\$\\mods\\demo\.ini\\coat\s*=")
+
+    def test_injected_lists_are_idempotent(self) -> None:
+        """同一份 ini 被注入两次不该累积出两段（否则段名/变量会重复）。"""
+        self._generate()
+        self._generate()
+        injected = (self.mod_dir / "mod.ini").read_text(encoding="utf-8")
+        self.assertEqual(injected.count("[CommandListMC_Panel1]"), 1)
+        self.assertEqual(injected.count("面板遥控（自动生成"), 1)
+
+    def test_mod_variable_refs_keep_their_case(self) -> None:
+        """本文件里**不许**再出现跨命名空间的变量赋值（实测会被静默丢弃）。
+
+        改 Mod 变量这件事交给**注入在 Mod 自己 ini 里**的命令列表（用 Mod 声明时的原样
+        大小写）；这里只用 `run =` 呼叫它。`d3dx_user.ini` 里的小写是**持久化层**的写法，
+        不是 ini 的书写要求（2026-10-02 更正过一次误判）。
+        """
+        text = self._generate()
+        # 只允许 `run = CommandList\<ns>\<name>` 这种跨命名空间**调用**
+        self.assertIn("run = CommandList\\mods\\demo.ini\\MC_Panel1", text)
+        # 变量赋值行里不许带命名空间路径（那种写法会被丢弃）
+        self.assertNotRegex(text, r"(?m)^\s*\$\\[^\s=]+ *=")
+
+
+class NextStepTests(unittest.TestCase):
+    """`core.next_step_lines()` —— 「切到下一档」语句的生成器。"""
+
+    def test_two_state_toggle(self) -> None:
+        lines = core.next_step_lines("$\\Demo\\cape", ["0", "1"], indent="  ")
+        text = "\n".join(lines)
+        self.assertIn("  if $\\Demo\\cape == 0", text)
+        self.assertIn("      $\\Demo\\cape = 1", text)
+        self.assertIn("  else if $\\Demo\\cape == 1", text)
+        self.assertIn("  else", text)
+        self.assertTrue(lines[-1].strip() == "endif")
+        self.assertNotIn("elif", text, "3DMigoto 不认 `elif`")
+
+    def test_multi_state_wraps_around(self) -> None:
+        text = "\n".join(core.next_step_lines("$x", ["0", "1", "2"]))
+        # 最后一档要回到第一个值（面板只发"下一个"，不发具体档位）
+        self.assertIn("if $x == 2\n    $x = 0", text)
+
+    def test_single_value_is_a_reset(self) -> None:
+        self.assertEqual(core.next_step_lines("$x", ["0"]), ["$x = 0"])
+
+    def test_empty_values_generate_nothing(self) -> None:
+        self.assertEqual(core.next_step_lines("$x", []), [])
