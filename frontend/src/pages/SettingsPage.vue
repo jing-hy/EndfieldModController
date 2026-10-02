@@ -2,7 +2,7 @@
 // 设置页（对应旧 index.html 的 #tab-settings）。
 // ⚠️ 所有表单项都走 `SettingPath / SettingSwitch / SettingSelect`，它们内部按"只发改动的那一个键"
 //    调 save_config（旧版语义），所以这里不碰保存细节，只负责分组与按钮。
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { call } from "../lib/bridge.js";
 import { store, applyTheme, THEMES } from "../store.js";
 import { settings, saveSetting } from "../lib/settings.js";
@@ -41,6 +41,28 @@ const paths = computed(() => {
   return { controller: root, reshade: c.reshade_dll || "", staging: c.staging_mods_dir || "", mod_backup: c.mod_backup_dir || "" };
 });
 const lineStatus = computed(() => []);
+// 详细状态：一个面板接住各类状态查询，结果落在纯黑日志框里（可复制）
+const probeText = ref("点上面的按钮查询：DLSS5 / Poser / 组件版本 / 完整性 / 初始化自检。");
+const probeBusy = ref(false);
+const PROBES = [
+  { m: "dlss5_status", label: "DLSS5 状态" },
+  { m: "poser_status", label: "Poser 状态" },
+  { m: "component_versions", label: "组件版本" },
+  { m: "check_integrity", label: "完整性检查" },
+  { m: "first_run_state", label: "初始化自检" },
+];
+async function probe(method) {
+  probeBusy.value = true;
+  probeText.value = `正在查询 ${method} …`;
+  try {
+    const r = await call(method);
+    probeText.value = JSON.stringify(r, null, 2);
+  } catch (e) {
+    probeText.value = `查询失败：${(e && e.message) || e}`;
+  } finally {
+    probeBusy.value = false;
+  }
+}
 
 async function changeTheme(v) { await saveSetting("theme", v); applyTheme(v); }
 async function run(method, ...args) { try { return await call(method, ...args); } catch (e) { return null; } }
@@ -171,6 +193,13 @@ async function openPath(kind) { await run("open_path_in_explorer", kind); }
         </div>
         <div v-if="store.state.warming" class="text-xs" style="color: var(--text-muted)">后台预热中…（预热完会自动刷新）</div>
       </div>
+    </Card>
+
+    <Card title="详细状态">
+      <div class="flex flex-wrap gap-2">
+        <Btn v-for="p in PROBES" :key="p.m" :disabled="probeBusy" @click="probe(p.m)">{{ p.label }}</Btn>
+      </div>
+      <div class="log-box h-56 mt-3">{{ probeText }}</div>
     </Card>
 
     <Card title="运行目录">

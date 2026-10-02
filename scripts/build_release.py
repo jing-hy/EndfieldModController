@@ -23,7 +23,7 @@
 静态检查（任一失败即中止，**不会**产出半成品）：
 
     1) 所有 Python 模块 py_compile
-    2) `node --check web/app.js`（node 不在 PATH 时跳过并提示）
+    2) 前端产物新鲜度校验（web/dist/index.html 不得比 frontend/src 旧）
     3) `python -m pytest tests -q`（必须指定 tests 目录，否则会被 `_tmp\\` 污染）
 
 发布（上传）不在本脚本里 —— 见 `scripts/prepare_release.py`。
@@ -137,7 +137,7 @@ def static_checks() -> None:
 
     # ② 前端：新版走 Vite（产物 = `web/dist/index.html`，JS/CSS 全内联的单文件）——
     #    这里校验**产物存在且不比源码旧**（"改了 frontend/ 忘了 npm run build" 是最容易犯的错，
-    #    否则会静默打出一个旧界面）。没有产物时回退检查旧的原生 `web/app.js`（切换期两条路都能过）。
+    #    否则会静默打出一个旧界面）。旧的原生前端已删除，所以产物缺失一律直接失败。
     dist_html = ROOT / "web" / "dist" / "index.html"
     frontend_src = ROOT / "frontend" / "src"
     if dist_html.is_file():
@@ -147,16 +147,9 @@ def static_checks() -> None:
             raise SystemExit("!! web/dist/index.html 比 frontend/src 旧 —— 请先 cd frontend && npm run build")
         print(f"      前端产物 ok（web/dist/index.html {dist_html.stat().st_size:,} B）", flush=True)
     else:
-        node = shutil.which("node")
-        app_js = ROOT / "web" / "app.js"
-        if node and app_js.is_file():
-            result = subprocess.run([node, "--check", str(app_js)], cwd=str(ROOT),
-                                    capture_output=True, text=True)
-            if result.returncode != 0:
-                raise SystemExit(f"!! node --check 失败：\n{result.stderr.strip()[:2000]}")
-            print("      node --check ok（web/app.js）", flush=True)
-        else:
-            print("      （跳过前端检查：既没有 Vite 产物，PATH 里也没有 node）", flush=True)
+        # 旧的原生前端已在 0.9.6 删除（归档在仓库外与 git 历史里），
+        # 现在只有这一条路：产物必须在。没有就直接失败，别静默打出没有界面的包。
+        raise SystemExit("!! 缺少 web/dist/index.html —— 先 cd frontend && npm install && npm run build")
 
     # ③ 单元测试（必须指定 tests 目录）
     run([sys.executable, "-m", "pytest", "tests", "-q"], label="pytest tests -q")

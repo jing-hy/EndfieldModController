@@ -7,6 +7,9 @@ import { store, refreshState, applyTheme, currentTheme, THEMES } from "./store.j
 import { waitForBridge, reportFrontendError } from "./lib/bridge.js";
 import { loadSettings } from "./lib/settings.js";
 import { dragHasFiles, importDroppedFile } from "./lib/importMod.js";
+import { normalizeAnnouncements } from "./lib/announce.js";
+import { showModalDialog, showToast } from "./lib/dialog.js";
+import { call } from "./lib/bridge.js";
 import DialogHost from "./components/DialogHost.vue";
 import ToastHost from "./components/ToastHost.vue";
 import AboutPage from "./pages/AboutPage.vue";
@@ -31,7 +34,15 @@ const tabs = [
 const theme = ref(currentTheme());
 // 拖放导入：提示层**松开鼠标就消失**（用户要求「应该是释放就消失」），拖拽计数避免子元素抖动
 const dragging = ref(false);
+// 公告条（用户每次启动都会看到；点关闭就告诉后端"已读"）
+const notices = ref([]);
+let firstRunChecked = false;
 let dragDepth = 0;
+async function dismissNotices() {
+  notices.value = [];
+  try { await call("announcements_seen"); } catch (e) { /* 忽略 */ }
+}
+
 async function onDrop(event) {
   event.preventDefault();
   dragDepth = 0;
@@ -85,6 +96,29 @@ onMounted(async () => {
       if (!location.hash && store.state.config && store.state.config.last_tab) {
         store.tab = store.state.config.last_tab;
       }
+      notices.value = normalizeAnnouncements(store.state.announcements);
+      // 首次启动：**只提示一次**（判据用后端持久化的 onboarding_done，而不是"当前还没就绪"
+      // 这类会一直为真的状态 —— 否则会连环弹）。
+      const fr = store.state.first_run || {};
+      if (!firstRunChecked && fr.first_run && !fr.onboarding_done) {
+        firstRunChecked = true;
+        const missing = (fr.missing_components || []).join("、");
+        const go = await showModalDialog({
+          title: "第一次使用：还没完成初始化",
+          message: [
+            missing ? `当前缺少：${missing}。` : "当前还没生成控制器。",
+            "",
+            "接下来可以做两件事（约 1 分钟）：",
+            "· 在「依赖」页点「自动安装/更新」把组件装齐；",
+            "· 在「Mod 库」页把 .zip / .7z / .rar 拖进来导入 Mod。",
+            "",
+            "⚠️ 第一次点「一键启动」如果终末地没起来，再点一次通常就好。",
+          ].join("\n"),
+          okText: "去依赖页", cancelText: "跳过",
+        });
+        if (go) store.tab = "dependencies";
+        try { await call("save_config", { onboarding_done: true }); } catch (e) { /* 记不上也不影响本次 */ }
+      }
     } catch (e) { /* call() 已经弹过窗 */ }
   }
 });
@@ -124,6 +158,21 @@ onMounted(async () => {
     </aside>
 
     <main class="flex-1 min-w-0 overflow-auto">
+      <!-- 公告条 -->
+      <div v-if="notices.length" class="px-6 pt-4">
+        <div class="card p-3" style="border-color: var(--accent)">
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0 space-y-1">
+              <div v-for="n in notices" :key="n.key" class="text-sm">
+                <b v-if="n.title">{{ n.title }}</b>
+                <span v-if="n.body" class="ml-1">{{ n.body }}</span>
+                <a v-if="n.link" class="text-accent ml-1" :href="n.link" target="_blank" rel="noopener">{{ n.link }}</a>
+              </div>
+            </div>
+            <button class="btn btn-mini shrink-0" @click="dismissNotices">知道了</button>
+          </div>
+        </div>
+      </div>
       <header class="h-12 px-6 flex items-center justify-between border-b sticky top-0 z-10"
               style="background: var(--surface); border-color: var(--border)">
         <h1 class="text-base font-semibold">{{ currentName }}</h1>

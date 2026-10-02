@@ -11,6 +11,7 @@ import { humanSize } from "../lib/util.js";
 import Card from "../components/ui/Card.vue";
 import Btn from "../components/ui/Btn.vue";
 import Switch from "../components/ui/Switch.vue";
+import ConflictDialog from "../components/ConflictDialog.vue";
 import { showAlert, showModalDialog, showToast } from "../lib/dialog.js";
 import { setStatus } from "../lib/status.js";
 
@@ -22,6 +23,8 @@ const busy = ref(false);
 // 「⋯ 更多」：就地弹出的小菜单（用户准则：⋯ 要就地弹小菜单，不要弹窗）
 const menu = ref(null);          // { id, name, x, y }
 const chars = ref([]);           // 已知角色（用于"更换归属"）
+// 冲突处理：生成控制器之后检查一次，有冲突就弹「每组一个下拉框」的窗
+const conflicts = ref(null);
 let timer = null, dlTimer = null;
 
 const selected = computed(() => new Set((store.state.selected || []).map(String)));
@@ -133,7 +136,28 @@ async function menuAct(act) {
 
 async function scan() { busy.value = true; try { await call("scan"); await refreshState();
     loadSettings(); } catch (e) {} finally { busy.value = false; } }
-async function prepare() { busy.value = true; try { await call("prepare"); } catch (e) {} finally { busy.value = false; } }
+async function prepare() {
+  busy.value = true;
+  try {
+    await call("prepare");
+    // prepare 会刷新 runtime\_state\mod_conflicts.json，紧接着读一次结论
+    const info = await call("conflict_groups");
+    const groups = (info && info.groups) || [];
+    if (groups.length) conflicts.value = groups;
+    else setStatus("生成完毕，没有发现资源冲突。");
+  } catch (e) { /* call 已弹窗 */ } finally { busy.value = false; }
+}
+
+async function resolveConflicts(keep) {
+  conflicts.value = null;
+  try {
+    const r = await call("resolve_mod_conflicts", keep);
+    if (r && r.ok === false) await showAlert("处理失败", r.message || "未知原因");
+    else setStatus((r && r.message) || "已处理冲突");
+    await refreshState();
+    loadSettings();
+  } catch (e) { /* call 已弹窗 */ }
+}
 async function fixAll() { try { await call("fix_all_mods"); } catch (e) {} }
 
 async function startDownload() {
@@ -274,6 +298,9 @@ onUnmounted(() => { if (timer) clearInterval(timer); if (dlTimer) clearInterval(
         </div>
       </div>
     </Card>
+
+    <ConflictDialog v-if="conflicts" :groups="conflicts"
+                    @resolve="resolveConflicts" @cancel="conflicts = null" />
 
     <!-- ⋯ 就地小菜单（浮层，点空白处关闭） -->
     <div v-if="menu" class="fixed inset-0 z-40" @click="closeMenu"></div>
