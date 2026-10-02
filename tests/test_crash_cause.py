@@ -323,3 +323,41 @@ def test_gpu_compiler_crash_is_still_remembered(env, monkeypatch):
     saved = crashwatch.read_crash_memory(env.config)
     assert saved, "gpu_compiler 这类崩溃也必须进崩溃记忆"
     assert saved[0]["mods"] == ["MC_佩丽卡_皮肤"]
+
+
+# ------------------------------------------------- 崩溃判据一致性（2026-10-02）
+def test_reportexception_alone_is_not_a_crash(env, monkeypatch):
+    """CrashSight 里**只有 `reportException`**（游戏内被捕获的异常）不算崩溃。
+
+    用户正常关窗口时它每次都打（实测 18:21 / 18:25 关窗口 → 6 条 reportException、
+    没有 uploadCrash）。外部反馈 #11 的「崩溃判定: CrashSight 记录到异常」就是拿它误判的
+    —— 而**同一份日志**里控制器写的是「未检测到崩溃（正常退出）」。
+    """
+    monkeypatch.setattr(crashwatch, "_crash_root", lambda: env.tmp / "no-crashes")
+    monkeypatch.setattr(crashwatch, "injection_snapshot", lambda config: {})
+    monkeypatch.setattr(crashwatch, "_extract_game_errors", lambda config, limit=20: [])
+    monkeypatch.setattr(crashwatch, "_crash_sight_lines",
+                        lambda config, since=None, limit=4: ["reportException", "reportException"])
+    monkeypatch.setattr(crashwatch, "_crash_sight_upload_lines", lambda config, since=None: [])
+
+    evidence = crashwatch.collect_evidence(env.config)
+
+    assert evidence["crash_sight"], "前提：CrashSight 确实留下了记录"
+    assert crashwatch.is_crash(evidence) is False
+
+
+def test_collect_crash_report_judges_by_uploadcrash_only():
+    """`api.collect_crash_report` 的 `crashed` 不许再用 `crash_sight`（防回归）。
+
+    它原本是 `bool(evidence.get("crash_sight"))` —— 于是"CrashSight 目录里有记录"就算崩溃，
+    与包内报告、崩溃监控（两处都走 `is_crash`，只认 uploadCrash）判据不一致，
+    会让用户在**根本没崩**的情况下被弹窗告知"崩溃 + Mod 资源冲突"。
+    """
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "endfieldmodcontroller" / "api.py").read_text(encoding="utf-8")
+    start = source.index("def collect_crash_report")
+    end = source.index("\n    def ", start + 10)
+    block = "\n".join(line.split("#", 1)[0] for line in source[start:end].splitlines())
+
+    assert "crashwatch.is_crash(" in block, "collect_crash_report 必须用 crashwatch.is_crash 判崩溃"
+    assert "crash_sight" not in block, "不许再用 crash_sight 判崩溃（reportException 会被误判成崩溃）"

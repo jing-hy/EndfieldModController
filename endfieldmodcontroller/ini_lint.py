@@ -155,6 +155,14 @@ def lint_file(path: Path) -> list[str]:
 if __name__ == "__main__":
     import sys
 
+    # 中文 Windows 控制台默认 GBK，下面的 ✅ / ❌ 会直接把它撞崩（UnicodeEncodeError），
+    # 于是"体检通过"反而看起来像失败（exit=1）。2026-10-02 修。
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:  # noqa: BLE001
+            pass
+
     target = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(
         r"D:\zmdmod\modtest\runtime\builtin\XXMI\EFMI\Mods\MC_Controller\controller.ini")
     found = lint_file(target)

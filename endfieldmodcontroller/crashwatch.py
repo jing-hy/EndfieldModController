@@ -297,16 +297,19 @@ def crash_memory_path(config: AppConfig) -> Path:
     return Path(config.runtime_path) / CRASH_MEMORY_NAME
 
 
-def _is_dependency_dir(name: str) -> bool:
-    """这个 staging 目录名看着像**依赖**（RabbitFX / Orfix / SlotFix 那类）吗？
+def _is_dependency_dir(item: Path) -> bool:
+    """这个 staging 目录是**依赖**（RabbitFX / Orfix / SlotFix 那类）吗？
 
-    直接复用 `core.dependency_key_of`（按"名字里包含依赖 key"判定），所以
-    `MC_RabbitFX -ENDMI-_RabbitFX -ENDMI-` 会被正确认出来。
+    判据统一走 `core.is_dependency_package`（**名字像依赖 且 自己不带换装资源**）。
+
+    ⚠️ **不能只看名字**（2026-10-02 定案）：作者的皮肤包常把前置名写进包名 ——
+    `MC_莱万汀_laevatain_..._rabbitfx_da62a` 会被旧的 `dependency_key_of` 命中，
+    于是被当成依赖排除出"当前加载的 Mod 清单" ⇒ 崩溃归因的组合比对**漏掉真正的 Mod**。
     """
     try:
         from . import core
 
-        return bool(core.dependency_key_of(name))
+        return core.is_dependency_package(item.name, item)
     except Exception:  # noqa: BLE001
         return False
 
@@ -333,7 +336,7 @@ def staging_mods(config: AppConfig, *, include_dependencies: bool = False) -> li
             continue
         if item.name.startswith("MC_Controller") or item.name.startswith("MC_Probe"):
             continue
-        if not include_dependencies and _is_dependency_dir(item.name):
+        if not include_dependencies and _is_dependency_dir(item):
             continue
         out.append(item.name)
     return out
@@ -421,6 +424,133 @@ def _same_combo(history: list[str], now: list[str]) -> bool:
 # 公开别名：`initialize._check_dlss5_nrstyle` 要拿它判断"现在这套 Mod 崩过没有"
 # （决定要不要动用户的 NRStyle，见那边的注释）。
 same_combo = _same_combo
+
+
+# 「这套组合这次**真的跑通了**」的判据（用户 2026-10-02 要求：成功启动没崩就从崩溃记忆里移出）。
+#
+# 两条任一满足即可，**共同前提都是"没有崩溃转储"**（`is_crash` 为假）：
+#   ① `normal_exit`：Player.log 里有卸载统计 = 走了正常退出流程；
+#   ② **存活 ≥ 120 秒**：很多人玩完直接 Alt+F4，Player.log 不会留下卸载统计，
+#      但"跑满两分钟还没崩"已足够说明这套组合没问题 —— 实测里那些"必崩"的组合
+#      （删了 `endif` 的 RabbitFX / 湿润效果修复、庄方宜旗袍）都是启动后几十秒内就崩。
+# ⚠️ 不能拿"没检测到崩溃"直接当成功：「无卸载统计、无 uploadCrash」那档也可能是一次静默闪退。
+COMBO_SUCCESS_ALIVE_SECONDS = 120
+
+
+def combo_succeeded(evidence: dict[str, Any]) -> bool:
+    """这次这套 Mod 到底有没有跑通（见上面两条判据）。"""
+    if is_crash(evidence):
+        return False
+    if evidence.get("normal_exit"):
+        return True
+    try:
+        alive = float((evidence.get("process") or {}).get("alive_seconds") or 0)
+    except (TypeError, ValueError):
+        return False
+    return alive >= COMBO_SUCCESS_ALIVE_SECONDS
+
+
+def forget_crashes_for_combo(config: AppConfig, mods: list[str] | None = None) -> list[dict[str, Any]]:
+    """这套 Mod **这次成功跑通、没崩** ⇒ 把记忆里匹配它的条目移出（返回被移出的那些）。
+
+    用户 2026-10-02 要求原话：「**如果某一组之前报崩溃的，后面终末地成功启动没崩就从记忆里移出**」。
+
+    为什么必须要有：崩溃记忆的用途是"下次一键启动前提醒"，可一旦同一套组合后来真的跑通了，
+    那条记忆就成了**噪音** —— 它会一直弹"这套组合以前崩过"，而那条记录反映的往往还是**旧版本**
+    的行为（例如 0.9.2 之前那个把 shader 汇编 `endif` 删掉的 bug，害得 RabbitFX 被冤枉了一整天）。
+    留着只会让人白紧张、还可能把人引去删 Mod。
+
+    ⚠️ 调用方必须先用 `combo_succeeded(evidence)` 确认"确实成功"，别拿"没检测到崩溃"当成功。
+    """
+    import json
+
+    current = sorted({str(m) for m in (staging_mods(config) if mods is None else mods)})
+    entries = read_crash_memory(config)
+    if not entries or len(current) < 2:      # 单 Mod 的组合不参与（与 `_same_combo` 同一口径）
+        return []
+    kept: list[dict[str, Any]] = []
+    dropped: list[dict[str, Any]] = []
+    for entry in entries:
+        history = sorted(str(x) for x in (entry.get("mods") or []))
+        if history and _same_combo(history, current):
+            dropped.append(entry)
+        else:
+            kept.append(entry)
+    if not dropped:
+        return []
+    path = crash_memory_path(config)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"entries": kept}, ensure_ascii=False, indent=2),
+                        encoding="utf-8", newline="\n")
+    except OSError:
+        return []
+    return dropped
+
+
+# 「这套组合已经**成功跑通过**」的台账（用户 2026-10-02 的两条要求，一体两面）：
+#   ① 「**如果某一组之前报崩溃的，后面终末地成功启动没崩就从记忆里移出**」
+#      → 清 `crash_memory.json` 里匹配的条目（见 `forget_crashes_for_combo`）；
+#   ② 「**报了独享标识可能冲突的，只要能进，都记忆不再报**」
+#      → 靠这个台账：**整套组合一起跑通过 ⇒ 这套里任何"独享标识相交"的静态推测都不再报到界面上**
+#        （静态推测本来就只是"可能冲突"；用户实测能进，就等于把那一条否掉了）。
+PROVEN_COMBOS_NAME = Path("_state") / "proven_combos.json"
+PROVEN_COMBOS_LIMIT = 50
+
+
+def proven_combos_path(config: AppConfig) -> Path:
+    return Path(config.runtime_path) / PROVEN_COMBOS_NAME
+
+
+def proven_combos(config: AppConfig) -> list[list[str]]:
+    """已经成功跑通过的 Mod 组合（每条是一套 staged Mod 名，已排序去重）。"""
+    import json
+
+    try:
+        data = json.loads(proven_combos_path(config).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    combos = data.get("combos") if isinstance(data, dict) else data
+    out: list[list[str]] = []
+    for item in combos or []:
+        if isinstance(item, list) and item:
+            out.append(sorted({str(x) for x in item}))
+    return out
+
+
+def record_proven_combo(config: AppConfig, mods: list[str] | None = None) -> list[str]:
+    """这套组合跑通了 ⇒ 记进"已证实无害"台账（返回记下的那套名字）。"""
+    import json
+
+    current = sorted({str(m) for m in (staging_mods(config) if mods is None else mods)})
+    if len(current) < 2:          # 单 Mod 不成"组合"（与 `_same_combo` 同一口径）
+        return []
+    combos = [c for c in proven_combos(config) if c != current]
+    combos.insert(0, current)
+    combos = combos[:PROVEN_COMBOS_LIMIT]
+    path = proven_combos_path(config)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"combos": combos}, ensure_ascii=False, indent=2),
+                        encoding="utf-8", newline="\n")
+    except OSError:
+        return []
+    return current
+
+
+def conflict_pair_proven(config: AppConfig, a: str, b: str) -> bool:
+    """`a` 与 `b` 是否**同处某个已跑通过的组合**里。
+
+    是 ⇒ 它们之间那条"独享标识相交"的静态推测已经被实测否掉，不该再报（用户原话：
+    「报了独享标识可能冲突的，**只要能进，都记忆不再报**」）。
+    """
+    a, b = str(a or ""), str(b or "")
+    if not a or not b:
+        return False
+    for combo in proven_combos(config):
+        if a in combo and b in combo:
+            return True
+    return False
 
 
 def prelaunch_risks(config: AppConfig) -> dict[str, Any]:
@@ -1085,6 +1215,22 @@ def make_bundle(config: AppConfig, evidence: dict[str, Any] | None = None,
             remember_crash(config, kind=str(cause.get("kind")),
                            detail=str(cause.get("detail") or ""), mods=staging_mods(config))
         except Exception:  # noqa: BLE001 —— 记忆写失败不该影响崩溃包本身
+            pass
+    elif combo_succeeded(evidence):
+        # 这次**确实跑通**了（没有崩溃转储，且正常退出或跑够久）⇒ 把记忆里匹配这套组合的旧记录移出。
+        # 用户 2026-10-02 要求：「某一组之前报崩溃的，后面终末地成功启动没崩就从记忆里移出」——
+        # 组合既然已经跑通，留着那条记忆只会让下次启动白弹一次"这套以前崩过"。
+        try:
+            cleared = forget_crashes_for_combo(config)
+            proven = record_proven_combo(config)
+            if cleared or proven:
+                detail = f"已移出 {len(cleared)} 条旧崩溃记忆" if cleared else ""
+                if proven:
+                    detail += ("；" if detail else "") + "这套组合已记为『能进』（以后不再报它的静态冲突）"
+                _log(config, f"崩溃记忆: 这套组合这次跑通了 —— {detail}")
+                if log:
+                    log(f"崩溃记忆: 这套组合跑通了 —— {detail}")
+        except Exception:  # noqa: BLE001 —— 清记忆/记台账失败不该影响崩溃包本身
             pass
 
     # ⑤ 打包

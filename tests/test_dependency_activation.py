@@ -14,6 +14,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from endfieldmodcontroller import activation, core
 
@@ -105,24 +106,41 @@ class DependencyActivationTests(unittest.TestCase):
         )
         self.assertEqual(list(report.dependency_choices), [])
 
-    def test_known_bad_dependency_is_never_activated(self) -> None:
-        """**默认**就不加载已知会导致崩溃的依赖（RabbitFX）—— 内外两侧一个变体都不进 staging。
+    def test_known_bad_dependency_is_activated_by_default(self) -> None:
+        """**默认不再屏蔽** RabbitFX（2026-10-02 用户要求：「**你把 RabbitFX 加回去，然后让我测试**」）。
 
-        用户 2026-10-02 原话：「**包含 RabbitFX 要程序能自动不加载它**」「**自动不加载默认开**」。
-        库里留着他的文件，我们只是不放它进 staging，并在日志里说明原因（不弹窗、不要求他动手）。
-        依据：RabbitFX 改写游戏 shader ⇒ 启动几十秒后必崩在 `nvgpucomp64`（当天实测定案）。
+        为什么反转：当初给它定罪的判据是"一进 staging，游戏启动几十秒后必崩在 `nvgpucomp64`"
+        —— 而那个现场是**我们自己的 bug** 造的（`sanitize_ini_control_flow` 把
+        `[ShaderRegex*.Pattern.Replace]` 里要塞进 shader 的汇编 `endif` 当 ini 控制流删掉，
+        实测 `RabbitFX.ini` 删了 62 行；0.9.2 已修，回测 350 文件逐字节一致）。
+        判据仍留在 `core.KNOWN_BAD_DEPENDENCIES` 里，只是不再自动屏蔽。
         """
         self._skin()                                   # 佩丽卡：正文里真的引用 RabbitFX
         self._internal_rabbitfx()                      # 内部一份
-        self._external_rabbitfx("（重要前置）RabbitFX v24_3d366")   # 外部一份
         mods = core.scan_library(self.lib, self.lib)
         chosen, blocked = activation.plan_dependencies(mods, ["rabbitfx"])   # 用默认值
-        self.assertEqual(chosen, {}, "默认就该跳过，不该选中任何一份")
+        self.assertIn("rabbitfx", chosen, "默认就不再屏蔽，应当照常按需激活")
+        self.assertEqual(blocked, [])
+
+    def test_known_bad_dependency_is_skipped_when_gate_explicitly_on(self) -> None:
+        """闸门**显式打开**时仍按老规矩跳过 —— 机制没丢，随时能复活。
+
+        ⚠️ `core.KNOWN_BAD_DEPENDENCIES` 现在是**空的**：RabbitFX 已于 2026-10-02 由用户实测洗清、
+        条目被移除（原话「**是带着 RabbitFX 的，进去渲染啥的都没啥问题**」）。所以这里自己往表里
+        塞一条，测的是"**那道闸门的机制本身还活着**"，而不是"RabbitFX 还被禁着"。
+        """
+        self._skin()
+        self._internal_rabbitfx()
+        self._external_rabbitfx("（重要前置）RabbitFX v24_3d366")
+        mods = core.scan_library(self.lib, self.lib)
+        with mock.patch.dict(core.KNOWN_BAD_DEPENDENCIES, {"rabbitfx": "测试用（演示闸门仍然可用）"}):
+            chosen, blocked = activation.plan_dependencies(mods, ["rabbitfx"], skip_known_bad=True)
+        self.assertEqual(chosen, {}, "闸门开着时一份都不该选中")
         names = [item["name"] for item in blocked]
         reasons = " ".join(item["reason"] for item in blocked)
         self.assertTrue(any("RabbitFX" in n for n in names), f"该把两份都记进 blocked: {names}")
         self.assertIn("已知会导致游戏崩溃", reasons)      # 日志里能说清"为什么少了依赖"
-        # 判据仍然"发现"了它（只是不加载）
+        # 判据仍然"发现"了它（只是被闸门挡了）
         self.assertIn("RabbitFX", core.collect_required_dependency_names(mods))
 
     def test_known_bad_can_be_opted_out(self) -> None:

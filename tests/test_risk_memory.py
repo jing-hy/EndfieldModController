@@ -181,3 +181,156 @@ def test_normal_exit_is_not_remembered(env, monkeypatch):
     bundle = crashwatch.make_bundle(env.config, evidence)
     assert (bundle.get("cause") or {}).get("kind") == "exit"
     assert crashwatch.read_crash_memory(env.config) == []
+
+
+# ------------------------------------------------- 成功跑通就移出崩溃记忆（2026-10-02 用户要求）
+def _mem_setup(env, monkeypatch) -> None:
+    """打桩掉那些要读真实游戏目录的东西（与上面几个用例同一套）。"""
+    monkeypatch.setattr(crashwatch, "collect_game_logs", lambda config, dest: [])
+    monkeypatch.setattr(crashwatch, "injection_snapshot", lambda config: {})
+    monkeypatch.setattr(crashwatch, "_crash_root", lambda: env.tmp / "no-crashes")
+    monkeypatch.setattr(crashwatch, "_crash_sight_lines", lambda config, since=None, limit=4: [])
+    monkeypatch.setattr(crashwatch, "_crash_sight_upload_lines", lambda config, since=None: [])
+    monkeypatch.setattr(crashwatch, "_extract_game_errors", lambda config, limit=20: [])
+
+
+def test_combo_succeeded_judgement(env):
+    """判据本身：有崩溃转储 ⇒ 不算成功；静默退出（无卸载统计 + 只活一小会儿）也不算。
+
+    用户要求的是「**成功启动没崩**就从记忆里移出」—— 所以"没检测到崩溃"不够，
+    「无卸载统计、无 uploadCrash」那档可能是一次闪退，不能拿它当成功。
+    """
+    assert crashwatch.combo_succeeded({"crash_upload": ["uploadCrash"], "normal_exit": False}) is False
+    assert crashwatch.combo_succeeded({"crash_upload": [], "normal_exit": True}) is True
+    assert crashwatch.combo_succeeded({"crash_upload": [], "normal_exit": False,
+                                       "process": {"alive_seconds": 30}}) is False
+    # 没卸载统计也算成功：很多人玩完直接 Alt+F4（实测那些"必崩"的组合都是几十秒内就崩）
+    assert crashwatch.combo_succeeded({"crash_upload": [], "normal_exit": False,
+                                       "process": {"alive_seconds": 200}}) is True
+
+
+def test_successful_run_clears_matching_memory(env, monkeypatch):
+    """用户原话：「**某一组之前报崩溃的，后面终末地成功启动没崩就从记忆里移出**」。"""
+    _mk(env, "MC_A", "MC_B")
+    crashwatch.remember_crash(env.config, kind="crash", mods=["MC_A", "MC_B"])
+    assert crashwatch.read_crash_memory(env.config), "前提：记忆里本来有一条"
+
+    _mem_setup(env, monkeypatch)
+    evidence = crashwatch.collect_evidence(env.config)
+    evidence["normal_exit"] = True
+    crashwatch.make_bundle(env.config, evidence)
+
+    assert crashwatch.read_crash_memory(env.config) == [], "这套组合跑通了，旧记忆该被移出"
+    assert crashwatch.prelaunch_risks(env.config)["blocking"] is False, "移出后不该再提前预警"
+
+
+def test_unrelated_combo_memory_is_kept(env, monkeypatch):
+    """只移出**匹配这套组合**的那条；别的组合的记录必须留着。"""
+    _mk(env, "MC_A", "MC_B")
+    crashwatch.remember_crash(env.config, kind="crash", mods=["MC_X", "MC_Y"])
+    crashwatch.remember_crash(env.config, kind="crash", mods=["MC_A", "MC_B"])
+
+    _mem_setup(env, monkeypatch)
+    evidence = crashwatch.collect_evidence(env.config)
+    evidence["normal_exit"] = True
+    crashwatch.make_bundle(env.config, evidence)
+
+    left = [e["mods"] for e in crashwatch.read_crash_memory(env.config)]
+    assert left == [["MC_X", "MC_Y"]], left
+
+
+def test_failed_run_keeps_memory(env, monkeypatch):
+    """这次又崩了 ⇒ 记忆照旧留着（这条路径不能被新逻辑弄坏）。"""
+    _mk(env, "MC_A", "MC_B")
+    _mem_setup(env, monkeypatch)
+    monkeypatch.setattr(crashwatch, "_crash_sight_lines",
+                        lambda config, since=None, limit=4: ["uploadCrash"])
+    monkeypatch.setattr(crashwatch, "_crash_sight_upload_lines",
+                        lambda config, since=None: ["uploadCrash"])
+
+    evidence = crashwatch.collect_evidence(env.config)
+    crashwatch.make_bundle(env.config, evidence)
+
+    saved = crashwatch.read_crash_memory(env.config)
+    assert saved and saved[0]["mods"] == ["MC_A", "MC_B"]
+
+
+def test_silent_exit_keeps_memory(env, monkeypatch):
+    """静默退出（没崩、也没卸载统计、只活 30 秒）⇒ **留着**记忆，别急着当成功清掉。"""
+    _mk(env, "MC_A", "MC_B")
+    crashwatch.remember_crash(env.config, kind="crash", mods=["MC_A", "MC_B"])
+    _mem_setup(env, monkeypatch)
+
+    evidence = crashwatch.collect_evidence(env.config)
+    evidence["normal_exit"] = False
+    evidence["process"] = {"alive_seconds": 30}
+    crashwatch.make_bundle(env.config, evidence)
+
+    assert crashwatch.read_crash_memory(env.config), "静默退出不算成功，记忆要留着"
+
+
+# --------------------------- 跑通过的组合：静态冲突不再报（2026-10-02 用户要求）
+def _conflict_pair(env, monkeypatch, names=("MC_A", "MC_B"),
+                   h1: str = "aaaaaaaa", h2: str = "bbbbbbbb") -> None:
+    """造一对**真会报冲突**的 staging Mod：两者的 ini 覆盖同样两个资源 hash（只有它们用到）。
+
+    ⚠️ 必须**两个不同的** hash —— 判据要求"至少 2 个独享标识同时相交"（单个相交可能只是巧合）。
+    """
+    monkeypatch.setattr(AppConfig, "library_path", property(lambda self: env.tmp / "library"))
+    (env.tmp / "library").mkdir(parents=True, exist_ok=True)
+    body = f"[TextureOverride_{h1}_0]\nhash = {h1}\n[TextureOverride_{h2}_1]\nhash = {h2}\n"
+    for name in names:
+        d = env.staging / name
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "0.ini").write_text("namespace = T\n" + body, encoding="utf-8")
+
+
+def test_proven_combo_silences_static_conflict(env, monkeypatch):
+    """用户原话：「报了独享标识可能冲突的，**只要能进，都记忆不再报**」。"""
+    from endfieldmodcontroller import initialize
+
+    _conflict_pair(env, monkeypatch)
+
+    # ① 常规检测：先如实报出来
+    report = initialize.Report()
+    initialize._check_mod_conflicts(env.config, report, None)
+    first = report.checks[-1]
+    assert first["ok"] is False and "覆盖同一批资源" in first["message"], first
+
+    # ② 这套组合**跑通过了**（等价于一次成功启动后的记账）
+    assert crashwatch.record_proven_combo(env.config) == ["MC_A", "MC_B"]
+    assert crashwatch.conflict_pair_proven(env.config, "MC_A", "MC_B") is True
+
+    # ③ 再检测 —— 这一对不再报，而且如实说明"忽略了 N 条"
+    report2 = initialize.Report()
+    initialize._check_mod_conflicts(env.config, report2, None)
+    second = report2.checks[-1]
+    assert second["ok"] is True, second["message"]
+    assert "已忽略" in second["message"], second["message"]
+
+
+def test_pair_never_proven_is_still_reported(env, monkeypatch):
+    """只有跑通过的那一对不再报；换一对没跑通过的，照样要报（别把功能一起修没）。"""
+    from endfieldmodcontroller import initialize
+
+    _conflict_pair(env, monkeypatch, ("MC_A", "MC_B"), "aaaaaaaa", "bbbbbbbb")
+    crashwatch.record_proven_combo(env.config, ["MC_A", "MC_B"])
+    _conflict_pair(env, monkeypatch, ("MC_C", "MC_D"), "cccccccc", "dddddddd")   # 从没一起跑通过
+
+    report = initialize.Report()
+    initialize._check_mod_conflicts(env.config, report, None)
+    msg = report.checks[-1]["message"]
+
+    assert "MC_C" in msg and "MC_D" in msg, msg
+    assert "MC_A" not in msg and "MC_B" not in msg, "跑通过的那一对不该再出现"
+
+
+def test_proven_combo_roundtrip(env):
+    """台账本身的读写、排序与去重。"""
+    assert crashwatch.proven_combos(env.config) == []
+    crashwatch.record_proven_combo(env.config, ["B", "A"])
+    crashwatch.record_proven_combo(env.config, ["A", "B"])      # 同一套只留一条
+    assert crashwatch.proven_combos(env.config) == [["A", "B"]]
+    assert crashwatch.conflict_pair_proven(env.config, "A", "B") is True
+    assert crashwatch.conflict_pair_proven(env.config, "A", "C") is False
+    assert crashwatch.record_proven_combo(env.config, ["A"]) == [], "单 Mod 不成组合"

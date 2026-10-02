@@ -735,6 +735,37 @@ def infer_character_detail(
     return match_character_detail(" ".join(rel_parts).lower())
 
 
+# 库里的**依赖包**（"重要前置"那类）按名字认：`（重要前置）RabbitFX v24_3d366`、
+# `RabbitFX -ENDMI-`、`_deps\RabbitFX` ……
+DEPENDENCY_NAME_HINTS = (
+    "dependency", "deps", "_deps", "library mod", "rabbitfx", "orfix", "slotfix",
+)
+
+
+def is_dependency_package(name: str, path: Path | None = None) -> bool:
+    """「名字像某个依赖」**且**「自己不带换装资源」= 真正的依赖包。
+
+    ⚠️ **为什么不能只看名字**（2026-10-02 反馈定案）：作者的**皮肤包**常把前置名写进
+    包名 —— `laevatain_as_2b_nier_-_by_primostudios_-_premium_nsfw_version_-_rabbitfx_da62a`
+    是莱万汀的 2B 皮肤，只因名字带 `rabbitfx` 就被判成依赖，而：
+      * 前端 `renderMods()` 对依赖项整条 `continue` ⇒ **卡片根本不渲染**；
+      * `resolve_active_set()` 也把它排除出候选 ⇒ **永远进不了 staging**；
+    用户看到的现象就是"**导入没反应 / 这个模型无法导入**"（实测连导三次，日志三次都写"完成"）。
+    **判据**：真正的依赖包只有 .ini/.txt/.fx（`（重要前置）RabbitFX v24_3d366` 实测如此），
+    皮肤包一定有 Meshes/Textures 或 .dds/.buf 之类的换装资源 —— 用这个把两者分开。
+    `path is None` 时退化成"只看名字"（保持老行为，调用方拿不到路径的场合）。
+    """
+    lowered = str(name or "").lower()
+    if not any(k in lowered for k in DEPENDENCY_NAME_HINTS):
+        return False
+    if path is None:
+        return True
+    try:
+        return not has_mod_resources(Path(path))
+    except OSError:
+        return True
+
+
 def infer_kind_and_group(
     rel_parts: Sequence[str],
     meta: dict[str, Any],
@@ -759,7 +790,7 @@ def infer_kind_and_group(
         group = rel_parts[0] if rel_parts else "未分类"
     if not kind:
         lowered = " ".join(rel_parts).lower() + " " + str(meta.get("name", "")).lower()
-        if any(k in lowered for k in ("dependency", "deps", "_deps", "library mod", "rabbitfx", "orfix", "slotfix")):
+        if is_dependency_package(lowered, path):
             kind = "dependency"
         elif any(k in lowered for k in ("tool", "tools", "utility")):
             kind = "tool"
@@ -1247,6 +1278,9 @@ class PatchRecord:
 # 汇编 `if_nz` 不闭合 ⇒ NVIDIA 编译器（`nvgpucomp64`）当场崩。**这是本项目改坏了用户
 # 的 Mod 内容**（库里 59 行 → staging 55 行，而同一份包在 XXMI2 里能正常跑）。
 _ASM_TEXT_SECTION_SUFFIXES = (".pattern", ".pattern.replace", ".insertdeclarations")
+# 汇编文本行的尾巴：要塞进 shader 的每一行都以**字面** `\n` 结尾（两个字符：反斜杠 + n）。
+# 这是"这行是汇编、不是 ini 控制流"的第二道判据（第一道是所在段的段名后缀）。
+_ASM_TEXT_LINE_SUFFIX = "\\n"
 
 
 def sanitize_ini_control_flow(path: Path) -> int:
@@ -1316,6 +1350,55 @@ def sanitize_ini_control_flow(path: Path) -> int:
         with path.open("w", encoding="utf-8", newline="") as fh:
             fh.write("".join(out))
     return removed
+
+
+def ini_asm_if_unbalanced(path: Path) -> dict[str, int] | None:
+    """这个 ini 里**要塞进 shader 的汇编**是不是 `if_nz` 比 `endif` 多？
+
+    这是 **0.9.2 之前那个 bug 的确切指纹**：旧版 `sanitize_ini_control_flow()` 会把
+    `[ShaderRegex*.Pattern.Replace]` 里、行尾带字面 ``\\n`` 的 **shader 汇编文本**当成
+    ini 控制流，把 `endif` 整行删掉（实测：`RabbitFX.ini` 删 62 行、`（重要前置）湿润效果修复\\Shader.ini`
+    删 11 行、庄方宜两份 `CutoutMask.ini` 各删 4 行）。汇编不闭合 ⇒ 驱动着色器编译器当场崩
+    （`nvgpucomp64`）、剔除遮罩失效导致模型干脆出不來。
+
+    **为什么需要它**：那个 bug 只改写 **staging 副本**（`activation.py` 里对 `dest` 调用的），
+    所以**库里的原件是好的**；但**已经生成过的 staging 会一直带着伤** —— 用户升级到新版后
+    若不重新「一键启动」，游戏读到的仍是坏的，他会以为"新版没用"。有了这个判据，自检就能
+    发现并**按库里的原件自动重新生成**。
+
+    返回 ``{"if_nz": n, "endif": m, "missing": n - m}``；配平、或文件里没有汇编文本时返回 ``None``。
+    只数 `if_nz`（这是该 bug 的指纹，宁可漏报也不误报），不看 ini 自己的 `if/endif` 控制流。
+    """
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    asm_lines = [ln for ln in text.splitlines() if ln.rstrip().endswith(_ASM_TEXT_LINE_SUFFIX)]
+    if not asm_lines:
+        return None
+    asm = "\n".join(asm_lines)
+    n_if = len(re.findall(r"\bif_nz\b", asm))
+    n_end = len(re.findall(r"\bendif\b", asm))
+    if n_if > n_end:
+        return {"if_nz": n_if, "endif": n_end, "missing": n_if - n_end}
+    return None
+
+
+def find_unbalanced_asm_inis(root: Path, *, limit: int = 40) -> list[dict[str, Any]]:
+    """扫一棵目录树，列出所有"汇编里 `if_nz` 比 `endif` 多"的 ini（旧版 bug 的受害者）。
+
+    只在**控制器自己的产物**（staging 的 `MC_*` 目录）或用户库上调用，用于自检与修复。
+    """
+    found: list[dict[str, Any]] = []
+    if not root.is_dir():
+        return found
+    for ini in sorted(root.rglob("*.ini")):
+        if len(found) >= limit:
+            break
+        detail = ini_asm_if_unbalanced(ini)
+        if detail:
+            found.append({"path": str(ini), "name": ini.name, **detail})
+    return found
 
 
 def patch_mod_hotkeys(
@@ -1441,11 +1524,17 @@ def generate_controller_mod(
     #   起因：源码显示 `[Constants]` 段里"解析失败的行"不会被 erase，会在第二遍被当成命令处理，
     #   可能连带毁掉整段的解析 —— 而此前每次加诊断变量，按键就整体不触发。
     #   这一版把变量数降到协议必需 + 3 个，用来验证"是不是我加的声明行本身在捣乱"。
+    # 2026-10-02 **探针退役**（用户批准：「探针可以清掉」）：
+    #   * 删 `$mc_dbg_3`（每次 Commit 就写一次）与 `$mc_plain_f24` + `[KeyMC_ProbeCommit]` /
+    #     `[CommandListMC_ProbeCommit]`（当年"无修饰键按键能否触发"的对照探针）—— 那一整轮
+    #     面板按键排查早已结束，而**没有任何消费端读这些值**（消费端只把 `d3dx_user.ini` 里
+    #     含这些名字的行记进日志）。
+    #   * 留下的两个都有诊断价值且**不常驻每帧**：`$mc_action_seen`（面板动作到底有没有送达，
+    #     只在动作发生时才动）+ `$mc_present_frames`（改成每 5 秒记一次）。
     lines.extend([
         "global persist $mc_present_frames = 0",
+        "global persist $mc_present_t = 0",
         "global persist $mc_action_seen = 0",
-        "global persist $mc_dbg_3 = -1",
-        "global persist $mc_plain_f24 = 0",
     ])
     for action in actions:
         lines.append(f"global persist $mc_state_{action.wire_id} = 0")
@@ -1472,15 +1561,8 @@ def generate_controller_mod(
         "run = CommandListMC_Commit",
         "",
     ])
-    # ★ 只留一个探针段：**无修饰键的 VK_F24（提交键）**，用来判"注入的键到底有没有到达 EFMI"。
-    #   协议段（`KeyMC_Digit*` / `Stage` / `Commit`）保持不变。
-    lines.extend([
-        "[KeyMC_ProbeCommit]",
-        "key = ctrl alt shift VK_F24",
-        "run = CommandListMC_ProbeCommit",
-        "[CommandListMC_ProbeCommit]",
-        "$mc_plain_f24 = $mc_plain_f24 + 1",
-    ])
+    # 2026-10-02：`[KeyMC_ProbeCommit]` / `[CommandListMC_ProbeCommit]` 那对探针段**已退役**
+    #   （它当年用来判"无修饰键的键到底有没有到达 EFMI"，那一轮排查早已结束）。
     for digit in range(10):
         lines.extend([
             f"[CommandListMC_Digit{digit}]",
@@ -1503,11 +1585,15 @@ def generate_controller_mod(
     lines.extend([
         "$controller_action = $mc_pending_action",
         "$controller_value = $mc_input",
-        "$mc_dbg_3 = $controller_action",
         "$mc_input = 0",
         "",
         "[Present]",
-        "$mc_present_frames = $mc_present_frames + 1",
+        "; 探针节流（2026-10-02，用户要求清掉常驻探针）：原来每帧 `+1`，现在每 5 秒记一次 ——",
+        "; 「计数在涨」这个判据不变（诊断端只记录它的值），每帧开销归零。",
+        "if time > $mc_present_t",
+        "    $mc_present_t = time + 5",
+        "    $mc_present_frames = $mc_present_frames + 1",
+        "endif",
         "if $controller_action != 0",
         "    $mc_action_seen = $mc_action_seen + 1",
     ])
@@ -1774,20 +1860,24 @@ DEFAULT_DEPENDENCIES = {
     "slotfix": {"display": "Slotfix", "kind": "dependency"},
 }
 
-# **已知会导致游戏崩溃的依赖 —— 库里可以留着，但绝不加载它**（2026-10-02 定案 + 用户要求）。
-# 用户原话：「**包含 RabbitFX 要程序能自动不加载它**」—— 他要的是"自动处理"，不是"提示他去移库"
-# （他先前为此找过那张根本不存在于界面的卡片）。
+# **已知会导致游戏崩溃的依赖 —— 库里可以留着，但绝不加载它**。
+# ⚠️ **当前是空的**：唯一那条（`rabbitfx`）已由用户实测结案（2026-10-02）。
 #
-# 依据（当天实测，见 topic 记忆）：RabbitFX 用 10 组 `[ShaderRegex*]` **改写游戏角色 shader**，
-# 一旦进了 `Mods`，游戏启动几十秒后**必崩**在 `nvgpucomp64`（着色器编译器）——
-# 用户原话「现在可以进入了，确认生效」（移走它之后佩丽卡正常），而**同一个包在别的 XXMI
-# 环境里带着它也没事**这件事与本项目的判定无关，我们的结论来自本机可复现的对照。
+# **RabbitFX 的完整经过**（留作判据的历史，别再重复栽这个跟头）：
+#   2026-10-02 上午认定"RabbitFX 一进 staging，游戏启动几十秒后必崩在 `nvgpucomp64`"
+#   （用户原话「**包含 RabbitFX 要程序能自动不加载它**」），于是列进这张表、默认屏蔽，
+#   判据仍会照常发现"某个 Mod 引用了 RabbitFX"，只是不把它放进 staging。
+#   **当天下午查清：那个现场是我们自己的 bug 造的** —— `core.sanitize_ini_control_flow()`
+#   把 `[ShaderRegex*.Pattern.Replace]` 里**要塞进游戏 shader 的汇编 `endif`** 当成 ini 控制流
+#   删掉了（拿 git 里修复前的旧实现真跑 `RabbitFX.ini`：`endif` 67 → **5**，**删了 62 行**），
+#   汇编不闭合 ⇒ 驱动着色器编译器当场崩。0.9.2（`3af26e6`）修掉该 bug 后，回测显示 staging
+#   产物与库里的原件**逐字节一致**；用户实测「**是带着 RabbitFX 的，进去渲染啥的都没啥问题**」
+#   ⇒ **罪名洗清、条目移除**（用户 2026-10-02：「RabbitFX 可以移出 todo 了」）。
 #
-# 判据仍会**照常发现**"某个 Mod 引用了 RabbitFX"，只是**不把它放进 staging**，
-# 并在日志里写明原因（`activation.dependency_note` 会输出"依赖去重：屏蔽「…」（…）"）。
-KNOWN_BAD_DEPENDENCIES: dict[str, str] = {
-    "rabbitfx": "实测会让游戏启动几十秒后崩在显卡着色器编译器（nvgpucomp64）",
-}
+# **留给将来**：真发现某个依赖有害时，往这里加 key（依赖名小写）+ 原因字符串，
+# `plan_dependencies(skip_known_bad=True)` / `resolve_active_set(skip_known_bad_dependencies=True)`
+# 那套闸门机制照旧可用（只是默认值现在是 `False` = 不屏蔽）。
+KNOWN_BAD_DEPENDENCIES: dict[str, str] = {}
 
 
 def dependency_key_of(name: str) -> str:

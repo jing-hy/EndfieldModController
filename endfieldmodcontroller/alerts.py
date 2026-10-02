@@ -24,6 +24,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import re
 import time
 from datetime import datetime
 from pathlib import Path
@@ -141,6 +142,9 @@ def normalize(document: dict[str, Any]) -> list[dict[str, Any]]:
             "url": str(raw.get("url") or "").strip(),
             "until": str(raw.get("until") or "").strip(),
             "hold_seconds": _clamp_hold(raw.get("hold_seconds")),
+            # 版本区间（2026-10-02 加）：留空 = 所有版本都收，两个都给 = 只对那个版本
+            "min_version": str(raw.get("min_version") or "").strip(),
+            "max_version": str(raw.get("max_version") or "").strip(),
         })
     return items
 
@@ -171,6 +175,43 @@ def hold_seconds(document: dict[str, Any], alert: dict[str, Any] | None = None) 
     if value is None:
         value = DEFAULT_HOLD_SECONDS
     return value
+
+
+def _version_tuple(value: Any) -> tuple[int, ...]:
+    """`"0.9.4"` → `(0, 9, 4)`；取不出数字时给 `(0,)`（与 `dlss5_fetcher` 同一套口径）。"""
+    parts = re.findall(r"\d+", str(value or ""))
+    return tuple(int(p) for p in parts) or (0,)
+
+
+def version_applies(item: dict[str, Any], version: str | None = None) -> bool:
+    """这条公告 / 预警适不适用于**本地这个版本**（用户 2026-10-02 要求：「公告要附带版本号，
+
+    是这个版本发公告还是所有版本都能收到，避免后面公告越来越多，管理器也要比对版本号」）。
+
+    规则（**留空 = 不受版本限制**）：
+      * `min_version` 与 `max_version` **都不给** ⇒ **所有版本都收**（重大信息 / 安全预警走这条）；
+      * 只给 `min_version` ⇒ 从那一版起（含）的所有版本；
+      * 只给 `max_version` ⇒ 到那一版为止（含）；
+      * **两个都给同一个版本号** ⇒ **只有装了那个版本的人**看得到（"这个版本发的公告"最常用）。
+
+    ⚠️ 读不出本地版本时**不拦**（宁可多提示一次，也别漏掉安全预警）。
+    """
+    local_text = str(version if version is not None else "").strip()
+    if not local_text:
+        try:
+            from .version import __version__ as local_text  # type: ignore[no-redef]
+        except Exception:  # noqa: BLE001
+            local_text = ""
+    local = _version_tuple(local_text)
+    if not str(local_text or "").strip() or local == (0,):
+        return True
+    low_text = str(item.get("min_version") or "").strip()
+    high_text = str(item.get("max_version") or "").strip()
+    if low_text and local < _version_tuple(low_text):
+        return False
+    if high_text and local > _version_tuple(high_text):
+        return False
+    return True
 
 
 # ---------------------------------------------------------------- 拉取
@@ -232,11 +273,16 @@ def load_document(config: Any, *, timeout: int = 20,
 
 # ---------------------------------------------------------------- 对外
 def overview(config: Any, *, document: dict[str, Any] | None = None,
-             log: Callable[[str], None] | None = None) -> dict[str, Any]:
+             log: Callable[[str], None] | None = None,
+             version: str | None = None) -> dict[str, Any]:
     """给界面用的总览。
 
-    * `announcements`：未读且未过期的 info/warning（**只弹一次**）；
-    * `critical`：未过期的异常状态预警（**每次都返回**，不看已读）。
+    * `announcements`：未读且未过期、**且适用于本地版本**的 info/warning（**只弹一次**）；
+    * `critical`：未过期、且适用于本地版本的异常状态预警（**每次都返回**，不看已读）。
+
+    `version`：本地版本号（默认取 `endfieldmodcontroller.version.__version__`）—— 用户 2026-10-02
+    要求"公告要附带版本号、管理器要比对版本号"，所以**两条链路（公告与预警）都在这一个地方过滤**，
+    留空版本区间的条目照旧对所有版本生效。
     """
     doc = document if document is not None else load_document(config, log=log)
     if not doc:
@@ -249,6 +295,8 @@ def overview(config: Any, *, document: dict[str, Any] | None = None,
     for item in normalize(doc):
         if is_expired(item["until"], now):
             continue
+        if not version_applies(item, version):
+            continue                      # 这条是给别的版本发的（或只对旧版本有意义）
         if item["level"] == "critical":
             critical.append({**item, "hold_seconds": hold_seconds(doc, item)})
         elif item["id"] not in seen:

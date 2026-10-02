@@ -27,6 +27,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from release_version import report as report_version_rule  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 REPO = "jing-hy/EndfieldModController"
 ENV_NAME = "GH_TOKEN"
@@ -89,6 +92,10 @@ def main(argv: list[str] | None = None) -> int:
     _fix_console()
     version = local_version()
     print(f"== 推送 {REPO} {args.branch} ==  版本 {version or '(未知)'}", flush=True)
+    # 版本号规则核对（用户 2026-10-02）：**推 main ≠ 发 Release** —— 只推源码时版本号不用改，
+    # 保持在「最新 Release + 1」；只有发过 Release 之后才轮到下一个号。
+    report_version_rule()
+    print("      推 main ≠ 发 Release：本次只更新源码，下载页 / Latest 不变 —— 版本号保持不动", flush=True)
 
     # ① 快照（**失败就不推**）
     if args.skip_snapshot:

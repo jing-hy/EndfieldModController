@@ -3105,7 +3105,7 @@ function showCrashModal(bundle) {
   $('crash-zip').textContent = bundle.zip || '(未打包成功，请直接压缩上面的文件夹)';
   const lines = [
     `时间      : ${bundle.created_at || '-'}`,
-    `崩溃判定  : ${bundle.crashed ? 'CrashSight 记录到异常' : '未检测到崩溃记录（可能是正常退出）'}`,
+    `崩溃判定  : ${bundle.crashed ? '检测到崩溃（CrashSight 上传了崩溃转储）' : '未检测到崩溃（正常退出）'}`,
     `归因      : ${bundle.crashed
       ? (cause.title || '其它原因（看包里的 controller-crash-report.log）')
       : '未崩溃'}`,

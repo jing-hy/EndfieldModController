@@ -146,5 +146,96 @@ class AlertsTests(unittest.TestCase):
         self.assertFalse(alerts.undo_safe_mode(self.config)["ok"])
 
 
+class AlertVersionGateTests(unittest.TestCase):
+    """公告的**版本区间**（2026-10-02 用户要求）。
+
+    用户原话：「**公告要附带版本号，是这个版本发公告还是所有版本都能收到，避免后面公告越来越多，
+    管理器也要比对版本号，防护机制同理**」—— 所以这里既测"只发给某个版本"、也测"所有版本都收"，
+    还要测 **critical 预警同样受限制**。
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory(prefix="mc-alerts-ver-")
+        self.root = Path(self.tmp.name)
+        self.config = AppConfig(
+            library_dir=str(self.root / "library"),
+            runtime_dir=str(self.root / "runtime"),
+            builtin_runtime_dir=str(self.root / "runtime" / "builtin"),
+        )
+        self.config._config_path = str(self.root / "config.json")
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    # ---------------------------------------------------------- 判据本身
+    def test_no_range_means_all_versions(self) -> None:
+        """两个都不给 = **所有版本都能收到**（重大信息 / 安全预警走这条）。"""
+        item = {"id": "a", "min_version": "", "max_version": ""}
+        for version in ("0.1.0", "0.7.0", "0.9.4", "1.0.0"):
+            self.assertTrue(alerts.version_applies(item, version), version)
+
+    def test_same_min_max_means_that_version_only(self) -> None:
+        """两个都给同一个版本号 = **只有装了那个版本的人**看得到（"这个版本发的公告"）。"""
+        item = {"id": "a", "min_version": "0.9.4", "max_version": "0.9.4"}
+        self.assertTrue(alerts.version_applies(item, "0.9.4"))
+        self.assertFalse(alerts.version_applies(item, "0.9.3"))
+        self.assertFalse(alerts.version_applies(item, "0.9.5"))
+
+    def test_min_only_and_max_only(self) -> None:
+        only_min = {"min_version": "0.9.4", "max_version": ""}
+        self.assertFalse(alerts.version_applies(only_min, "0.9.3"))
+        self.assertTrue(alerts.version_applies(only_min, "0.9.4"))
+        self.assertTrue(alerts.version_applies(only_min, "0.10.0"))
+
+        only_max = {"min_version": "", "max_version": "0.7.9"}
+        self.assertTrue(alerts.version_applies(only_max, "0.7.0"))
+        self.assertFalse(alerts.version_applies(only_max, "0.8.0"))
+
+    def test_shorter_version_string_still_compares(self) -> None:
+        """`0.9` 这种写法也要能比（`(0,9) < (0,9,4)`）。"""
+        item = {"min_version": "0.9", "max_version": ""}
+        self.assertFalse(alerts.version_applies(item, "0.8.9"))
+        self.assertTrue(alerts.version_applies(item, "0.9.4"))
+
+    def test_unknown_local_version_does_not_block(self) -> None:
+        """读不出本地版本时**不拦** —— 宁可多提示一次，也别漏掉安全预警。"""
+        item = {"min_version": "0.9.4", "max_version": "0.9.4"}
+        self.assertTrue(alerts.version_applies(item, ""))
+
+    # ---------------------------------------------------------- 端到端（overview 层）
+    def test_overview_filters_by_local_version(self) -> None:
+        doc = _doc([
+            {"id": "old-only", "level": "info", "title": "老版本专用",
+             "min_version": "0.7.0", "max_version": "0.7.9"},
+            {"id": "this-version", "level": "info", "title": "本版公告",
+             "min_version": "0.9.4", "max_version": "0.9.4"},
+            {"id": "everyone", "level": "info", "title": "所有版本"},
+        ])
+        got = alerts.overview(self.config, document=doc, version="0.9.4")
+        self.assertEqual([a["id"] for a in got["announcements"]],
+                         ["this-version", "everyone"])
+
+        got2 = alerts.overview(self.config, document=doc, version="0.7.5")
+        self.assertEqual([a["id"] for a in got2["announcements"]],
+                         ["old-only", "everyone"])
+
+    def test_critical_also_respects_version(self) -> None:
+        """**防护机制同理**：critical 异常状态预警也受版本区间限制。"""
+        doc = _doc([
+            {"id": "c-old", "level": "critical", "title": "只对老版本",
+             "max_version": "0.7.9"},
+            {"id": "c-all", "level": "critical", "title": "所有版本"},
+        ])
+        got = alerts.overview(self.config, document=doc, version="0.9.4")
+        self.assertEqual([c["id"] for c in got["critical"]], ["c-all"])
+
+    def test_normalize_keeps_version_fields(self) -> None:
+        items = alerts.normalize(_doc([
+            {"id": "x", "min_version": " 0.9.0 ", "max_version": "0.9.9"},
+        ]))
+        self.assertEqual(items[0]["min_version"], "0.9.0")
+        self.assertEqual(items[0]["max_version"], "0.9.9")
+
+
 if __name__ == "__main__":
     unittest.main()

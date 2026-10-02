@@ -1537,6 +1537,25 @@ def _check_mod_conflicts(config: AppConfig, report: Report, log: Callable[[str],
         (staged if child.name.startswith("MC_") else manual).append(child.name)
 
     groups = _mod_conflict_summary(config, mods_dir, staged)
+    # **已经实测跑通过的组合：它们之间的"独享标识相交"不再报**（用户 2026-10-02 原话：
+    #   「报了独享标识可能冲突的，**只要能进，都记忆不再报**」）。
+    #   静态推测本来就只说"可能冲突"；用户带着这套进得去游戏，那条就等于被实测否掉了 ——
+    #   继续报只会让人白折腾（2026-10-02 外部反馈里"湿润效果修复 vs 各皮肤"那 12 条就是这么来的：
+    #   湿润效果修复是通用效果前置包，它跟每个皮肤都有交集是**设计使然**，不是两个 Mod 抢资源）。
+    proven_ignored = 0
+    try:
+        from . import crashwatch
+
+        kept_groups: list[dict[str, Any]] = []
+        for item in groups:
+            names = [str(x) for x in (item.get("names") or [])]
+            if len(names) == 2 and crashwatch.conflict_pair_proven(config, names[0], names[1]):
+                proven_ignored += 1
+                continue
+            kept_groups.append(item)
+        groups = kept_groups
+    except Exception:  # noqa: BLE001 —— 过滤失败就当没过滤，别把整项自检弄挂
+        proven_ignored = 0
     problems: list[str] = [str(item.get("text") or "") for item in groups]
 
     # 角色层：用 core 的别名解析（比 MC_ 前缀可靠）
@@ -1595,10 +1614,13 @@ def _check_mod_conflicts(config: AppConfig, report: Report, log: Callable[[str],
         pass
 
     if problems:
-        report.add("mod_conflicts", False, detail, manual=True)
+        extra = f"（另有 {proven_ignored} 条『独享标识相交』以前跑通过、已忽略）" if proven_ignored else ""
+        report.add("mod_conflicts", False, detail + extra, manual=True)
         report.action("检测到 Mods 冲突（见上），请在 Mod 库页重新「生成控制器」清理")
     else:
-        report.add("mod_conflicts", True, f"{len(staged)} 个 staging Mod，按资源 hash 比对无冲突")
+        note = (f"（另有 {proven_ignored} 条『独享标识相交』以前跑通过、已忽略）"
+                if proven_ignored else "")
+        report.add("mod_conflicts", True, f"{len(staged)} 个 staging Mod，按资源 hash 比对无冲突{note}")
 
 
 def _check_poser(config: AppConfig, report: Report, log: Callable[[str], None] | None) -> None:
@@ -1774,16 +1796,90 @@ def _check_hotkey_panel(config: AppConfig, report: Report, log: Callable[[str], 
         report.add("hotkey_panel", False, "统一面板缺失：面板或动作清单没写进 ReShade 目录", manual=True)
 
 
+def _staging_broken_inis(mods_dir: Path) -> list[dict]:
+    """staging 里有没有"被旧版误删了汇编 `endif`"的 ini（我们自己的产物，可以放心重建）。"""
+    from . import core
+
+    broken: list[dict] = []
+    if not mods_dir.is_dir():
+        return broken
+    for child in sorted(mods_dir.glob("MC_*")):
+        if not child.is_dir() or child.name == "MC_Controller":
+            continue
+        for item in core.find_unbalanced_asm_inis(child, limit=8):
+            broken.append({"mod": child.name, **item})
+            break                      # 一个 Mod 记一条就够
+    return broken
+
+
+def _library_sources_broken(config: AppConfig, broken: list[dict]) -> list[dict]:
+    """把 staging 里那些坏 ini 映射回**库里的源文件**，看库里的原件是不是也坏了。
+
+    ⚠️ **为什么必须先看这一步**：staging 是**从库复制出来的**。如果库里的原件也被改坏
+    （不是我们干的 —— 我们从来只改 staging 副本；可能是别的工具或手动编辑），那"重新生成
+    staging"只会把坏文件再复制一遍，**看起来修好了、其实没有**，下次自检又来一遍。
+    而**用户的 Mod 库是红线：任何情况都不动**（除非他自己点「移出 Mod 库」）——
+    所以这种情况只能**如实报告 + 让他重新下载那些 Mod**，绝不自动改库。
+    """
+    from . import core
+
+    bad: list[dict] = []
+    try:
+        mods = core.scan_library(config.library_path, config.staging_mods_path)
+    except Exception:  # noqa: BLE001
+        return bad
+    by_dir = {f"MC_{core.safe_name(m.group)}_{core.safe_name(m.name)}": m for m in mods}
+    for item in broken:
+        mod = by_dir.get(str(item.get("mod") or ""))
+        if mod is None:
+            continue
+        try:
+            rel = Path(item["path"]).relative_to(config.staging_mods_path / str(item["mod"]))
+        except (KeyError, ValueError):
+            continue
+        detail = core.ini_asm_if_unbalanced(mod.path / rel)
+        if detail:
+            bad.append({"mod": mod.name, "file": str(rel).replace("\\", "/"), **detail})
+    return bad
+
+
 def _check_staging(config: AppConfig, report: Report, log: Callable[[str], None] | None) -> None:
-    """选中的 Mod 必须有对应的 MC_ staging 目录，否则服装 Mod 不会生效。"""
+    """选中的 Mod 必须有对应的 MC_ staging 目录；**已有的 staging 还要抽查完整性**。
+
+    ⚠️ **为什么要抽查**（2026-10-02 外部反馈的教训）：0.9.2 之前那个 bug 会把 staging 里
+    Mod ini 的 **shader 汇编 `endif`** 删掉（`[ShaderRegex*.Pattern.Replace]` 段，实测
+    `RabbitFX.ini` 删 62 行、湿润效果修复删 11 行、旗袍 `CutoutMask.ini` 删 4 行）⇒ 汇编不闭合
+    ⇒ 驱动着色器编译器崩（`nvgpucomp64`）或模型干脆不出。它**只改 staging 副本、库里的原件是好的**，
+    可是**已经生成过的 staging 会一直带着伤**：用户升级到新版后若不重新「一键启动」，
+    游戏读到的仍是坏的，他会以为"新版没用"。所以这里主动发现 + **按库里的原件自动重新生成**。
+    """
     if not config.effective_selected_mods:
         report.add("staging", True, "没有选中任何 Mod（跳过）")
         return
     mods_dir = config.staging_mods_path
     existing = [d for d in mods_dir.glob("MC_*") if d.is_dir() and d.name not in {"MC_Controller"}] if mods_dir.is_dir() else []
-    if existing:
+    broken = _staging_broken_inis(mods_dir) if existing else []
+    if existing and not broken:
         report.add("staging", True, f"{len(existing)} 个 MC_ Mod 已 staging")
         return
+
+    # 先确认库里的原件是好的 —— 库要是也坏了，重建 staging 只是把坏文件再复制一遍
+    if broken:
+        lib_broken = _library_sources_broken(config, broken)
+        if lib_broken:
+            items = "、".join(f"{i['mod']}（{i['file']}，缺 {i['missing']} 个 endif）"
+                             for i in lib_broken[:3])
+            report.add(
+                "staging", False,
+                f"你的 **Mod 库里**有 {len(lib_broken)} 个文件被改坏了：{items} —— 这是**库里的原件**"
+                f"受损（不是本程序改的：我们只改给游戏加载的那份副本），重新生成也修不好。"
+                f"请重新下载这些 Mod；**我们不会动你的 Mod 库**。",
+                manual=True,
+            )
+            if log:
+                log(f"staging 完整性: 库里的原件受损，未自动处理（不动用户库）：{items}")
+            return
+
     try:
         from . import activation, launcher
 
@@ -1798,8 +1894,22 @@ def _check_staging(config: AppConfig, report: Report, log: Callable[[str], None]
                 getattr(config, "prefer_internal_dependencies", True)
             ),
         )
-        report.add("staging", True, f"已重新 staging {result.get('patch_count', 0)} 个 Mod", fixed=True)
-        report.action("重新 staging 选中的 Mod")
+        if broken:
+            names = "、".join(item["mod"].replace("MC_", "", 1) for item in broken[:3])
+            more = f" 等 {len(broken)} 个" if len(broken) > 3 else ""
+            report.add(
+                "staging", True,
+                f"发现 staging 里有 {len(broken)} 个 Mod 的 ini 被**旧版本**改坏"
+                f"（shader 汇编里少了 `endif`，会让游戏崩或模型不显示）：{names}{more}"
+                f" —— 已按你库里的原件重新生成（库里的文件一直没动过）",
+                fixed=True,
+            )
+            report.action("按库里原件重新生成被旧版改坏的 staging")
+            if log:
+                log(f"staging 完整性: 旧版误删 endif 的 Mod 已重新生成：{names}{more}")
+        else:
+            report.add("staging", True, f"已重新 staging {result.get('patch_count', 0)} 个 Mod", fixed=True)
+            report.action("重新 staging 选中的 Mod")
     except Exception as exc:  # noqa: BLE001
         report.add("staging", False, f"staging 失败: {exc}", manual=True)
 

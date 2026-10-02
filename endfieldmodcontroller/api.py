@@ -774,7 +774,14 @@ class EndfieldModControllerApi:
         return {
             "ok": True,
             "path": str(path),
-            "crashed": bool(evidence.get("crash_sight")),
+            # ⚠️ **判据必须与包内报告 / 崩溃监控一致**（2026-10-02 修）：这里原本是
+            # `bool(evidence.get("crash_sight"))` —— 那只表示"CrashSight 目录里有记录"，
+            # 而游戏自己的 `reportException`（被捕获的异常）**每次运行都会打**，不等于崩溃。
+            # 后果：正常退出也被判成「崩溃判定: CrashSight 记录到异常」，还会连带挂上
+            # "Mod 资源冲突"的归因，让用户白去折腾 Mod（外部反馈 #11 就是这个现象：他的
+            # 界面说崩溃，而同一份日志里写的是「未检测到崩溃（正常退出）」）。
+            # 统一走 `crashwatch.is_crash`（只有真的上传了崩溃转储 uploadCrash 才算崩）。
+            "crashed": crashwatch.is_crash(evidence),
             "crash_dirs": [c.get("report_dir") for c in (evidence.get("crashes") or [])],
         }
 

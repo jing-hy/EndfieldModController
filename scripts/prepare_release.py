@@ -23,6 +23,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from release_version import report as report_version_rule  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "dist"
 VERSION_PY = ROOT / "endfieldmodcontroller" / "version.py"
@@ -57,6 +60,8 @@ def main() -> int:
     _fix_console()
     version = read_version()
     print(f"== 准备 v{version} 的发布附件 ==", flush=True)
+    # 版本号规则核对（用户 2026-10-02）：本地应为「最新 Release + 1」；只推源码没发 Release 时不动号。
+    report_version_rule()
 
     exe = DIST / f"{APP_NAME}.exe"
     versioned = DIST / f"{APP_NAME}-{version}.exe"
@@ -100,7 +105,7 @@ def main() -> int:
      --notes "（把这一版的更新说明填在这里，或用 --notes-file RELEASE_NOTES.md）"
 
    提醒：
-     * 版本号规则 = 与 GitHub 上有区别就升下一版、未推送期间只领先一个；
+     * 版本号规则 = **只跟"最新 Release"比**、本地领先它一个；只推了源码没发 Release 时**不改号**；
      * 伪旧版（0.1.9-from-{version}）与带版本号副本**不要**上传；
      * 上传前建议先核对 sha256 与上面的值一致。
 """, flush=True)

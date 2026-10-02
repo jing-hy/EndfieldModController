@@ -82,7 +82,7 @@ def plan_dependencies(
     keys: Iterable[str],
     *,
     prefer_internal: bool = True,
-    skip_known_bad: bool = True,
+    skip_known_bad: bool = False,
 ) -> tuple[dict[str, mc_core.ModInfo], list[dict[str, str]]]:
     """为每个"需要的依赖"挑**唯一一份**，其余记成"已屏蔽"。
 
@@ -92,10 +92,18 @@ def plan_dependencies(
     ⇒ 规则：① 开关决定"内部 / 外部"哪一侧优先；② **优先侧有就只从这一侧取**，另一侧
     整侧屏蔽；③ 同一侧有多份时**只留最后安装的那一份**；④ 优先侧没有才退到另一侧
     （同样只留最后安装的那一份）；⑤ 两侧都没有 → 不在这里决定（调用方按"缺失"报）。
-    ⑥ `skip_known_bad`（**默认 True**）：`core.KNOWN_BAD_DEPENDENCIES` 里的依赖**一律不选**
-    —— 用户 2026-10-02 的要求「**包含 RabbitFX 要程序能自动不加载它**」「**自动不加载默认开**」。
-    库里留着他的文件，我们只是不放它进 staging，并在日志里说明原因（不弹窗、不要求他动手）。
-    把这边翻成 `False`（或在设置页加开关）即可恢复成普通依赖。
+    ⑥ `skip_known_bad`（**2026-10-02 起默认 `False` = 不屏蔽**）：`core.KNOWN_BAD_DEPENDENCIES`
+    里的依赖**照常进 staging**。
+    **为什么把默认翻转过来**：当初给 RabbitFX 定罪的判据是"它一进 staging，游戏启动几十秒后
+    必崩在 `nvgpucomp64`"—— 而那个现场是**我们自己的 bug 造的**：`core.sanitize_ini_control_flow()`
+    把 `[ShaderRegex*.Pattern.Replace]` 里**要塞进游戏 shader 的汇编 `endif`** 当成 ini 控制流删掉
+    （实测 `RabbitFX.ini`：67 → 5 个 endif，**删了 62 行**），汇编不闭合 ⇒ 驱动编译器当场崩。
+    **0.9.2 修掉该 bug 后**，回测显示 staging 产物与库里的源**逐字节一致**（350 个文件 0 差异）。
+    ⇒ 按用户准则「**先保留判断机制、停掉动作**」：判据与理由都留在 `KNOWN_BAD_DEPENDENCIES` 里，
+    只是不再自动屏蔽。**用户原话：「你把 RabbitFX 加回去，然后让我测试」** —— 等实测确认
+    "现在真的不崩"之后再定是永久解除还是恢复屏蔽。
+    **要复活（改回屏蔽）**：把这里和 `resolve_active_set` 的默认值改回 `True`
+    （或在设置页做成开关）。
 
     ⚠️ **为什么必须有"只留一份"**：RabbitFX 作者在 GameBanana 页面上写死过
     「Having multiple RabbitFXs will cause unexpected behaviours and game crashes…
@@ -104,7 +112,14 @@ def plan_dependencies(
     internal: dict[str, list[mc_core.ModInfo]] = {}
     external: dict[str, list[mc_core.ModInfo]] = {}
     for mod in mods:
-        key = mc_core.dependency_key_of(getattr(mod, "name", ""))
+        name = str(getattr(mod, "name", ""))
+        # **皮肤包不能当依赖候选**（2026-10-02，与 `core.infer_kind_and_group` 同一判据）：
+        # 作者会把前置名写进皮肤包名（`laevatain_..._rabbitfx_da62a`），只按名字匹配就会把
+        # 它当成"RabbitFX 的一份"—— 一旦 RabbitFX 不再被"已知有害"那道闸拦住，这个 208 MB
+        # 的皮肤包就会被当作依赖整个塞进 staging。判据要求"名字像依赖 **且** 没有换装资源"。
+        if not mc_core.is_dependency_package(name, Path(str(getattr(mod, "path", "")))):
+            continue
+        key = mc_core.dependency_key_of(name)
         if not key:
             continue
         (internal if _is_internal_dependency(mod) else external).setdefault(key, []).append(mod)
@@ -188,7 +203,10 @@ def resolve_active_set(
     *,
     allow_same_character: bool = False,
     prefer_internal_dependencies: bool = True,
-    skip_known_bad_dependencies: bool = True,
+    # 2026-10-02：默认 `False` = 不再自动屏蔽 `KNOWN_BAD_DEPENDENCIES`（RabbitFX 照常进 staging）。
+    # 原因见 `plan_dependencies` 的 ⑥：那次"进 staging 就崩"是我们自己删 shader 汇编 `endif`
+    # 造成的，用户在等实测。要恢复屏蔽就把这里改回 `True`。
+    skip_known_bad_dependencies: bool = False,
 ) -> tuple[list[mc_core.ModInfo], ActivationReport]:
     """解析"最终要生效的 Mod 集合"。
 
@@ -750,14 +768,21 @@ def stage_and_prepare(
         json.dumps(active_targets, ensure_ascii=False, indent=2),
         newline=chr(10),
     )
+    # 加载探针：只用来确认「我们生成的 ini 有没有被加载、`[Present]` 有没有跑」。
+    # 2026-10-02（用户批准「探针可以清掉」）：**不再每帧自增** —— 改成每 5 秒记一次，
+    # 「计数在涨」这个判据不变，而每帧的开销归零。`$mc_probe_loaded` 是常量，零开销。
     fsutil.write_text_atomic(
         staging_root / "MC_Probe.ini",
         "; EndfieldModController load probe" + chr(10)
         + "[Constants]" + chr(10)
         + "global persist $mc_probe_loaded = 20261001" + chr(10)
         + "global persist $mc_probe_frames = 0" + chr(10)
+        + "global persist $mc_probe_t = 0" + chr(10)
         + "[Present]" + chr(10)
-        + "$mc_probe_frames = $mc_probe_frames + 1" + chr(10),
+        + "if time > $mc_probe_t" + chr(10)
+        + "    $mc_probe_t = time + 5" + chr(10)
+        + "    $mc_probe_frames = $mc_probe_frames + 1" + chr(10)
+        + "endif" + chr(10),
         newline=chr(10),
     )
 

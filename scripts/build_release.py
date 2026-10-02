@@ -38,6 +38,9 @@ import sys
 import time
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from release_version import report as report_version_rule  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "dist"
 OLD_DIR = DIST / "_old"
@@ -294,6 +297,9 @@ def main() -> int:
     version = read_version()
     print(f"== 构建 EndfieldModController {version} ==", flush=True)
     check_readme_versions(version)
+    # 版本号规则核对（用户 2026-10-02）：**只跟"最新 Release"比** —— 本地应为「最新 Release + 1」；
+    # 只推了源码没发 Release 时不动号。查不到只提示、不中止（这条是软约束）。
+    report_version_rule()
 
     # [0] 先编译统一控制面板（ReShade addon）：它要随进 exe，构建晚于它就等于带了旧面板。
     if "--skip-addon" in args:
