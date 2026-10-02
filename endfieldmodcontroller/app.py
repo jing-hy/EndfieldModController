@@ -32,6 +32,18 @@ def _resource_root() -> Path:
 WEB_DIR = _resource_root() / "web"
 
 
+def _index_html() -> Path:
+    """窗口要加载的页面。
+
+    **默认继续用原生页面**；只有 Vite 产物就绪、**并且**放了接管标记（`web/dist/.ready`）时才切过去。
+    这样 Phase 1 做到一半也不会让人看到半成品界面，切换与回退都只是删/加一个标记文件的事。
+    """
+    dist = WEB_DIR / "dist"
+    if (dist / ".ready").is_file() and (dist / "index.html").is_file():
+        return dist / "index.html"
+    return WEB_DIR / "index.html"
+
+
 def _already_running() -> bool:
     """Windows 命名互斥体：判断是否已经有控制器在跑。"""
     if os.name != "nt":
@@ -155,7 +167,7 @@ def main(argv: list[str] | None = None) -> int:
 
     window = webview.create_window(
         WINDOW_TITLE,
-        str(WEB_DIR / "index.html"),
+        str(_index_html()),
         js_api=api,
         width=1180,
         height=800,

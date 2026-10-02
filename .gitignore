@@ -72,3 +72,10 @@ desktop.ini
 
 # 数据/资产改写时留下的备份（.mc.bak.<时间戳>）不入库：git 历史本身就是回溯手段
 *.mc.bak.*
+
+# 前端（Vue + Vite）：只提交源码与**构建产物** web/dist/（PyInstaller 打包要用它，
+# 而构建机以外的机器没有 node），node_modules 绝不入库。
+frontend/node_modules/
+frontend/.vite/
+# 运行时产物：Mod 备份仓（内容随用户库变化，不该进版本库）
+mod-backup/

@@ -34,8 +34,12 @@ APP_NAME = "EndfieldModController"
 # 悄悄退化成"内置兜底数据"（角色表踩过一次：exe 里没有 characters.json，33 位角色全没了）。
 # 面板也一样：没有它，「整合 Mod 快捷键」会因为"面板不存在"而拒绝锁键（这是对的，
 # 但用户会以为是开关坏了），所以它必须进包。
+# 前端：Vite 产物**只有在放了接管标记**（`web/dist/.ready`）时才带上，否则回退原生 `web/` ——
+# 于是构建永远不会因为"前端还没弄好"而打出半成品界面（Phase 0/1 期间的切换保险）。
+_WEB_READY = (ROOT / "web" / "dist" / ".ready").is_file() and (ROOT / "web" / "dist" / "index.html").is_file()
+_WEB_SRC = "web/dist" if _WEB_READY else "web"
 ADD_DATA = [
-    ("web", "web"),
+    (_WEB_SRC, "web"),
     ("endfieldmodcontroller/characters.json", "endfieldmodcontroller"),
     ("endfieldmodcontroller/hotkey_hints.json", "endfieldmodcontroller"),
     ("assets/addon/endfieldmodcontroller.addon64", "assets/addon"),

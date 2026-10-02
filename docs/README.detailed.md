@@ -5,7 +5,7 @@
 
 《明日方舟：终末地》的一站式 Mod 管理器：把 **DLSS5 神经渲染 + 第一人称视角 + 服装 Mod（EFMI）** 以及 **乳摇（SecondaryMotion）** 统一到一次「一键启动」里，并自动维护各项注入与初始化自检。
 
-Windows 桌面程序（Python + PyWebview），单文件 exe，**零配置启动即用**。当前版本 **0.9.5**。
+Windows 桌面程序（Python + PyWebview），单文件 exe，**零配置启动即用**。当前版本 **0.9.6**。
 
 > 💬 **QQ 群：1045239747**（加群验证答案 `jing_hy`）—— 不方便用 GitHub 或想直接问，都可以在群里发诊断包；记得附上现象。
 
@@ -686,3 +686,20 @@ python scripts\upload_release_assets.py  :: 上传两个附件（大文件走直
 - 使用 Mod 可能违反游戏用户协议，**风险由使用者自负**；请自行确认你所在环境的规则。
 - 本程序会读写游戏目录中的注入类文件（`d3d12.dll` / `d3dcompiler_47.dll` / `vulkan-1.dll` / `plugin\sbm.dll` / `plugin\poser.dll` / `plugin\poses\` / `plugin\mmd\` / `SecondaryMotion\` 等），但一律先备份、且提供一键还原；**不会**修改游戏本体、资源与存档。
 - 第三方组件由其原作者维护，出问题请先到对应仓库反馈；本程序的集成问题欢迎开 issue，或加 **QQ 群 `1045239747`**（验证答案 `jing_hy`）。
+
+
+## 前端技术栈与构建
+
+界面在 **0.9.6** 换代：从"原生 HTML/CSS/JS"迁到 **Vue 3 + Vite + Tailwind CSS**。
+
+* 源码在 `frontend/`（`src/pages/*.vue` 一页一个文件、`src/components/ui/*` 是共用组件、
+  `src/lib/bridge.js` 是**唯一**的 pywebview 桥接点、`src/lib/settings.js` 集中所有设置项）。
+* 构建：`cd frontend && npm install && npm run build` —— 产物是**单文件** `web/dist/index.html`
+  （JS/CSS 全内联，并强制打成 IIFE，这样 pywebview 继续用 `file://` 加载，**不需要起本地 HTTP 服务**）。
+* **切换开关**：`web/dist/.ready` 标记文件。有它 → 程序加载 `web/dist/index.html`（新前端）；
+  没有 → 回退 `web/index.html`（旧前端）。打包脚本与 `app.py` 都按同一个判据走，
+  所以"前端没构建好"永远不会打出坏包。
+* `scripts/build_release.py` 会校验**产物不比 `frontend/src` 旧**（防止改了源码忘了构建）。
+* 设计令牌在 `frontend/src/styles/tokens.css`：浅色基底 + 去饱和强调色；6 套主题沿用原名字
+  （`light/dark/amber/cyan/violet/emerald`，存在 `localStorage('mc-theme')`，改名会让用户设置失效）。
+* ⚠️ **日志框在任何主题下都是纯黑 + 可复制**，这是硬要求，换皮时不能丢。

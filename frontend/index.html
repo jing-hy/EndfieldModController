@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <title>EndfieldModController</title>
+    <!-- ★ 首屏主色：必须在 <head> 内联、在样式表之前生效，否则会先闪一下默认色
+         （用户 2026-10-01 要求「启动最开始就要扫主色调的配置换启动页主色」）。
+         白名单与 store.js 的 THEMES 必须保持一致。 -->
+    <script>
+      (function () {
+        try {
+          var ok = ["light", "dark", "amber", "cyan", "violet", "emerald"];
+          var t = localStorage.getItem("mc-theme") || "light";
+          document.documentElement.setAttribute("data-theme", ok.indexOf(t) >= 0 ? t : "light");
+        } catch (e) { /* 隐私模式忽略 */ }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
