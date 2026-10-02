@@ -664,10 +664,29 @@ def set_feed_addon_enabled(
         return {"ok": False, "enabled": enabled, "moved": [], "message": f"创建 _disabled 失败: {exc}"}
     source_dir, target_dir = (disabled, base) if enabled else (base, disabled)
     moved: list[str] = []
+    removed: list[str] = []
     for pattern in FEED_ADDON_GLOBS:
         for path in sorted(source_dir.glob(pattern)):
             target = target_dir / path.name
             if target.exists():
+                # ⚠️ **目标已存在不能只是 `continue`**（2026-10-02 反馈者 31002 的现场）：
+                # 他那台机器 `runtime\dlss5\` 与 `_disabled\` 里**各有一份**
+                # `dlss5-feed.addon64`（大概是"放回"时用复制而不是移动、或手工拷回来的）。
+                # 于是 `feed_addon_status` 说"启用中"（走进停用分支）、这里说"无需停用"，
+                # 两个判据互相矛盾 ⇒ **什么也没做** ⇒ ReShade 一直加载着 feed，
+                # 与 `renodx-dlss5` 抢同一条 NGX 链路 ⇒ 游戏 42 秒静默退出。
+                # 目标位置**已经是我们想要的状态** ⇒ 把源位置这份多余的删掉，才算真到位。
+                try:
+                    path.unlink()
+                except OSError as exc:
+                    return {"ok": False, "enabled": enabled, "moved": moved, "removed": removed,
+                            "message": f"清理多余副本 {path.name} 失败: {exc}"}
+                removed.append(path.name)
+                if log is not None:
+                    try:
+                        log(f"喂帧组件 dlss5-feed: 清掉多余副本 {path.name}（两处各有一份）")
+                    except Exception:  # noqa: BLE001
+                        pass
                 continue
             try:
                 shutil.move(str(path), str(target))
@@ -685,8 +704,11 @@ def set_feed_addon_enabled(
         "ok": True,
         "enabled": enabled,
         "moved": moved,
+        "removed": removed,
         "message": (f"已{action}喂帧组件（{', '.join(moved)}）" if moved
-                    else f"喂帧组件无需{action}（已经到位）"),
+                    else (f"已清掉 {len(removed)} 个多余副本（{', '.join(removed)}），状态已到位"
+                          if removed
+                          else f"喂帧组件无需{action}（已经到位）")),
     }
 
 
