@@ -117,6 +117,26 @@ def test_status_installed_with_poser_loader(env):
     assert poser._needs_install(state) == (False, "")
 
 
+def test_install_record_with_bom_is_recognised(env):
+    """上游写的安装记录**带 UTF-8 BOM**，必须照读（2026-10-02 反馈者诊断包定位）。
+
+    `tools\\deploy.ps1` 用 PowerShell 5.1 的 `Set-Content … -Encoding UTF8` 写这份记录，
+    它会写 BOM；以前按 `utf-8` 读 → `json.loads` 抛 `Unexpected UTF-8 BOM` → 被吞成 `{}`
+    → 判「缺少安装记录 plugin\\poser-install.json」→ **每点一次「修复」都重跑一遍 Poser
+    安装向导**，界面停在「修复后仍有缺失」（向导每次都回"无需替换"，所以永远修不好）。
+    """
+    _write(env.game / "plugin" / "poser.dll", FAKE_POSER_DLL)
+    _write(env.game / "d3dcompiler_47.dll", POSER_PROXY)
+    _write(env.game / "plugin" / "mmd" / "character-faces" / "aglina-9fb0b6c4fbb6.face.json", b"{}")
+    record = json.dumps(_installed_record(env.game)).encode("utf-8")
+    _write(env.game / "plugin" / "poser-install.json", b"\xef\xbb\xbf" + record)   # 带 BOM
+
+    state = poser.status(env.config, include_web=False)
+    assert state["record"] is True, "带 BOM 的记录必须被认出来（否则每次修复都会重装一遍 Poser）"
+    assert state["record_consistent"] is True
+    assert poser._needs_install(state) == (False, "")
+
+
 def test_status_middle_state_after_clean(env):
     """净化之后：安装记录还在，但 dll 与 proxy 已被移走 → 必须判成"需要重装"。"""
     _write(env.game / "plugin" / "poser-install.json",

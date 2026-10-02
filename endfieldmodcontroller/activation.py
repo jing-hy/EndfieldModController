@@ -82,6 +82,7 @@ def plan_dependencies(
     keys: Iterable[str],
     *,
     prefer_internal: bool = True,
+    skip_known_bad: bool = True,
 ) -> tuple[dict[str, mc_core.ModInfo], list[dict[str, str]]]:
     """为每个"需要的依赖"挑**唯一一份**，其余记成"已屏蔽"。
 
@@ -91,6 +92,10 @@ def plan_dependencies(
     ⇒ 规则：① 开关决定"内部 / 外部"哪一侧优先；② **优先侧有就只从这一侧取**，另一侧
     整侧屏蔽；③ 同一侧有多份时**只留最后安装的那一份**；④ 优先侧没有才退到另一侧
     （同样只留最后安装的那一份）；⑤ 两侧都没有 → 不在这里决定（调用方按"缺失"报）。
+    ⑥ `skip_known_bad`（**默认 True**）：`core.KNOWN_BAD_DEPENDENCIES` 里的依赖**一律不选**
+    —— 用户 2026-10-02 的要求「**包含 RabbitFX 要程序能自动不加载它**」「**自动不加载默认开**」。
+    库里留着他的文件，我们只是不放它进 staging，并在日志里说明原因（不弹窗、不要求他动手）。
+    把这边翻成 `False`（或在设置页加开关）即可恢复成普通依赖。
 
     ⚠️ **为什么必须有"只留一份"**：RabbitFX 作者在 GameBanana 页面上写死过
     「Having multiple RabbitFXs will cause unexpected behaviours and game crashes…
@@ -109,6 +114,27 @@ def plan_dependencies(
     for key in sorted({str(k).lower() for k in keys}):
         if key not in mc_core.DEFAULT_DEPENDENCIES:
             continue                    # 未知依赖：不在这里处理（调用方按 missing 报）
+        bad_reason = mc_core.KNOWN_BAD_DEPENDENCIES.get(key) if skip_known_bad else None
+        if bad_reason:
+            # **已知会崩的依赖：一个变体都不放进 staging**（内外两侧都屏蔽，如实说清原因）
+            for mod in list(internal.get(key, [])) + list(external.get(key, [])):
+                blocked.append({
+                    "name": str(getattr(mod, "name", "")),
+                    "path": str(getattr(mod, "path", "")),
+                    "key": key,
+                    "skipped": "known_bad",
+                    "reason": f"已知会导致游戏崩溃，已自动跳过（{bad_reason}）",
+                })
+            # 库里连一份都没有时，也要留一条"跳过"记录（这样不会被误报成"依赖缺失"）
+            if not (internal.get(key) or external.get(key)):
+                blocked.append({
+                    "name": mc_core.DEFAULT_DEPENDENCIES[key]["display"],
+                    "path": "",
+                    "key": key,
+                    "skipped": "known_bad",
+                    "reason": f"已知会导致游戏崩溃，已自动跳过（{bad_reason}）",
+                })
+            continue
         ins = sorted(internal.get(key, []), key=_installed_at)
         outs = sorted(external.get(key, []), key=_installed_at)
         keep, drop = (ins, outs) if prefer_internal else (outs, ins)
@@ -162,6 +188,7 @@ def resolve_active_set(
     *,
     allow_same_character: bool = False,
     prefer_internal_dependencies: bool = True,
+    skip_known_bad_dependencies: bool = True,
 ) -> tuple[list[mc_core.ModInfo], ActivationReport]:
     """解析"最终要生效的 Mod 集合"。
 
@@ -226,7 +253,9 @@ def resolve_active_set(
         if not keys:
             break
         picked, dropped = plan_dependencies(
-            mods, keys, prefer_internal=prefer_internal_dependencies
+            mods, keys,
+            prefer_internal=prefer_internal_dependencies,
+            skip_known_bad=skip_known_bad_dependencies,
         )
         blocked.extend(dropped)
         pending = []
@@ -239,10 +268,18 @@ def resolve_active_set(
     report.dependencies = [m.id for m in needed.values()]
     report.dependency_choices = {key: mod.name for key, mod in needed.items()}
     report.blocked_dependencies = blocked
+    # 被"已知有害"那道闸**主动跳过**的依赖 key —— 它们**不算"库里没有"**。
+    # 2026-10-02：否则日志会自相矛盾（一边说"已自动跳过 RabbitFX"，一边又说
+    # "依赖缺失：RabbitFX（库里没有…）"）。
+    skipped_keys = {
+        str(item.get("key") or "") for item in blocked if item.get("skipped") == "known_bad"
+    }
 
     for mod in list(chosen.values()) + list(needed.values()):
         for name in _needs(mod):
             key = str(name).lower()
+            if key in skipped_keys:
+                continue
             if key in mc_core.DEFAULT_DEPENDENCIES and key not in needed:
                 if name not in report.missing_dependencies:
                     report.missing_dependencies.append(name)

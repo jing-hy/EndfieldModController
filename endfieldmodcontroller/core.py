@@ -1774,6 +1774,21 @@ DEFAULT_DEPENDENCIES = {
     "slotfix": {"display": "Slotfix", "kind": "dependency"},
 }
 
+# **已知会导致游戏崩溃的依赖 —— 库里可以留着，但绝不加载它**（2026-10-02 定案 + 用户要求）。
+# 用户原话：「**包含 RabbitFX 要程序能自动不加载它**」—— 他要的是"自动处理"，不是"提示他去移库"
+# （他先前为此找过那张根本不存在于界面的卡片）。
+#
+# 依据（当天实测，见 topic 记忆）：RabbitFX 用 10 组 `[ShaderRegex*]` **改写游戏角色 shader**，
+# 一旦进了 `Mods`，游戏启动几十秒后**必崩**在 `nvgpucomp64`（着色器编译器）——
+# 用户原话「现在可以进入了，确认生效」（移走它之后佩丽卡正常），而**同一个包在别的 XXMI
+# 环境里带着它也没事**这件事与本项目的判定无关，我们的结论来自本机可复现的对照。
+#
+# 判据仍会**照常发现**"某个 Mod 引用了 RabbitFX"，只是**不把它放进 staging**，
+# 并在日志里写明原因（`activation.dependency_note` 会输出"依赖去重：屏蔽「…」（…）"）。
+KNOWN_BAD_DEPENDENCIES: dict[str, str] = {
+    "rabbitfx": "实测会让游戏启动几十秒后崩在显卡着色器编译器（nvgpucomp64）",
+}
+
 
 def dependency_key_of(name: str) -> str:
     """这个名字属于哪个已知依赖（`rabbitfx` / `orfix` / `slotfix`）？都不像就返回空串。

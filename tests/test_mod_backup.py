@@ -75,6 +75,53 @@ class ModBackupTests(unittest.TestCase):
         target_dir = modbackup.backup_dir(self.config)
         self.assertEqual(len([p for p in target_dir.iterdir() if p.is_dir()]), 1)
 
+    # ------------------------------------------------- 总开关（用户 2026-10-02 要求）
+    def test_switch_defaults_to_on(self) -> None:
+        """默认开：连"没有这个字段"的老配置读进来也必须是开着的。"""
+        self.assertTrue(modbackup.enabled(self.config))
+        self.assertTrue(modbackup.status(self.config)["enabled"])
+
+    def test_switch_off_stops_backup_entirely(self) -> None:
+        """关了就不备份：**一个字节都不复制**，连备份目录都不建。
+
+        用户 2026-10-02 原话：「给 mod 备份做一个开关，默认开，关了就不备份」。
+        """
+        self._add_mod("Alice")
+        state = self.api.set_mod_backup_enabled(False)
+        self.assertTrue(state["ok"] and state["changed"], state)
+        self.assertFalse(state["enabled"])
+        target_dir = modbackup.backup_dir(self.config)
+        self.assertFalse(target_dir.exists(), "关掉后不该凭空多出一个空备份目录")
+
+        self.api._invalidate_mods()
+        result = self.api._backup_new_mods()
+        self.assertTrue(result.get("skipped"), result)
+        self.assertEqual(result.get("reason"), "disabled")
+        self.assertFalse(target_dir.exists(), "关掉后不该创建备份目录")
+        self.assertFalse((self.root / "mod-backup").exists())
+
+    def test_switch_off_keeps_existing_backups_and_resumes(self) -> None:
+        """只增不减优先于开关：关掉不删已有备份；重新打开后照旧补上没备份过的。"""
+        self._add_mod("Alice")
+        self.api._backup_new_mods()
+        target_dir = modbackup.backup_dir(self.config)
+        self.assertTrue((target_dir / "Alice" / "mod.ini").is_file())
+
+        self.api.set_mod_backup_enabled(False)
+        self._add_mod("Bob")
+        self.api._invalidate_mods()
+        self.api._backup_new_mods()
+        self.assertFalse((target_dir / "Bob").exists(), "关着的时候不该备份")
+        self.assertTrue((target_dir / "Alice" / "mod.ini").is_file(), "关掉开关绝不能删已有备份")
+
+        opened = self.api.set_mod_backup_enabled(True)
+        self.assertTrue(opened["ok"] and opened["changed"], opened)
+        self.api._invalidate_mods()
+        result = self.api._backup_new_mods()
+        self.assertEqual(len(result["created"]), 1, result)          # Bob 补上
+        self.assertTrue((target_dir / "Bob").is_dir())
+        self.assertTrue((target_dir / "Alice" / "mod.ini").is_file())
+
     def test_backup_survives_source_removal_and_is_never_deleted(self) -> None:
         """只增不减：源 Mod 删了、库空跑很多次，备份也必须在。"""
         source = self._add_mod("Alice")

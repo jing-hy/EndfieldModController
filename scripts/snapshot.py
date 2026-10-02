@@ -250,6 +250,13 @@ def prune(keep: int, parent: Path = SNAPSHOT_PARENT, *, quiet: bool = False) -> 
 
 
 def main(argv: list[str] | None = None) -> int:
+    # 输出里可能带非 GBK 字符（Mod 名生僻字 / 替换字符 U+FFFD），Windows 下管道默认
+    # cp936 → print 抛 UnicodeEncodeError 会把调用它的 push.py 一起带崩（2026-10-02 实测）。
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+        except Exception:  # noqa: BLE001
+            pass
     ap = argparse.ArgumentParser(description="给当前状态做一份快照（推 main 前自动执行）")
     ap.add_argument("--label", default="", help="标签，通常传版本号，如 0.9.1")
     ap.add_argument("--data-root", default=str(DEFAULT_DATA_ROOT), help="数据根（默认 ../modtest）")

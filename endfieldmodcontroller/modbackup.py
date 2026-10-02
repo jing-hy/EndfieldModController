@@ -44,6 +44,16 @@ def configured_dir(config: AppConfig) -> str:
     return str(getattr(config, "mod_backup_dir", "") or "").strip()
 
 
+def enabled(config: AppConfig) -> bool:
+    """**Mod 备份总开关**（默认开）。
+
+    用户 2026-10-02 原话：「**给 mod 备份做一个开关，默认开，关了就不备份**」。
+    关掉 = 一个字节都不复制、连备份目录都不创建；**已有的备份一个都不动**
+    （"只增不减"是这条功能的红线，开关不改变它）。
+    """
+    return bool(getattr(config, "mod_backup_enabled", True))
+
+
 def backup_dir(config: AppConfig) -> Path:
     """备份仓目录（默认 `<数据根>\\mod-backup`）。"""
     value = configured_dir(config)
@@ -118,7 +128,12 @@ def _dir_bytes(path: Path) -> int:
 
 
 def pending(config: AppConfig, mods: Sequence[Any]) -> list[Any]:
-    """还没备份过的 Mod（索引里没有，且备份目录/旧 zip 也都不存在）。"""
+    """还没备份过的 Mod（索引里没有，且备份目录/旧 zip 也都不存在）。
+
+    总开关关着时一律返回空 —— 这时"待备份"没有意义，界面也不该显示"还有 N 个待打包"。
+    """
+    if not enabled(config):
+        return []
     known = {
         str(entry.get("id") or "")
         for entry in _read_index(config).get("entries", [])
@@ -139,6 +154,10 @@ def pending(config: AppConfig, mods: Sequence[Any]) -> list[Any]:
 
 def backup_mod(config: AppConfig, mod: Any, *, log: Callable[[str], None] | None = None) -> dict[str, Any]:
     """把一个 Mod **整份复制**进备份仓；已有同名目录/旧 zip 就只登记不重拷。"""
+    if not enabled(config):
+        # 关掉总开关：连备份目录都不建（否则"关了还凭空多个空目录"）。
+        return {"ok": True, "skipped": True, "disabled": True,
+                "message": "Mod 备份已关闭（设置页「Mod 备份」滑块可打开）"}
     target_dir = backup_dir(config)
     if _overlaps_library(config, target_dir):
         return {"ok": False, "skipped": True,
@@ -198,6 +217,9 @@ def backup_all(
     log: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """把这一批里"新见到的"Mod 逐个备份（单项失败不中断，最后汇总）。"""
+    if not enabled(config):
+        return {"checked": 0, "created": [], "failed": [], "disabled": True,
+                "dir": str(backup_dir(config))}
     todo = pending(config, list(mods))
     created: list[str] = []
     failed: list[str] = []
@@ -249,6 +271,7 @@ def status(config: AppConfig) -> dict[str, Any]:
     return {
         "dir": str(target),
         "exists": target.is_dir(),
+        "enabled": enabled(config),
         "count": len(folders) + len(zips),
         "folders": len(folders),
         "legacy_zips": len(zips),
@@ -291,6 +314,28 @@ def set_backup_dir(config: AppConfig, value: str | Path | None) -> dict[str, Any
     state = status(config)
     state.update({"ok": True, "changed": changed, "previous": str(previous_dir),
                   "configured": configured_dir(config)})
+    return state
+
+
+def set_enabled(config: AppConfig, value: bool) -> dict[str, Any]:
+    """开/关 **Mod 备份总开关**（设置页滑块，默认开）。
+
+    用户 2026-10-02 原话：「给 mod 备份做一个开关，默认开，关了就不备份」。
+    规则：
+    * 关掉 = **不再复制任何东西**（`backup_mod`/`backup_all` 直接跳过、连备份目录都不建）；
+    * **已有的备份一个都不动、目录也不删**（"只增不减"是这条功能的红线，开关不改变它）；
+    * 重新打开后，库里"还没备份过"的 Mod 会在下次扫描/一键启动时照旧补上（索引没丢）。
+    """
+    previous = enabled(config)
+    config.mod_backup_enabled = bool(value)
+    try:
+        config.save()
+    except OSError as exc:
+        config.mod_backup_enabled = previous
+        return {"ok": False, "changed": False, "enabled": previous,
+                "message": f"保存配置失败：{exc}"}
+    state = status(config)
+    state.update({"ok": True, "changed": previous != bool(value), "enabled": bool(value)})
     return state
 
 

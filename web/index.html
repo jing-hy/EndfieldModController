@@ -188,6 +188,10 @@
           <span class="setting-label">Mod 库目录</span>
           <input id="cfg-library_dir" type="text" placeholder="library">
         </div>
+        <div class="setting-row switch-row">
+          <span class="setting-label" title="关掉后不再把 Mod 库里的 Mod 复制进备份仓；已有的备份一个都不会删（只增不减）。">Mod 备份（默认开，关了就不备份）</span>
+          <label class="switch"><input type="checkbox" id="cfg-mod-backup-enabled" checked><span class="slider"></span></label>
+        </div>
         <div class="setting-row">
           <span class="setting-label">Mod 备份目录<em>留空 = 主路径下的 mod-backup（只增不减）</em></span>
           <div class="input-with-button">

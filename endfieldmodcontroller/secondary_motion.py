@@ -128,10 +128,15 @@ def status(config: AppConfig) -> dict[str, Any]:
     status_file = data_dir / "runtime" / "runtime_status.json"
     if status_file.is_file():
         try:
-            payload = json.loads(status_file.read_text(encoding="utf-8"))
+            # ⚠️ 这些 json 都是**外部程序写的**（插件 / 上游工具包 / 乳摇管理器），
+            #    一律按 `utf-8-sig` 读：PowerShell 5.1 的 `-Encoding UTF8` 会写 BOM，
+            #    按 `utf-8` 读会抛 UnicodeDecodeError/JSONDecodeError 被吞成"空配置"
+            #    （Poser 安装记录就是这么被误判成"缺失"的，2026-10-02 定位）。
+            #    utf-8-sig 对无 BOM 文件与 utf-8 完全等价。
+            payload = json.loads(status_file.read_text(encoding="utf-8-sig"))
             payload["age_s"] = round(time.time() - status_file.stat().st_mtime, 1)
             result["runtime"] = payload
-        except (OSError, json.JSONDecodeError):
+        except (OSError, ValueError):
             result["runtime"] = {}
     log_file = game / "plugin" / "sbm_log.txt"
     if log_file.is_file():

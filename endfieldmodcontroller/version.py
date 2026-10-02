@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 APP_NAME = "EndfieldModController"
-__version__ = "0.9.2"
+__version__ = "0.9.3"
 
 # 自我更新与"检查更新"指向的仓库
 REPO = "jing-hy/EndfieldModController"

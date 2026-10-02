@@ -695,7 +695,11 @@ def _xxmi_summary(config: Any) -> list[str]:
     except (OSError, json.JSONDecodeError) as exc:
         lines.append(f"读取失败       : {exc}")
         return lines
-    section = data.get("Config") or {}
+    # ⚠️ 段名是 **`Launcher`**（XXMI 的 `config_version` 2.2.x 实测），不是 `Config`。
+    #    2026-10-02 由反馈者诊断包定位：读错段会让这一行**永远**打印 `active_importer: None`
+    #    / `enabled_importers: None` —— 本机正常环境（`Launcher.active_importer == 'EFMI'`）
+    #    也一样是 None，等于每次排查都被自己的摘要带偏。（`Config` 只作为老版兜底。）
+    section = data.get("Launcher") or data.get("Config") or {}
     lines.append(f"active_importer   : {section.get('active_importer')!r}")
     lines.append(f"enabled_importers : {section.get('enabled_importers')!r}")
     importers = data.get("Importers") or {}

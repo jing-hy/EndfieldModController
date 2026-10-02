@@ -68,12 +68,19 @@ global persist $enabled = 1
         self.assertEqual(report.dependencies, [])
 
     def test_dependency_activated_when_required(self) -> None:
-        """被 requires 真正引用到的依赖仍必须激活（含传递依赖）。"""
+        """被 requires 真正引用到的依赖仍必须激活（含传递依赖）。
+
+        ⚠️ 显式关掉"跳过已知有害依赖"：本测试的依赖 fixture 名字里就含 `rabbitfx`，
+        而默认开启的那道闸（用户 2026-10-02 要求「自动不加载默认开」）会把它挡住 ——
+        那是另一条独立行为，由 `test_dependency_activation.py` 里的专项测试覆盖。
+        """
         mods = core.scan_library(self.library, self.staging)
         char = next(m for m in mods if m.kind == "character")
         dep = next(m for m in mods if m.kind == "dependency")
         char.requires = [dep.name]
-        active, report = activation.resolve_active_set(mods, [char.id])
+        active, report = activation.resolve_active_set(
+            mods, [char.id], skip_known_bad_dependencies=False
+        )
         self.assertIn(dep.id, [m.id for m in active])
         self.assertEqual(report.dependencies, [dep.id])
 

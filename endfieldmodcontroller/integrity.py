@@ -151,6 +151,30 @@ def repair_integrity(config: AppConfig, log: Callable[[str], None] | None = None
     except Exception as exc:  # noqa: BLE001
         note(f"准备 XXMI 配置文件失败: {exc}")
 
+    # ②.5 **XXMI 的签名密钥与 `Security.user_signature` 必须先就位** —— 与「一键启动」的
+    #     `launcher.ensure_injections()`（在写任何配置**之前**调 `ensure_xxmi_signing_key`）
+    #     保持一致。少了这一步，「修复」写进去的 `extra_libraries_signature` 会在 XXMI
+    #     下次启动时被它自己重新生成的密钥作废 → 它弹「Failed to validate unsecure
+    #     settings!」→ 用户一点 Reset，注入列表就被清空。
+    #
+    #     为什么"修复"链路特别容易缺这一步（2026-10-02 反馈者诊断包实证）：
+    #     `bootstrap_xxmi_config()` 拉起 XXMI 生成配置后是**强杀**它的 —— XXMI 自己生成的
+    #     密钥对落了盘，`user_signature` 却没来得及落盘（诊断包里 `Security.user_signature`
+    #     长度 **0**，正常环境是 140）；而 `sign_xxmi_setting()` 只在**私钥文件缺失**时才补
+    #     这一对，私钥已存在 → 永远补不上，用户表现为「点多少次修复都还是不行」。
+    try:
+        launcher_path = config.xxmi_launcher_path
+        xxmi_config = (reshade_integration.xxmi_config_path(launcher_path)
+                       if launcher_path is not None else None)
+        if xxmi_config is not None and xxmi_config.is_file():
+            key_state = launcher_mod.ensure_xxmi_signing_key(xxmi_config)
+            if key_state.get("generated"):
+                note(str(key_state.get("message") or "已生成 XXMI 签名密钥"))
+            elif not key_state.get("ok"):
+                note(f"准备 XXMI 签名密钥失败: {key_state.get('message')}")
+    except Exception as exc:  # noqa: BLE001
+        note(f"准备 XXMI 签名密钥失败: {exc}")
+
     note("重新生成控制器和 staging")
     activation.stage_and_prepare(
         config.library_path,

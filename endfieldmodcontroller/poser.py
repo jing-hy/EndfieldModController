@@ -149,13 +149,25 @@ def _decode_output(raw: bytes) -> str:
 
 
 def _read_install_record(game: Path) -> dict[str, Any]:
-    """读上游向导写的安装记录 `plugin\\poser-install.json`（状态唯一真源）。"""
+    """读上游向导写的安装记录 `plugin\\poser-install.json`（状态唯一真源）。
+
+    ⚠️ **必须按 `utf-8-sig` 读**（2026-10-02 由反馈者诊断包定位）：这份记录是上游
+    `tools\\deploy.ps1` 用 `Set-Content -LiteralPath … -Encoding UTF8` 写的，
+    而 Windows PowerShell 5.1 的 `-Encoding UTF8` **带 UTF-8 BOM**。
+    以前这里用 `utf-8` + `json.loads` → 抛 `Unexpected UTF-8 BOM` → 被 except 吞成
+    `{}` → `status()["record"]` 永远是 False → `_needs_install()` 永远回
+    「缺少安装记录 plugin\\poser-install.json」→ **每点一次「修复」/「一键启动」就重跑一遍
+    Poser 安装向导**（向导每次都回"无需替换；安装记录已同步"），用户看到的就是
+    「点多少次修复都还是那一条」。`utf-8-sig` 对无 BOM 的文件与 `utf-8` 完全等价，
+    所以老记录照读不误。
+    """
     path = game / PLUGIN_DIR_NAME / INSTALL_RECORD_NAME
     if not path.is_file():
         return {}
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        # ValueError 同时覆盖 JSONDecodeError 与 UnicodeDecodeError（编码不符时别炸上层）
         return {}
     if not isinstance(data, dict) or data.get("product") != "Endfield Poser":
         return {}

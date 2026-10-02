@@ -77,6 +77,11 @@ class EndfieldModControllerApi:
             if callable(log):
                 log(message)
 
+        if not modbackup.enabled(self.config):
+            # 总开关关着（用户 2026-10-02 要求）：不复制、不建目录，也不写日志 ——
+            # 关掉是用户的明确选择，不是故障，不该每扫一次就刷一行。
+            return {"ok": True, "skipped": True, "reason": "disabled"}
+
         if background:
             def worker() -> None:
                 try:
@@ -142,6 +147,34 @@ class EndfieldModControllerApi:
                 launcher._append_log(self.config, f"Mod 备份目录未变：{result['dir']}")
         elif result.get("message"):
             launcher._append_log(self.config, f"WARN Mod 备份目录未改：{result['message']}")
+        return {**self.mod_backup_status(), **result}
+
+    def set_mod_backup_enabled(self, enabled: bool = True) -> dict[str, Any]:
+        """设置页「Mod 备份」总开关（用户 2026-10-02：「默认开，关了就不备份」）。
+
+        关掉只影响"以后还备不备份"：**已有备份一个都不动**（只增不减是红线），
+        重新打开后库里还没备份过的 Mod 会在下次扫描/一键启动时补上。
+        切换时写一行日志 —— "关了以后什么都没发生"事后不好判断是不是开关的缘故。
+        """
+        from . import modbackup
+
+        result = modbackup.set_enabled(self.config, bool(enabled))
+        if result.get("ok"):
+            if result.get("changed"):
+                if enabled:
+                    launcher._append_log(
+                        self.config,
+                        "Mod 备份已开启：库里新见到的 Mod 会整份复制到 "
+                        f"{result.get('dir')}（只增不减，程序不会删那里的文件）",
+                    )
+                else:
+                    launcher._append_log(
+                        self.config,
+                        "Mod 备份已关闭：不再复制任何 Mod（已有备份原样保留在 "
+                        f"{result.get('dir')}，一个都不删）",
+                    )
+        elif result.get("message"):
+            launcher._append_log(self.config, f"WARN Mod 备份开关未改：{result['message']}")
         return {**self.mod_backup_status(), **result}
 
     def choose_mod_backup_dir(self) -> dict[str, Any]:

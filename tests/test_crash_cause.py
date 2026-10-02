@@ -193,6 +193,34 @@ def test_diagnostic_bundle_includes_dlss5_scene(env, monkeypatch):
     assert "mod_conflicts.json" in names
 
 
+def test_xxmi_summary_reads_launcher_section(env, monkeypatch):
+    """诊断摘要里的 `active_importer` 在 **`Launcher`** 段，不是 `Config` 段。
+
+    2026-10-02 反馈者诊断包定位：读错段会让这一行**永远**打印 `None` —— 本机正常环境
+    （`Launcher.active_importer == 'EFMI'`）也一样，等于每次排查都被自己的摘要带偏，
+    历史上还被当成"XXMI 没写进去"的证据用过。
+    """
+    launcher = env.tmp / "XXMI" / "Resources" / "Bin" / "XXMI Launcher.exe"
+    launcher.parent.mkdir(parents=True, exist_ok=True)
+    launcher.write_bytes(b"MZ")
+    config_path = env.tmp / "XXMI" / "XXMI Launcher Config.json"
+    config_path.write_text(json.dumps({
+        "Launcher": {"active_importer": "EFMI", "enabled_importers": ["EFMI"]},
+        "Importers": {"EFMI": {"Importer": {
+            "extra_libraries_enabled": True,
+            "extra_libraries": str(env.dlss5 / "d3d12.dll"),
+            "extra_libraries_signature": "s" * 140,
+        }}},
+        "Security": {"user_signature": "u" * 140},
+    }, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(AppConfig, "xxmi_launcher_path", property(lambda self: launcher))
+
+    text = "\n".join(diagnostics._xxmi_summary(env.config))
+    assert "active_importer   : 'EFMI'" in text, text
+    assert "enabled_importers : ['EFMI']" in text, text
+    assert "None" not in text, text
+
+
 # --------------------------------------------------- 硬证据优先（2026-10-02 用户反馈后加的）
 def test_dlss5_crash_record_beats_static_conflict(env):
     """插件自己记下的崩溃（**实测证据**）压过"自检发现资源相交"（静态推测）。

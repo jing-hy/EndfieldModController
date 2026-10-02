@@ -61,8 +61,14 @@ class DependencyActivationTests(unittest.TestCase):
 
     def _resolve(self, prefer_internal: bool = True):
         mods = core.scan_library(self.lib, self.lib)
+        # ⚠️ 这里显式**关掉**"跳过已知有害依赖"：本文件测的是去重/内外优先级/引用判据，
+        # 那些逻辑与 `KNOWN_BAD_DEPENDENCIES` 无关，而 fixture 的名字里都带 rabbitfx ——
+        # 默认开启的那道闸会把它们全挡住。闸本身的测试见文件末尾两条。
         return activation.resolve_active_set(
-            mods, [m.id for m in mods], prefer_internal_dependencies=prefer_internal
+            mods,
+            [m.id for m in mods],
+            prefer_internal_dependencies=prefer_internal,
+            skip_known_bad_dependencies=False,
         )
 
     # -- 测试 --------------------------------------------------------
@@ -98,6 +104,37 @@ class DependencyActivationTests(unittest.TestCase):
             "注释里提到 RabbitFX 不该被当成依赖引用",
         )
         self.assertEqual(list(report.dependency_choices), [])
+
+    def test_known_bad_dependency_is_never_activated(self) -> None:
+        """**默认**就不加载已知会导致崩溃的依赖（RabbitFX）—— 内外两侧一个变体都不进 staging。
+
+        用户 2026-10-02 原话：「**包含 RabbitFX 要程序能自动不加载它**」「**自动不加载默认开**」。
+        库里留着他的文件，我们只是不放它进 staging，并在日志里说明原因（不弹窗、不要求他动手）。
+        依据：RabbitFX 改写游戏 shader ⇒ 启动几十秒后必崩在 `nvgpucomp64`（当天实测定案）。
+        """
+        self._skin()                                   # 佩丽卡：正文里真的引用 RabbitFX
+        self._internal_rabbitfx()                      # 内部一份
+        self._external_rabbitfx("（重要前置）RabbitFX v24_3d366")   # 外部一份
+        mods = core.scan_library(self.lib, self.lib)
+        chosen, blocked = activation.plan_dependencies(mods, ["rabbitfx"])   # 用默认值
+        self.assertEqual(chosen, {}, "默认就该跳过，不该选中任何一份")
+        names = [item["name"] for item in blocked]
+        reasons = " ".join(item["reason"] for item in blocked)
+        self.assertTrue(any("RabbitFX" in n for n in names), f"该把两份都记进 blocked: {names}")
+        self.assertIn("已知会导致游戏崩溃", reasons)      # 日志里能说清"为什么少了依赖"
+        # 判据仍然"发现"了它（只是不加载）
+        self.assertIn("RabbitFX", core.collect_required_dependency_names(mods))
+
+    def test_known_bad_can_be_opted_out(self) -> None:
+        """显式关掉那道闸后，行为回到普通的"按需激活 + 去重"（便于将来放开）。"""
+        self._skin()
+        self._internal_rabbitfx()
+        mods = core.scan_library(self.lib, self.lib)
+        chosen, blocked = activation.plan_dependencies(
+            mods, ["rabbitfx"], prefer_internal=True, skip_known_bad=False
+        )
+        self.assertIn("rabbitfx", chosen, "关掉闸以后应当照旧激活")
+        self.assertEqual(blocked, [])
 
     def test_manual_imported_dependency_is_found_by_name_containment(self) -> None:
         """用户手动导入的（`（重要前置）RabbitFX …` / 里层 `RabbitFX -ENDMI-`）也要能命中。"""

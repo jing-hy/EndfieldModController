@@ -1186,6 +1186,8 @@ async function refreshPaths(config) {
   // Mod 备份目录（用户 2026-10-02 要求「在设置里能自行选择备份目录」）：
   // 留空 = 主路径下的 mod-backup；填的值原样回显，方便他改到别的盘。
   if ($('cfg-mod_backup_dir')) $('cfg-mod_backup_dir').value = config.mod_backup_dir || '';
+  // 「Mod 备份」总开关（用户 2026-10-02：「默认开，关了就不备份」）
+  if ($('cfg-mod-backup-enabled')) $('cfg-mod-backup-enabled').checked = config.mod_backup_enabled !== false;
   $('cfg-staging_mods_dir').value = config.staging_mods_dir || '';
   $('cfg-runtime_dir').value = config.runtime_dir || '';
   $('cfg-xxmi_launcher').value = config.xxmi_launcher || '';
@@ -1330,12 +1332,23 @@ async function refreshFromState() {
   // Mod 备份仓：库里新见到的 Mod 会自动整份复制进去（纯备份、不压缩；只增不减，程序从不删它）
   const backup = s.mod_backup || null;
   if (backup) {
+    const backupOn = backup.enabled !== false;
+    // 总开关（用户 2026-10-02：「默认开，关了就不备份」）：开关状态与"目录输入框能否编辑"同步 ——
+    // 关着的时候目录/「选择…」置灰，避免"填了目录却没在备份"的困惑。
+    if ($('cfg-mod-backup-enabled')) $('cfg-mod-backup-enabled').checked = backupOn;
+    if ($('cfg-mod_backup_dir')) $('cfg-mod_backup_dir').disabled = !backupOn;
+    if ($('mod-backup-choose')) $('mod-backup-choose').disabled = !backupOn;
     if ($('path-mod-backup')) $('path-mod-backup').textContent = backup.dir || '';
     if ($('mod-backup-status')) {
       const mb = ((backup.bytes || 0) / 1048576).toFixed(1);
-      let text = `已备份 ${backup.count || 0} 个 Mod（${mb} MB）· 只增不减，程序不会删除这里的文件`;
-      if (backup.pending) text += ` · 还有 ${backup.pending} 个待打包`;
-      if (backup.overlaps_library) text += ' · ⚠ 备份目录与 Mod 库重叠，已暂停备份（请到设置里改「Mod 备份目录」）';
+      let text;
+      if (!backupOn) {
+        text = `Mod 备份已关闭 —— 不会再复制任何 Mod；已有 ${backup.count || 0} 个备份（${mb} MB）原样保留，程序不会删`;
+      } else {
+        text = `已备份 ${backup.count || 0} 个 Mod（${mb} MB）· 只增不减，程序不会删除这里的文件`;
+        if (backup.pending) text += ` · 还有 ${backup.pending} 个待打包`;
+        if (backup.overlaps_library) text += ' · ⚠ 备份目录与 Mod 库重叠，已暂停备份（请到设置里改「Mod 备份目录」）';
+      }
       $('mod-backup-status').textContent = text;
     }
   }
@@ -2031,6 +2044,29 @@ function bind() {
         else setStatus('已打开 Mod 备份文件夹');
       } catch (err) {
         setStatus('打开备份文件夹失败：' + (err && err.message ? err.message : err));
+      }
+    };
+  }
+
+  // 「Mod 备份」总开关（用户 2026-10-02：「默认开，关了就不备份」）——
+  // 关掉只停"以后还备不备份"：已有备份一个都不删（只增不减是这条功能的红线）。
+  if ($('cfg-mod-backup-enabled')) {
+    $('cfg-mod-backup-enabled').onchange = async (event) => {
+      const wanted = !!event.target.checked;
+      try {
+        const result = await call('set_mod_backup_enabled', { enabled: wanted });
+        if (!result || result.ok === false) {
+          event.target.checked = !wanted;      // 后端没接受就把界面弹回去，别显示假的成功
+          setStatus((result && result.message) || '切换 Mod 备份失败');
+          return;
+        }
+        await refreshFromState();
+        setStatus(wanted
+          ? `Mod 备份已开启：库里新见到的 Mod 会整份复制到 ${result.dir || '备份仓'}`
+          : 'Mod 备份已关闭：不再复制任何 Mod（已有备份一个都不删）');
+      } catch (err) {
+        event.target.checked = !wanted;
+        setStatus('切换 Mod 备份失败：' + (err && err.message ? err.message : err));
       }
     };
   }

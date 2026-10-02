@@ -125,6 +125,10 @@ class AppConfig:
     # 文件夹只增不减，只要见到新 mod，就打包 zip 放进去」。默认与 `library/` 平级、
     # 就放在数据根下，用户一眼能看到、能自己拷到别处；程序**只往里加，从不删**。
     mod_backup_dir: str = "mod-backup"
+    # **Mod 备份总开关**（用户 2026-10-02 要求：「给 mod 备份做一个开关，默认开，关了就不备份」）。
+    # 默认 True = 老行为（库里每见到一个新 Mod 就整份复制进备份仓）；关掉 = **一个字节都不复制**、
+    # 连备份目录都不会创建；**已有的备份一个都不动**（"只增不减"这条红线不受开关影响）。
+    mod_backup_enabled: bool = True
     # **依赖去重与内外优先级**（用户 2026-10-02 要求：「加个去重，在设置里加个内部
     # RabbitFX 优先，默认开，开的话如果还有外部 RabbitFX 就把外部的屏蔽掉，没开就把
     # 内部屏蔽掉、就算外部优先，如果外部有多个，按最后安装的优先」）。
@@ -527,7 +531,18 @@ class AppConfig:
 
     @property
     def efmi_dir(self) -> Path | None:
-        """EFMI 目录：优先从 XXMI Launcher 路径上溯，再回退到内置 runtime。"""
+        """EFMI 目录：优先从 XXMI Launcher 路径上溯，再回退到内置 runtime。
+
+        ⚠️ **判据是"EFMI 目录在不在"，而不是"`EFMI\\d3d11.dll` 在不在"**（2026-10-02 修，
+        由反馈者截图定位）：以前这里要求 `<XXMI>\\EFMI\\d3d11.dll` 已经存在才算找到 EFMI，
+        于是"刚解压好、还没被 XXMI 部署过"的内置 XXMI（dll 此时只在
+        `Resources\\Packages\\XXMI\\d3d11.dll`）会被判成**根本没有 EFMI** →
+        `efmi_dll_path` 返回 None → 每次启动都弹
+        「发现缺失文件：EFMI d3d11.dll（注入用）是否自动修复?」，而点"继续"也修不好
+        （判据是死结：修复链里没有任何一步能把它变"存在"），EFMI 的 d3d11.dll 也永远
+        不会被写进注入库。放宽之后，`efmi_dll_path` 里那段"回退到包目录"的逻辑才真正
+        生效 —— 那段回退 2026-09-29 就写了，却因为进不来而**永远走不到**。
+        """
         candidates: list[Path] = []
         launcher = self.xxmi_launcher_path
         if launcher is not None:
@@ -535,8 +550,11 @@ class AppConfig:
         if self.use_builtin_runtime:
             candidates.append(self.builtin_runtime_path / "XXMI")
         for parent in candidates:
-            if (parent / "EFMI" / "d3d11.dll").is_file():
-                return parent / "EFMI"
+            efmi = parent / "EFMI"
+            if ((efmi / "d3d11.dll").is_file()
+                    or (efmi / "Core").is_dir()
+                    or (efmi / "Mods").is_dir()):
+                return efmi
         return None
 
     def _is_builtin_staging(self) -> bool:

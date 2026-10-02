@@ -66,6 +66,19 @@ def local_version() -> str:
     return m.group(1) if m else ""
 
 
+def _fix_console() -> None:
+    """Windows 下控制台/管道默认是 GBK —— 快照输出里只要有一个非 GBK 字符（Mod 名里的
+    生僻字、文件名里的替换字符 U+FFFD 等），`print` 就会抛 `UnicodeEncodeError` 把**整个
+    推送**打断（2026-10-02 实测：崩在"打印快照输出"这一步，推送根本没发出去）。
+    同 `prepare_release.py` 的做法：把两个流改成 utf-8 + errors=replace。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="快照 + 推 main 到 GitHub")
     ap.add_argument("--dry-run", action="store_true", help="只打印将执行的命令，不真的推")
@@ -73,6 +86,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--branch", default="main", help="推哪个分支（默认 main）")
     args = ap.parse_args(argv)
 
+    _fix_console()
     version = local_version()
     print(f"== 推送 {REPO} {args.branch} ==  版本 {version or '(未知)'}", flush=True)
 
@@ -98,7 +112,7 @@ def main(argv: list[str] | None = None) -> int:
         print("      !! 找不到 GH_TOKEN（进程环境与 HKCU\\Environment 都没有）—— 无法推送", flush=True)
         return 1
     url = f"https://{token}@github.com/{REPO}.git"
-    print(f"[2/3] 远端：https://{REPO}.git  （token {mask(token)}）", flush=True)
+    print(f"[2/3] 远端：https://github.com/{REPO}.git  （token {mask(token)}）", flush=True)
 
     before_local = git("rev-parse", args.branch).stdout.strip()
     ahead = git("rev-list", "--count", f"origin/{args.branch}..{args.branch}").stdout.strip()
@@ -118,6 +132,7 @@ def main(argv: list[str] | None = None) -> int:
         print("      !! 推送失败", flush=True)
         return res.returncode
 
+    git("fetch", "origin", "--quiet")
     after_remote = git("rev-parse", f"origin/{args.branch}").stdout.strip()
     print(f"      完成：远端 {args.branch} = {after_remote[:12]}（本地 {before_local[:12]}）"
           f"{'  ✓ 一致' if after_remote == before_local else '  ⚠ 不一致，请核对'}", flush=True)
