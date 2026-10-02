@@ -200,7 +200,7 @@ def ensure_xxmi(config: AppConfig, progress: Progress = None, byte_progress: Byt
     #  "设置自己变回去了"，而他要用的正是自己那份）。内置那份照旧装好、依赖页可见，
     #  只是不再劫持 `xxmi_launcher`。
     if _points_at_builtin(config, config.xxmi_launcher):
-        config.xxmi_launcher = str(exe)
+        config.xxmi_launcher = config.store_path(exe)
         config.save()
     _write_marker(root, {"version": version, "asset": asset_name, "source": XXMI_REPO})
     if progress:
@@ -262,7 +262,7 @@ def ensure_efmi(config: AppConfig, progress: Progress = None, byte_progress: Byt
     # 同理：用户把 staging 指到别处（例如他自己那份 XXMI 的 `EFMI\Mods`）时不覆盖 ——
     # 否则他的 Mod 会被送进内置那份，外部 XXMI 永远读不到（issue #4 的另一半）。
     if _points_at_builtin(config, config.staging_mods_dir):
-        config.staging_mods_dir = str(target / "Mods")
+        config.staging_mods_dir = config.store_path(target / "Mods")
         config.save()
     if progress:
         progress(3, 3, "EFMI", "installed")

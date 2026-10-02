@@ -288,6 +288,21 @@ def test_blank_paths_fall_back_to_defaults(tmp_path):
     assert cfg.secondary_motion_dir == ""
 
 
+def test_store_path_keeps_inside_relative_and_outside_absolute(tmp_path):
+    """`store_path`：数据根里的 → 存相对；外面的（用户自己那份）→ 原样保留绝对。"""
+    root = tmp_path / "data"
+    root.mkdir()
+    cfg = AppConfig()
+    cfg.save(root / "config.json")
+
+    inside = root / "runtime" / "dlss5" / "d3d12.dll"
+    outside = tmp_path / "XXMI Launcher" / "Resources" / "Bin" / "XXMI Launcher.exe"
+
+    assert cfg.store_path(inside) == "runtime/dlss5/d3d12.dll"
+    assert cfg.store_path(outside) == str(outside)
+    assert cfg.store_path("") == ""
+
+
 def test_save_config_refills_blank_paths(tmp_path, monkeypatch):
     """走一遍 `api.save_config`：用户在设置页清空某一项 → 保存后它自己填回该有的值。"""
     from endfieldmodcontroller.api import EndfieldModControllerApi

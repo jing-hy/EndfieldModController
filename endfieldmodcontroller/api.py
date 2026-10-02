@@ -1672,7 +1672,7 @@ class EndfieldModControllerApi:
     def download_reshade(self, version: str = reshade.DEFAULT_VERSION) -> dict[str, Any]:
         result = reshade.download_reshade(self.config.reshade_runtime_path, version)
         if not self.config.reshade_dll:
-            self.config.reshade_dll = result["dll"]
+            self.config.reshade_dll = self.config.store_path(result["dll"])
             self.config.save()
         return result
 

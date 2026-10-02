@@ -859,6 +859,26 @@ class AppConfig:
     def controller_dir(self) -> Path:
         return self.staging_mods_path / "MC_Controller"
 
+    def store_path(self, value: str | Path) -> str:
+        """把"程序自己算出来的路径"按**配置该有的存法**归一化，然后才写进配置。
+
+        * 落在**数据根里**的 → 存**相对路径**：数据根改名/搬家后天然跟随，不会变成指向
+          旧目录的死路径（2026-10-02 群反馈：「我把主路径改了文件名，然后他没识别出来」）；
+        * 落在数据根外的（你自己那份 XXMI、游戏目录、外部 Mod 库…）→ **原样保留**绝对路径。
+
+        凡是"把程序算出来的路径写进配置"的地方都该过这一道，别再直接写 `str(path)`。
+        """
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        try:
+            path = Path(text).expanduser()
+            if path.is_absolute():
+                return path.resolve().relative_to(Path(self.base_dir).resolve()).as_posix()
+        except (OSError, ValueError):
+            return text
+        return text
+
     def normalize_blank_paths(self) -> list[str]:
         """把「留空 = 自动」的路径字段补回默认值，返回被回填的字段名。
 

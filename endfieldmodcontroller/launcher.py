@@ -1050,7 +1050,14 @@ def configure_xxmi_extra_libraries(config: AppConfig) -> dict[str, Any]:
         raise LaunchError("XXMI Launcher Config.json was not found next to XXMI Launcher")
     data = json.loads(config_path.read_text(encoding="utf-8"))
     importer = data.setdefault("Importers", {}).setdefault("EFMI", {}).setdefault("Importer", {})
+    # ⚠️ 先把**已经不存在的路径**剔掉再写：这里以前只追加、从不清理，于是程序目录
+    # 改名/搬家之后，注入库里会一直躺着旧位置的死路径（XXMI 会去加载一个不存在的 DLL，
+    # 而注入列表里的死项还会参与签名）。与「一键启动」的全量重写互为兜底。
     existing = [line.strip() for line in str(importer.get("extra_libraries") or "").splitlines() if line.strip()]
+    dropped = [item for item in existing if not Path(item).is_file()]
+    existing = [item for item in existing if Path(item).is_file()]
+    if dropped:
+        _append_log(config, f"XXMI 注入库清理掉 {len(dropped)} 条已不存在的路径: {dropped}")
     reshade_path = str(reshade_dll)
     if reshade_path not in existing:
         existing.append(reshade_path)
@@ -1294,7 +1301,7 @@ def enable_anti_cheat_safe_mode(config: AppConfig) -> dict[str, Any]:
     if info is not None:
         try:
             adopted = reshade_integration.adopt_game_reshade_dll(config, info)
-            config.reshade_dll = adopted["target"]
+            config.reshade_dll = config.store_path(adopted["target"])
             config.save()
             adopted_ok = True
             actions.append(f"adopted ReShade 6.x from {adopted['source']}")
@@ -1316,7 +1323,7 @@ def enable_anti_cheat_safe_mode(config: AppConfig) -> dict[str, Any]:
         try:
             from . import reshade
             downloaded = reshade.download_reshade(config.reshade_runtime_path)
-            config.reshade_dll = downloaded["dll"]
+            config.reshade_dll = config.store_path(downloaded["dll"])
             config.save()
             actions.append(f"downloaded ReShade {downloaded['version']}")
         except Exception as exc:  # noqa: BLE001
@@ -1978,7 +1985,7 @@ def ensure_migoto_runtime(config: AppConfig, source_dir: Path | None = None) -> 
         if bootstrap_src.resolve() != bootstrap_dst.resolve():
             _copy_if_changed(bootstrap_src, bootstrap_dst)
         copied.append("mc_bootstrap.dll")
-    config.migoto_loader = str(target / "loader.exe")
+    config.migoto_loader = config.store_path(target / "loader.exe")
     config.save()
     return {"source": str(source), "framework_source": str(framework_source), "target": str(target), "loader": str(target / "loader.exe"), "copied": copied}
 

@@ -552,17 +552,12 @@ def import_pack(config: AppConfig, archive: Path, log: Callable[[str], None] | N
             tool.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
             return {"ok": False, "message": f"无法创建工具目录 {tool}: {exc}"}
-        # 记进配置，下次直接能找到。**落在数据根里时存相对路径**：用户以后把程序目录
-        # 改名/搬走，相对路径天然跟随，不会变成指向旧目录的死路径
+        # 记进配置，下次直接能找到。**落在数据根里时存相对路径**（`config.store_path`）：
+        # 用户以后把程序目录改名/搬走，相对路径天然跟随，不会变成指向旧目录的死路径
         # （2026-10-02 群反馈：旧版这里写的是绝对路径，正是"识别还是旧目录"的来源之一）。
         try:
             if not config.secondary_motion_dir:
-                try:
-                    tool_parent = Path(tool.parent).resolve()
-                    config.secondary_motion_dir = tool_parent.relative_to(
-                        Path(config.base_dir).resolve()).as_posix()
-                except (OSError, ValueError):
-                    config.secondary_motion_dir = str(tool.parent)
+                config.secondary_motion_dir = config.store_path(tool.parent)
                 config.save()
         except OSError:
             pass

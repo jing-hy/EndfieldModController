@@ -296,7 +296,8 @@ def set_backup_dir(config: AppConfig, value: str | Path | None) -> dict[str, Any
     previous_value = configured_dir(config)
     previous_dir = backup_dir(config)
     text = "" if value is None else str(value).strip()
-    config.mod_backup_dir = text or DEFAULT_DIR_NAME
+    # 落在数据根里的位置存相对路径（搬家后天然跟随）；外部位置原样保留
+    config.mod_backup_dir = config.store_path(text) or DEFAULT_DIR_NAME
     target = backup_dir(config)
     changed = str(target) != str(previous_dir)
 

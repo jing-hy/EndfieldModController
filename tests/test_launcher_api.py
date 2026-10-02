@@ -112,6 +112,44 @@ $cape = 0,1
         self.assertTrue(importer["extra_libraries_enabled"])
         self.assertIn(str(reshade.resolve()), importer["extra_libraries"])
 
+    def test_configure_xxmi_extra_libraries_drops_dead_paths(self) -> None:
+        """注入库里**已经失效的旧路径要清掉**（2026-10-02）。
+
+        背景：这里以前只追加、从不清理 —— 用户把程序目录改名/搬走后，注入库会一直带着
+        旧位置的死路径（XXMI 会去加载一个不存在的 DLL），而「一键启动」的全量重写只在
+        走那条链路时才覆盖它。现在写之前先剔掉不存在的路径。
+        """
+        root = self.root / "xxmi"
+        bin_dir = root / "Resources" / "Bin"
+        bin_dir.mkdir(parents=True)
+        launcher_exe = bin_dir / "XXMI Launcher.exe"
+        launcher_exe.write_bytes(b"")
+        dead = str(self.root / "旧程序目录" / "runtime" / "dlss5" / "d3d12.dll")   # 不存在
+        config_json = root / "XXMI Launcher Config.json"
+        config_json.write_text(json.dumps({
+            "Importers": {"EFMI": {"Importer": {
+                "extra_libraries": dead,
+                "extra_libraries_enabled": True,
+            }}}
+        }, ensure_ascii=False), encoding="utf-8")
+        reshade = self.root / "ReShade64.dll"
+        reshade.write_bytes(b"")
+        cfg = AppConfig(
+            library_dir=str(self.library),
+            runtime_dir=str(self.runtime),
+            staging_mods_dir=str(self.staging),
+            xxmi_launcher=str(launcher_exe),
+            game_exe=str(self.game),
+            reshade_dll=str(reshade),
+            dependency_manifest=str(Path(__file__).resolve().parents[1] / "dependencies.json"),
+        )
+
+        launcher.configure_xxmi_extra_libraries(cfg)
+
+        importer = json.loads(config_json.read_text(encoding="utf-8"))["Importers"]["EFMI"]["Importer"]
+        self.assertNotIn(dead, importer["extra_libraries"])
+        self.assertIn(str(reshade.resolve()), importer["extra_libraries"])
+
     def test_api_rollback(self) -> None:
         api = EndfieldModControllerApi(self.config_path)
         state = api.scan()
