@@ -200,7 +200,12 @@ class AlertVersionGateTests(unittest.TestCase):
     def test_unknown_local_version_does_not_block(self) -> None:
         """读不出本地版本时**不拦** —— 宁可多提示一次，也别漏掉安全预警。"""
         item = {"min_version": "0.9.4", "max_version": "0.9.4"}
-        self.assertTrue(alerts.version_applies(item, ""))
+        # ⚠️ 不能拿空串来模拟"读不出"：空串在实现里是"**取当前版本**兜底"（见
+        # `version_applies`），于是这条断言会**跟着版本号走** —— 升到 0.9.5 之后就挂了
+        # （2026-10-02 构建 0.9.5 时实测）。真正"读不出"= 解析不出任何数字。
+        self.assertTrue(alerts.version_applies(item, "unknown-version"))
+        # 空串 = 按当前版本判断（不是"不拦"）
+        self.assertFalse(alerts.version_applies({"min_version": "0.0.1", "max_version": "0.0.9"}, ""))
 
     # ---------------------------------------------------------- 端到端（overview 层）
     def test_overview_filters_by_local_version(self) -> None:

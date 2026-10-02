@@ -174,14 +174,18 @@
         <button id="settings-export-diagnostics-btn" class="primary">一键导出诊断包</button>
         <button id="init-check-btn" class="primary">一键检测全部</button>
         <button id="game-restore-btn">一键还原游戏本体</button>
-        <span class="hint">淡色只读项是按「主路径」自动推导的，不用填；其余项可直接输入，留空即自动。<br>
+        <span class="hint">只有「主路径」是只读的（它就是程序所在目录）；下面每一项都可以自己填，<b>留空即自动</b>（按主路径推导）。<br>
           出问题时先点「一键导出诊断包」：导出后会告诉你把包发到哪里（GitHub issue 或 QQ 群），记得<b>附上现象</b>。</span>
       </div>
 
       <div class="settings-group">
         <h3>① 工作区与 Mod 库<em>相对主路径</em></h3>
         <div class="setting-row">
-          <span class="setting-label">主路径<em>runtime 等相对路径的基准</em></span>
+          <span class="setting-label">主路径<em>程序所在目录，下面这些都相对它</em></span>
+          <input id="cfg-data-root" type="text" readonly class="auto-input" placeholder="程序所在目录">
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">runtime 目录<em>主路径下存放运行时的目录</em></span>
           <input id="cfg-runtime_dir" type="text" placeholder="runtime">
         </div>
         <div class="setting-row">
@@ -201,7 +205,7 @@
         </div>
         <div class="setting-row">
           <span class="setting-label">Staging Mods 目录<em>EFMI 实际加载的位置</em></span>
-          <input id="cfg-staging_mods_dir" type="text" readonly class="auto-input" placeholder="自动：&lt;主路径&gt;/builtin/XXMI/EFMI/Mods">
+          <input id="cfg-staging_mods_dir" type="text" placeholder="留空 = 自动：&lt;主路径&gt;/builtin/XXMI/EFMI/Mods">
         </div>
         <div class="setting-row">
           <span class="setting-label">依赖清单</span>
@@ -230,22 +234,22 @@
       </div>
 
       <div class="settings-group">
-        <h3>③ 组件与注入<em>前三项按主路径自动推导</em></h3>
+        <h3>③ 组件与注入<em>留空 = 按主路径自动推导；程序目录改名会自动跟上</em></h3>
         <div class="setting-row">
           <span class="setting-label">DLSS5 / 第一人称目录</span>
-          <input id="cfg-dlss5_dir" type="text" readonly class="auto-input" placeholder="自动：&lt;主路径&gt;/dlss5">
+          <input id="cfg-dlss5_dir" type="text" placeholder="留空 = 自动：&lt;主路径&gt;/dlss5">
         </div>
         <div class="setting-row">
           <span class="setting-label">ReShade 底座 d3d12.dll</span>
-          <input id="cfg-reshade_dll" type="text" readonly class="auto-input" placeholder="自动：&lt;主路径&gt;/dlss5/d3d12.dll">
+          <input id="cfg-reshade_dll" type="text" placeholder="留空 = 自动：&lt;主路径&gt;/dlss5/d3d12.dll">
         </div>
         <div class="setting-row">
-          <span class="setting-label">乳摇工具目录</span>
-          <input id="cfg-secondary_motion_dir" type="text" readonly class="auto-input" placeholder="自动：&lt;主路径&gt;/secondary_motion">
+          <span class="setting-label">乳摇工具目录<em>装到别处时填这里</em></span>
+          <input id="cfg-secondary_motion_dir" type="text" placeholder="留空 = 自动：&lt;主路径&gt;/secondary_motion">
         </div>
         <div class="setting-row">
           <span class="setting-label">Endfield Poser 安装包</span>
-          <input id="cfg-poser_dir" type="text" readonly class="auto-input" placeholder="自动：&lt;主路径&gt;/poser（从官方 Release 下载）">
+          <input id="cfg-poser_dir" type="text" placeholder="留空 = 自动：&lt;主路径&gt;/poser（从官方 Release 下载）">
         </div>
         <div class="setting-row">
           <span class="setting-label">ReShade 注入方式</span>

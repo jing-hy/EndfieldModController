@@ -519,7 +519,7 @@ def launch_manager(config: AppConfig) -> dict[str, Any]:
     """启动它原生的 Manager.exe（保持工具自身界面不变）。"""
     exe = config.secondary_motion_exe
     if exe is None or not exe.is_file():
-        return {"ok": False, "message": "未找到 SecondaryMotion.Manager.exe，请在设置页配置工具目录"}
+        return {"ok": False, "message": "未找到 SecondaryMotion.Manager.exe —— 去依赖页装一下乳摇工具（默认装到 <主路径>/runtime/secondary_motion）"}
     creationflags = 0
     if os.name == "nt":
         creationflags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
@@ -552,10 +552,17 @@ def import_pack(config: AppConfig, archive: Path, log: Callable[[str], None] | N
             tool.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
             return {"ok": False, "message": f"无法创建工具目录 {tool}: {exc}"}
-        # 记进配置，下次直接能找到
+        # 记进配置，下次直接能找到。**落在数据根里时存相对路径**：用户以后把程序目录
+        # 改名/搬走，相对路径天然跟随，不会变成指向旧目录的死路径
+        # （2026-10-02 群反馈：旧版这里写的是绝对路径，正是"识别还是旧目录"的来源之一）。
         try:
             if not config.secondary_motion_dir:
-                config.secondary_motion_dir = str(tool.parent)
+                try:
+                    tool_parent = Path(tool.parent).resolve()
+                    config.secondary_motion_dir = tool_parent.relative_to(
+                        Path(config.base_dir).resolve()).as_posix()
+                except (OSError, ValueError):
+                    config.secondary_motion_dir = str(tool.parent)
                 config.save()
         except OSError:
             pass

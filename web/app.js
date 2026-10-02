@@ -1177,6 +1177,8 @@ async function prepare() {
 
 async function refreshPaths(config) {
   state.config = config;
+  // 设置页第一项：主路径（只读）—— 就是程序所在目录，runtime/library 等相对路径都以它为基准
+  if ($('cfg-data-root')) $('cfg-data-root').value = state.dataRoot || '';
   $('path-controller').textContent = config ? '' : '';
   const info = await call('log');
   $('path-controller').textContent = info.controller;
@@ -1288,9 +1290,30 @@ async function saveConfig() {
   $('settings-status').textContent = '设置已保存' + backupNote;
 }
 
+// 自动探测到的路径在**写回配置**之前先归一化：如果它落在「主路径」里面（= 程序自己
+// 那份内置组件），就存成**相对路径**，数据根改名/搬家时天然跟随；只有真正的外部位置
+// （用户自己装的 XXMI / migoto）才存绝对路径。
+// 背景（2026-10-02 群反馈）：这些自动填进去的绝对路径，在用户改了程序目录名之后会变成
+// 指向旧目录的死路径 —— 界面一直显示旧目录，还会在旧位置重建空目录树。
+function asStoredPath(value) {
+  const root = String(state.dataRoot || '').replace(/[\\/]+$/, '');
+  if (!root || !value) return value;
+  const norm = (s) => String(s).replace(/\//g, '\\').toLowerCase();
+  const target = norm(value);
+  const base = norm(root);
+  if (target === base) return '';
+  if (target.startsWith(base + '\\')) {
+    return String(value).slice(root.length + 1).replace(/\\/g, '/');
+  }
+  return value;
+}
+
 async function refreshFromState() {
   const s = await call('get_state');
   state.config = s.config;
+  // **主路径**（= 程序所在目录）：用户把程序目录改名/搬走后，这里显示的就是程序当前
+  // 认的那个目录（2026-10-02 群反馈：「我把主路径改了文件名，然后他没识别出来」）。
+  state.dataRoot = s.data_root || '';
   // 未读公告（info/warning）：由 boot() 弹一次，**不锁启动**、看完即走。
   // 异常状态预警（critical）不走这里 —— 见 runOneClickLaunch 里的 prelaunch_alerts。
   state.announcements = s.announcements || [];
@@ -1449,19 +1472,22 @@ async function refreshFromState() {
     $('poser-status').textContent = plines.join('\n');
   }
   if (!s.config.xxmi_launcher && s.detected_xxmi) {
-    state.config.xxmi_launcher = s.detected_xxmi;
-    $('cfg-xxmi_launcher').value = s.detected_xxmi;
-    await call('save_config', { xxmi_launcher: s.detected_xxmi });
+    const stored = asStoredPath(s.detected_xxmi);
+    state.config.xxmi_launcher = stored;
+    $('cfg-xxmi_launcher').value = stored;
+    await call('save_config', { xxmi_launcher: stored });
   }
   if (!s.config.migoto_loader && s.detected_migoto_loader) {
-    state.config.migoto_loader = s.detected_migoto_loader;
-    $('cfg-migoto_loader').value = s.detected_migoto_loader;
-    await call('save_config', { migoto_loader: s.detected_migoto_loader });
+    const stored = asStoredPath(s.detected_migoto_loader);
+    state.config.migoto_loader = stored;
+    $('cfg-migoto_loader').value = stored;
+    await call('save_config', { migoto_loader: stored });
   }
   if (!s.config.official_launcher && s.detected_official_launcher) {
-    state.config.official_launcher = s.detected_official_launcher;
-    $('cfg-official_launcher').value = s.detected_official_launcher;
-    await call('save_config', { official_launcher: s.detected_official_launcher });
+    const stored = asStoredPath(s.detected_official_launcher);
+    state.config.official_launcher = stored;
+    $('cfg-official_launcher').value = stored;
+    await call('save_config', { official_launcher: stored });
   }
   // 后端还在后台预热（全盘探测）时 detected_* 是空的：稍后再静默刷新一次补上，
   // 这样"加载页尽早出现"和"探测结果照旧可用"两件事都成立（2026-10-01 改）。
@@ -2888,8 +2914,10 @@ function bind() {
   };
   $('autodetect-btn').onclick = async () => {
     const s = await call('get_state');
+    state.dataRoot = s.data_root || state.dataRoot || '';
     if (s.detected_xxmi) {
-      $('cfg-xxmi_launcher').value = s.detected_xxmi;
+      // 程序自己那份内置 XXMI 存成相对路径（见 asStoredPath 的注释）
+      $('cfg-xxmi_launcher').value = asStoredPath(s.detected_xxmi);
       await saveConfig();
       $('settings-status').textContent = '已自动检测并保存 XXMI 路径';
     } else {

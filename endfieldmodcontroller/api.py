@@ -23,6 +23,11 @@ IMPORT_SUFFIX_HINT = " / ".join(IMPORT_SUFFIXES)
 class EndfieldModControllerApi:
     def __init__(self, config_path: Path | None = None) -> None:
         self.config = AppConfig.load(config_path)
+        # 数据根（程序目录）被改名/搬走时，`AppConfig.load` 会把配置里残留的旧绝对路径
+        # 自动改回相对路径 —— 这里留痕，排查"路径怎么变了"时有据可查
+        # （用户 2026-10-02 群反馈：「我把主路径改了文件名，然后他没识别出来」）。
+        for note in list(getattr(self.config, "_relocated", []) or []):
+            launcher._append_log(self.config, f"数据根与配置里记录的不同，已自动纠正路径 {note}")
         self.config.ensure_dirs()
         self._mods_cache = None
         self._dep_task: dict[str, Any] | None = None
@@ -944,6 +949,10 @@ class EndfieldModControllerApi:
         render_api = reshade_integration.detect_render_api(game_dir) if game_dir is not None else "unknown"
         return {
             "config": self.config.to_dict(),
+            # **主路径**（= 程序所在目录 = config.json / runtime / library 的基准）。
+            # 设置页第一项显示它：用户把程序目录改名/搬走后，一眼就能看出程序认的是哪个
+            # 目录（2026-10-02 群反馈：「我把主路径改了文件名，然后他没识别出来」）。
+            "data_root": str(self.config.base_dir),
             "mods": mods_payload,
             "dependency_report": self._dependency_report(),
             "render_api": render_api,
@@ -990,6 +999,13 @@ class EndfieldModControllerApi:
         for key, value in data.items():
             if key in known:
                 setattr(self.config, key, value)
+        # **「留空 = 自动」必须真的成立**（用户 2026-10-02：「全部放开吧」）：
+        # 空串不能原样留着 —— `resolve_path("")` 会解析成**数据根本身**（`dlss5_dir` 空了，
+        # `dlss5_path` 就变成数据根，DLSS5 直接失效）。先按默认值回填，再让 `autofill`
+        # 把能自动推导的（内置 XXMI / ReShade 底座 / 乳摇 / Poser）补上，最后把补好的
+        # 值一起返回给前端回显 —— 用户看到的就是"清空后它自己填回该有的样子"。
+        self.config.normalize_blank_paths()
+        self.config.autofill(deep=False)
         self.config.ensure_dirs()
         self.config.save()
         return {"ok": True, "config": self.config.to_dict()}

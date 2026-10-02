@@ -6,7 +6,7 @@ import os
 import shutil
 import sys
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import MISSING, asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
@@ -113,6 +113,172 @@ def _quarantine_broken_config(path: Path) -> None:
             path.replace(path.with_name(f"{path.name}.broken-{stamp}"))
     except OSError:
         pass
+
+
+# ---------------------------------------------------------------
+# 数据根自愈（2026-10-02 群反馈）
+# ---------------------------------------------------------------
+# 这些字段的值**本该是"相对数据根"的相对路径**，但历史上可能被写成绝对路径：
+#   * `secondary_motion.import_pack` 装 sbm 时写的是 `str(tool.parent)`（绝对）；
+#   * `autofill(deep=True)` 的全盘探测（XXMI / migoto / 官方启动器）返回的也是绝对路径；
+#   * 前端在字段留空时会把 `detected_xxmi` 这类绝对路径回写进配置。
+# 一旦用户把程序目录改名或搬走，这些"旧数据根的绝对路径"就全成了指向别处的死路径。
+_DATA_ROOT_RELATIVE_FIELDS = (
+    "library_dir",
+    "runtime_dir",
+    "mod_backup_dir",
+    "builtin_runtime_dir",
+    "staging_mods_dir",
+    "dlss5_dir",
+    "reshade_dll",
+    "poser_dir",
+    "dlss5_source_dir",
+    "nvngx_assets_dir",
+    "dependency_manifest",
+    "secondary_motion_dir",
+    "secondary_motion_dll",
+    "xxmi_launcher",
+    "migoto_loader",
+    "official_launcher",
+)
+# 数据根内部的固定子目录名：绝对路径里一旦出现这些段，它后面那截就是"数据根内的布局"。
+_DATA_ROOT_MARKERS = ("runtime", "library", "mod-backup", "assets")
+
+
+def _data_root_of(config_path: Path) -> str:
+    return str(Path(config_path).resolve().parent)
+
+
+def _within(root: Path, path: Path) -> bool:
+    """`path` 是否落在 `root` 里面（data_root 搬迁判据、目录创建护栏都要用）。"""
+    try:
+        Path(path).resolve().relative_to(Path(root).resolve())
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def _data_root_split(value: Path) -> tuple[str, Path | None]:
+    """把"某个数据根里的绝对路径"拆成（相对数据根的尾部, 疑似数据根本身）。
+
+    例：`D:\\应用\\zmd_mod管理\\runtime\\secondary_motion`
+        → (`runtime/secondary_motion`, `D:\\应用\\zmd_mod管理`)
+    认不出布局特征时返回 `("", None)`。
+
+    ⚠️ 取**最左边**那个标志段，不能取最右边的：数据根布局总是从第一个
+    `runtime` / `library` / `mod-backup` / `assets` 段开始。取最右边会把
+    `<数据根>\\library\\mod-backup` 拆成 (`mod-backup`, `<数据根>\\library`)，于是
+    "Mod 备份目录"被误当成"旧数据根残留"改写掉，绕过"备份不许落在库内"的检查
+    （单测 `test_backup_dir_inside_library_is_refused` 抓到过）。
+    """
+    parts = Path(value).parts
+    for index, part in enumerate(parts):
+        if part.lower() in _DATA_ROOT_MARKERS:
+            tail = "/".join(parts[index:])
+            prefix = Path(*parts[:index]) if index else None
+            return tail, prefix
+    return "", None
+
+
+def _data_root_tail(value: Path) -> str:
+    """只要"相对数据根的尾部"（目录创建护栏用）。"""
+    return _data_root_split(value)[0]
+
+
+def _is_empty_shell(prefix: Path, limit: int = 200) -> bool:
+    """`prefix` 是不是"一棵只有空目录、一个文件都没有"的壳。
+
+    用途：判断某个疑似旧数据根是不是**被历史版本重建出来的空目录树** ——
+    那种壳里不可能有用户数据，认定成残留是安全的。里面有任何一个文件就返回 False。
+    """
+    stack = [Path(prefix)]
+    seen = 0
+    while stack:
+        current = stack.pop()
+        try:
+            with os.scandir(current) as entries:
+                for entry in entries:
+                    seen += 1
+                    if seen > limit:
+                        return False        # 条目太多 = 像真目录，别当空壳
+                    try:
+                        if entry.is_file(follow_symlinks=False):
+                            return False
+                        if entry.is_dir(follow_symlinks=False):
+                            stack.append(Path(entry.path))
+                    except OSError:
+                        return False
+        except OSError:
+            return False
+    return True
+
+
+def _relocate_stale_paths(cfg: "AppConfig", config_path: Path) -> list[str]:
+    """把配置里"旧数据根的绝对路径"改写回相对路径，返回改动说明（空 = 没改）。
+
+    三条判据，从可靠到保守：
+    ① **有旧数据根记录**（`cfg.data_root`，上次运行的路径）且与当前不同 → 落在旧根之下
+       的绝对路径一律跟着走。这条与"旧目录是否还在"无关：哪怕用户只是把目录复制了一份，
+       也不会继续用旧那份。
+    ② **没有记录**（老配置第一次升级上来）→ 只对一个**已经不存在的**（或已被历史版本
+       重建成空壳的）、**长得像数据根布局**（含 `runtime` / `library` / `mod-backup` /
+       `assets` 段）、**且那截疑似数据根本身也已经不在用了的**绝对路径动手。
+       在用的目录一律不碰 —— 那可能是用户故意指定的外部 XXMI / 外部 Mod 目录，
+       或者只是"用户配了、还没建出来"的路径。
+    ③ 同上，但"疑似数据根本身"是个**只有空目录的空壳**（被历史版本重建出来的）也算残留。
+       ⚠️ 判据必须保守：把"用户自定义、只是还没建出来"的目录（例如刚填的 Mod 库路径）
+       当成残留改掉，会把配置改坏 —— 单测 `test_backup_dir_inside_library_is_refused`
+       正是这么抓到的。
+    """
+    base = Path(config_path).resolve().parent
+    base_key = os.path.normcase(str(base))
+    recorded = str(getattr(cfg, "data_root", "") or "").strip()
+    old_root: Path | None = None
+    if recorded:
+        try:
+            old_root = Path(recorded).expanduser()
+        except (OSError, ValueError):
+            old_root = None
+    if old_root is not None and os.path.normcase(str(old_root)) == base_key:
+        old_root = None                      # 数据根没变，不需要迁移
+
+    changed: list[str] = []
+    for name in _DATA_ROOT_RELATIVE_FIELDS:
+        raw = str(getattr(cfg, name, "") or "").strip()
+        if not raw:
+            continue
+        value = Path(raw).expanduser()
+        if not value.is_absolute():
+            continue                     # 已经是相对路径 = 天然跟随数据根，不动
+        relocated = ""
+        if old_root is not None:
+            try:
+                relocated = value.resolve().relative_to(old_root.resolve()).as_posix()
+            except (OSError, ValueError):
+                relocated = ""
+        if not relocated:
+            try:
+                exists = value.exists()
+            except OSError:
+                continue
+            tail, prefix = _data_root_split(value)
+            if not tail or prefix is None:
+                continue
+            try:
+                if prefix.exists() and not _is_empty_shell(prefix):
+                    continue         # 疑似数据根还在、而且里面还有东西 → 不是残留，别动
+            except OSError:
+                continue
+            if exists and tail.split("/", 1)[0] not in ("runtime", "assets"):
+                continue             # 已经存在的路径、又不是程序自己管的区域 → 保守不动
+            relocated = tail
+        if not relocated:
+            continue
+        setattr(cfg, name, relocated)
+        changed.append(f"{name}: {raw} -> {relocated}")
+    if changed:
+        cfg.data_root = str(base)
+    return changed
 
 
 @dataclass
@@ -253,8 +419,17 @@ class AppConfig:
     # 默认为 True：XXMI Launcher 的 exe 要求管理员权限（非管理员启动会直接报
     # WinError 740），而用户要的是「零配置启动即用」，所以默认就按管理员处理。
     require_admin: bool = True
+    # **上次运行时的数据根**（= config.json 所在目录；打包后就是 exe 所在目录）。
+    # 用途（2026-10-02 群反馈修）：把程序目录**改名 / 搬到别的路径**之后，配置里那些
+    # "旧数据根的绝对路径"会失效 —— 界面一直显示旧目录、灰色的又改不了，还会在旧位置
+    # 重建出一整条空目录树（反馈原话：「我把主路径改了文件名，然后他没识别出来」
+    # 「又重新给我新建了一个空白文件」）。加载时拿它跟当前数据根一比，就能把这些残留
+    # 路径**自动改写回相对路径**（见 `_relocate_stale_paths`）—— 用户什么都不用做。
+    data_root: str = ""
 
     _config_path: str = field(default="", init=False, repr=False)
+    # 最近一次加载时被自动纠正的路径字段（"字段: 旧值 -> 新值"），供日志留痕。
+    _relocated: list[str] = field(default_factory=list, init=False, repr=False)
 
     # ---------------------------------------------------------------
     # Persistence
@@ -268,6 +443,7 @@ class AppConfig:
         if not path.is_file():
             cfg = cls()
             cfg._config_path = str(path)
+            cfg.data_root = _data_root_of(path)   # 记下这一版的数据根，下次搬家才对得上
             cfg.hotkey_default_applied = True   # 新配置天然就是新默认，无需迁移
             _apply_gpu_defaults(cfg)            # 非 50 系 → DLSS5 默认关（读注册表，毫秒级）
             cfg.autofill(deep=False)   # 只填内嵌路径（毫秒级）；全盘探测交给后台预热
@@ -279,6 +455,7 @@ class AppConfig:
             _quarantine_broken_config(path)
             cfg = cls()
             cfg._config_path = str(path)
+            cfg.data_root = _data_root_of(path)
             cfg.hotkey_default_applied = True
             _apply_gpu_defaults(cfg)
             cfg.autofill(deep=False)   # 只填内嵌路径（毫秒级）；全盘探测交给后台预热
@@ -306,6 +483,21 @@ class AppConfig:
             migrated = True
         # 同一次加载里顺手按显卡代次定 DLSS5 的默认（非 50 系 → 关）
         if _apply_gpu_defaults(cfg):
+            migrated = True
+        # **数据根自愈**（2026-10-02 群反馈）：程序目录被改名/搬走后，配置里残留的
+        # "旧数据根绝对路径"会让设置页一直显示旧目录、还会在旧位置重建空目录树
+        # （见 `_relocate_stale_paths` 的注释）。必须排在 autofill 之前 —— 那些路径
+        # 先变回相对路径，autofill 的"是否内置 staging"判断才会得出正确结论。
+        relocated = _relocate_stale_paths(cfg, path)
+        if relocated:
+            cfg._relocated = relocated
+            migrated = True
+        base_now = _data_root_of(path)
+        if str(cfg.data_root or "").strip() != base_now:
+            cfg.data_root = base_now
+            migrated = True
+        # 「留空 = 自动」的字段被清空过 → 补回默认值（空串会被解析成数据根本身）
+        if cfg.normalize_blank_paths():
             migrated = True
         # 关键路径留空时按工作区内的内嵌组件补齐并落盘：
         # 这样把 config.json 整个删掉，一键启动依然能自建出完整可用配置。
@@ -667,8 +859,47 @@ class AppConfig:
     def controller_dir(self) -> Path:
         return self.staging_mods_path / "MC_Controller"
 
+    def normalize_blank_paths(self) -> list[str]:
+        """把「留空 = 自动」的路径字段补回默认值，返回被回填的字段名。
+
+        设置页里这些框**可以自己填、也可以留空**（用户 2026-10-02：「全部放开吧」）。
+        但"留空"不能真的存成空串：`resolve_path("")` 会解析成**数据根本身**
+        （`dlss5_dir` 一空，`dlss5_path` 就变成数据根，DLSS5 直接失效）。所以每次
+        加载/保存都按 dataclass 的默认值回填：
+          * `library_dir` / `runtime_dir` / `dlss5_dir` / `staging_mods_dir` 这类**有默认值**
+            的 → 填回默认（`library` / `runtime` / `runtime/dlss5` …）；
+          * `xxmi_launcher` / `reshade_dll` / `secondary_motion_dir` / `poser_dir` 默认就是空
+            → 保持空，由 `autofill()` 或各组件自己的探测去补（真正的"自动"）。
+        """
+        defaults: dict[str, str] = {}
+        for item in fields(self):
+            if item.name.startswith("_") or item.default is MISSING:
+                continue
+            if isinstance(item.default, str):
+                defaults[item.name] = item.default
+        filled: list[str] = []
+        for name in _DATA_ROOT_RELATIVE_FIELDS:
+            if str(getattr(self, name, "") or "").strip():
+                continue
+            default = defaults.get(name, "")
+            if default:
+                setattr(self, name, default)
+                filled.append(name)
+        return filled
+
     def ensure_dirs(self) -> None:
+        """建出本程序要用的目录。
+
+        ⚠️ **绝不在"数据根之外 + 当前不存在 + 长得像数据根布局"的位置建目录**：配置里
+        残留的旧数据根绝对路径，会让这里把**一整条空目录树重建回旧位置** —— 用户看到
+        的是「我没动它，它又给我新建了一个空白文件夹」（2026-10-02 群反馈，本地已复现：
+        `staging_mods_dir` 指向旧根时会重建 `<旧根>\\runtime\\builtin\\XXMI\\EFMI\\Mods`）。
+        数据根内的目录、以及用户真指定的**已存在**的外部目录，行为完全不变。
+        """
+        root = self.base_dir
         for path in (self.library_path, self.runtime_path, self.builtin_runtime_path, self.staging_mods_path, self.reshade_runtime_path):
+            if not _within(root, path) and not path.is_dir() and _data_root_tail(path):
+                continue
             path.mkdir(parents=True, exist_ok=True)
 
     def validate(self) -> list[str]:
