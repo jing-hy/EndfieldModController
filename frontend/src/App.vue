@@ -3,7 +3,7 @@ import { ref, computed, onMounted } from "vue";
 import {
   Library, Wrench, PackageCheck, Rocket, Settings, Info, Palette,
 } from "lucide-vue-next";
-import { store, refreshState, applyTheme, currentTheme, THEMES } from "./store.js";
+import { store, refreshState, applyTheme, currentTheme, THEMES, PAGE_IDS } from "./store.js";
 import { waitForBridge, reportFrontendError } from "./lib/bridge.js";
 import { loadSettings } from "./lib/settings.js";
 import { dragHasFiles, importDroppedFile } from "./lib/importMod.js";
@@ -64,6 +64,12 @@ const themeOpen = ref(false);
 const currentPage = computed(() => pages[store.tab]);
 const currentName = computed(() => tabs.find((t) => t.id === store.tab)?.name || "");
 
+// 切页签要**写回** config.last_tab —— 之前只有启动时读、从不保存，"记住上次页签"实际不成立。
+async function goTab(id) {
+  store.tab = id;
+  try { await call("save_config", { last_tab: id }); } catch (e) { /* 记不上不影响使用 */ }
+}
+
 function pickTheme(name) {
   theme.value = name;
   applyTheme(name);
@@ -76,9 +82,11 @@ onMounted(async () => {
     store.tab = "preview";
     return;
   }
-  // `?demo=1`：用真实库快照渲染（**只给截图/评审用**，文件不随正式包分发）。
-  // 用 <script> 注入而不是 fetch —— file:// 下 fetch 本地 json 会被 CORS 拦掉。
-  if (new URLSearchParams(location.search).get("demo") === "1") {
+  // `?demo=1`：用真实库快照渲染 —— **只在 `VITE_UI_DEMO=1 npm run build` 的构建里存在**。
+  // 正式构建会被下面这行 `import.meta.env.VITE_UI_DEMO` 判断整段摇掉（rollup 常量折叠），
+  // 所以正式包既没有这段逻辑、也不会去读任何本地文件（用户准则：正式版不含测试通道）。
+  if (import.meta.env.VITE_UI_DEMO === "1"
+      && new URLSearchParams(location.search).get("demo") === "1") {
     await new Promise((resolve) => {
       const el = document.createElement("script");
       el.src = "./demo-state.js";
@@ -123,9 +131,9 @@ onMounted(async () => {
       // 注入开关全显示"关"，因为 settings 从没被填充过）。
       loadSettings();
       // 旧版会记住上次停留的页签（config.last_tab）；带 hash 深链时以 hash 为准
-      if (!location.hash && store.state.config && store.state.config.last_tab) {
-        store.tab = store.state.config.last_tab;
-      }
+      // 校验后再用：配置里残留的旧页签名会让 currentPage 变成 undefined、页面一片空白
+      const lastTab = store.state.config && store.state.config.last_tab;
+      if (!location.hash && PAGE_IDS.includes(lastTab)) store.tab = lastTab;
       notices.value = normalizeAnnouncements(store.state.announcements);
       // 首次启动：**只提示一次**（判据用后端持久化的 onboarding_done，而不是"当前还没就绪"
       // 这类会一直为真的状态 —— 否则会连环弹）。
@@ -166,7 +174,7 @@ onMounted(async () => {
         终末地 Mod 管理器
       </div>
       <nav class="flex-1 p-2 space-y-0.5">
-        <button v-for="t in tabs" :key="t.id" @click="store.tab = t.id"
+        <button v-for="t in tabs" :key="t.id" @click="goTab(t.id)"
           class="w-full flex items-center gap-2.5 px-3 py-2 rounded text-left transition-colors"
           :style="store.tab === t.id
             ? { background: 'var(--accent-soft)', color: 'var(--accent)', fontWeight: 500 }

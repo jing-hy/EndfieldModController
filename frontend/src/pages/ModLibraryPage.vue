@@ -89,7 +89,8 @@ function openMenu(mod, event) {
   // ⚠️ 坐标必须在**脚本**里算好：Vue 模板作用域拿不到 window（写了会直接报错）。
   const width = 172;
   const x = Math.max(8, Math.min(box.right - width, (window.innerWidth || 1200) - width - 8));
-  const y = Math.min(box.bottom + 4, (window.innerHeight || 800) - 190);
+  // 上下都要兜底：窗口很矮时 `innerHeight - 190` 会是负数，菜单就跑到窗口上方看不见了
+  const y = Math.max(8, Math.min(box.bottom + 4, (window.innerHeight || 800) - 190));
   menu.value = { id: String(mod.id), name: mod.name, x, y };
 }
 function closeMenu() { menu.value = null; }

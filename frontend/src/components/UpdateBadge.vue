@@ -59,6 +59,8 @@ async function checkNow() {
 }
 
 async function startUpdate() {
+  if (busy.value) return;
+  busy.value = true;             // 弹确认框期间就置忙，避免连点开出多个确认框、重复触发更新
   const ok = await showModalDialog({
     title: latest.value ? `更新到 v${latest.value}？` : "重启以完成更新？",
     message: latest.value
@@ -66,8 +68,7 @@ async function startUpdate() {
       : `更新包已经下载好了，现在重启程序来装上它。`,
     okText: latest.value ? "下载并更新" : "重启并安装", cancelText: "稍后",
   });
-  if (!ok) return;
-  busy.value = true;
+  if (!ok) { busy.value = false; return; }
   note.value = "正在处理…";
   try {
     if (pending.value) await call("apply_app_update");

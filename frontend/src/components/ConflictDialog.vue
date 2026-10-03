@@ -16,6 +16,23 @@ const SLOT_LABELS = {
   mask: "面罩", nudity: "裸体", skirt: "裙子", hair: "头发", face: "脸",
   leg: "腿部", arm: "手臂", shoe: "鞋子", tail: "尾巴", ear: "耳朵",
 };
+// ⚠️ 后端 `resolve_mod_conflicts(keep)` 的语义是"**没被 keep 的冲突 Mod 一律取消勾选**"。
+// 所以"暂不处理"的组，必须把**该组所有 Mod** 都放进 keep —— 否则用户选了"都保持启用"，
+// 实际结果是这一组被全部停用（2026-10-03 多角度审查抓到的真 bug）。
+function keepList() {
+  const keep = [];
+  props.groups.forEach((g, i) => {
+    const chosen = picked.value[i];
+    const mods = g.mods || [];
+    if (chosen) {
+      keep.push(String(chosen));
+    } else {
+      for (const m of mods) keep.push(String(m.id));
+    }
+  });
+  return keep;
+}
+
 function slotLabel(name) {
   if (!name) return "";
   return SLOT_LABELS[String(name).toLowerCase()] || String(name);
@@ -65,7 +82,7 @@ watch(
           </span>
           <span class="flex gap-2 shrink-0">
             <button class="btn btn-secondary" @click="emit('cancel')">暂不处理，继续</button>
-            <button class="btn btn-primary" @click="emit('resolve', Object.values(picked).filter(Boolean))">
+            <button class="btn btn-primary" @click="emit('resolve', keepList())">
               应用选择并停用其他
             </button>
           </span>

@@ -42,6 +42,7 @@ function tone(state) {
 async function refresh() {
   try {
     await refreshState();
+    checked.value = true;
     loadSettings();
     const total = deps.value.length;
     const ok = deps.value.filter((d) => d.status === "已安装").length;
@@ -81,7 +82,7 @@ onUnmounted(() => { if (timer) clearInterval(timer); });
 
     <!-- 两列（GPT-6 Astra 评审：摘要/进度/日志全占首屏，真正要看的组件列表起点太低）：
          左 = 摘要 + 进度 + 组件列表（要看的）；右 = 安装日志（要盯的，滚动时吸顶）。 -->
-    <div class="grid gap-4" style="grid-template-columns: minmax(0, 1fr) minmax(280px, 360px)">
+    <div class="two-col grid gap-4">
       <div class="space-y-4 min-w-0">
 
     <!-- 状态摘要：把"现在到底什么情况"用三个数字说清楚（评审：原来只有 0/0 和一行日志） -->

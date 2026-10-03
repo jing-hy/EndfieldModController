@@ -87,6 +87,9 @@ LINE_FAIL_THRESHOLD = 2
 # （`Hostname mismatch`）—— 而我这边同一时刻实测它是 200 正常的，所以**不能因此删掉这条线路**，
 # 只能在他那种网络下快速跳过。
 LINE_CERT_FAIL_TTL = 30 * 60
+# 403/429（限流）单独一档：它是**临时**状态，不该跟证书错误一样冷却半小时
+# （多角度审查：复用 30 分钟会把很快恢复的镜像错误排除掉）。
+LINE_RATE_LIMIT_TTL = 5 * 60
 
 # ── 照 PCL（ModNet.vb `TryBeginThread` / `SourceFail`）补的两条判据 ─────────
 #
@@ -560,7 +563,8 @@ def _load_lines_cache() -> dict[str, Any]:
         return {}
 
 
-def _remember_line(name: str, ok: bool, mbps: float, *, cert_error: bool = False) -> None:
+def _remember_line(name: str, ok: bool, mbps: float, *, cert_error: bool = False,
+                  rate_limited: bool = False) -> None:
     """记一条线路的成绩（几 KB 的 JSON，不常驻、可随时删）。
 
     cert_error=True 表示这次失败是 **HTTPS 证书不匹配**（不是超时/抖动）：那种失败是
@@ -739,13 +743,13 @@ def download(
         # 复用 cert_error 的语义 —— 它与证书错误一样"一次就该跳过"，否则每次下载都白试。
         rate_limited = _looks_rate_limited(message)
         if rate_limited and not cert_error:
-            cert_error = True
+            cert_error = True          # 复用"确定性失败"的阈值语义（一次就跳）
             _log(log, f"（{line.name} 返回 403/429 —— 这条线路在限流或拒绝访问，"
                       f"本次先跳过它，换个线路继续）")
         if network_wide:
             _log(log, f"（{line.name} 这次是网络/DNS 故障，不计入该线路的失败记录）")
         else:
-            _remember_line(line.name, False, 0.0, cert_error=cert_error)
+            _remember_line(line.name, False, 0.0, cert_error=cert_error, rate_limited=rate_limited)
         errors.append(f"{line.name}: {report.message}")
         _log(log, f"线路 {line.name} 失败：{report.message}")
         if cert_error:
@@ -867,7 +871,10 @@ def _attempt_line(
 
     try:
         # 断点续传优先：直接用分块把缺的补齐（哪怕设置里关了加速也续，否则前面的白下）
-        if (incomplete or resume_from) and supports_range and size:
+        # ⚠️ 续传分支**也要**遵守"这个源不许分片"（多角度审查抓到：原先只在小文件分支判了
+        #    `_may_parallel`，续传路径直接进并发，于是 github.com 这类限流源在续传时照样开多连接）。
+        if (incomplete or resume_from) and supports_range and size \
+                and policy != "never" and _may_parallel(url):
             threads = recommended_threads(size)
             report.boosted = True
             report.threads = threads
@@ -895,10 +902,10 @@ def _attempt_line(
         # PCL 的 `TryBeginThread` 里对 github.com 这类源直接 Return Nothing（不分片）——
         # 它们按连接数限流，分片只会更容易被拒。
         if (not supports_range or (size and size < MIN_PARALLEL_BYTES)
-                or policy == "never" or not _may_parallel(final_url or url)):
+                or policy == "never" or not _may_parallel(url)):
             reason = ("服务器不支持 Range" if not supports_range else
                       "文件较小，不值得并发" if size and size < MIN_PARALLEL_BYTES else
-                      "这个下载源限流，单连接反而更快" if not _may_parallel(final_url or url)
+                      "这个下载源限流，单连接反而更快" if not _may_parallel(url)
                       else "已按设置关闭加速")
             report.reason = reason
             # 已有部分数据时按追加写（不截断），否则从头写

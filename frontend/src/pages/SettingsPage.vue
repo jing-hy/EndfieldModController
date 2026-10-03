@@ -92,7 +92,7 @@ async function openPath(kind) { await run("open_path_in_explorer", kind); }
 
     <!-- 两列（GPT-6 Astra 评审：五个大区连续纵向排列要滚很久，右侧又大片空白）：
          左 = 各设置分组（要改的）；右 = 运行状态与详细状态（要看的，滚动时吸顶）。 -->
-    <div class="grid gap-4" style="grid-template-columns: minmax(0, 1fr) minmax(300px, 380px)">
+    <div class="two-col grid gap-4">
       <div class="space-y-4 min-w-0">
 
     <Card title="维护操作（会改动文件，请确认后再点）">
@@ -212,7 +212,7 @@ async function openPath(kind) { await run("open_path_in_explorer", kind); }
 
 
       <!-- 右栏：状态（滚动时吸顶） -->
-      <div class="space-y-4 min-w-0" style="align-self: start; position: sticky; top: 12px">
+      <div class="space-y-4 min-w-0" style="align-self: start; position: sticky; top: 68px">
         <Card title="运行状态">
           <div class="space-y-1.5 text-sm">
             <div class="flex items-center gap-2">

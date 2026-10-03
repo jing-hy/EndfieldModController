@@ -44,3 +44,33 @@ def test_timeout_is_not_rate_limited():
 def test_bad_url_does_not_crash():
     assert fastnet._may_parallel("") is True
     assert fastnet._may_parallel("not a url") is True
+
+
+# ---------------------------------------------------------------------------
+# 2026-10-03 多角度审查后补的回归
+# ---------------------------------------------------------------------------
+
+def test_rate_limited_uses_shorter_cooldown():
+    """★ 403/429 是**临时**限流，冷却不该跟证书错误一样长（审查：30 分钟太久）。
+
+    `_line_blocked` 是纯函数（缓存当参数传），所以直接喂两个缓存就能对照两档 TTL。
+    """
+    from endfieldmodcontroller import fastnet as f
+    assert f.LINE_RATE_LIMIT_TTL < f.LINE_CERT_FAIL_TTL
+
+    # 同一个时间点（已经过了限流那档的冷却）：限流线路该解封、证书线路仍该封着
+    past = int(f.time.time()) - (f.LINE_RATE_LIMIT_TTL + 5)
+    rate_cache = {"镜像A": {"ok": False, "rate": True, "fails": 99, "fail_at": past}}
+    cert_cache = {"镜像B": {"ok": False, "cert": True, "fails": 99, "fail_at": past}}
+    assert f._line_blocked("镜像A", rate_cache) is False, "限流冷却过了就该重新试它"
+    assert f._line_blocked("镜像B", cert_cache) is True, "证书错误仍是长冷却"
+
+
+def test_fresh_failure_blocks_then_recovers():
+    """刚失败 → 跳过；过了普通 TTL → 恢复。"""
+    from endfieldmodcontroller import fastnet as f
+    now = int(f.time.time())
+    cache = {"镜像C": {"ok": False, "fails": f.LINE_FAIL_THRESHOLD, "fail_at": now}}
+    assert f._line_blocked("镜像C", cache) is True
+    cache["镜像C"]["fail_at"] = now - (f.LINE_FAIL_TTL + 5)
+    assert f._line_blocked("镜像C", cache) is False
