@@ -2551,9 +2551,41 @@ class EndfieldModControllerApi:
         while dest.exists():
             counter += 1
             dest = self.config.library_path / f"{base}_{counter}"
+        # ⚠️⚠️ **解压前先处理"长路径"**（issue #12：「mod无法解压」；实测那条路径 264 字符，
+        # 超过 Windows 上限 259 ⇒ 父目录建得出、文件写不进 ⇒ `[Errno 2] No such file or directory`）。
+        # 不做这一步的话，解到一半才抛英文 errno，用户既不知道原因也不知道怎么办。
+        _extracted = False
+        if suffix == ".zip":
+            try:
+                from . import longpath as _lp
+
+                import zipfile as _zf
+
+                with _zf.ZipFile(archive_path) as _arc:
+                    _verdict = _lp.check_lengths(dest, _arc.namelist())
+                if _verdict.get("too_long"):
+                    launcher._append_log(
+                        self.config,
+                        f"导入: {name} 有 {len(_verdict['too_long'])} 个条目路径过长"
+                        f"（最长 {_verdict['worst']}，上限 {_verdict['limit']}）—— 先试长路径解压")
+                    dest.mkdir(parents=True, exist_ok=True)
+                    _extracted = self._extract_zip_into_long(archive_path, dest)
+                    if not _extracted:
+                        kept = _keep_failed_import(self.config, archive_path, name)
+                        return {"ok": False, "long_path": True,
+                                "source_path": str(kept),
+                                "target_dir": str(self.config.library_path),
+                                "message": _lp.explain(dest, _verdict)}
+                    launcher._append_log(self.config, "导入: 长路径解压成功")
+            except Exception as exc:  # noqa: BLE001 —— 预判本身出错不该挡住导入
+                launcher._append_log(self.config, f"导入: 长路径预判出错（按常规继续）：{exc}")
+                _extracted = False
+
         try:
             dest.mkdir(parents=True, exist_ok=True)
-            if suffix == ".zip":
+            if _extracted:
+                pass                                  # 上面已经用扩展前缀解好了
+            elif suffix == ".zip":
                 self._extract_zip_into(archive_path, dest)
             else:
                 # 7z/rar 在**临时目录**里解，再整份搬进库：这样即使包里有
@@ -3217,6 +3249,55 @@ class EndfieldModControllerApi:
         except OSError as exc:
             return {"ok": False, "message": f"创建下载目录失败：{exc}"}
         return self.open_path(str(target))
+
+    def _extract_zip_into_long(self, archive_path: Path, dest: Path) -> bool:
+        r"""用 **Win32 扩展长度前缀（`\\?\`）**把 zip 解进 `dest`，成功返回 True。
+
+        为什么可行：Python 的 `open()` 走 `CreateFileW`，路径带上 `\\?\` 前缀时
+        Win32 **跳过 MAX_PATH 检查** ⇒ 超过 260 字符也能写。**进程内生效、不改系统设置**
+        （符合"零配置即用"）。逐条解、逐条校验 zip-slip，任何一步失败就整体返回 False，
+        由调用方决定怎么告诉用户（不会留下半成品：解之前会先把已写文件清掉）。
+        """
+        import zipfile
+
+        from . import longpath as lp
+
+        written: list[Path] = []
+        try:
+            root = str(dest.resolve())
+            with zipfile.ZipFile(archive_path) as archive:
+                for info in archive.infolist():
+                    member = info.filename
+                    if not member or member.endswith("/"):
+                        continue
+                    target = (dest / member)
+                    # ⚠️ **每一次文件系统操作都要带扩展前缀**（2026-10-03 实测教训）：
+                    # 第一次写的时候只在 `open()` 上加了前缀，而 `mkdir` 用的是普通路径
+                    # ⇒ 超长时**父目录建不出来** ⇒ 整个方案失败。
+                    # `pathlib` 的 `mkdir` 不会自己加前缀，所以这里显式用 `os.makedirs`。
+                    target_ext = lp.extended(target)
+                    # zip-slip 校验：解出来的路径必须仍在 dest 之内
+                    #（这里用**未加前缀**的路径做前缀比较，语义更直观）
+                    if not str(target).startswith(str(dest)):
+                        raise ValueError(f"压缩包里有非法路径: {member}")
+                    parent_ext = lp.extended(target.parent)
+                    os.makedirs(parent_ext, exist_ok=True)
+                    with archive.open(info) as src:
+                        with open(target_ext, "wb") as out:
+                            while True:
+                                chunk = src.read(1 << 20)
+                                if not chunk:
+                                    break
+                                out.write(chunk)
+                    written.append(target)
+            return True
+        except Exception:  # noqa: BLE001 —— 清理半成品后交给调用方报错
+            for path in reversed(written):
+                try:
+                    os.unlink(lp.extended(path))
+                except OSError:
+                    pass
+            return False
 
     def _extract_zip_into(self, archive_path: Path, dest: Path) -> None:
         """把 zip 解进 ``dest``，逐条做 zip-slip 校验（任何逃逸条目直接拒绝）。"""

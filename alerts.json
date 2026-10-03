@@ -15,6 +15,15 @@
   ],
   "alerts": [
     {
+      "id": "v1.0.0-1.0.1-selfupdate-broken",
+      "level": "warning",
+      "title": "v1.0.0 / v1.0.1 的「自动更新」是坏的，请手动换一次 exe",
+      "min_version": "1.0.0",
+      "max_version": "1.0.1",
+      "body": "你装的是 v1.0.0 或 v1.0.1 —— 这两个版本的**程序自更新有 bug**：\n\n· 下载更新包时进度条在走，但**日志不动、也没有速度**；\n· 更关键的是**下完之后没有任何提示**，不会问你要不要安装，看起来就像「下载完成就没了」。\n\n**所以这两个版本没法自己更新到新版，请手动换一次：**\n\n1. 到 GitHub 的 Releases 页下载最新的 `EndfieldModController.exe`（项目地址：https://github.com/jing-hy/EndfieldModController/releases/latest ）；\n2. 也可以在 QQ 群里拿最新版 exe；\n3. **用下载到的 exe 直接覆盖你现在那个 exe 文件**（先把管理器关掉再覆盖）；\n4. 重新打开就是最新版了。\n\n**你的 Mod 库、配置、备份都不会动** —— 只是换一个 exe 文件而已，数据都在 exe 旁边的 `library\\` 与 `runtime\\` 里。\n\n换到 v1.0.2（或更新）之后自更新就正常了，以后不必再手动换。",
+      "url": "https://github.com/jing-hy/EndfieldModController/releases/latest"
+    },
+    {
       "id": "v0.7.0-alert-feature",
       "level": "info",
       "title": "v0.7.0 起加入「异常状态预警」",
