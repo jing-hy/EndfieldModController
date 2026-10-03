@@ -109,7 +109,8 @@ function openMenu(mod, event) {
   const x = Math.max(8, Math.min(box.right - width, (window.innerWidth || 1200) - width - 8));
   // 上下都要兜底：窗口很矮时 `innerHeight - 190` 会是负数，菜单就跑到窗口上方看不见了
   const y = Math.max(8, Math.min(box.bottom + 4, (window.innerHeight || 800) - 190));
-  menu.value = { id: String(mod.id), name: mod.name, x, y };
+  // ⚠️ 把 `kind` 一起存下来 —— 模板里判断「移到辅助/服装」要用它（模板作用域拿不到 mod）
+  menu.value = { id: String(mod.id), name: mod.name, kind: String(mod.kind || ""), x, y };
 }
 function closeMenu() { menu.value = null; }
 
@@ -152,6 +153,7 @@ async function menuAct(act) {
       assignRef.value.openFor(m);
       return;
     } else if (act === "toAssist" || act === "toSkin") {
+      // 判据从 `menu.kind` 来（模板只传 act）
       // 用户 2026-10-03：「一些被误识别的 mod 可以在辅助和皮肤之间移动」——
       // 自动判据只能猜，猜错了要让用户一句话改过来（写进该 Mod 的 mod.meta.json）。
       const want = act === "toAssist" ? "assist" : "character";
@@ -376,10 +378,15 @@ watch(() => store.demoCovers, (val) => {
          :style="{ left: menu.x + 'px', top: menu.y + 'px' }">
       <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('character')">更改所属角色…</button>
       <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('fix')">修复 Mod 文件</button>
-            <button v-if="m.kind !== 'assist'" class="w-full text-left px-3 py-1.5 text-sm"
-                    @click="menuAct('toAssist', m)">移到「辅助 Mod」</button>
-            <button v-else class="w-full text-left px-3 py-1.5 text-sm"
-                    @click="menuAct('toSkin', m)">移到「皮肤 Mod」</button>
+      <!-- ⚠️ **不要再引用 `m`**（2026-10-03 修「点了更多页面就变纯白」）：
+           `m` 只存在于 `menuAct()` 函数体内，**模板作用域里没有它** ——
+           渲染这个浮层时会抛 `ReferenceError`，整页直接白掉。
+           （服装页白、辅助页正常，因为辅助页是我照着新写的那份、没带这个错。）
+           要用就用 `menu` —— 它带着 `id / name / kind`。 -->
+      <button v-if="menu.kind !== 'assist'" class="w-full text-left px-3 py-1.5 text-sm"
+              @click="menuAct('toAssist')">移到「辅助 Mod」</button>
+      <button v-else class="w-full text-left px-3 py-1.5 text-sm"
+              @click="menuAct('toSkin')">移到「服装 Mod」</button>
       <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('rollback')">回滚</button>
       <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('open')">打开所在目录</button>
       <div style="height:1px;background:var(--border)" class="my-1"></div>
