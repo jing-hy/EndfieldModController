@@ -65,7 +65,8 @@ async function run(method, ...args) { try { return await call(method, ...args); 
 
 <template>
   <div class="space-y-4">
-    <button class="w-full py-4 rounded-lg text-white text-base font-semibold transition-colors"
+    <button id="oneclick-launch-btn"
+            class="w-full py-4 rounded-lg text-white text-base font-semibold transition-colors"
             :disabled="running"
             :style="{ background: running ? 'var(--border-strong)' : 'var(--accent)' }"
             @click="oneClick">

@@ -22,6 +22,8 @@ export const store = reactive({
   // 用户看到的就是"图片加载很慢"（2026-10-03 反馈）。放这里整个会话只取一次。
   covers: {},
   demoCovers: null,
+  // 设置页点「依赖清空并重新下载」→ 清完跳到依赖页，由依赖页读这个标志自动开跑
+  autoStartDeps: false,
 });
 
 export async function refreshState() {

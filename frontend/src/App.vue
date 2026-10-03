@@ -12,6 +12,7 @@ import UpdateBadge from "./components/UpdateBadge.vue";
 import { showModalDialog, showToast } from "./lib/dialog.js";
 import { call } from "./lib/bridge.js";
 import DialogHost from "./components/DialogHost.vue";
+import OnboardingTour from "./components/OnboardingTour.vue";
 import ToastHost from "./components/ToastHost.vue";
 import AboutPage from "./pages/AboutPage.vue";
 import SettingsPage from "./pages/SettingsPage.vue";
@@ -43,6 +44,7 @@ const dragging = ref(false);
 // 公告条（用户每次启动都会看到；点关闭就告诉后端"已读"）
 const notices = ref([]);
 let firstRunChecked = false;
+const tourVisible = ref(false);   // 新手引导浮层（挖孔高亮 + 箭头指向目标）
 let dragDepth = 0;
 async function dismissNotices() {
   notices.value = [];
@@ -102,6 +104,9 @@ onMounted(async () => {
       store.config = store.state.config || {};
       store.ready = true;
       loadSettings();
+      // demo 模式也要能看引导：快照里把 first_run.onboarding_done 置 false 即可复现首启
+      const demoFr = store.state.first_run || {};
+      if (demoFr.first_run && !demoFr.onboarding_done) tourVisible.value = true;
       return;
     }
   }
@@ -142,37 +147,54 @@ onMounted(async () => {
       const fr = store.state.first_run || {};
       if (!firstRunChecked && fr.first_run && !fr.onboarding_done) {
         firstRunChecked = true;
-        const missing = (fr.missing_components || []).join("、");
-        // 评审：一屏塞了三件事、`Poser` 没解释、"跳过"没说后果 ⇒ 步骤化 + 说清是什么。
-        const go = await showModalDialog({
-          title: "首次使用：需要完成初始化",
-          message: [
-            missing ? `还缺少 ${missing}（摆姿 / MMD 播放用的组件）。` : "控制器还没生成。",
-            "",
-            "建议先做这一步（约 1 分钟）：",
-            "1. 打开「依赖」页",
-            "2. 点「安装缺失依赖」",
-            "3. 装完回「启动」页点「一键启动」",
-            "",
-            "",
-            // 用户 2026-10-03 要求：「新手教程在 mod 拖入后面加一步，展示可以下载」——
-            // 所以把"导入 Mod"讲成两条路：拖进本地包，或直接粘网址下载。
-            "导入 Mod 有两种方式：",
-            "① 把 .zip / .7z / .rar 拖进窗口 —— 会自动解压进库并识别角色；",
-            "② 直接下载：在「Mod 库」页点「下载 Mod」，粘贴网址（一行一个），",
-            "   也支持香蕉网（GameBanana）页面地址 —— 会自动取真实文件直链，并带出封面。",
-            "",
-            "提示：第一次点「一键启动」如果游戏没起来，再点一次通常就好。",
-            "这一条只提示一次，点「暂时跳过」不会再弹。",
-          ].join("\n"),
-          okText: "去依赖页", cancelText: "暂时跳过",
-        });
-        if (go) store.tab = "dependencies";
-        try { await call("save_config", { onboarding_done: true }); } catch (e) { /* 记不上也不影响本次 */ }
+        // 用户 2026-10-03：「现在首次使用引导变成只有文字的了，我需要那种一个箭头指向按钮的
+        // 那种」—— 原来那个纯文字弹窗是评审建议下改的，但他要的是**高亮 + 箭头指向**的
+        // 分步引导（0.4.0 那版就是分步 tour，本次移植回来并补上箭头）。
+        tourVisible.value = true;
       }
     } catch (e) { /* call() 已经弹过窗 */ }
   }
 });
+
+// 引导步骤（沿用 0.4.0 的四步，内容按现在的界面更新；
+// 第二步按用户要求补上"也可以直接下载"这条路）。
+const TOUR_STEPS = [
+  {
+    tab: "dependencies", target: "dep-update-all-btn",
+    title: "第一步：先把组件装齐",
+    body: "这里是「依赖」页。点这个「安装缺失依赖」按钮，程序会自动下载并安装\n"
+      + "XXMI Launcher、XXMI 库、EFMI、DLSS5 组件等全部依赖（需要联网）。\n\n"
+      + "建议先点它，等装完再去启动。右边那个黑框会显示下载线路与进度。",
+  },
+  {
+    tab: "library", target: "mod-download-box",
+    title: "第二步：把 Mod 弄进来",
+    body: "有两种方式：\n"
+      + "① 把 Mod 的 .zip / .7z / .rar 拖到窗口任意位置 —— 松手后自动解压进库并识别角色；\n"
+      + "② 直接下载：在「下载 Mod」里粘贴网址（一行一个），也支持香蕉网页面地址，\n"
+      + "   会自动取真实文件直链、并带出封面。\n\n"
+      + "同一个角色默认只保留一个 Mod（自动互斥），避免游戏崩。",
+  },
+  {
+    tab: "launch", target: "oneclick-launch-btn",
+    title: "第三步：一键启动",
+    body: "点这个「一键启动」：程序会补齐缺失组件、同步注入库、跑一遍初始化自检，\n"
+      + "然后拉起 XXMI Launcher（不会自动进游戏，进游戏在 XXMI 里点 Start）。\n\n"
+      + "第一次可能会提示「请再点一次一键启动」，看到后再点一次即可。",
+  },
+  {
+    tab: "settings", target: "game-restore-btn",
+    title: "第四步：随时可以还原",
+    body: "「设置」页有「还原游戏本体」：\n"
+      + "本程序对游戏目录做的任何改动都可回滚（净化前会完整备份、只移动不删除）。\n\n"
+      + "同一页还有「依赖清空并重新下载」——组件装坏了、缺文件时可以一键清空重来。",
+  },
+];
+
+async function finishTour() {
+  tourVisible.value = false;
+  try { await call("save_config", { onboarding_done: true }); } catch (e) { /* 记不上也不影响本次 */ }
+}
 </script>
 
 <template>
@@ -253,6 +275,9 @@ onMounted(async () => {
         <div class="text-xs mt-1" style="color: var(--text-muted)">支持 .zip / .7z / .rar（进度显示在顶部提示条）</div>
       </div>
     </div>
+
+    <!-- 新手引导：挖孔高亮 + 箭头指向目标控件（用户要的"一个箭头指向按钮"） -->
+    <OnboardingTour v-model="tourVisible" :steps="TOUR_STEPS" @finish="finishTour" />
 
     <DialogHost />
     <ToastHost />

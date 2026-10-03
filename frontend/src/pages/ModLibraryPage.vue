@@ -368,7 +368,7 @@ watch(() => store.demoCovers, (val) => {
       </div>
     </Card>
 
-    <Card title="下载 Mod">
+    <Card id="mod-download-box" title="下载 Mod">
       <div class="flex items-start justify-between gap-4">
         <div class="text-xs" style="color: var(--text-muted)"
              title="粘贴网址一行一个 → 并行下载；zip / 7z / rar 会自动解压进 Mod 库并识别角色。直接支持香蕉网（GameBanana）页面地址：会自动换成真实文件直链，并带出封面、作者与版本；打不开时请检查 VPN。">

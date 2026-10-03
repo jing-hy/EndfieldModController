@@ -12,6 +12,7 @@ import Badge from "../components/ui/Badge.vue";
 import SettingPath from "../components/ui/SettingPath.vue";
 import SettingPathBrowse from "../components/ui/SettingPathBrowse.vue";
 import SettingSwitch from "../components/ui/SettingSwitch.vue";
+import { showModalDialog, showToast } from "../lib/dialog.js";
 import SettingSelect from "../components/ui/SettingSelect.vue";
 
 const RE_INJECTION = [
@@ -67,6 +68,42 @@ async function probe(method) {
 
 async function changeTheme(v) { await saveSetting("theme", v); applyTheme(v); }
 async function run(method, ...args) { try { return await call(method, ...args); } catch (e) { return null; } }
+
+// 「依赖清空并重新下载」——用户 2026-10-03 要求：
+//   ① 出弹窗确认；② 清空完弹个提示；③ 跳转到依赖页走正常下载流程（含日志）。
+// 后端 `reset_dependencies_and_redownload` 只做前两步（还原游戏本体 + 清 runtime/assets
+// 并写回路径），它自己的文档里就写着"前端负责第三步的跳转与触发"——之前前端没实现。
+async function resetDependencies() {
+  const ok = await showModalDialog({
+    title: "依赖清空并重新下载",
+    message: [
+      "会依次做三件事：",
+      "① 从备份区还原终末地本体（没做过净化就跳过）；",
+      "② 清掉 runtime 与 assets，然后重新下载并展开；",
+      "③ 跳到「依赖」页开始一键下载。",
+      "",
+      "你的 Mod 库和程序本体不受影响。",
+      "清完到装好之间，组件列表会先变空，属于正常现象。",
+    ].join("\n"),
+    // 破坏性动作：按钮文字自解释，默认聚焦在安全项上
+    okText: "清空并重新下载",
+    cancelText: "取消，什么都不做",
+    focusCancel: true,
+  });
+  if (!ok) return;
+
+  const result = await run("reset_dependencies_and_redownload");
+  if (!result || result.ok === false) {
+    showToast((result && result.message) || "清空失败，详情见设置页的运行日志", "danger");
+    return;
+  }
+
+  // 清空完的"动态"提示（用户原话：「清空完弹个动态」）
+  showToast("已清空 runtime 与 assets，正在跳到依赖页重新下载…", "success");
+  // 跳依赖页并让那边自动开跑（依赖页 onMounted 会读这个标志）
+  store.autoStartDeps = true;
+  store.tab = "dependencies";
+}
 async function openPath(kind) { await run("open_path_in_explorer", kind); }
 </script>
 
@@ -97,8 +134,8 @@ async function openPath(kind) { await run("open_path_in_explorer", kind); }
 
     <Card title="维护操作（会改动文件，请确认后再点）">
       <div class="flex flex-wrap gap-2">
-        <Btn @click="run('game_clean_restore')">还原游戏本体</Btn>
-        <Btn variant="danger" @click="run('reset_dependencies_and_redownload')">依赖清空并重新下载</Btn>
+        <Btn id="game-restore-btn" @click="run('game_clean_restore')">还原游戏本体</Btn>
+        <Btn variant="danger" @click="resetDependencies">依赖清空并重新下载</Btn>
       </div>
       <div class="text-xs mt-2" style="color: var(--text-muted)">
         「还原游戏本体」只从备份区把非原版文件搬回去，不动你的 Mod 库；

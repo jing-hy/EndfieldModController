@@ -68,7 +68,18 @@ async function start() {
   await refresh();
 }
 
-onMounted(() => { refresh(); timer = setInterval(pollProgress, 1200); });
+onMounted(() => {
+  refresh();
+  timer = setInterval(pollProgress, 1200);
+  // 「依赖清空并重新下载」在设置页清完会置这个标志并跳过来 —— 这里自动开跑，
+  // 用户不用再找按钮点一次（用户 2026-10-03 要求：「清空完…然后跳转到依赖页走正常
+  // 下载流程，包括那些日志什么的」）。日志靠下面的 pollProgress 轮询同一个后端进度。
+  if (store.autoStartDeps) {
+    store.autoStartDeps = false;
+    logLines.value = ["已清空 runtime 与 assets，开始重新下载依赖…"];
+    start();
+  }
+});
 onUnmounted(() => { if (timer) clearInterval(timer); });
 </script>
 
@@ -77,7 +88,7 @@ onUnmounted(() => { if (timer) clearInterval(timer); });
     <div class="flex flex-wrap gap-2">
       <Btn @click="refresh">重新扫描</Btn>
       <Btn @click="call('ensure_initialized')">检查并补齐</Btn>
-      <Btn variant="primary" @click="start">安装缺失依赖</Btn>
+      <Btn id="dep-update-all-btn" variant="primary" @click="start">安装缺失依赖</Btn>
     </div>
 
     <!-- 两列（GPT-6 Astra 评审：摘要/进度/日志全占首屏，真正要看的组件列表起点太低）：

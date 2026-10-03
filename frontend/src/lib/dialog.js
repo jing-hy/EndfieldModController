@@ -56,13 +56,16 @@ export function showToast(text, tone) {
 
 // 旧版签名：showModalDialog({ title, message, okText, cancelText, showCancel, link, extraButtons })
 // 返回 Promise<boolean>（点主按钮 = true）。正文用 textContent 渲染（**不允许写 markdown**）。
+//
+// `focusCancel`（2026-10-03 加）：**破坏性动作默认把焦点放在安全项（取消）上** —— 用户定的
+// 交互准则之一（「破坏性动作写清后果、默认聚焦安全项」）。不传则维持旧行为（聚焦主按钮）。
 export function showModalDialog({
   title, message, okText = "确定", cancelText = "取消",
-  showCancel = true, link = null, extraButtons = [],
+  showCancel = true, link = null, extraButtons = [], focusCancel = false,
 }) {
   return new Promise((resolve) => {
     uiState.dialog = {
-      title, message, okText, cancelText, showCancel, link, extraButtons,
+      title, message, okText, cancelText, showCancel, link, extraButtons, focusCancel,
       _resolve: resolve,
     };
   });
