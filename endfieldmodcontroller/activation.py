@@ -853,6 +853,13 @@ def stage_and_prepare(
         for mod in staged_mods:
             if mod.is_dependency:
                 continue
+            # ⚠️ **自带 UI（游戏内菜单）的 Mod 绝不锁键**（2026-10-03 用户：
+            #     「有没有什么判据能判断一个 mod 是不是有 ui，**有 ui 就不锁键**」）。
+            # 这类 Mod 自己处理输入（`/` 打开菜单、鼠标左右中键选择、方向键/手柄导航），
+            # 锁掉它的键 = 把它的菜单入口废掉。
+            if mc_core.looks_like_ui_mod(mod.path, [mod.group or "", mod.name or ""], {}):
+                _log(log, f"跳过锁键：{mod.name} 自带游戏内菜单（它自己管输入）")
+                continue
             patch_records.extend(mc_core.patch_mod_hotkeys(mod.path, backup_root, mod.id))
 
     controller_dir = staging_root / "MC_Controller"

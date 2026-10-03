@@ -914,6 +914,60 @@ def assist_group_of(rel_parts: Sequence[str], meta: dict[str, Any]) -> str:
     return ASSIST_GROUP_OTHER
 
 
+# ── 「自带 UI 的 Mod」判据（2026-10-03 用户要求）─────────────────────────────
+# 用户原话：「**看看有没有什么判据能判断一个 mod 是不是有 ui，有 ui 就不锁键，
+#            那个 mod 不加入 reshade 的界面里**」。
+#
+# 为什么需要：有些 Mod **自带一套游戏内菜单**（ini 自绘，不是外部程序），典型代表是
+# Snaccubus 的「庄方宜 模块化菜单包」（`zhuangfangyimodularmenumod`）。这类 Mod：
+#   * **自己处理输入** —— 用 `/` 打开、鼠标左右中键选择、方向键/手柄导航；
+#   * 因此**绝不能锁它的键**（锁了它自己的操作入口就废了）；
+#   * 它的 `actions` 里绝大多数是「菜单怎么操作」（导航/点击/翻页）而不是换装本身，
+#     **塞进 ReShade 面板毫无意义**（那个包被提取出 63 条，还有大量重复）。
+#
+# **判据 = 出现菜单状态变量**（实测对照）：
+#   * 庄方宜菜单包：`$in_menu` / `$select_page` / `$clicktype` / `$clickcontroller` /
+#     `$holdselect` —— **命中 5 个**；
+#   * 普通换装 Mod（陈千语）：**命中 0 个**（它只有 `key = vk_right/vk_down/vk_left`）。
+# 另加两条辅助特征（有则加分）：绑定鼠标键（`VK_LBUTTON`/`VBUTTON`）、绑定手柄键。
+UI_MENU_VARS = (
+    "$in_menu", "$in_character_menu", "$select_page", "$selectmenu",
+    "$clicktype", "$clickcontroller", "$holdselect", "$holdselectcontroller",
+)
+# 自带 UI 的 Mod 往往会绑鼠标/手柄 —— 普通换装 Mod 不会
+UI_INPUT_HINTS = ("vk_lbutton", "vk_rbutton", "vk_mbutton", "xbutton1", "xbutton2",
+                  "xinput", "xbox", "gamepad", "controller")
+
+
+def looks_like_ui_mod(path: Path | None, rel_parts: Sequence[str] = (), meta: dict | None = None) -> bool:
+    """这个 Mod 是不是**自带游戏内 UI（菜单）**。
+
+    命中即：**不锁它的键**、**不把它的动作塞进 ReShade 面板**、卡片上提示"游戏内按 / 打开"。
+    """
+    if path is None:
+        return False
+    try:
+        text = ""
+        for ini in sorted(path.rglob("*.ini"))[:12]:
+            try:
+                text += ini.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            if len(text) > 400_000:
+                break
+    except OSError:
+        return False
+    if not text:
+        return False
+    low = text.lower()
+    hits = sum(1 for v in UI_MENU_VARS if v in low)
+    if hits >= 2:
+        return True
+    # 菜单变量只命中 1 个时，看有没有鼠标/手柄绑定佐证
+    aux = sum(1 for k in UI_INPUT_HINTS if k in low)
+    return hits >= 1 and aux >= 1
+
+
 def looks_like_wallpaper(path: Path | None, rel_parts: Sequence[str]) -> bool:
     """是不是「加载页 / 壁纸」类（整包只换界面背景、不换角色衣服）。
 
@@ -1109,7 +1163,15 @@ def _make_mod_info(
     requires = meta.get("requires") or meta.get("dependencies") or []
     if isinstance(requires, str):
         requires = [requires]
-    actions = parse_mod_actions(mod_root, mods_root)
+    # ⚠️ **自带 UI（游戏内菜单）的 Mod 不把动作送进 ReShade 面板**
+    # （2026-10-03 用户：「有 ui 就…**那个 mod 不加入 reshade 的界面里**」）。
+    # 这类 Mod 的 actions 绝大多数是"菜单怎么操作"（导航/点击/翻页），
+    # 实测那个模块化菜单包被提取出 **63 条**、还有大量重复 —— 塞进面板毫无意义，
+    # 而且面板发它的"键"还会和鼠标/手柄操作打架。它自己就有菜单，用户直接用它。
+    if looks_like_ui_mod(mod_root, [group or "", str(meta.get("name", ""))], meta):
+        actions = []
+    else:
+        actions = parse_mod_actions(mod_root, mods_root)
     cover = find_cover(source_root, mod_root, meta)
     meta_path = next(
         (base / n for base in (source_root, mod_root) for n in ("mod.meta.json", "mod_info.json", "mod.yaml", "mod.yml") if (base / n).is_file()),

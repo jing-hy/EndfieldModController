@@ -230,6 +230,27 @@ def _check_bundled_assets(config: AppConfig, report: Report, log: Callable[[str]
         else:
             report.add(key, False, result.message, manual=True)
 
+    # ⚠️ **RabbitFX 随包展开**（2026-10-03 用户：「那把他随包」）。
+    # 它本体只有 6 KB，而从 GameBanana 拉取在国内线路上实测只有 8 KB/s ——
+    # 为这 6 KB 让用户等/失败不值得，所以随包放在 `assets\rabbitfx\`，启动时展开到
+    # `<Mod 库>\_deps\RabbitFX`（与 `dependencies.json` 声明的安装位置一致）。
+    # 它是**幂等**的：目标已存在就什么都不做（绝不覆盖用户自己更新过的那份）；
+    # 库里已有别的副本时不铺（作者明确警告"多份会导致异常与崩溃"），只如实报出来。
+    try:
+        from . import rabbitfx
+
+        fx = rabbitfx.ensure_bundled(config, log=log)
+        if fx.get("status") == "installed":
+            report.add("rabbitfx:bundled", True, f"RabbitFX 已随包展开到 {fx.get('dir')}", fixed=True)
+            report.action("展开随包前置 RabbitFX（庄方宜菜单包等 Mod 需要它）")
+        elif fx.get("status") == "already_elsewhere":
+            report.add("rabbitfx:bundled", True, f"库里已有 RabbitFX：{fx.get('dir')}")
+        elif fx.get("status") == "present":
+            report.add("rabbitfx:bundled", True, "RabbitFX 已就位")
+        # `missing` 不报错：依赖下载那条路会兜底（dependencies.json 里也声明了它）
+    except Exception as exc:  # noqa: BLE001 —— 随包展开失败不该让自检整体失败
+        _log(log, f"RabbitFX 随包展开出错（忽略，依赖下载会兜底）：{exc}")
+
 
 def _check_dlss5_dir(config: AppConfig, report: Report, log: Callable[[str], None] | None) -> None:
     dlss5 = config.dlss5_path

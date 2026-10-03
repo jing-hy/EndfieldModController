@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "group": "rabbitfx",
+  "notes": "EFMI RabbitFX（作者 caverabbit，GameBanana 651557，CC BY-NC-ND 4.0）——终末地 Mod 的**共享 shader 特效前置**：用 [ShaderRegex*] 正则改写角色 shader，插入额外贴图槽（t60/t61 Glow、t70-t74 Diffuse/Lightmap/Normal 等），并做去马赛克与 HSV 调色。庄方宜的模块化菜单包等 Mod 明确要求它。**随包分发**，展开到 `<Mod 库>/_deps/RabbitFX` （与 dependencies.json 里声明依赖时的安装位置一致，这样两条路互不冲突）。⚠️ 作者明确警告：全库只能有一份 RabbitFX，多份会导致异常与崩溃；本程序展开前会检查目标是否已存在，不会重复铺。",
+  "compression": "none",
+  "files": {
+    ".endfieldmodcontroller_source.json": {
+      "size": 120,
+      "sha256": "b5f4db9482a3d524458225edad9ed892da4c4e7fbb7c9701ff8ee9172864b3cd",
+      "origin": "EFMI RabbitFX by caverabbit (GameBanana 651557)"
+    },
+    "deltaTime.ini": {
+      "size": 485,
+      "sha256": "2c8acbe54849dbdfa4665b6c77590c518e8662c74a4a973aeb94f9b4be8f819c",
+      "origin": "EFMI RabbitFX by caverabbit (GameBanana 651557)"
+    },
+    "DISABLED/ShaderCacheSettings.ini": {
+      "size": 314,
+      "sha256": "814892cdaad44145a38a520a025ba63210df4854bbe49dc11517bd361ab4c086",
+      "origin": "EFMI RabbitFX by caverabbit (GameBanana 651557)"
+    },
+    "RabbitFX.ini": {
+      "size": 32574,
+      "sha256": "0305b3f355704a049dcdd2462b3db45b44167faeb6e0fa4189cecf6df128d421",
+      "origin": "EFMI RabbitFX by caverabbit (GameBanana 651557)"
+    },
+    "README.txt": {
+      "size": 805,
+      "sha256": "b9d67ad86fcd3992e291c7ec260b64c96556d8e76c92ab3f0a0150dbacfc09d3",
+      "origin": "EFMI RabbitFX by caverabbit (GameBanana 651557)"
+    }
+  }
+}
