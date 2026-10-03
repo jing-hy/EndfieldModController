@@ -4,6 +4,7 @@
 //    调 save_config（旧版语义），所以这里不碰保存细节，只负责分组与按钮。
 import { computed, ref } from "vue";
 import { call } from "../lib/bridge.js";
+import { useLogAutoScroll } from "../lib/autoscroll.js";
 import { store, applyTheme, THEMES } from "../store.js";
 import { settings, saveSetting } from "../lib/settings.js";
 import Card from "../components/ui/Card.vue";
@@ -105,6 +106,13 @@ async function resetDependencies() {
   store.tab = "dependencies";
 }
 async function openPath(kind) { await run("open_path_in_explorer", kind); }
+
+// 日志框自动滚到底（不抢鼠标、没新内容不动）
+const logBox = ref(null);
+useLogAutoScroll(logBox, () => logLines.value);
+// 诊断详情那块日志也自动滚到底
+const probeBox = ref(null);
+useLogAutoScroll(probeBox, () => probeText);
 </script>
 
 <template>
@@ -286,7 +294,7 @@ async function openPath(kind) { await run("open_path_in_explorer", kind); }
           <div class="flex flex-wrap gap-2">
             <Btn v-for="p in PROBES" :key="p.m" :disabled="probeBusy" @click="probe(p.m)">{{ p.label }}</Btn>
           </div>
-          <div class="log-box h-56 mt-3">{{ probeText }}</div>
+          <div ref="probeBox" class="log-box h-56 mt-3">{{ probeText }}</div>
         </Card>
       </div>
     </div>

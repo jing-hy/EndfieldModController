@@ -3,6 +3,7 @@
 // ⚠️ 日志框是**纯黑**的（.log-box 在 tokens.css 里，且 user-select: text 保证可复制）。
 import { ref, computed, onMounted, onUnmounted } from "vue";
 import { call } from "../lib/bridge.js";
+import { useLogAutoScroll } from "../lib/autoscroll.js";
 import { store, refreshState } from "../store.js";
 import { loadSettings } from "../lib/settings.js";
 import Card from "../components/ui/Card.vue";
@@ -126,6 +127,10 @@ onMounted(() => {
   }
 });
 onUnmounted(() => { if (timer) clearInterval(timer); });
+
+// 日志框自动滚到底（不抢鼠标、没新内容不动）
+const logBox = ref(null);
+useLogAutoScroll(logBox, () => logLines.value);
 </script>
 
 <template>
@@ -199,7 +204,7 @@ onUnmounted(() => { if (timer) clearInterval(timer); });
               {{ logLines.length > 1 ? logLines.length + " 行" : "尚无日志" }}
             </span>
           </div>
-          <div v-if="logLines.length" class="log-box" style="max-height: 420px; border-radius: 0">{{ logLines.join("\n") }}</div>
+          <div v-if="logLines.length" ref="logBox" class="log-box" style="max-height: 420px; border-radius: 0">{{ logLines.join("\n") }}</div>
           <div v-else class="log-empty" style="min-height: 52px; text-align: center">
             尚未开始。点「安装缺失依赖」后，这里会显示下载线路与安装过程。
           </div>

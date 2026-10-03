@@ -2,6 +2,7 @@
 // 启动页（旧 #tab-launch）：一键启动 + 六个注入开关（**与设置页共享同一份 settings 状态**）。
 import { ref } from "vue";
 import { call } from "../lib/bridge.js";
+import { useLogAutoScroll } from "../lib/autoscroll.js";
 import { showAlert } from "../lib/dialog.js";
 import { settings, saveSetting } from "../lib/settings.js";
 import { store } from "../store.js";
@@ -61,6 +62,10 @@ async function oneClick() {
   }
 }
 async function run(method, ...args) { try { return await call(method, ...args); } catch (e) { return null; } }
+
+// 日志框自动滚到底（不抢鼠标、没新内容不动）
+const logBox = ref(null);
+useLogAutoScroll(logBox, () => consoleLog.value);
 </script>
 
 <template>
@@ -99,7 +104,7 @@ async function run(method, ...args) { try { return await call(method, ...args); 
 
     <div class="log-card">
       <div class="log-card-head"><span>运行日志</span></div>
-      <div class="log-box" style="max-height: 260px; border-radius: 0">{{ consoleLog }}</div>
+      <div ref="logBox" class="log-box" style="max-height: 260px; border-radius: 0">{{ consoleLog }}</div>
     </div>
   </div>
 </template>

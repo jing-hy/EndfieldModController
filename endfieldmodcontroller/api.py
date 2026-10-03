@@ -923,9 +923,11 @@ class EndfieldModControllerApi:
             local = updates_mod._sbm_local_version(self.config)
             report["manifest"]["secondary_motion"] = {
                 "display": "ShakingBreastManager（次级运动插件）",
-                # 版本号可能读不到（工具目录没配 / 文件被删）→ 别渲染成「v 已安装」
+                # 版本号读不到（工具目录没配 / 文件被删）时**只显示「已安装」** ——
+                # 用户 2026-10-03：「已安装（版本号读不到）就不要显示版本号就行」。
+                # 读不到版本是内部细节，摆到状态列里只会让人以为装坏了。
                 "status": (f"v{local} 已安装" if (state["manager_exists"] and local)
-                           else ("已安装（版本号读不到）" if state["manager_exists"]
+                           else ("已安装" if state["manager_exists"]
                                  else "未安装（点上方「自动安装/更新」会从官方仓库拉取并装好）")),
                 "present": bool(state["manager_exists"]),
                 "required": False,
