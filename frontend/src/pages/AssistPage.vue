@@ -7,6 +7,8 @@ import { settings, loadSettings } from "../lib/settings.js";
 import Card from "../components/ui/Card.vue";
 import Switch from "../components/ui/Switch.vue";
 import ModDownloadCard from "../components/ModDownloadCard.vue";
+import CharacterAssignDialog from "../components/CharacterAssignDialog.vue";
+import { showToast, showAlert, showModalDialog } from "../lib/dialog.js";
 import { ImageOff } from "lucide-vue-next";
 import { Wrench } from "lucide-vue-next";
 import Btn from "../components/ui/Btn.vue";
@@ -79,6 +81,62 @@ function queueCovers(list) {
 onMounted(() => { queueCovers(list.value); });
 watch(() => [list.value.length, store.demoCovers], () => { queueCovers(list.value); });
 
+// 「⋯ 更多」：就地弹出的小菜单（用户准则：⋯ 要就地弹小菜单，不要弹窗）
+// ⚠️ 用户 2026-10-03：「还有辅助类 mod 没有更多按钮」—— 服装页早就有，辅助页一直没做，
+// 于是"更改归属 / 移到皮肤 / 修复 / 回滚 / 移出库"这些在辅助页全都够不着。
+const menu = ref(null);          // { id, name, x, y }
+const assignRef = ref(null);     // 归属下拉（复用服装页那个两下拉的组件）
+
+function openMenu(mod, event) {
+  event.stopPropagation();
+  const box = event.currentTarget.getBoundingClientRect();
+  const width = 176;
+  const x = Math.max(8, Math.min(box.right - width, (window.innerWidth || 1200) - width - 8));
+  const y = Math.max(8, Math.min(box.bottom + 4, (window.innerHeight || 800) - 200));
+  menu.value = { id: String(mod.id), name: mod.name, x, y };
+}
+function closeMenu() { menu.value = null; }
+
+async function menuAct(act) {
+  const m = menu.value;
+  if (!m) return;
+  closeMenu();
+  try {
+    if (act === "character") {
+      const mod = (store.state.mods || []).find((x) => String(x.id) === m.id);
+      if (mod && assignRef.value) { assignRef.value.openFor(mod); return; }
+    } else if (act === "toSkin") {
+      const r = await call("set_mod_kind", m.id, "character");
+      if (r && r.ok === false) await showAlert("移动失败", r.message || "未知原因");
+      else showToast(`「${m.name}」已移到服装 Mod`, "success");
+    } else if (act === "fix") {
+      const r = await call("fix_mod", m.id);
+      if (r && r.ok === false) await showAlert("修复失败", r.message || "未知原因");
+      else showToast(`已修复 ${m.name}`, "success");
+    } else if (act === "rollback") {
+      const r = await call("rollback_mod", m.id);
+      if (r && r.ok === false) await showAlert("回滚失败", r.message || "未知原因");
+      else showToast(`已回滚 ${m.name}`, "success");
+    } else if (act === "open") {
+      const mod = (store.state.mods || []).find((x) => String(x.id) === m.id);
+      if (mod && mod.path) await call("open_path_in_explorer", mod.path);
+    } else if (act === "delete") {
+      const ok = await showModalDialog({
+        title: "移出 辅助 Mod？",
+        message: `${m.name}\n\n它会从辅助 Mod 列表里移出并留一份备份，之后不再加载。`
+          + `\n不会删除你的其它 Mod，也不会动游戏本体。`,
+        okText: "移出并备份", cancelText: "保留在库",
+      });
+      if (!ok) return;
+      const r = await call("delete_mod", m.id);
+      if (r && r.ok === false) await showAlert("移出失败", r.message || "未知原因");
+      else showToast(r && r.moved_to ? `已移出库：${r.moved_to}` : "已移出 辅助 Mod", "success");
+    }
+    await call("scan");
+    await refreshState();
+  } catch (e) { /* call 已弹窗 */ }
+}
+
 async function rescan() { try { await call("scan"); } catch (e) { /* call 已弹窗 */ } }
 async function openLib() { try { await call("open_path_in_explorer", "library"); } catch (e) {} }
 </script>
@@ -144,6 +202,8 @@ async function openLib() { try { await call("open_path_in_explorer", "library");
               <span class="mt-auto flex items-center justify-between gap-2">
                 <Switch :model-value="selected.has(String(m.id))"
                         @update:model-value="() => toggleMod(m)" />
+                <button class="btn btn-mini shrink-0" title="更多：分类 / 移到服装 Mod / 修复 / 回滚 / 移出库"
+                        @click="openMenu(m, $event)">⋯</button>
               </span>
             </span>
           </div>
@@ -166,11 +226,29 @@ async function openLib() { try { await call("open_path_in_explorer", "library");
               <span class="switch-state">{{ selected.has(String(m.id)) ? "已启用" : "未启用" }}</span>
               <Switch :model-value="selected.has(String(m.id))"
                       @update:model-value="() => toggleMod(m)" />
+              <button class="btn btn-mini shrink-0" title="更多：分类 / 移到服装 Mod / 修复 / 回滚 / 移出库"
+                      @click="openMenu(m, $event)">⋯</button>
             </span>
           </div>
         </div>
       </div>
     </Card>
     <ModDownloadCard />
+
+    <!-- ⋯ 就地小菜单（浮层，点空白处关闭） -->
+    <div v-if="menu" class="fixed inset-0 z-40" @click="closeMenu"></div>
+    <div v-if="menu" class="fixed z-50 card py-1 shadow-lg" style="min-width: 172px"
+         :style="{ left: menu.x + 'px', top: menu.y + 'px' }">
+      <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('character')">更改分类…</button>
+      <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('toSkin')">移到「服装 Mod」</button>
+      <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('fix')">修复 Mod 文件</button>
+      <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('rollback')">回滚</button>
+      <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('open')">打开所在目录</button>
+      <div style="height:1px;background:var(--border)" class="my-1"></div>
+      <button class="w-full text-left px-3 py-1.5 text-sm" style="color: var(--danger)"
+              @click="menuAct('delete')">移出 辅助 Mod</button>
+    </div>
+
+    <CharacterAssignDialog ref="assignRef" />
   </div>
 </template>

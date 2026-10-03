@@ -163,7 +163,10 @@ async function pollProgress() {
       // 形态**照抄拖入 zip 那套**（`importMod.js` 用 `showAlert("导入 Mod", …)`），
       // 文案也保持一致：识别到角色就报角色，没识别出来就提示去「⋯ → 更换归属」。
       // 判定用**边沿**：上一轮还在下、这一轮 `done` ⇒ 只在"刚下完"那一刻弹一次。
-      if (wasModDlActive && md && md.done && items.length) {
+      // ⚠️ 条件里**不要**再要求 `items.length`（2026-10-03 用户：「下载的已入库还是没有弹窗」）：
+      // 后端跑完会把 `done` 置真，但 `items` 若干轮之后可能被下一次任务替换/清空，
+      // 那一刻正好被轮询撞上就永远不弹。只在"上一轮还在下、这一轮 done"时弹，就够了。
+      if (wasModDlActive && md && md.done) {
         // ⚠️ **下载完要重新扫描并刷新界面**（2026-10-03 用户：「下载完 mod 不会自动刷新
         // mod 列表」）。原先只有"组件安装完"会刷新（下面那段 running→false 的逻辑），
         // Mod 下载走的是**另一条任务链**，跑完没人通知界面 ⇒ 服装/辅助页看不到新下的 Mod。
@@ -188,9 +191,16 @@ async function pollProgress() {
       }
       wasModDlActive = modDlActive.value;
     } catch (e) { /* 没有 Mod 下载任务很正常 */ }
-    progressText.value = p.total
+    // ⚠️ **组件安装的进度文字不能覆盖 Mod 下载的**（2026-10-03 用户：
+    //     「进度条下面未开始的字样没有联动」）。
+    // 上面 Mod 分支设过 `Mod 下载 x/y MB`，而这一行原先**无条件**把它冲成
+    // `p.message || ""`（依赖任务没在跑时就是空串）⇒ 模板的 `|| "尚未开始"` 兜底生效，
+    // 于是下载时进度文字永远显示「尚未开始」。
+    const depText = p.total
       ? `第 ${p.current}/${p.total} 项` + (p.computed_bytes ? ` · ${(p.computed_bytes / 1048576).toFixed(1)} MB` : "")
       : (p.message || "");
+    if (depText) progressText.value = depText;
+    else if (!modDlActive.value) progressText.value = "";
 
     // ⚠️ 用户 2026-10-03：「安装完成没动态，不会自动刷新组件状态，而且安装完还是待补齐」——
     // 这里原来**只更新进度条**，从不在跑完时刷新组件清单，于是 `deps` / `missingCount`
