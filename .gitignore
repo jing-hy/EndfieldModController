@@ -83,3 +83,9 @@ mod-backup/
 # UI 截图用的真实库快照（不进仓库、不进 exe）
 web/dist/demo-state.js
 frontend/src/demo-state.json
+
+# 临时调试脚本（不要提交）
+_probe.py
+_fix_*.py
+_scan_*.py
+_tmp_*.py
