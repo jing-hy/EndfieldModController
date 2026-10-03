@@ -1,5 +1,5 @@
 <script setup>
-// Mod 库页（旧 #tab-library）：三个分区卡片 —— 皮肤 Mod / 下载 Mod / Mod 列表。
+// 服装 Mod页（旧 #tab-library）：三个分区卡片 —— 皮肤 Mod / 下载 Mod / Mod 列表。
 // 分组与过滤规则照抄旧 renderMods：按 conflict_group||group 分组，
 // 跳过 _deps 分组与 kind=dependency/tool/assist（那些由依赖页 / 辅助页管）。
 import { ref, computed, onMounted, onUnmounted, watch } from "vue";
@@ -88,7 +88,7 @@ async function toggleMod(mod) {
     }
   }
   try {
-    // ⚠️ 这里**不要**调 `refreshState()`：那会全量重拉 `get_state()`（重新扫描整个 Mod 库），
+    // ⚠️ 这里**不要**调 `refreshState()`：那会全量重拉 `get_state()`（重新扫描整个 服装 Mod），
     //    每次点开关都要等它跑完 —— 用户 2026-10-03 反馈「mod 的按钮反应怎么这么慢，
     //    其他开关都没这个问题」（设置页/启动页的开关只发一个键，所以快）。
     //    `selected` 是从 `store.state.config.selected_mods` 派生的，把新值写回去界面就立刻响应。
@@ -131,15 +131,15 @@ async function menuAct(act) {
       const ok = await showModalDialog({
         // 标题直接说动作（评审：原标题"确认"、以及把 runtime\backups\mod-trash 这种内部路径
         // 摆给用户，都会让人以为要删到系统目录里去）
-        title: "移出 Mod 库？",
-        message: `${m.name}\n\n它会从 Mod 库列表里移出并留一份备份，之后不再加载。`
+        title: "移出 服装 Mod？",
+        message: `${m.name}\n\n它会从 服装 Mod列表里移出并留一份备份，之后不再加载。`
           + `\n不会删除你的其它 Mod，也不会动游戏本体。`,
         okText: "移出并备份", cancelText: "保留在库",
       });
       if (!ok) return;
       const r = await call("delete_mod", m.id);
       if (r && r.ok === false) await showAlert("移出失败", r.message || "未知原因");
-      else showToast(r && r.moved_to ? `已移出库：${r.moved_to}` : "已移出 Mod 库", "success");
+      else showToast(r && r.moved_to ? `已移出库：${r.moved_to}` : "已移出 服装 Mod", "success");
     } else if (act === "character") {
       if (!chars.value.length) {
         const r = await call("known_characters");
@@ -299,7 +299,7 @@ watch(() => store.demoCovers, (val) => {
         </template>
         <template v-else>
           <div>把 .zip / .7z / .rar 拖到窗口任意处即可导入；也可以在上面粘贴网址下载。</div>
-          <div>如果你已经把 Mod 放进 Mod 库目录了，点「重新扫描」。</div>
+          <div>如果你已经把 Mod 放进 服装 Mod目录了，点「重新扫描」。</div>
         </template>
       </div>
       <div v-else class="mt-3 space-y-4">
@@ -384,7 +384,7 @@ watch(() => store.demoCovers, (val) => {
       <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('open')">打开所在目录</button>
       <div style="height:1px;background:var(--border)" class="my-1"></div>
       <button class="w-full text-left px-3 py-1.5 text-sm" style="color: var(--danger)"
-              @click="menuAct('delete')">移出 Mod 库</button>
+              @click="menuAct('delete')">移出 服装 Mod</button>
     </div>
   </div>
 </template>

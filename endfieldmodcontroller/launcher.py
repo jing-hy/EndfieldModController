@@ -2134,8 +2134,17 @@ def launch(
     #   `launch_migoto_loader()` 上（该函数全库无人调用），所以从来没执行过。
     if not dry_run:
         try:
-            efmi_d3dx = Path(config.auto_detect_migoto_loader() or "") / "d3dx.ini"
-            if efmi_d3dx.is_file() and _has_efmi_core_config(efmi_d3dx) and ensure_efmi_early_includes(efmi_d3dx):
+            # ⚠️ 这里要的是 **EFMI 自己的 `d3dx.ini`**，所以直接取 `config.efmi_dir`。
+            # 原来写的是 `config.auto_detect_migoto_loader()` —— 而 `auto_detect_migoto_loader`
+            # 是 `config.py` 里的**模块级函数**、不是 `AppConfig` 的方法，于是每次都抛
+            # `'AppConfig' object has no attribute 'auto_detect_migoto_loader'`、
+            # 被下面的 except 吞成一句 WARN ⇒ **这段纠正从来没生效过**
+            #（用户日志里 14:48 / 14:53 / 14:55 三次全是这个 WARN）。
+            # 后果不小：不把 `skip_early_includes_load` 改回 0，`[Key*]` 段就不会在初始化阶段
+            # 注册，**所有按键（Mod 自带的、我们面板发的）一律收不到**。
+            efmi_dir = config.efmi_dir
+            efmi_d3dx = (efmi_dir / "d3dx.ini") if efmi_dir else None
+            if efmi_d3dx and efmi_d3dx.is_file() and _has_efmi_core_config(efmi_d3dx) and ensure_efmi_early_includes(efmi_d3dx):
                 _append_log(config, "EFMI: 已改为初始化阶段加载 Mods（否则 [Key*] 按键全部不注册）")
         except Exception as exc:  # noqa: BLE001 —— 纠正失败不能拦住启动
             _append_log(config, f"WARN EFMI 提前加载纠正失败: {exc}")

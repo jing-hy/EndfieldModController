@@ -29,7 +29,7 @@ const pages = {
   about: AboutPage,
 };
 const tabs = [
-  { id: "library", name: "Mod 库", icon: Library },
+  { id: "library", name: "服装 Mod", icon: Library },
   { id: "assist", name: "辅助 Mod", icon: Wrench },
   { id: "dependencies", name: "依赖", icon: PackageCheck },
   { id: "launch", name: "启动", icon: Rocket },
