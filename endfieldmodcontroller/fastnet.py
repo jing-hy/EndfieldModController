@@ -79,6 +79,46 @@ LINE_FAIL_THRESHOLD = 2
 # （`Hostname mismatch`）—— 而我这边同一时刻实测它是 200 正常的，所以**不能因此删掉这条线路**，
 # 只能在他那种网络下快速跳过。
 LINE_CERT_FAIL_TTL = 30 * 60
+
+# ── 照 PCL（ModNet.vb `TryBeginThread` / `SourceFail`）补的两条判据 ─────────
+#
+# ① **有些源不要分片**：PCL 对 `github.com` / `bmclapi` / `pcl2-server` 这类源**强制单线程** ——
+#    它们按连接数限流或干脆限速，开多线程只会更容易被拒、总速度还更慢。
+#    注意这里比的是**主机名**（精确后缀），所以 `gh.xmly.dev` 这种镜像**不受影响**、照常分片。
+NO_SPLIT_HOSTS = (
+    "github.com", "githubusercontent.com", "githubassets.com",
+    "bmclapi2.bangbang93.com", "pcl2-server", "meloong.com",
+    "optifine.net", "momot.rs",
+)
+
+# ② **被限流/拒绝要算这条线路自己的账**：PCL 的做法是 `403/429` 就禁用该源
+#    （`SourceFail` 里 `(403)`/`(429)` 直接 `SourcesOnce.Remove`）。
+#    否则每次下载都要白试一遍被限的线路，用户看到的就是"卡在 0%"。
+RATE_LIMIT_MARKERS = ("403", "429", "too many requests", "rate limit", "forbidden")
+
+
+def _host_of(url: str) -> str:
+    try:
+        return (urlsplit(url).hostname or "").lower()
+    except ValueError:
+        return ""
+
+
+def _may_parallel(url: str) -> bool:
+    """这个源允许分片吗？（PCL：上面那批主机强制单线程）"""
+    host = _host_of(url)
+    if not host:
+        return True
+    for blocked in NO_SPLIT_HOSTS:
+        if host == blocked or host.endswith("." + blocked):
+            return False
+    return True
+
+
+def _looks_rate_limited(message: str) -> bool:
+    """这条线路是不是"被拒/被限流"？（确定性失败，应当记账并快速跳过）"""
+    text = (message or "").lower()
+    return any(marker in text for marker in RATE_LIMIT_MARKERS)
 # 线路成绩缓存（下次优先用快的），只放几 KB，不常驻
 LINE_CACHE = "_net/lines.json"
 BASE_HEADERS = {"User-Agent": USER_AGENT, "Accept-Encoding": "identity"}
@@ -679,6 +719,13 @@ def download(
         # 一次就该跳过（否则每次下载都要白试一遍）。2026-10-01 issue #6 实证。
         cert_error = ("CERTIFICATE_VERIFY_FAILED" in message
                       or "certificate verify failed" in message.lower())
+        # 被 403/429 拒绝也是**确定性失败**：PCL（`SourceFail`）就直接把源禁用掉。
+        # 复用 cert_error 的语义 —— 它与证书错误一样"一次就该跳过"，否则每次下载都白试。
+        rate_limited = _looks_rate_limited(message)
+        if rate_limited and not cert_error:
+            cert_error = True
+            _log(log, f"（{line.name} 返回 403/429 —— 这条线路在限流或拒绝访问，"
+                      f"本次先跳过它，换个线路继续）")
         if network_wide:
             _log(log, f"（{line.name} 这次是网络/DNS 故障，不计入该线路的失败记录）")
         else:
@@ -829,9 +876,14 @@ def _attempt_line(
             return report
 
         # 小文件 / 不支持 Range / 明确不要加速 → 老老实实单连接
-        if not supports_range or (size and size < MIN_PARALLEL_BYTES) or policy == "never":
+        # PCL 的 `TryBeginThread` 里对 github.com 这类源直接 Return Nothing（不分片）——
+        # 它们按连接数限流，分片只会更容易被拒。
+        if (not supports_range or (size and size < MIN_PARALLEL_BYTES)
+                or policy == "never" or not _may_parallel(final_url or url)):
             reason = ("服务器不支持 Range" if not supports_range else
-                      "文件较小，不值得并发" if size and size < MIN_PARALLEL_BYTES else "已按设置关闭加速")
+                      "文件较小，不值得并发" if size and size < MIN_PARALLEL_BYTES else
+                      "这个下载源限流，单连接反而更快" if not _may_parallel(final_url or url)
+                      else "已按设置关闭加速")
             report.reason = reason
             # 已有部分数据时按追加写（不截断），否则从头写
             written, stalled, note = _download_sequential(
