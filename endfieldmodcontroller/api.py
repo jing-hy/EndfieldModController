@@ -3809,11 +3809,47 @@ class EndfieldModControllerApi:
                 task["message"] = f"正在下载 v{latest}…"
 
                 def on_progress(done: int, total: int) -> None:
+                    # ⚠️⚠️ **自更新也要写日志与实时速度**（2026-10-03 用户报
+                    # 「**安装日志一直不动，也没下载速度，条在走**」）。
+                    # 原来这里**只写 percent**，所以进度条会走，而日志框纹丝不动、
+                    # 速度卡片永远是「—」—— 用户根本看不出下载有没有在动。
                     if not total:
                         return
+                    import time as _t
+
+                    now = _t.time()
                     task["percent"] = min(99.0, done * 100.0 / total)
                     task["message"] = (f"下载 v{latest}：{done // 1048576}/"
                                        f"{max(total // 1048576, 1)} MB")
+                    task["bytes_received"] = int(done)
+                    task["expected_bytes"] = int(total)
+                    task["byte_percent"] = round(min(99.0, done * 100.0 / total), 1)
+                    task["running"] = True
+
+                    # ① 实时速度：与依赖下载同一套算法（前后采样差 + 指数平滑）
+                    prev_bytes = task.get("_speed_bytes")
+                    prev_at = task.get("_speed_at")
+                    if prev_bytes is not None and prev_at is not None and now > prev_at:
+                        instant = (int(done) - int(prev_bytes)) / (now - float(prev_at))
+                        if instant >= 0:
+                            old_speed = float(task.get("speed_bps") or 0.0)
+                            task["speed_bps"] = (instant if old_speed <= 0
+                                                 else old_speed * 0.6 + instant * 0.4)
+                    task["_speed_bytes"] = int(done)
+                    task["_speed_at"] = now
+
+                    # ② 日志：每跨过 10% 或距上次超过 3 秒记一条（别刷屏）
+                    pct = int(done * 100 / total)
+                    last_pct = int(task.get("_upd_last_pct", -10))
+                    last_at = float(task.get("_upd_last_at", 0.0))
+                    if pct >= last_pct + 10 or (now - last_at) > 3.0:
+                        speed = float(task.get("speed_bps") or 0.0)
+                        speed_text = (f"  {speed / 1048576:.2f} MB/s" if speed > 0 else "")
+                        task.setdefault("log", []).append(
+                            f"下载更新包 v{latest}：{pct}%"
+                            f"（{done / 1048576:.1f}/{total / 1048576:.1f} MB）{speed_text}")
+                        task["_upd_last_pct"] = pct
+                        task["_upd_last_at"] = now
 
                 result = selfupdate.download_update(
                     self.config, url=info.get("download_url", ""),

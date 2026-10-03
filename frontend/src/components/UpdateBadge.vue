@@ -6,7 +6,7 @@
 //   ① 普通       —— 显示当前版本，点了主动检查一次
 //   ② 有新版     —— `v当前 → v新版` + 高亮，点了下载并更新
 //   ③ 已下载待装 —— 「重启以完成更新」，点了立刻应用（用户选过"稍后"会停在这）
-import { ref, watch } from "vue";
+import { ref, watch, onUnmounted } from "vue";
 import { call } from "../lib/bridge.js";
 import { store, onStateRefreshed } from "../store.js";
 import { showAlert, showModalDialog, showToast } from "../lib/dialog.js";
@@ -17,6 +17,93 @@ const latest = ref("");
 const pending = ref(false);
 const busy = ref(false);
 const note = ref("");
+// ⚠️ **下载更新包时的进度**（2026-10-03 用户：「安装日志不动、没速度、条在走」）——
+// 自更新是后台下 28.4 MB 的 exe，原来界面上只有一句"正在处理…"，全程没有反馈。
+// 后端的自更新任务就记在依赖任务里（`get_dependency_progress`），这里轮询它。
+const dlPercent = ref(0);
+const dlSpeed = ref(0);
+// ⚠️ 必须是 ref：模板里 `v-if="dlTimer"` 要响应式更新（普通变量不触发重渲染）
+const dlTimer = ref(null);
+// 防重入：轮询可能连着几轮都看到"已下载"，别弹出多个确认框
+const applying = ref(false);
+
+function humanSize(bytes) {
+  const n = Number(bytes) || 0;
+  if (n >= 1048576) return (n / 1048576).toFixed(1) + " MB";
+  if (n >= 1024) return (n / 1024).toFixed(0) + " KB";
+  return n.toFixed(0) + " B";
+}
+
+function stopPolling() {
+  if (dlTimer.value) { clearInterval(dlTimer.value); dlTimer.value = null; }
+}
+
+async function pollDownload() {
+  try {
+    const p = await call("get_dependency_progress");
+    const pct = Math.round(Number(p && p.percent) || 0);
+    const spd = Number((p && p.speed_bps) || 0);
+    dlPercent.value = Math.max(0, Math.min(100, pct));
+    dlSpeed.value = spd;
+    const running = !!(p && p.running);
+    if (running) {
+      note.value = `正在下载 v${latest.value || ""}：${dlPercent.value}%`
+        + (spd > 0 ? `　${humanSize(spd)}/s` : "");
+    } else {
+      // 不跑了：按后端给的结果收尾
+      stopPolling();
+      const msg = String((p && p.message) || "");
+      const ok = /已下载|完成/.test(msg);
+      const failed = /失败/.test(msg);
+      if (ok) {
+        note.value = "更新包已下载，等待你选择何时安装";
+      } else if (failed) {
+        note.value = "更新失败";
+      } else {
+        note.value = "";
+      }
+      await load();
+      // ⚠️⚠️ **下载完成后必须弹窗问"现在更新吗"**（2026-10-03 用户：
+      //     「**下载完成就没了，没有弹窗询问是否现在更新**」）。
+      // 后端是后台线程、`start_app_update()` 立刻返回，所以"下载完成"这个时刻
+      // **只有轮询能发现**；原来的代码到这就把 `note` 一改就结束了，
+      // 用户看到的是"下完了然后没了" —— 既不提示、也不安装。
+      // 后端 `pending_apply=True` 时表示"包已就绪，等你决定"。
+      if (ok && (p.pending_apply || p.pending)) {
+        await askApply();
+      } else if (failed) {
+        await showAlert("更新失败", msg || "下载更新包没有成功，可以稍后再试。");
+      }
+    }
+  } catch (e) { /* 拿不到就下一轮再试 */ }
+}
+
+/** 问用户要不要**立刻重启安装**（用户 2026-10-01 要求：下载完要弹窗让他选）。 */
+async function askApply() {
+  if (applying.value) return;          // 防重入：轮询可能连着触发
+  applying.value = true;
+  try {
+    const now = await showModalDialog({
+      title: "更新包已下载完成",
+      message: `新版本已下载好（在 runtime\\_update\\ 里，不会丢）。\n\n`
+        + `现在重启程序就会装上它，你的 Mod 库、配置与备份都不会动。\n`
+        + `也可以选「稍后」，下次启动时会再提醒你。`,
+      okText: "立即重启并安装", cancelText: "稍后",
+    });
+    if (now) {
+      note.value = "正在安装…";
+      await call("apply_app_update");   // 后端会替换 exe 并自动重启，这条调用不返回是正常的
+    } else {
+      note.value = "更新包已下载，可随时点这里安装";
+    }
+  } catch (e) {
+    /* call() 已经弹过窗 */
+  } finally {
+    applying.value = false;
+  }
+}
+
+onUnmounted(stopPolling);
 
 function icon() {
   if (pending.value) return RefreshCw;
@@ -99,8 +186,17 @@ async function startUpdate() {
   if (!ok) { busy.value = false; return; }
   note.value = "正在处理…";
   try {
-    if (pending.value) await call("apply_app_update");
-    else await call("start_app_update");
+    if (pending.value) {
+      await call("apply_app_update");
+    } else {
+      await call("start_app_update");
+      // 下载是后台线程 —— 起一个 1 秒轮询，把百分比和速度显示出来，别让用户干等
+      dlPercent.value = 0;
+      dlSpeed.value = 0;
+      stopPolling();
+      dlTimer.value = setInterval(pollDownload, 1000);
+      pollDownload();
+    }
   } catch (e) {
     /* call() 已经弹过窗 */
   } finally {
@@ -125,10 +221,18 @@ function onClick() {
           @click="onClick">
     <component :is="icon()" :size="16" class="shrink-0" />
     <span class="min-w-0 truncate">
-      <template v-if="pending">重启以完成更新</template>
+      <!-- ⚠️ **下载中要看到百分比**（2026-10-03 用户：「安装日志不动、没速度、条在走」）——
+           原来下载期间这里还是显示 "v当前 → v新版"，看不出正在下多少。 -->
+      <template v-if="dlTimer">下载中 {{ dlPercent }}%<template v-if="dlSpeed > 0"> · {{ humanSize(dlSpeed) }}/s</template></template>
+      <template v-else-if="pending">重启以完成更新</template>
       <template v-else-if="latest">v{{ current }} → v{{ latest }}</template>
       <!-- 拿不到版本号时说人话（评审：「版本 未知」像内部状态，不像可点的入口） -->
       <template v-else>{{ current ? "版本 v" + current : "检查程序更新" }}</template>
     </span>
   </button>
+  <!-- 下载中的细进度条（压在徽章底部）：让"还在动"这件事一眼可见 -->
+  <div v-if="dlTimer" class="h-0.5 rounded-full overflow-hidden mx-1"
+       style="background: var(--surface-2)">
+    <div class="h-full transition-all" :style="{ width: dlPercent + '%', background: 'var(--accent)' }"></div>
+  </div>
 </template>
