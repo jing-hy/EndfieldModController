@@ -24,7 +24,8 @@ const covers = computed(() => store.covers);
 const busy = ref(false);
 // 「⋯ 更多」：就地弹出的小菜单（用户准则：⋯ 要就地弹小菜单，不要弹窗）
 const menu = ref(null);          // { id, name, x, y }
-const chars = ref([]);           // 已知角色（用于"更换归属"）
+const chars = ref([]);
+const assignRef = ref(null);   // 「更换归属」弹窗（带下拉，见 CharacterAssignDialog）           // 已知角色（用于"更换归属"）
 const keyword = ref("");          // 搜索（评审：Mod 一多，没搜索只能靠翻）
 // 冲突处理：生成控制器之后检查一次，有冲突就弹「每组一个下拉框」的窗
 const conflicts = ref(null);
@@ -144,14 +145,12 @@ async function menuAct(act) {
         const r = await call("known_characters");
         chars.value = (r && (r.characters || r.items)) || [];
       }
-      const pick = await showModalDialog({
-        title: `「${m.name}」归到哪个角色？`,
-        message: "输入角色名（留空 = 保持未分类）。已知角色：" + chars.value.slice(0, 40).join("、"),
-        okText: "设定归属", cancelText: "取消",
-      });
-      if (pick === false) return;
-      const r = await call("set_mod_character", m.id, pick === true ? "" : String(pick));
-      if (r && r.ok === false) await showAlert("设定失败", r.message || "未知原因");
+      // ⚠️ 以前这里用 showModalDialog —— 它**只返回 true/false、没有输入控件**，
+      // 于是文案写着"输入角色名（留空 = 保持未分类）"却没法输入，
+      // `pick === true ? "" : String(pick)` **永远把归属设成空**。
+      // 改成真正的下拉选择器（CharacterAssignDialog）。
+      assignRef.value.openFor(m);
+      return;
     } else if (act === "open") {
       const mod = (store.state.mods || []).find((x) => String(x.id) === m.id);
       if (mod && mod.path) await call("open_path_in_explorer", mod.path);
@@ -346,6 +345,7 @@ watch(() => store.demoCovers, (val) => {
       </div>
     </Card>
 
+    <CharacterAssignDialog ref="assignRef" />
     <ModDownloadCard />
 
     <ConflictDialog v-if="conflicts" :groups="conflicts"
