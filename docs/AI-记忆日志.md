@@ -4,9 +4,9 @@
 > 目的：让「当时为什么这么改、踩过什么坑」跟着源码一起留在仓库里。
 > 想改内容 → 改记忆库（用记忆工具），再跑一次本脚本；不要直接编辑本文件。
 
-- 生成时间：2026-10-04 00:01:08
+- 生成时间：2026-10-04 01:09:05
 - 来源：`.dsh-meow/memory.db`
-- 条目：489 条（已跳过 archived / 其它项目的条目）
+- 条目：491 条（已跳过 archived / 其它项目的条目）
 
 ---
 
@@ -517,15 +517,16 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 `关键词：["v1.0.3","长路径导入","issue 12 已关闭","贴图替换类","ASSIST_GROUP_TEXTURE","--modtest-both","伪旧版","自更新缓存","last_check.json","github_cache.json","删不掉是因为在用"]`
 
 ### **modecontroller 当前状态 · 唯一真源…
-*2026-10-03 23:56*
+*2026-10-04 00:01*
 
 **modecontroller 当前状态 · 唯一真源**（有变动请**更新本条**，别再另开新条目）
-**发布**：GitHub **Latest = v1.0.5**（2026-10-03T15:54Z 发布，用户明确说「改完直接release」后才发的）—— https://github.com/jing-hy/EndfieldModController/releases/tag/v1.0.5 ；v1.0.4 是当天 14:49Z 发的（**注意：v1.0.4 早就发过 Release，别再以为"只推了源码"**）。
-**v1.0.5 的附件（与本地逐字节一致）**：`EndfieldModController.exe` **29,848,022 B / sha256 `953BABFC9785AB0DD4D043F3C43E19CBBC6B50920C0C6813DBE6AA1B29F7D90D`**；`assets-bundle.zip` **144,696,905 B / `910CF2E6AED50484FB7F2D90575E763FB102E02D3B72DBE8D660062A330BBFB1`**。本地 `dist\` 另有带版本号副本；**伪旧版 `-0.1.9-from-1.0.5.exe`** 也构建了放进 modtest（测自更新用）。
-**v1.0.5 修的东西**（全部由用户实测/外部反馈驱动）：① 启动页**乳摇 / Poser 开关关不掉**（`api._persist_injection_switch` 把开关落进配置）② **关闭后再打开「弹完 UAC 没反应」**（单实例锁只看 PID 被 Windows 复用坑死 → 改成 PID+进程指纹（exe 路径+创建时间）+窗口存在性，真占用时把窗口拉到最前面）③ **「更改角色归属」点了没反应**（真因：`<CharacterAssignDialog>` **从来没 import** ⇒ Vue 当未知元素 ⇒ ref 拿到 DOM 元素 ⇒ `openFor is not a function` 被空 catch 吞；同页 `<Badge>` 也漏；用 WebView2 CDP 远程调试抓到的）④ **Poser 关了开不回来**（三层：开关守卫拦显式指令 → force 变成每次重下 → 最终：**本地包在位就不下载**；**缺 loader 由 `poser.ensure_loader()` 自己补 proxy**，不再跑会拒绝干活的上游向导）⑤ **「关乳摇」不再拆掉 Poser 的底座**（`_other_plugin_dlls` 认 `.disabled` 停用副本）⑥ **一键启动 62 秒 → 秒级**（关着「自动更新依赖」+本地已就位 ⇒ **一个请求都不发**；此前 Libs/EFMI/Poser 三个都没尊重那个开关，Poser 一步静默下载 54 秒）⑦ 归类弹窗两个入口打通。
-**仓库新东西**：`docs/AI-记忆日志.md`（记忆库导出的可读日志，489 条）与 `docs/structure/`（normify 结构树整份镜像，187 文件 / 1.4 MB）—— **`push.py` 每次推送前自动刷新并单独提交这两样**（用户：「每次传源码记忆都一起」「结构树也一起上传」）；脚本 `scripts/memory_log.py`、`scripts/sync_structure.py`。
-**测试**：`tests` **630 passed / 49 subtests**。**结构树**：163 模块 / 145 叶子 / 369 API / validate 0 error（源目录 `~/.dsh/profiles/desktop/normify-modecontroller`，镜像在仓库 `docs/structure/`）。
-**发版流程（本次实走）**：改代码 → `pytest` → **自己 `git commit`**（⚠️ `push.py`/`build_release.py` 都不 commit）→ `python scripts\build_release.py`（第 0 步卡 version.py 与两份 README 一致）→ `prepare_release.py` → `push.py`（先快照，失败就不推；顺带刷记忆日志+结构树）→ `gh release create <tag> --title … --notes-file RELEASE_NOTES.md --latest`（⚠️ 建出来不带附件）→ `python scripts\upload_release_assets.py --tag <tag>`（DoH 查真实 IP + curl --resolve 直连，144 MB 约 28 秒）。附件只推**不带版本号**的 exe + `assets-bundle.zip`；快照落 `D:\zmdmod\_snapshot_<标签>-<时间戳>\`。
+**发布**：GitHub **Latest = v1.0.5**（2026-10-03T15:54Z）—— https://github.com/jing-hy/EndfieldModController/releases/tag/v1.0.5 ；v1.0.4 是当天 14:49Z 发的（**别再说"v1.0.4 只推了源码"**）。远端 main = `f542ea0`（含"维护者指南"那次推送）。
+**v1.0.5 附件（Release 上的那一份）**：`EndfieldModController.exe` **29,848,022 B / sha256 `953BABFC9785AB0DD4D043F3C43E19CBBC6B50920C0C6813DBE6AA1B29F7D90D`**；`assets-bundle.zip` **144,696,905 B / `910CF2E6AED50484FB7F2D90575E763FB102E02D3B72DBE8D660062A330BBFB1`**。
+⚠️ **本地 dist 里的 exe 与 Release 附件字节不同**（29,847,586 B / `5EB4B041…`）：那是发完之后为了补伪旧版又跑了一次 `build_release --with-fake-old` 重建的（**同一份源码、PyInstaller 非确定性**）。要"逐字节核对"就只能以 **Release 附件**为准；想还原本地可 `gh release download v1.0.5 --pattern EndfieldModController.exe`（curl `--resolve` 直连**会失败** —— 资产重定向到 objects.githubusercontent.com）。
+**v1.0.5 修的东西**：① 乳摇/Poser 开关关不掉（`_persist_injection_switch` 落配置）② 关闭后再打开「弹完 UAC 没反应」（单实例锁 PID+进程指纹+窗口存在性）③「更改角色归属」没反应（真因 `<CharacterAssignDialog>` **没 import**，用 WebView2 CDP 抓到 `openFor is not a function`；同页 `<Badge>` 也漏）④ Poser 关了开不回来（包在位不下载 + 缺 loader 由 `poser.ensure_loader()` 自己补 proxy，不跑会拒绝的上游向导）⑤ 关乳摇不再拆 Poser 底座（`_other_plugin_dlls` 认 `.disabled`）⑥ **一键启动 62 秒 → 秒级**（关着「自动更新依赖」+本地已就位 ⇒ 一个请求都不发；此前 Libs/EFMI/Poser 都没尊重那个开关，Poser 一步静默下载 54 秒）⑦ 归类弹窗两个入口打通。
+**仓库新增（用户要求"随源码一起上传"）**：`CONTRIBUTING.md`（**维护者指南**：改动边界、提交前必做检查、该一并更新的产出、发布流程、自动生成产物清单）；`docs/AI-记忆日志.md`（记忆库导出，本机路径已脱敏，**不传 memory.db**）；`docs/structure/`（normify 结构树整份镜像 187 文件 / 1.4 MB）。后两样由 **`push.py` 每次推送前自动刷新并单独提交**（脚本 `scripts/memory_log.py` / `scripts/sync_structure.py`）。
+**测试**：`tests` **630 passed**。**结构树**：163 模块 / 145 叶子 / 369 API / validate 0 error（源目录 `~/.dsh/profiles/desktop/normify-modecontroller`）。
+**发版流程（本次实走）**：改代码 → `pytest` → **自己 commit** → `build_release.py`（卡 version.py 与两份 README 一致）→ `prepare_release.py` → `push.py`（先快照；顺带刷记忆日志+结构树）→ `gh release create <tag> --notes-file RELEASE_NOTES.md --latest`（⚠️ 不带附件）→ `upload_release_assets.py --tag <tag>`（DoH + curl 直连；**同名资产已存在会 HTTP 422**，别指望覆盖）。附件只推**不带版本号**的 exe + `assets-bundle.zip`。
 
 `关键词：["当前状态唯一真源","Latest v0.9.4","0.9.5未发Release","远端main","版本号只跟Release比","发版流程","必须自己commit","build_release第0步校验版本号","推送前自动快照","只推不带版本号exe","modtest只放最新exe"]`
 
@@ -652,7 +653,7 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 
 `关键词：["极乐净土","MMD素材","mmdmod","Endfield Poser","vmd","BowlRoll需登录","vidol-dance-gokuraku","gokuraku.vmd","yurie","mmd素材目录","Poser停用","待用户确认"]`
 
-## 经验教训（被纠正过的、踩过的坑）（352 条）
+## 经验教训（被纠正过的、踩过的坑）（353 条）
 
 ### XXMI/EFMI 启动终末地是 Endfield.ex…
 *2026-09-27 14:58*
@@ -1449,13 +1450,6 @@ SteamTools / Watt Toolkit（BeyondDimension/SteamTools）的网络加速原理 =
 测自更新 / 换 Release 附件时最容易踩的坑（2026-09-27 实测）：**本机有两层缓存会把「最新版」锁死在旧 Release 上** —— ① `runtime/_update/last_check.json`（selfupdate 的 6 小时检查缓存，含 `latest` 与 `digest`）；② `runtime/_net/github_cache.json`（github 模块的 30 分钟网页路线缓存，含 tag 与资产名）。**发新版、或替换同一 tag 的 Release 附件之后，必须把这两个缓存删掉**，否则：a) 0.1.9 的测试 exe 会"更新到"上一个版本（本次就是差点更新到 0.2.0 而不是 0.2.1）；b) 若附件被替换过，缓存里的旧 `digest` 会让下载后的 sha256 校验直接失败。另外：**造旧版测试 exe 一定要基于当前最新代码构建**（本次做的是"0.2.1 的代码 + 0.1.9 的版本号"），否则更新完拿到的还是旧功能，等于白测。
 
 `关键词：["自更新测试","last_check.json","github_cache.json","缓存锁旧版本","替换附件后digest失效","sha256校验失败","造旧版exe要基于最新代码","0.2.1的0.1.9","发新版后清缓存"]`
-
-### 镜像线路下的并发实测（2026-09-27，27.6 M…
-*2026-09-27 21:29*
-
-镜像线路下的并发实测（2026-09-27，27.6 MB、**不开加速器**）：单连接（gh.xmly.dev）0.71 MB/s → **8 连接 3.21 MB/s → 16 连接 3.96 MB/s**（并发提升 **5.6 倍**，已追平加速器水平 4.33）；而 **多线路混合（4+4+4）只有 1.16 MB/s —— 是负优化**（慢线路成了木桶短板，且每个镜像对单 IP 的总带宽有限，分散反而更亏）。结论：**镜像场景下"并发连接数"才是提速主力，"铺多线路"是反模式**。这与另一条实测互补：加速器开着时单连接已 4.33 MB/s，并发只起"抗抖动"作用；单连接被限速时（镜像），并发才是主要提速手段。据此把 `recommended_threads` 从「每 4 MB 一个、最少 4」改为「每 1.5 MB 一个、最少 8」，`MAX_THREADS` 16→20（27.6 MB 给 18 连接、126 MB 给 20 连接）。
-
-`关键词：["镜像并发实测","单连接0.71","16连接3.96","多线路混合负优化","木桶效应","只加连接不铺线路","recommended_threads","MAX_THREADS20","并发是提速主力"]`
 
 ### 惩罚性缓存（封禁 / 黑名单）的设计教训（2026-09…
 *2026-09-27 21:29*
@@ -3887,7 +3881,32 @@ tkinter 只留作源码模式兜底，且失败时给出**可照做的替代**�
 
 `关键词：["loader共存","共享proxy","关乳摇拆底座","d3dcompiler_47","vulkan-1","Poser打不开","ensure_loader","_other_plugin_dlls","停用副本","上游向导拒绝","插件互相废掉","proxy还原"]`
 
-## 事实（细碎的原子信息）（64 条）
+### **镜像线路下的并发实测 —— ⚠️「铺多线路是反模式」…
+*2026-10-04 01:01*
+
+**镜像线路下的并发实测 —— ⚠️「铺多线路是反模式」只对"静态等分"成立，动态抢块反而最快（2026-10-04 更正）**
+
+**① 旧结论（2026-09-27，仍然成立的另一半）**：不加速器时单连接（gh.xmly.dev）0.71 MB/s → **8 连接 3.21 → 16 连接 3.96**（并发提升 5.6×，追平加速器）；据此把 `recommended_threads` 改成「每 1.5 MB 一个、最少 8」，`MAX_THREADS` 16→20。
+
+**② 2026-10-04 三种模式对照**（`scripts/speedtest_mixed.py`，真实 Release 资产、本机）：
+| 模式 | 速度 |
+|---|---|
+| 单线路 12 连接 | 0.664 MB/s |
+| 多线路**静态等分**（每条线路各下自己那段） | 0.508 ← **负优化**（慢线路=木桶短板） |
+| 多线路**动态抢块**（共享块队列 + 谁空谁领 + 停滞淘汰） | **0.975（+47%）** |
+
+⇒ **静态等分是反模式；动态抢块是最优**。已落地进 `fastnet`：`_download_parallel(alt_urls=[...])` —— 它的 `todo` 队列本来就是"共享队列谁空谁领"（动态天然成立），只补了「每次块重试换一条线路」+「连挂两次的线路本次淘汰」（选线路是纯函数 `_pick_line_url`，有单测）。**实测整包**：28.5 MB 用 **9.6 秒（2.955 MB/s）**、4 条线路共用 15 块、文件逐字节一致。
+
+`关键词：["镜像并发实测","单连接0.71","16连接3.96","多线路混合负优化","木桶效应","只加连接不铺线路","recommended_threads","MAX_THREADS20","并发是提速主力"]`
+
+### 【"DNS 故障不计入线路失败"这条善意豁免，会让死域名…
+*2026-10-04 01:01*
+
+【"DNS 故障不计入线路失败"这条善意豁免，会让死域名被永久重试】（2026-10-04 用户反馈「下载慢而且下不下来」）现场日志：一秒内刷十几遍 `线路 gh.xmly.dev 失败：<urlopen error [Errno 11001] getaddrinfo failed>` + `下载失败：所有线路都失败`。**两层根因**：① `gh.xmly.dev`（我线路表里排第一的镜像）**域名已经不存在**了（`Resolve-DnsName` 回"DNS 名称不存在"）；② 旧逻辑把 `getaddrinfo failed` 当"全网故障、不计入这条线路的失败"（本意是不冤枉好线路）⇒ 死域名**永远不进冷却、永远排第一、每次下载先白试一遍**。**修法**：DNS 类失败记进单独的短冷却 `_DNS_DEAD`（10 分钟），并且**任何兜底都不许把被 DNS 拉黑的放回候选**（连 `mirror` 模式那条直返分支也要过滤 —— 我第一版漏了，被自己写的测试抓到）。**通用**：给"确定性失败"（域名不存在 / 证书不符 / 403·429）留"不记账"的例外时，先问一句"**如果它永远不恢复，会不会被无限重试**"。
+
+`关键词：["DNS失败","getaddrinfo failed","域名已死","线路冷却","无限重试","gh.xmly.dev","镜像失效","下载下不下来","确定性失败豁免","日志刷屏"]`
+
+## 事实（细碎的原子信息）（65 条）
 
 ### modecontroller：游戏目录 loader_l…
 *2026-09-27 14:58*
@@ -4614,6 +4633,13 @@ DSH 官方 feedback 通道 = **GitHub Discussions**：`https://github.com/deepse
 可复跑脚本：`scripts/speedtest_gamebanana.py`（开/不开 VPN 都能跑，输出同格式三组对照）。
 
 `关键词：["香蕉网","GameBanana","下载速度","并发","连接数","16连接","13倍","VPN","fastnet","policy always","BOOST_FLOOR_MBPS","试用窗口","测速脚本"]`
+
+### modecontroller 仓库可发现性：`jing-…
+*2026-10-04 00:22*
+
+modecontroller 仓库可发现性：`jing-hy/EndfieldModController` **一直是 public**（匿名 API/网页 HTTP 200，站内按名字搜索 total_count=1 命中）。2026-10-04 用户问"为啥我查不到"，实测原因是三点：① **topics 原本是空的**（已补 14 个：endfield / arknights-endfield / mod-manager / game-mod / dlss / reshade / 3dmigoto / efmi / xxmi / python / pywebview / windows / mods / tool，匿名按 `topic:endfield` 等三个标签复测均命中）；② description 是**纯中文**，GitHub 搜索对中文分词差，搜"终末地 mod 管理器"这类词命中不了，必须搜精确仓库名；③ 新仓库 + 4 stars + 无外链 ⇒ Google/Bing/百度**尚未收录**（要几天到几周，百度对 GitHub 尤其慢）。要修可发现性：加 topics ✓、description 加英文（例如 `Endfield Mod Manager — …`）、README 顶部加英文摘要、去社区发带链接的帖子（外链收录最快）。
+
+`关键词：["仓库公开","查不到","GitHub搜索","topics","可发现性","description英文","搜索引擎收录","jing-hy","EndfieldModController","topic标签"]`
 
 ## 用户偏好与环境（**含个人信息，公开前请自行取舍**）（18 条）
 
