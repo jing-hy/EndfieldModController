@@ -690,7 +690,7 @@ python scripts\upload_release_assets.py  :: 上传两个附件（大文件走直
 
 ## 前端技术栈与构建
 
-界面在 **0.9.6** 换代：从"原生 HTML/CSS/JS"迁到 **Vue 3 + Vite + Tailwind CSS**。
+界面在 **1.0.0** 换代：从"原生 HTML/CSS/JS"迁到 **Vue 3 + Vite + Tailwind CSS**。
 
 * 源码在 `frontend/`（`src/pages/*.vue` 一页一个文件、`src/components/ui/*` 是共用组件、
   `src/lib/bridge.js` 是**唯一**的 pywebview 桥接点、`src/lib/settings.js` 集中所有设置项）。
