@@ -1889,6 +1889,60 @@ class EndfieldModControllerApi:
         threading.Thread(target=worker, name="mc-full-update", daemon=True).start()
         return self.get_dependency_progress()
 
+    def pending_component_updates(self) -> dict[str, Any]:
+        """**读随包版本表**，给出「有哪些组件该更新了」——纯本地，不联网。
+
+        用户 2026-10-03：「那个一键启动检查更新**还是要加**，但是是**随包资源里配一张
+        版本表**，每次比对那个表，然后**随管理器更新而更新**，对旧版本**没有这个表，
+        如果表不存在就跳过**」。
+
+        为什么不用联网版（`check_component_updates`）：那次实测要 **6.1 秒**
+        （GitHub 的 XXMI/Libs/EFMI + reshade.me + 乳摇 + Poser），
+        放在"一键启动前"就是"点一下干等 6 秒"——用户明确说过「反应很慢」。
+        读表是微秒级，所以可以放心放在启动路径上。
+
+        **表不存在**（旧版本 exe 没有这个文件）⇒ 返回空列表 ⇒ 前端直接跳过。
+        """
+        from . import component_versions
+
+        installed: dict[str, str] = {}
+        # 内置组件：读各自的 marker
+        try:
+            from . import runtime_deps
+
+            root = self.config.builtin_runtime_path / "XXMI"
+            marker = runtime_deps._read_marker(root) or {}
+            installed["XXMI"] = str(marker.get("version") or "")
+            installed["XXMI-Libs"] = str(marker.get("XXMI-Libs_version") or "")
+            installed["EFMI"] = str(marker.get("EFMI_version") or "")
+            # Poser 的版本另存（与上面同一处的写法保持一致）
+            try:
+                from . import poser
+
+                installed["Poser"] = str(poser.installed_version(self.config) or "")
+            except Exception:            # noqa: BLE001
+                pass
+        except Exception as exc:         # noqa: BLE001
+            launcher._append_log(self.config, f"版本表比对：读内置组件版本失败（{exc}）")
+        # 外部组件：复用现成的 component_versions()
+        try:
+            from . import updates
+
+            versions = updates.component_versions(self.config)
+            for key in ("reshade", "secondary_motion"):
+                row = versions.get(key) or {}
+                installed[key] = str(row.get("version") or "")
+        except Exception as exc:         # noqa: BLE001
+            launcher._append_log(self.config, f"版本表比对：读外部组件版本失败（{exc}）")
+
+        outdated = component_versions.outdated(installed)
+        if outdated:
+            launcher._append_log(
+                self.config,
+                "版本表比对：" + "、".join(
+                    f"{o['key']} {o['current']}→{o['latest']}" for o in outdated))
+        return {"ok": True, "outdated": outdated, "installed": installed}
+
     def get_dependency_progress(self) -> dict[str, Any]:
         if self._dep_task is None:
             return {"running": False, "current": 0, "total": 0, "percent": 0.0, "message": "未开始",

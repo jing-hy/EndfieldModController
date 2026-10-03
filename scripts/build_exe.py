@@ -42,6 +42,9 @@ ADD_DATA = [
     (_WEB_SRC, "web"),
     ("endfieldmodcontroller/characters.json", "endfieldmodcontroller"),
     ("endfieldmodcontroller/hotkey_hints.json", "endfieldmodcontroller"),
+    # ⚠️ **随包组件版本表**（2026-10-03 用户要求）：给"一键启动前的更新检查"用，
+    # 读它是纯本地操作（微秒级），不像以前那样同步联网查 GitHub（实测 6.1 秒）。
+    ("endfieldmodcontroller/component_versions.json", "endfieldmodcontroller"),
     ("assets/addon/endfieldmodcontroller.addon64", "assets/addon"),
 ]
 

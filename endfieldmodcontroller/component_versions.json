@@ -1,0 +1,41 @@
+{
+  "_readme": [
+    "随包组件版本表 —— 给「一键启动前的更新检查」用（用户 2026-10-03 要求）。",
+    "",
+    "**为什么用它**：以前那道检查是同步联网查 GitHub（实测 6.1 秒），点一键启动要干等；",
+    "读这张表是纯本地操作，微秒级返回。代价是版本信息**随管理器发版而更新**——",
+    "这正是用户要的「随管理器更新而更新」。",
+    "",
+    "**怎么维护**：发管理器新版时，把这里各组件的最新版本号同步一遍即可。",
+    "留空（\"\"）的条目会被跳过，不会误报。",
+    "",
+    "**旧版本兼容**：旧 exe 里没有这个文件 ⇒ 读取返回空 ⇒ 检查直接跳过，不报错也不阻塞。"
+  ],
+  "builtin": {
+    "XXMI": {
+      "latest": "v2.3.8",
+      "repo": "SpectrumQT/XXMI-Launcher"
+    },
+    "XXMI-Libs": {
+      "latest": "v1.2.0",
+      "repo": "SpectrumQT/XXMI-Libs-Package"
+    },
+    "EFMI": {
+      "latest": "v1.4.8",
+      "repo": "SpectrumQT/EFMI-Package"
+    },
+    "Poser": {
+      "latest": "0.5.2",
+      "repo": "OedoSoldier/Endfield-Poser"
+    }
+  },
+  "external": {
+    "reshade": {
+      "latest": "6.8.0",
+      "note": "官方新版可能与 DLSS5 插件不兼容"
+    },
+    "secondary_motion": {
+      "latest": "2.3.5"
+    }
+  }
+}

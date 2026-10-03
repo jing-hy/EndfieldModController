@@ -8,10 +8,32 @@ PCL 的 `TryBeginThread` 里对 github.com / bmclapi / pcl2-server 这类源**�
 from endfieldmodcontroller import fastnet
 
 
-def test_github_direct_is_not_parallel():
-    """GitHub 直连按 PCL 的名单强制单线程。"""
+def test_github_direct_depends_on_token(monkeypatch):
+    """★ GitHub 直连能不能并发，**由有没有 token 决定**（2026-10-03 用户规则）。
+
+    用户原话：「**直连应该在没有 ghtoken 的时候禁止并发**」。
+    理由：GitHub 对**未认证**请求按 IP 限流 —— 直连开并发只是让同一个 IP 在更短时间内
+    发更多请求，更容易 403/429，反而更慢甚至失败；有 token 时额度 5000 次/小时，
+    并发才有意义（用户实测直连 16 连接 0.203 MB/s vs 单连接 0.032，**6.3 倍**）。
+
+    ⚠️ 这条**取代**了原来"照 PCL 名单一律单线程"的老判据 ——
+    那批主机现在改成看 token；其它主机（bmclapi 等）仍一律单线程。
+    """
+    monkeypatch.setattr(fastnet, "_has_github_token", lambda: False)
     assert fastnet._may_parallel("https://github.com/a/b.zip") is False
     assert fastnet._may_parallel("https://objects.githubusercontent.com/x") is False
+    monkeypatch.setattr(fastnet, "_has_github_token", lambda: True)
+    assert fastnet._may_parallel("https://github.com/a/b.zip") is True
+    assert fastnet._may_parallel("https://objects.githubusercontent.com/x") is True
+
+
+def test_non_github_blocked_hosts_stay_single(monkeypatch):
+    """名单里**非 GitHub** 的那批主机仍然一律单线程（token 与它们无关）。"""
+    monkeypatch.setattr(fastnet, "_has_github_token", lambda: True)
+    for url in ("https://bmclapi2.bangbang93.com/a.zip",
+                "https://meloong.com/a.zip",
+                "https://optifine.net/a.zip"):
+        assert fastnet._may_parallel(url) is False, f"{url} 仍应单线程"
 
 
 def test_mirror_hosts_still_parallel():

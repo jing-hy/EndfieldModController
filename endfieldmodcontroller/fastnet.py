@@ -135,15 +135,62 @@ def _host_of(url: str) -> str:
         return ""
 
 
+_TOKEN_CACHE: list[bool | None] = [None]
+
+
+def _has_github_token() -> bool:
+    """本机有没有可用的 GitHub token（进程环境或 Windows 用户级环境变量）。
+
+    复用 `github.token()`，保证与"检查更新"用的是**同一处判据**，不出现两套口径。
+    延迟导入以避免 `fastnet` ←→ `github` 的循环依赖；结果缓存在进程内。
+    """
+    if _TOKEN_CACHE[0] is not None:
+        return bool(_TOKEN_CACHE[0])
+    value = False
+    try:
+        from . import github as _gh
+
+        token, _source = _gh.token()
+        value = bool(token)
+    except Exception:                      # noqa: BLE001 —— 判不出来就当作"没有"
+        value = False
+    _TOKEN_CACHE[0] = value
+    return value
+
+
 def _may_parallel(url: str) -> bool:
-    """这个源允许分片吗？（PCL：上面那批主机强制单线程）"""
+    """这个源允许分片吗？
+
+    ⚠️⚠️ **直连（真实 GitHub 主机）在没有 token 时禁止并发**（2026-10-03 用户明确要求：
+    「**直连应该在没有 ghtoken 的时候禁止并发**」）。
+
+    理由：GitHub 对**未认证**请求按 IP 限流 —— 直连开并发只是让同一个 IP 在更短时间内
+    发更多请求，更容易 403/429，反而更慢甚至直接失败；有 token 时额度 5000 次/小时，
+    并发才有意义。
+    **只作用于直连**：镜像线路走第三方中转，请求不计在 GitHub 的 IP 限流上 ——
+    实测 `ghproxy.net` 16 连接 2.05 MB/s（单连接 0.19，10 倍），所以镜像照常并发。
+
+    另：`NO_SPLIT_HOSTS` 里那批主机（照 PCL 的经验）仍然一律单线程。
+    """
     host = _host_of(url)
     if not host:
         return True
     for blocked in NO_SPLIT_HOSTS:
         if host == blocked or host.endswith("." + blocked):
+            # ⚠️ 这里的 blocked 名单里就有 github.com 等 —— 但按用户 2026-10-03 的规则，
+            # **有 token 时直连也允许并发**（他实测直连 16 连接 0.203 MB/s vs 单连接 0.032，6.3 倍）。
+            # 所以对"真实 GitHub 主机"改成看 token；其它主机（bmclapi 等）照旧禁止。
+            if _is_github_host(host):
+                return _has_github_token()
             return False
     return True
+
+
+def _is_github_host(host: str) -> bool:
+    """是不是**真实的** GitHub 主机（不是镜像中转域名）。"""
+    host = (host or "").lower()
+    return any(host == h or host.endswith("." + h)
+               for h in ("github.com", "githubusercontent.com", "githubassets.com"))
 
 
 def _looks_rate_limited(message: str) -> bool:

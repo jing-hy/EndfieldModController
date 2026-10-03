@@ -331,6 +331,34 @@ async function oneClick() {
   // ─────────────────────────────────────────────────────────────────────────
   if (!(await preflightGate())) return;
 
+  // ⚠️ **用「随包版本表」检查组件更新**（2026-10-03 用户：「那个一键启动检查更新**还是要加**，
+  //    但是是**随包资源里配一张版本表**，每次比对那个表，然后**随管理器更新而更新**，
+  //    对旧版本**没有这个表，如果表不存在就跳过**」）。
+  //
+  // 与上一版的区别：上一版调 `check_component_updates`（**同步联网，实测 6.1 秒**），
+  // 用户反馈"反应很慢"；这次读的是**随 exe 走的本地表**，微秒级，不会拖慢启动。
+  // 旧版本 exe 没有那张表 ⇒ 后端返回空列表 ⇒ 这里自动跳过（不报错、不阻塞）。
+  try {
+    const upd = await call("pending_component_updates");
+    const outdated = (upd && upd.outdated) || [];
+    if (outdated.length) {
+      const lines = outdated.map((o) => `· ${o.display || o.key}：${o.current} → ${o.latest}`).join("\n");
+      const go = await showModalDialog({
+        title: `${outdated.length} 个组件有新版本`,
+        message:
+          `这些组件有新版本可用：\n${lines}\n\n` +
+          "去「依赖」页点「一键更新全部组件」就能装上（那里有进度和速度）。\n\n" +
+          "想先不管、直接启动也可以。",
+        okText: "去依赖页更新", cancelText: "仍然启动",
+      });
+      if (go) {
+        store.autoStartDeps = true;
+        store.tab = "dependencies";
+        return;
+      }
+    }
+  } catch (e) { /* 查不到就照常启动，绝不因为它挡住用户 */ }
+
   running.value = true;
   try {
     await call("launch");
