@@ -53,10 +53,20 @@ CHUNK_BYTES = 2 << 20
 #   * **块数不超过 MAX_PIECES** —— 大文件别切成上千个碎块（请求开销反而更大）。
 PIECES_PER_THREAD = 4
 MAX_PIECES = 256
-MAX_THREADS = 20
+# ⚠️ 实测"4 条不够、十几条才吃满"，而工程上 20 条对 588 MB 的大包也常顶到上限；
+# 若服务端是**按连接限速**，加连接能近似线性提速 ⇒ 提到 32（2026-10-03）。
+MAX_THREADS = 32
 READ_CHUNK = 262144
 # 单次读多久没数据算"抖动/卡死"，切并发续传
+# ⚠️ **"多久收不到数据算断流"的下限**（2026-10-03 再调）。
+# 它原来是硬性的 20 秒，但那只适合正常线路：香蕉网无 VPN 时实测 0.008 MB/s，
+# **读满一个 256 KB 缓冲要 32 秒** ⇒ 20 秒必然超时 → 重试 → 再超时，
+# 4 次重试白耗 80 秒、块还是下不完。用户看到的就是"速度出来很慢"。
+# 现在它只是**下限**，真正的等待窗口由 `_stall_window()` 按"块大小 ÷ 实测速度"算。
 STALL_SECONDS = 20
+# 自适应窗口的上下限（秒）：够慢的线路等得起，真断流也别无限期挂着。
+STALL_WINDOW_MIN = 20
+STALL_WINDOW_MAX = 180
 # 探测连接的超时（要短，坏线路要快速跳过；实测直连会直接超时 15s，白等太久）
 PROBE_TIMEOUT = 8
 # 探测阶段的时间上限：慢线路不能把探测拖成几十秒
@@ -388,7 +398,13 @@ def _download_sequential(
                     try:
                         _sock = getattr(getattr(getattr(response, "fp", None), "raw", None), "_sock", None)
                         if _sock is not None:
-                            _sock.settimeout(STALL_SECONDS)
+                            # ⚠️ **自适应无数据窗口**（2026-10-03）：固定 20 秒对"极慢但通"的
+                            # 线路是误杀 —— 香蕉网无 VPN 时实测 0.008 MB/s，读满 256 KB 要 32 秒，
+                            # 于是每块都"超时→重试→再超时"，用户看到的就是"速度出来很慢"。
+                            # 这里按"已读速度"估窗口；没有速度就用下限兜底。
+                            _elapsed = max(time.time() - started, 1e-6)
+                            _mbps = (written / 1048576) / _elapsed if written else 0.0
+                            _sock.settimeout(_stall_window(READ_CHUNK, _mbps))
                     except Exception:  # noqa: BLE001 - 拿不到底层 socket 就保持原样
                         pass
                     chunk = response.read(READ_CHUNK)
@@ -473,6 +489,7 @@ def _download_parallel(
     log: Log = None,
     max_seconds: float = 0,
     cancel: Callable[[], bool] | None = None,
+    expected_mbps: float = 0.0,      # ⚠️ 已知单连接速度：用于算"无数据等待窗口"（2026-10-03）
 ) -> int:
     """并发分块下载，**块级断点续传**：已完成的块记在 sidecar 里，中断后不重下。
 
@@ -513,6 +530,7 @@ def _download_parallel(
 
     def fetch(span: tuple[int, int]) -> None:
         begin, end = span
+        _fetch_started = time.time()          # 用于估算"当下的实际速度"（自适应窗口）
         last_error: Exception | None = None
         for attempt in range(4):
             if cancel and cancel():
@@ -528,8 +546,17 @@ def _download_parallel(
                     # sidecar 里 `done: []`（一个块都没完成），文件停在 768 KB 不动，
                     # 日志里连一条重试都没有（因为失败路径不记日志）。
                     # 现在跟单连接一个规格：每读一小块就重设"多久没数据算卡死"。
+                    # ⚠️ **自适应无数据窗口**（2026-10-03）：固定 20 秒对极慢但通的线路是误杀
+                    #（0.008 MB/s 时读满 256 KB 要 32 秒 ⇒ 每块都"超时→重试→再超时"）。
+                    # 这里按"这块多大 ÷ 已知速度"给窗口，拿不到速度就用下限兜底。
+                    # 速度优先用"这块已经读了多少 / 花了多久"（更贴近当下），
+                    # 没有就用调用方给的探测值 —— 两者都没有就落到窗口下限。
+                    _live_mbps = (state["live"] / 1048576) / max(time.time() - _fetch_started, 1e-6) \
+                        if state.get("live") else 0.0
+                    _window = _stall_window(max(1, end - begin + 1),
+                                            _live_mbps or float(expected_mbps or 0.0))
                     try:
-                        response.fp.raw._sock.settimeout(STALL_SECONDS)  # type: ignore[attr-defined]
+                        response.fp.raw._sock.settimeout(_window)  # type: ignore[attr-defined]
                     except (AttributeError, OSError):
                         pass
                     buf = bytearray()
@@ -594,12 +621,29 @@ def _download_parallel(
     return state["retries"]
 
 
+def _stall_window(piece_bytes: int, mbps: float) -> float:
+    """按"这块有多大 ÷ 已知速度"算出**合理的无数据等待窗口**（秒）。
+
+    为什么需要：固定 20 秒对**极慢但通**的线路是误杀 —— 0.008 MB/s 时读满 256 KB
+    就要 32 秒，于是每一块都会"超时→重试→再超时"。这里给一个与速度匹配的窗口，
+    同时用 `STALL_WINDOW_MAX` 兜住（真断流不能无限等）。
+    """
+    if mbps <= 0:
+        return float(STALL_WINDOW_MAX)
+    # 单次 read 的期望耗时（READ_CHUNK 一小块）再放宽若干倍，留出抖动余量
+    expected = (READ_CHUNK / 1048576) / mbps            # 读一小块要几秒
+    window = max(STALL_WINDOW_MIN, min(STALL_WINDOW_MAX, expected * 8))
+    # 也别小于"整块 ÷ 速度"的很小一部分（大块时读循环是连续的，按小块算就够）
+    return float(window)
+
+
 def recommended_threads(size: int) -> int:
     """按体积给并发数。
 
     2026-09-27 实测（27.6 MB、镜像线路 gh.xmly.dev）：
         单连接 0.71 MB/s → 8 连接 3.21 MB/s → 16 连接 3.96 MB/s
     即并发是主要提速手段（5.6 倍），所以这里给得比以前大方；
+2026-10-03：上限从 20 提到 32（实测"4 条不够、十几条才吃满"，大包常顶到上限）；
     同时实测"多线路混合"反而更慢（被慢线路拖累），所以只加连接、不铺线路。
     """
     by_size = max(1, size // (1536 * 1024))          # 每 1.5 MB 一个连接
@@ -1066,7 +1110,8 @@ def _attempt_line(
             report.retries = _download_parallel(
                 url, work, size=size, start=written, threads=threads,
                 timeout=timeout, progress=progress, log=log,
-                max_seconds=BOOST_TRIAL_SECONDS, cancel=cancel)          # 试用窗口：到点不再提交新块
+                max_seconds=BOOST_TRIAL_SECONDS, cancel=cancel,
+                expected_mbps=float(report.probe_mbps or 0.0))          # 试用窗口：到点不再提交新块
             done_now = sum(b - a + 1 for a, b in _load_parts(work, size))
             if size and done_now < size and done_now > written:
                 boost_mbps = _mbps(done_now - written, max(time.time() - trial_started, 1e-6))

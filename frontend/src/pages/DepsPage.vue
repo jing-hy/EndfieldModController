@@ -302,9 +302,13 @@ async function pollProgress() {
       //（香蕉网部分直链如此），于是整块被跳过：进度条不动，**速度也一起不更新**；
       // 而上面那行已经把 `speedBps` 设成了依赖下载的 0 ⇒ 速度卡片恒显示「—」。
       if (modDlActive.value) {
+        // ⚠️ **进度文字必须带百分比**（2026-10-03 用户：「进度条下面文字还是未开始，
+        // **要显示百分比**」）。原来只有 `x/y MB`，而进度条本身不显示数字 ⇒
+        // 用户看不到"下到几成了"。现在统一写成「Mod 下载 45%（123.4/912.8 MB）」。
         if (md.total_bytes > 0) {
           percent.value = Math.min(99, Math.round((md.done_bytes / md.total_bytes) * 100));
-          progressText.value = `Mod 下载 ${(md.done_bytes / 1048576).toFixed(1)}/${(md.total_bytes / 1048576).toFixed(1)} MB`;
+          progressText.value =
+            `Mod 下载 ${percent.value}%（${(md.done_bytes / 1048576).toFixed(1)}/${(md.total_bytes / 1048576).toFixed(1)} MB）`;
         } else if (items.length) {
           // 总大小未知：用各任务自身百分比的平均兜底，别让进度条死住
           const known = items.filter((it) => Number(it.size) > 0);
@@ -315,7 +319,11 @@ async function pollProgress() {
             const doneCount = items.filter((it) => /完成|已入库/.test(String(it.status || ""))).length;
             percent.value = Math.min(99, Math.round((doneCount / items.length) * 100));
           }
-          progressText.value = `Mod 下载 ${(md.done_bytes / 1048576).toFixed(1)} MB（总大小未知）`;
+          progressText.value =
+            `Mod 下载 ${percent.value}%（已下 ${(md.done_bytes / 1048576).toFixed(1)} MB，总大小未知）`;
+        } else {
+          // 有任务但一条都还没报数（准备期）：也要有百分比口径，写 0%
+          progressText.value = `Mod 下载 0%（正在读取下载信息…）`;
         }
         // ⚠️ **B5：有「需手动解压」的包时要告诉用户去哪拿**（2026-10-03 补回归）。
         // 后端把解压不了的包标成「需手动解压」并**保留文件**（不删），
@@ -446,8 +454,19 @@ async function pollProgress() {
     const depText = p.total
       ? `第 ${p.current}/${p.total} 项` + (p.computed_bytes ? ` · ${(p.computed_bytes / 1048576).toFixed(1)} MB` : "")
       : (p.message || "");
-    if (depText) progressText.value = depText;
-    else if (!modDlActive.value) progressText.value = "";
+    // ⚠️⚠️ **Mod 下载在跑时，它的文字谁也不许覆盖**（2026-10-03 用户报过两次：
+    //   「进度条下面未开始的字样没有联动」「**进度条下面文字还是未开始**」）。
+    // 上面 Mod 分支刚写好 `Mod 下载 45%（x/y MB）`，而这里原先**无条件**把它冲成
+    // `depText`（依赖任务没在跑时可能是空串或残留文案）⇒ 模板的 `|| "尚未开始"`
+    // 兜底生效 ⇒ Mod 下载期间进度文字永远显示「尚未开始」。
+    // 优先级：Mod 下载 > 依赖任务 > 清空（交给模板兜底）。
+    if (modDlActive.value) {
+      // 保持上面刚写好的带百分比文字，**不动**
+    } else if (depText) {
+      progressText.value = depText;
+    } else {
+      progressText.value = "";
+    }
 
     // ⚠️ 用户 2026-10-03：「安装完成没动态，不会自动刷新组件状态，而且安装完还是待补齐」——
     // 这里原来**只更新进度条**，从不在跑完时刷新组件清单，于是 `deps` / `missingCount`
@@ -559,10 +578,16 @@ useLogAutoScroll(logBox, () => logLines.value);
     </div>
 
     <div>
+      <!-- ⚠️ **进度条本身也要显示百分比**（2026-10-03 用户：「进度条下面文字还是未开始，
+           要显示百分比」）—— 只在下面那行写文字不够，条上带数字才一眼看到进度。
+           用现有 CSS 变量与尺寸，不新造样式。 -->
+      <div class="flex items-center justify-between text-xs mb-1.5" style="color: var(--text-muted)">
+        <span>{{ progressText || "尚未开始" }}</span>
+        <span style="color: var(--accent); font-weight: 600">{{ percent }}%</span>
+      </div>
       <div class="h-1.5 rounded-full overflow-hidden" style="background: var(--surface-2); border: 1px solid var(--border)">
         <div class="h-full transition-all" :style="{ width: percent + '%', background: 'var(--accent)' }"></div>
       </div>
-      <div class="text-xs mt-1.5" style="color: var(--text-muted)">{{ progressText || "尚未开始" }}</div>
     </div>
 
     <Card v-if="deps.length" title="组件状态">
