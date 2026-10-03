@@ -34,6 +34,7 @@ export async function importDroppedFile(file, { onDone, onNeedConfirm } = {}) {
     showProgressToast("import", `准备导入 ${file.name} …`);
     const begin = await call("import_mod_begin", file.name);
     if (!begin || !begin.ok) {
+      hideProgressToast("import");       // 失败也要撤掉进度，否则界面停在"准备导入…"
       await showAlert("导入 Mod", (begin && begin.message) || "导入失败");
       return;
     }
@@ -42,6 +43,12 @@ export async function importDroppedFile(file, { onDone, onNeedConfirm } = {}) {
       const end = Math.min(sent + CHUNK, file.size);
       const part = await call("import_mod_chunk", begin.token, await sliceToBase64(file, sent, end));
       if (!part || !part.ok) {
+        // ⚠️⚠️ **"卡在那里不动"的一半在这里**（2026-10-03 用户：「mod 超过 600mb 就显示
+        // 请手动解压放入，**但是动态还一直卡在那里**」）。
+        // 后端超限时只回了一句错误，前端虽然 `return` 了，但**那条自我更新的进度提示
+        // 没有撤掉**（`hideProgressToast("import")` 只在成功路径上调）⇒ 进度条永远停在
+        // 超限那一刻，看起来就是"卡死"。现在：**任何失败分支都先把进度提示撤掉**。
+        hideProgressToast("import");
         await showAlert("导入 Mod", (part && part.message) || "传输失败");
         return;
       }
@@ -56,6 +63,7 @@ export async function importDroppedFile(file, { onDone, onNeedConfirm } = {}) {
     setStatus(`正在解压并识别角色：${file.name} …`);
     const result = await call("import_mod_finish", begin.token);
     if (!result || !result.ok) {
+      hideProgressToast("import");       // 失败也要撤掉进度，否则停在"正在解压…"
       await showAlert("导入 Mod", (result && result.message) || "导入失败");
       return;
     }
@@ -84,6 +92,9 @@ export async function importDroppedFile(file, { onDone, onNeedConfirm } = {}) {
       await showAlert("导入 Mod", result.warning || `已导入「${result.name}」。`);
     }
   } catch (err) {
+    // ⚠️ **任何异常都要撤掉进度提示** —— 这是"动态一直卡在那里"的最后一道兜底：
+    // 进度 toast 是 sticky 的（同一 key 只占一条、不会自己消失），不主动撤就会一直挂着。
+    hideProgressToast("import");
     await showAlert("导入 Mod", `导入失败：${(err && err.message) || err}`);
   }
 }

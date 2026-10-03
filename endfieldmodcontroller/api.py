@@ -19,6 +19,22 @@ from .config import AppConfig, auto_detect_migoto_loader, auto_detect_official_l
 # 拖进 Mod 库页面的压缩包格式（用户 2026-10-01：「需要增加支持拖入 7z」「rar 也要」）。
 # zip 走标准库（自带 zip-slip 防护），7z/rar 走外部解压器（见 dependencies.find_archive_tool）。
 IMPORT_SUFFIXES = (".zip", ".7z", ".rar")
+
+# ── 导入压缩包的大小上限（2026-10-03 用户选 A：**直接去掉原来那个 600 MB**）──────
+# 用户报：「**mod 超过 600mb 就显示请手动解压放入，但是动态还一直卡在那里，
+# 为什么定额这么低**」。两件事分别处理：
+#   ① **600 MB 本身过时**：它来自更早"一次性 base64 传整包"的时代（那条路在
+#      `import_mod_archive`，限额 300 MB，注释写着"避免超大包把内存和调用参数撑爆"）。
+#      而**分块上传是流式 `open(..., "ab")` 直接写磁盘的**、全程不把整包读进内存
+#      ⇒ 没有技术上必须卡在 600 MB 的理由。**用户明确选了 A（直接去掉限额）**。
+#   ② **"卡住"的根因是超限时的写法**：原实现只 `return {"ok": False}`，**不删**已写进
+#      磁盘的 `.part`、**不清理** `_import_sessions` 会话、**不更新**任务状态 ⇒
+#      进度停在超限那一刻、临时文件留在 `runtime\_incoming\`。
+#
+# 现在：**不再按大小拒绝**（交给磁盘空间），只留一个**防呆**上限 ——
+# 挡住"误拖一个几十 GB 的包把磁盘塞满"这种自伤；一旦触发就彻底清理并如实说明。
+# 8 GB：正常 Mod（含那个 912 MB 的）都在它之下，而它又远小于"误拖整个盘"的量级。
+IMPORT_HARD_CAP_BYTES = 8 * 1024 ** 3
 IMPORT_SUFFIX_HINT = " / ".join(IMPORT_SUFFIXES)
 
 
@@ -3085,9 +3101,48 @@ class EndfieldModControllerApi:
         except OSError as exc:
             return {"ok": False, "message": f"写入分块失败：{exc}"}
         info["size"] += len(blob)
-        if info["size"] > 600 * 1024 * 1024:
-            return {"ok": False, "message": "压缩包超过 600 MB，请先解压后手动放进 Mod 库"}
+        # ⚠️⚠️ **这里原来卡了 600 MB 限额，2026-10-03 按用户要求（选 A）去掉**。
+        #
+        # 用户反馈：「**mod 超过 600mb 就显示请手动解压放入，但是动态还一直卡在那里，
+        # 为什么定额这么低**」—— 两件事：
+        #   ① **限额本身过时**：这个 600 MB 来自更早"一次性 base64 传整包"的时代
+        #      （那条路在 `import_mod_archive`，限额 300 MB，注释写着"避免超大包把内存
+        #      和调用参数撑爆"）。而**分块这条路是流式直接 `open(...,"ab")` 写磁盘的，
+        #      全程不把整包读进内存** ⇒ 没有技术上必须卡在 600 MB 的理由。
+        #   ② **超限时的写法就是"卡住"的根因**：原实现只 `return {"ok": False}` ——
+        #      **不删**已写进磁盘的 `.part`、**不清理** `_import_sessions` 会话、
+        #      **不更新**任务状态 ⇒ 进度停在超限那一刻、临时文件留在 `runtime\_incoming\`，
+        #      用户看到的就是"提示出来了，但动态一直卡在那里"。
+        #
+        # 现在：**不再按大小拒绝**（只靠磁盘空间），但保留一个"防呆"上限
+        # `IMPORT_HARD_CAP_BYTES`，且**一旦触发就彻底清理并如实说明**。
+        if info["size"] > IMPORT_HARD_CAP_BYTES:
+            self._abort_import_session(str(token), info)
+            return {
+                "ok": False,
+                "aborted": True,
+                "message": (f"这个包太大了（已超过 {IMPORT_HARD_CAP_BYTES // (1024 ** 3)} GB），"
+                            f"已中止导入并清理掉临时文件。\n"
+                            f"如果确实要装这么大的包，请先解压，再把里面的 Mod 文件夹拖进 Mod 库。"),
+            }
         return {"ok": True, "received": info["size"]}
+
+    def _abort_import_session(self, token: str, info: dict[str, Any]) -> None:
+        """中止一次导入：**把临时文件和会话都清干净**（2026-10-03）。
+
+        为什么必须有它：原来超限/失败时只返回一句错误，`.part` 留在
+        `runtime\\_incoming\\`、会话留在 `_import_sessions` —— 用户看到"提示出来了、
+        但动态卡在那里"，磁盘上还留着半截大文件。
+        """
+        sessions = getattr(self, "_import_sessions", None)
+        if isinstance(sessions, dict):
+            sessions.pop(str(token), None)
+        try:
+            path = info.get("path")
+            if path:
+                Path(path).unlink(missing_ok=True)
+        except OSError:
+            pass
 
     def import_mod_finish(self, token: str) -> dict[str, Any]:
         """分块接收完毕：落盘完成 → 走与一次性导入完全相同的解压 + 收编流程。"""
@@ -3134,7 +3189,12 @@ class EndfieldModControllerApi:
         suffix = Path(name).suffix.lower()
         if suffix not in IMPORT_SUFFIXES:
             return {"ok": False, "message": f"目前只支持 {IMPORT_SUFFIX_HINT}（其他格式请先解压）"}
-        max_bytes = 300 * 1024 * 1024
+        # ⚠️ **两条路的限额必须一致**（2026-10-03）：原来是 300 MB，而分块那条是 600 MB，
+        # 同一个包"拖进去"和"走另一条路"结果不同，用户会莫名其妙。
+        # 现在共用同一个**防呆**上限（见 `IMPORT_HARD_CAP_BYTES` 的说明）。
+        # ⚠️ 注意这条是**一次性 base64 传整包**的老路径，它**真的会把整包读进内存**，
+        # 所以超大包建议走分块那条（前端默认就是分块）。
+        max_bytes = IMPORT_HARD_CAP_BYTES
         try:
             blob = base64.b64decode(data_b64 or "", validate=False)
         except Exception as exc:  # noqa: BLE001
@@ -3144,7 +3204,8 @@ class EndfieldModControllerApi:
         if len(blob) > max_bytes:
             return {"ok": False,
                     "message": f"压缩包太大（{len(blob) / 1048576:.1f} MB），"
-                               f"超过 {max_bytes // 1048576} MB，请先解压后手动放到 Mod 库"}
+                               f"超过 {max_bytes // (1024 ** 3)} GB —— 这么大的包请先解压，"
+                               f"再把里面的 Mod 文件夹拖进 Mod 库"}
 
         incoming = self.config.runtime_path / "_incoming"
         incoming.mkdir(parents=True, exist_ok=True)
