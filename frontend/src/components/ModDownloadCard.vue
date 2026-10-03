@@ -46,7 +46,10 @@ async function openDir() {
 </script>
 
 <template>
-  <Card title="下载 Mod">
+  <!-- ⚠️ **C6：这个 id 是新手引导第 2 步的高亮目标**（2026-10-03 补回归）。
+       0.9.5 的引导第 2 步指向 `#mod-download-box`，换代后那个 id **不存在**
+       ⇒ 第二步没有聚光高亮、只能把卡片居中显示，用户看不出该点哪。 -->
+  <Card title="下载 Mod" id="mod-download-box">
     <template #badge><span class="text-xs" style="color: var(--text-muted)">粘网址，一行一个</span></template>
     <p class="text-xs mb-2" style="color: var(--text-muted)">
       支持直链，也支持<b>香蕉网（GameBanana）页面地址</b> —— 会自动换成真实文件直链，并带出封面。

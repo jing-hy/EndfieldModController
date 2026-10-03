@@ -124,6 +124,31 @@ async function menuAct(act) {
   closeMenu();
   try {
     if (act === "fix") {
+      // ⚠️ **C5：修之前先查工具在不在**（2026-10-03 补回归）。
+      // 0.9.5（`app.js:808-817`）会先 `modfix_status`，工具缺失时讲清"放 assets\\modfix
+      // 或 runtime\\modfix"；换代后 grep `modfix_status` **0 命中** ⇒ 用户点了"修复"，
+      // 失败也只看到一句错误码，不知道该往哪放工具。
+      // ⚠️ 按用户准则：**不能因为"当前没就位"就把按钮禁用**（工具随包、点下去会自动展开），
+      // 所以只在**确实不可用**（`usable === false`：随包与 runtime 都没有）时才说明。
+      // 注意后端返回的是 `{ tool: {...} }`。
+      try {
+        const st = await call("modfix_status");
+        const tool = (st && st.tool) || {};
+        if (tool.usable === false) {
+          await showModalDialog({
+            title: "修复工具不在",
+            message: [
+              "这个修复工具是随包分发的，但当前两份都没有：",
+              "· assets\\modfix\\（随包那份）",
+              "· runtime\\modfix\\（运行时那份）",
+              "",
+              "从 Release 下载的话，重新展开一次 assets-bundle.zip 即可。",
+            ].join("\n"),
+            okText: "知道了", showCancel: false,
+          });
+          return;
+        }
+      } catch (e) { /* 查不到就直接试，别因为检查本身挡住 */ }
       const r = await call("fix_mod", m.id);
       if (r && r.ok === false) await showAlert("修复失败", r.message || "未知原因");
       else showToast(`已修复 ${m.name}`, "success");
