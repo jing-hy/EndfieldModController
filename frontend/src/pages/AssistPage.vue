@@ -27,9 +27,25 @@ const selected = computed(
 async function toggleMod(mod) {
   const ids = new Set(selected.value);
   const id = String(mod.id);
-  if (ids.has(id)) ids.delete(id);
-  else ids.add(id);
-  // 辅助 Mod 不绑角色，所以**不做同角色互斥**（那是角色 Mod 的规则）
+  const turningOn = !ids.has(id);
+  // ⚠️⚠️ **壁纸类互斥要在界面上当场生效**（2026-10-03 用户报「你壁纸互斥还是没做」）。
+  //
+  // 背景：我上一轮只改了后端 `activation.resolve_active_set`（staging 时只留一个），
+  // 而**界面的开关直接读写 `selected_mods`** ⇒ 两个壁纸的开关都亮着，
+  // 用户完全看不出互斥 —— 他要的是"**打开一个，另一个自动关掉**"。
+  // 这里在做同一条规则：开启壁纸时**先把同组其它壁纸全部关掉**。
+  const isWallpaper = String(mod.group || "") === WRAPPER_GROUP;
+  const autoOff = [];
+  if (turningOn && isWallpaper) {
+    for (const other of wallpapers.value) {
+      if (String(other.id) !== id && ids.has(String(other.id))) {
+        ids.delete(String(other.id));
+        autoOff.push(other.name || String(other.id));
+      }
+    }
+  }
+  if (turningOn) ids.add(id);
+  else ids.delete(id);
   try {
     // 同「服装 Mod」页：**不调 refreshState()**（全量重拉 get_state 会重新扫描整个库，
     // 点一下要等很久）；直接写回派生来源，界面立刻响应。
@@ -39,15 +55,24 @@ async function toggleMod(mod) {
       if (!store.state.config || typeof store.state.config !== "object") store.state.config = {};
       store.state.config.selected_mods = applied;
     }
+    // 自动关掉的要说一声，否则用户以为是"点一下把别的也弄没了"
+    if (autoOff.length) {
+      showToast(`壁纸是互斥的，已自动关掉：${autoOff.join("、")}`, "warn");
+    }
   } catch (e) { /* call 已弹窗 */ }
 }
+
+// ⚠️ **常量必须在使用它的代码之前**（原来它定义在第 70 行，而上面的 toggleMod 里已经用了）
+const WRAPPER_GROUP = "加载页与壁纸";   // 与后端 core.WALLPAPER_GROUP 对齐
+
+// 本页所有**壁纸类** Mod —— 互斥规则要用（用户 2026-10-03：「你壁纸互斥还是没做」）
+const wallpapers = computed(() => list.value.filter((m) => String(m.group || "") === WRAPPER_GROUP));
 
 const covers = computed(() => store.covers);
 
 // 页内按**子类**分组（用户 2026-10-03：「辅助 Mod 是标签，实际页面卡片中需要在卡片细分
 // 加载页和功能类之类的」）—— 「辅助 Mod」只是标签页，同一页里还要按子类分开列，
 // 否则壁纸包和"隐藏 UI"混在一起看不出区别。顺序固定：加载页/壁纸 → 界面功能 → 工具 → 其它。
-const WRAPPER_GROUP = "加载页与壁纸";   // 与后端 core.WALLPAPER_GROUP 对齐
 const GROUP_ORDER = ["加载页与壁纸", "界面功能类", "工具画质类", "其它辅助"];
 function groupsOf(list) {
   const picked = Array.isArray(list) ? list : [];
