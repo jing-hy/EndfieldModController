@@ -513,27 +513,8 @@ def prepare_reshade_runtime(config: AppConfig, controller_dir: Path) -> dict[str
     except OSError as exc:
         _append_log(config, f"往 runtime\\reshade\\Addons 放面板失败（忽略）: {exc}")
 
-    # ⚠️ 2026-10-03 实测第二个同源问题：**第一人称的配置也得同步到这份 ini**。
-    # ReShade 以基准目录（= runtime\reshade）为准，所以它读的 `[endfield-enhancer]` 段
-    # 是**这份**；而初始化只维护 `dlss5\ReShade.ini`，于是那份里的正确值（尤其
-    # `CameraEFMICompatibility=1`、`ShortcutFirstPerson=112`）在生效的这份里全是 0 ——
-    # 用户看到的正是「第一人称视角不会自动配置」（面板里点按钮也没反应）。
-    # 这里把 dlss5 那份的关键项同步过来（缺这份文件时跳过，交给 initialize 重建）。
-    try:
-        _sync_enhancer_section(config.dlss5_path / "ReShade.ini", reshade_dir / "ReShade.ini")
-        # ⚠️ 2026-10-03 第四个同源问题：**中文字体**。
-        # `dlss5\ReShade.ini` 的 `[STYLE] Font=C:\WINDOWS\Fonts\msyh.ttc`，而生效那份是空值
-        # ⇒ 第一人称（Endfield Enhancer）自己会报
-        #     Chinese font missing: in ReShade Settings, select Chinese as the overlay language
-        #   or choose a Chinese-capable font
-        # 于是 `Language=1`（中文）配上去了也**显示不出来** —— 用户看到的就是
-        # 「第一人称还是不会自动改中文」。字体与字号一并同步。
-        _sync_style_section(config.dlss5_path / "ReShade.ini", reshade_dir / "ReShade.ini")
-    except OSError as exc:
-        _append_log(config, f"同步 [endfield-enhancer] / [STYLE] 到 runtime\\reshade 失败（忽略）: {exc}")
-
     # `initialize._rebuild_ini` 会把这份当"[endfield-enhancer] 段的历史来源"之一，
-    # 所以照旧写一份，保持既有行为。
+    # 所以照旧写一份，保持既有行为。同步动作写在本函数末尾（必须在写 ini 之后）。
     #
     # ⚠️ 2026-10-03 实测第三个同源问题：**search path 原先写成相对基准目录的路径**。
     # 这份 ini 由 `RESHADE_BASE_PATH_OVERRIDE`（launcher 启动时设成 `runtime\reshade`）指成
@@ -553,20 +534,84 @@ def prepare_reshade_runtime(config: AppConfig, controller_dir: Path) -> dict[str
         rel = base.name
     shaders_rel = os.path.join(rel, "reshade-shaders", "Shaders")
     textures_rel = os.path.join(rel, "reshade-shaders", "Textures")
-    ini_text = "\n".join([
-        "[ADDON]",
-        f"AddonPath={rel}",
-        "",
-        "[GENERAL]",
-        f"EffectSearchPaths={shaders_rel}\\**",
-        f"TextureSearchPaths={textures_rel}\\**",
-        f"PresetPath={os.path.join(rel, 'ReShadePreset.ini')}",
-        "",
-    ])
+    wanted_keys = {
+        "AddonPath": rel,
+        "EffectSearchPaths": shaders_rel + "\\**",
+        "TextureSearchPaths": textures_rel + "\\**",
+        "PresetPath": os.path.join(rel, "ReShadePreset.ini"),
+    }
+
+    # ⚠️⚠️ 2026-10-03 **关键修正：合并写入，绝不整份覆盖**。
+    # 旧实现是 `write_text(ini_text)` —— 只生成 `[ADDON]` + `[GENERAL]` 两段就盖掉整个文件，
+    # 于是每次一键启动都会把 **`[STYLE]`（字体）、`[endfield-enhancer]`（第一人称的语言等）**
+    # 这些段整段抹掉。实测证据：11:56 补好的 `[STYLE] Font=C:\WINDOWS\Fonts\msyh.ttc`，
+    # 到 12:15 又变回空 —— 而"字体为空"正是第一人称中文显示不出来的原因
+    # （addon 自己会报 `Chinese font missing`）。用户看到的「还是英文」就是这么来的。
+    # 现在只更新上面这 4 个键，其它段和键一律原样保留。
+    ini_path = reshade_dir / "ReShade.ini"
+    existing: list[str] = []
+    if ini_path.is_file():
+        try:
+            existing = ini_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            existing = []
+
+    if not existing:
+        merged = ["[ADDON]", f"AddonPath={rel}", "", "[GENERAL]",
+                  f"EffectSearchPaths={wanted_keys['EffectSearchPaths']}",
+                  f"TextureSearchPaths={wanted_keys['TextureSearchPaths']}",
+                  f"PresetPath={wanted_keys['PresetPath']}", ""]
+    else:
+        merged, section, seen = [], "", set()
+        for line in existing:
+            text = line.strip()
+            if text.startswith("["):
+                # 离开某段时，把它缺的键补上（保证 [ADDON]/[GENERAL] 一定被写好）
+                if section == "[ADDON]" and "AddonPath" not in seen:
+                    merged.append(f"AddonPath={rel}")
+                if section == "[GENERAL]":
+                    for key in ("EffectSearchPaths", "TextureSearchPaths", "PresetPath"):
+                        if key not in seen:
+                            merged.append(f"{key}={wanted_keys[key]}")
+                section = text
+                seen = set()
+                merged.append(line)
+                continue
+            if "=" in text:
+                key = text.partition("=")[0].strip()
+                if key in wanted_keys:
+                    merged.append(f"{key}={wanted_keys[key]}")
+                    seen.add(key)
+                    continue
+            merged.append(line)
+        # 文件里压根没有这两个段时，补在末尾
+        if "[ADDON]" not in [ln.strip() for ln in merged if ln.strip().startswith("[")]:
+            merged += ["", "[ADDON]", f"AddonPath={rel}"]
+        if "[GENERAL]" not in [ln.strip() for ln in merged if ln.strip().startswith("[")]:
+            merged += ["", "[GENERAL]",
+                       f"EffectSearchPaths={wanted_keys['EffectSearchPaths']}",
+                       f"TextureSearchPaths={wanted_keys['TextureSearchPaths']}",
+                       f"PresetPath={wanted_keys['PresetPath']}"]
+
     try:
-        (reshade_dir / "ReShade.ini").write_text(ini_text, encoding="utf-8", newline="\n")
+        ini_path.write_text("\r\n".join(merged) + "\r\n", encoding="utf-8")
     except OSError as exc:
         _append_log(config, f"写入 runtime\\reshade\\ReShade.ini 失败（忽略）: {exc}")
+
+    # ⚠️ 2026-10-03 实测同源问题：**第一人称的配置与中文字体也得同步到这份 ini**。
+    # ReShade 以基准目录（= runtime\reshade）为准，所以它读的 `[endfield-enhancer]` /
+    # `[STYLE]` 段是**这份**；而初始化只维护 `dlss5\ReShade.ini`。两份会分叉：
+    #   * addon 首次运行把它读的那份写成**出厂值（全 0）** ⇒ `CameraEFMICompatibility=0`
+    #     （与 EFMI 共存必需）、`ShortcutFirstPerson=0`（F1 没配上）—— 用户看到的
+    #     「第一人称视角不会自动配置」；
+    #   * `[STYLE] Font` 为空 ⇒ addon 报 `Chinese font missing` ⇒ 中文显示不出来 ——
+    #     用户看到的「还是英文」。
+    # 两个同步都必须放在**写 ini 之后**（写的是合并结果，同步只补差异项）。
+    try:
+        _sync_enhancer_section(config.dlss5_path / "ReShade.ini", ini_path)
+        _sync_style_section(config.dlss5_path / "ReShade.ini", ini_path)
+    except OSError as exc:
+        _append_log(config, f"同步 [endfield-enhancer] / [STYLE] 到 runtime\\reshade 失败（忽略）: {exc}")
 
     return {
         "reshade_dir": str(reshade_dir),
