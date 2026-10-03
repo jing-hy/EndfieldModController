@@ -26,18 +26,34 @@ const deps = computed(() => {
 const required = computed(() => (store.state.dependency_report || {}).required || []);
 const okCount = computed(() => deps.value.filter((d) => d.status === "已安装").length);
 const missingCount = computed(() => deps.value.filter((d) => d.status === "缺失").length);
-const progressLabel = computed(() => {
-  // 评审指出：摘要写「已就绪」、进度写「尚未开始」，两个状态互相打架 ——
+// ⚠️ 原来的 `tone(state)` 判的是 `"ok"` / `"missing"`，而后端 `status` 实际是**中文**
+// （`已安装` / `已就位` / `已是最新` / `缺失`）⇒ 永远落到 muted（灰），缺了的组件也看不出来。
+// 用户 2026-10-03：「组件确实要标红，正常标绿」。改用后端给的**真布尔** `present` 判断，
+// 比匹配中文字符串可靠（status 是给人看的，present 是给机器判的）。
+function tone(d) {
+  return d && d.present ? "success" : "danger";
+}
+function rowColor(d) {
+  return d && d.present ? "var(--success, #2e7d32)" : "var(--danger, #c0392b)";
+}
+
+// 下载实时速度：后端在 byte_progress 里采样并平滑过；不在下载时是 0 ⇒ 显示 —（不留假数字）
+const speedBps = ref(0);      // 由 pollProgress 从 get_dependency_progress 里取
+const speedText = computed(() => (speedBps.value > 0 ? humanSize(speedBps.value) + "/s" : "—"));
+function humanSize(bytes) {
+  const n = Number(bytes) || 0;
+  if (n >= 1048576) return (n / 1048576).toFixed(1) + " MB";
+  if (n >= 1024) return (n / 1024).toFixed(0) + " KB";
+  return n.toFixed(0) + " B";
+}
+
+const progressLabel = computed(() => {  // 评审指出：摘要写「已就绪」、进度写「尚未开始」，两个状态互相打架 ——
   // 这里统一成**一次流程**的状态，并且明确"还没检查过"这一档。
   if (running.value) return "进行中";
   if (!checked.value) return "未检查";
   if (missingCount.value) return "待补齐";
   return "全部就位";
 });
-
-function tone(state) {
-  return state === "ok" ? "success" : state === "missing" ? "danger" : "muted";
-}
 
 async function refresh() {
   try {
@@ -50,20 +66,49 @@ async function refresh() {
   } catch (e) { /* call 已弹窗 */ }
 }
 
+let wasRunning = false;      // 上一轮是否在跑（用来捕捉"刚跑完"这个瞬间）
+
 async function pollProgress() {
   try {
     const p = await call("get_dependency_progress");
     if (!p) return;
-    running.value = !!p.running;
+    const nowRunning = !!p.running;
+    running.value = nowRunning;
     if (typeof p.percent === "number") percent.value = p.percent;
     if (Array.isArray(p.log) && p.log.length) logLines.value = p.log;
+    speedBps.value = Number(p.speed_bps || 0);   // 下载实时速度（第 4 个卡片）
     progressText.value = p.total ? `${p.current}/${p.total}` : (p.message || "");
+
+    // ⚠️ 用户 2026-10-03：「安装完成没动态，不会自动刷新组件状态，而且安装完还是待补齐」——
+    // 这里原来**只更新进度条**，从不在跑完时刷新组件清单，于是 `deps` / `missingCount`
+    // 一直是开始前的旧数据：装完了仍显示"待补齐"、Badge 也还是旧的。
+    // 捕捉 running: true → false 的那一刻：拉一次最新状态 + 给一条完成提示。
+    if (wasRunning && !nowRunning) {
+      await refresh();
+      // 后端没有顶层 failed/missing，只有 results（每项 status ∈
+      // up_to_date|updated|downloaded|missing|error|skipped）—— 这里自己归类。
+      const results = Array.isArray(p.results) ? p.results : [];
+      const failed = results.filter((r) => String(r && r.status) === "error").length;
+      const missing = results.filter((r) => String(r && r.status) === "missing").length;
+      const message = String(p.message || "");
+      if (failed > 0) {
+        showToast(`安装结束，但有 ${failed} 项失败 —— 详情见右侧安装日志`, "danger");
+      } else if (missing > 0) {
+        showToast(`安装结束，仍有 ${missing} 项缺失 —— 详情见右侧安装日志`, "warn");
+      } else if (message.startsWith("失败")) {
+        showToast(`安装失败：${message}`, "danger");
+      } else {
+        showToast("依赖安装/更新完成", "success");
+      }
+    }
+    wasRunning = nowRunning;
   } catch (e) { /* 忽略轮询错误 */ }
 }
 
 async function start() {
   running.value = true;
-  try { await call("start_full_update"); } catch (e) { running.value = false; return; }
+  wasRunning = true;
+  try { await call("start_full_update"); } catch (e) { running.value = false; wasRunning = false; return; }
   status.value = "已开始自动安装/更新…";
   await refresh();
 }
@@ -110,6 +155,12 @@ onUnmounted(() => { if (timer) clearInterval(timer); });
         <div class="text-xl font-semibold">{{ progressLabel }}</div>
         <div class="text-xs mt-0.5" style="color: var(--text-muted)">当前状态</div>
       </div></div>
+      <!-- 第 4 个：下载实时速度（用户 2026-10-03：「不是上面三个卡片还有一个空位吗，
+           可以把下载实时速度开个卡片放那里」）。不在下载时显示 —，不留一个假数字。 -->
+      <div class="card"><div class="card-body">
+        <div class="text-xl font-semibold">{{ speedText }}</div>
+        <div class="text-xs mt-0.5" style="color: var(--text-muted)">下载速度</div>
+      </div></div>
     </div>
 
     <div>
@@ -121,12 +172,13 @@ onUnmounted(() => { if (timer) clearInterval(timer); });
 
     <Card v-if="deps.length" title="组件状态">
       <div class="divide-y" style="border-color: var(--border)">
-        <div v-for="d in deps" :key="d.key" class="py-2.5 flex items-center justify-between gap-4">
+        <div v-for="d in deps" :key="d.key" class="py-2.5 flex items-center justify-between gap-4"
+             :style="{ borderLeft: `3px solid ${rowColor(d)}`, paddingLeft: '10px' }">
           <div class="min-w-0">
             <div class="font-medium truncate">{{ d.display || d.key }}</div>
             <div class="text-xs mt-0.5" style="color: var(--text-muted)">{{ d.version || "" }}</div>
           </div>
-          <Badge :tone="tone(d.status)">{{ d.status || "未知" }}</Badge>
+          <Badge :tone="tone(d)">{{ d.status || "未知" }}</Badge>
         </div>
       </div>
     </Card>

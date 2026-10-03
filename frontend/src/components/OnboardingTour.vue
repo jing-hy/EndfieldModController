@@ -1,9 +1,9 @@
 <script setup>
 // 新手引导（分步 tour）：挖孔聚光高亮目标控件 + **箭头指向它** + 气泡说明。
 //
-// 移植自 0.4.0 的 `web/app.js` + `web/style.css`（那版用户是满意的），
-// 差别只有两处：① 换成 Vue 组件；② **加了指向目标的箭头**（用户 2026-10-03：
-// 「我需要那种一个箭头指向按钮的那种」——旧版只有挖孔高亮，没有箭头）。
+// 移植自 0.4.0 的 `web/app.js` + `web/style.css`（那版用户是满意的），差别只是换成 Vue 组件。
+// ⚠️ 我一度加过"指向目标的箭头"，用户实测后说「高亮没啥问题，但箭头是错位的，
+//    不过也用不上箭头，去掉就行」⇒ 已删除。**不要再加回来。**
 //
 // 定位逻辑沿用旧版的做法：切页 → **等两帧**（切页后布局才稳定）→ 量目标矩形 →
 // 聚光对齐（外扩 8px）→ 卡片贴目标下方，放不下就挪到上方；没有目标时卡片居中。
@@ -20,8 +20,6 @@ const emit = defineEmits(["update:modelValue", "finish"]);
 const index = ref(0);
 const spot = ref({ left: "50%", top: "40%", width: "0px", height: "0px" });
 const card = ref({ left: "50%", top: "46%", transform: "translate(-50%, 0)" });
-// 箭头：朝上（卡片在目标下方）或朝下（卡片在目标上方）；无目标时隐藏
-const arrow = ref({ show: false, left: "0px", top: "0px", dir: "up" });
 
 const PAD = 8;          // 聚光比目标外扩多少
 const CARD_W = 420;     // 与 CSS 的 max-width 一致
@@ -58,7 +56,6 @@ async function layout() {
     // 真的没有具体目标（或元素始终没出现）：聚光收成一个点，卡片居中，不画箭头
     spot.value = { left: "50%", top: "40%", width: "0px", height: "0px" };
     card.value = { left: "50%", top: "46%", transform: "translate(-50%, 0)" };
-    arrow.value = { show: false, left: "0px", top: "0px", dir: "up" };
     return;
   }
   const r = el.getBoundingClientRect();
@@ -71,15 +68,6 @@ async function layout() {
   const cardTop = fitsBelow ? below : Math.max(16, r.top - GAP - 220);
   const cardLeft = Math.min(Math.max(16, r.left), Math.max(16, window.innerWidth - CARD_W - 16));
   card.value = { left: `${cardLeft}px`, top: `${cardTop}px`, transform: "none" };
-  // 箭头：卡在卡片与目标之间的缝里，水平指向目标中心
-  const targetCx = r.left + r.width / 2;
-  const arrowLeft = Math.min(Math.max(12, targetCx - cardLeft - 8), CARD_W - 28);
-  arrow.value = {
-    show: true,
-    left: `${arrowLeft}px`,
-    top: fitsBelow ? `${cardTop - 9}px` : `${cardTop + 214}px`,
-    dir: fitsBelow ? "up" : "down",
-  };
 }
 
 function go(delta) {
@@ -104,10 +92,6 @@ watch(() => props.modelValue, (visible) => {
   <div v-if="modelValue" class="tour-root">
     <!-- 聚光：超大 box-shadow 把四周压暗（旧版同款做法），只留目标区域透亮 -->
     <div class="tour-spot" :style="spot"></div>
-
-    <!-- 指向目标的箭头（三角形，跟着卡片上下翻转） -->
-    <div v-if="arrow.show" class="tour-arrow" :class="`tour-arrow-${arrow.dir}`"
-         :style="{ left: arrow.left, top: arrow.top }"></div>
 
     <div class="tour-card" :style="card">
       <div class="tour-progress">{{ index + 1 }} / {{ steps.length }}</div>
@@ -135,17 +119,6 @@ watch(() => props.modelValue, (visible) => {
   transition: left .22s ease, top .22s ease, width .22s ease, height .22s ease;
   pointer-events: none;
 }
-.tour-arrow {
-  position: fixed;
-  width: 0; height: 0;
-  border-left: 9px solid transparent;
-  border-right: 9px solid transparent;
-  transition: left .22s ease, top .22s ease;
-  pointer-events: none;
-  z-index: 801;
-}
-.tour-arrow-up { border-bottom: 9px solid var(--accent); }
-.tour-arrow-down { border-top: 9px solid var(--accent); }
 .tour-card {
   position: fixed;
   width: 420px;

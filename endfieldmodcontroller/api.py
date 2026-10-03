@@ -1405,6 +1405,21 @@ class EndfieldModControllerApi:
             else:
                 task["message"] = f"{key}: 下载中 {received / 1048576:.1f} MB"
 
+            # 实时速度（依赖页顶部那个卡片）：用前后两次采样的字节差 / 时间差。
+            # 指数平滑一下，否则数字会随每个分块剧烈跳动、看不出趋势。
+            import time as _t
+
+            now = _t.time()
+            prev_bytes, prev_at = task.get("_speed_bytes"), task.get("_speed_at")
+            if prev_bytes is not None and prev_at is not None and now > prev_at:
+                instant = (int(received) - int(prev_bytes)) / (now - prev_at)
+                if instant >= 0:
+                    old_speed = float(task.get("speed_bps") or 0.0)
+                    task["speed_bps"] = instant if old_speed <= 0 else old_speed * 0.6 + instant * 0.4
+            task["_speed_bytes"] = int(received)
+            task["_speed_at"] = now
+            task["bytes_received"] = int(received)
+
         def bump(count: int = 1, label: str = "") -> None:
             """某个阶段完成：把已完成项数加上 count 并刷新全局进度。"""
             task = self._dep_task
@@ -1688,8 +1703,19 @@ class EndfieldModControllerApi:
 
     def get_dependency_progress(self) -> dict[str, Any]:
         if self._dep_task is None:
-            return {"running": False, "current": 0, "total": 0, "percent": 0.0, "message": "未开始", "log": [], "results": []}
-        return dict(self._dep_task)
+            return {"running": False, "current": 0, "total": 0, "percent": 0.0, "message": "未开始",
+                    "log": [], "results": [], "speed_bps": 0.0, "bytes_received": 0}
+        snapshot = dict(self._dep_task)
+        # 速度只在"刚刚还在下载"时有效：下载之间的空档（解压 / 安装 / 校验）超过 3 秒就报 0，
+        # 否则卡片会一直挂着一个早就不动的速度值，看着像卡住了。
+        import time as _t
+
+        sampled_at = snapshot.get("_speed_at")
+        if not snapshot.get("running") or not sampled_at or (_t.time() - float(sampled_at)) > 3.0:
+            snapshot["speed_bps"] = 0.0
+        snapshot.pop("_speed_bytes", None)
+        snapshot.pop("_speed_at", None)
+        return snapshot
 
     def read_launch_log(self, tail: int = 300) -> dict[str, Any]:
         paths = [self.config.runtime_path / "launch.log"]
