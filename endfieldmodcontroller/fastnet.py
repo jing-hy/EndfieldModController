@@ -433,7 +433,10 @@ def _download_sequential(
                             return 0, True, (f"连接建立后 {int(_seq_waited)}s 内没有收到任何数据（线路不通）")
                         continue
                     _seq_waited = 0.0
+                    # ⚠️ **同并行：读之前把预算放回去**（否则慢线路上每次 read 都 1 秒超时）
+                    _restore_sock_timeout(response, _seq_window)
                     chunk = response.read(READ_CHUNK)
+                    _sock_timeout(response, POLL_SECONDS)
                     if not chunk:
                         break
                     fh.write(chunk)
@@ -605,7 +608,14 @@ def _download_parallel(
                                 raise TimeoutError(
                                     f"连接建立后 {int(_waited)}s 内没有收到任何数据（线路不通）")
                             continue
+                        # ⚠️⚠️ **真读之前要把超时预算放回去**（2026-10-03 修「下载到最后崩了」）：
+                        # `select()` 只是"看一眼有没有数据"，1 秒粒度正好；
+                        # 但 `read()` 要用**这个块的窗口**做预算 —— 慢线路上读满 256 KB
+                        # 可能要几十秒，用 1 秒必然超时 ⇒ 每一块都被记成"失败"。
+                        _restore_sock_timeout(response, _window)
                         chunk = response.read(READ_CHUNK)
+                        # 读完立刻收回短超时，下一轮轮询才能 1 秒内响应"暂停"
+                        _sock_timeout(response, POLL_SECONDS)
                         if not chunk:
                             break
                         _waited = 0.0
@@ -671,6 +681,27 @@ def _download_parallel(
     if len(done_spans) >= len(spans):
         _clear_parts(dest)      # 块齐了才算下完
     return state["retries"]
+
+
+def _sock_timeout(response: Any, seconds: float) -> None:
+    """给 `response` 底层 socket 设读超时（拿不到就静默跳过）。"""
+    sock = getattr(getattr(getattr(response, "fp", None), "raw", None), "_sock", None)
+    if sock is None:
+        return
+    try:
+        sock.settimeout(seconds)
+    except (OSError, ValueError):
+        pass
+
+
+def _restore_sock_timeout(response: Any, window: float) -> None:
+    """`select()` 确认有数据后，**把读超时放回"这块的窗口"**。
+
+    ⚠️ **为什么必须**（2026-10-03 实测）：轮询用的 `POLL_SECONDS`(1 秒) 如果一直留着，
+    `response.read(READ_CHUNK)` 就只有 1 秒预算 —— 而慢线路上读满 256 KB 要几十秒
+    ⇒ **每次 read 都超时** ⇒ 整包下载必然失败（用户报「下载到最后崩了」）。
+    """
+    _sock_timeout(response, max(1.0, float(window)))
 
 
 def _readable(response: Any, wait_seconds: float) -> bool:

@@ -830,6 +830,14 @@ def infer_kind_and_group(
         elif looks_like_wallpaper(path, rel_parts):
             kind = "assist"
             group = WALLPAPER_GROUP
+        # ⚠️ **只替换贴图、不换模型**的那一类要排在 `looks_like_assist` **之前**
+        #    （2026-10-03 用户要求「和皮肤 mod 做区分，算辅助 mod」）。原因：
+        #    `looks_like_assist` 的第一条是"没有换装资源"，而这类 Mod **有 .dds**
+        #    ⇒ 会被它判成"有换装资源" ⇒ 落到 `kind=character`。
+        #    「弭弗饮料罐690308」就是这么被塞进「服装 Mod」页的（group=弭弗）。
+        elif looks_like_texture_only(path, rel_parts, meta, matched):
+            kind = "assist"
+            group = ASSIST_GROUP_TEXTURE
         elif path is not None and looks_like_assist(path, rel_parts, meta, matched):
             kind = "assist"
             # 页内再细分组（用户要求）
@@ -892,6 +900,26 @@ WALLPAPER_GROUP = "加载页与壁纸"
 ASSIST_GROUP_HIDE = "界面功能类"
 ASSIST_GROUP_TOOL = "工具画质类"
 ASSIST_GROUP_OTHER = "其它辅助"
+# ⚠️ **只替换贴图、不换模型**的那一类（2026-10-03 用户要求）：
+# 典型代表是「弭弗饮料罐」——它把饮料罐贴图换成真实品牌，有 Textures 但**没有 Meshes**。
+# 这类以前会被 `looks_like_assist` 的"没有换装资源"一条挡掉（它确实有 .dds）
+# ⇒ 落到 `kind=character` + 一个按目录名生成的 group，出现在「服装 Mod」页里。
+ASSIST_GROUP_TEXTURE = "贴图替换类"
+# 网格类资源的特征（有这些就说明在换模型，不是纯贴图替换）
+MESH_DIR_HINTS = ("meshes", "mesh")
+MESH_EXTS = (".buf", ".ib", ".vb", ".mesh", ".obj", ".fbx")
+TEXTURE_DIR_HINTS = ("textures", "texture")
+TEXTURE_EXTS = (".dds", ".png", ".jpg", ".jpeg", ".tga")
+# ⚠️ **服装/装扮类关键词**：名字里带这些的一律当"角色服装"处理，
+# 不纳入「贴图替换类」（2026-10-03：`莱万汀泳装` 只有贴图没有网格，
+# 但它是那个角色的衣服，必须留在角色库参与同角色互斥）。
+GARMENT_HINTS = (
+    "泳装", "旗袍", "内衣", "内裤", "服装", "皮肤", "外套", "上衣", "下装",
+    "裙子", "连衣裙", "制服", "礼服", "婚纱", "和服", "汉服", "战斗服",
+    "装扮", "套装", "全身", "发型", "头发", "脸部", "鞋子", "袜子",
+    "swimsuit", "bikini", "dress", "outfit", "costume", "skin", "cloth",
+    "lingerie", "uniform", "hairstyle",
+)
 # 命中这些词判成"界面/功能类"（隐藏 UI、去水印、改 HUD 这类）
 ASSIST_FUNC_HINTS = (
     "隐藏", "去ui", "去界面", "水印", "hud", "uid", "hide", "watermark",
@@ -911,6 +939,10 @@ def assist_group_of(rel_parts: Sequence[str], meta: dict[str, Any]) -> str:
         return ASSIST_GROUP_HIDE
     if any(k in lowered for k in ("tool", "tools", "utility", "工具", "画质", "reshade", "postfx")):
         return ASSIST_GROUP_TOOL
+    # 「只替换贴图」的（饮料罐贴图、材质替换…）—— 名字里不一定有特征词，
+    # 所以这里也认一下显式标记（调用方传进来的 meta 里可能有）
+    if str(meta.get("assist_group") or "") == ASSIST_GROUP_TEXTURE:
+        return ASSIST_GROUP_TEXTURE
     return ASSIST_GROUP_OTHER
 
 
@@ -994,6 +1026,58 @@ def has_mod_resources(path: Path) -> bool:
     except OSError:
         return False
     return False
+
+
+def looks_like_texture_only(
+    path: Path | None,
+    rel_parts: Sequence[str],
+    meta: dict[str, Any],
+    character: str = "",          # 保留形参仅为调用方兼容；判据**不用它**（见 docstring）
+) -> bool:
+    r"""是不是「**只替换贴图、不换模型**」的那类 Mod（2026-10-03 用户要求）。
+
+    用户原话（针对「弭弗饮料罐690308」）：「那个能不能**和皮肤 mod 做区分，算辅助 mod**，
+    然后给个**其他 group（其他和壁纸那些并列）**」。
+
+    判据（**只看"改了什么"，不看"属于谁"**）：
+    ① **有贴图资源**（`Textures\` 目录，或目录里有 .dds/.png/.tga）；
+    ② **没有网格资源**（没有 `Meshes\`，也没有 .buf/.ib/.vb/.mesh 文件）——
+       只要在换模型就说明是换装（服装/皮肤），该留在角色库参与同角色互斥；
+       **只换贴图、不换模型**的才算这一类。
+
+    ⚠️ **不要拿"识别出角色"当否决项**（2026-10-03 实测踩到）：
+    「弭弗饮料罐690308」里的「弭弗」**确实是游戏里的角色**（别名 mifu / mi fu / 弥弗），
+    `match_character` 返回 high 置信 —— 但这个 Mod 只是把**饮料罐贴图**换成真实品牌，
+    并没有换模型。用户要的语义是「**和皮肤 mod 做区分**」，所以判据必须是
+    "改了什么"（贴图 or 模型），而不是"属于哪个角色"。
+    （参数 `character` 保留在签名里是为了调用方兼容，**不再使用**。）
+    """
+    if path is None or not path.is_dir():
+        return False
+    lowered = "/".join(str(x) for x in rel_parts).lower() + " " + str(meta.get("name", "")).lower()
+
+    has_texture = any(hint in lowered for hint in TEXTURE_DIR_HINTS) or \
+        any((path / name).is_dir() for name in ("Textures", "textures"))
+    has_mesh = any(hint in lowered for hint in MESH_DIR_HINTS) or \
+        any((path / name).is_dir() for name in ("Meshes", "meshes"))
+    # ⚠️ **服装类关键词一律排除**（2026-10-03 实测：`莱万汀泳装` 只有贴图没有网格，
+    #    但它就是那个角色的衣服，不该被挪出角色库）。
+    if any(hint in lowered for hint in GARMENT_HINTS):
+        return False
+    try:
+        for item in path.rglob("*"):
+            if not item.is_file():
+                continue
+            suffix = item.suffix.lower()
+            if suffix in MESH_EXTS:
+                has_mesh = True
+            elif suffix in TEXTURE_EXTS:
+                has_texture = True
+            if has_mesh:
+                break          # 一旦发现网格就当换装处理，不必再扫
+    except OSError:
+        return False
+    return has_texture and not has_mesh
 
 
 def looks_like_assist(
