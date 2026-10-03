@@ -335,10 +335,23 @@ async function oneClick() {
   // 判据来自依赖页同源的 `check_component_updates`（返回 dict：{key: {current, latest, update_available}}）。
   try {
     const upd = await call("check_component_updates");
-    const map = (upd && (upd.components || upd.items || upd)) || {};
+    // ⚠️ 后端返回的是**分段字典**：`{reshade, secondary_motion, poser, builtin, errors}`。
+    //   * 组件在各自的段里（`builtin` 段是 XXMI / XXMI-Libs / EFMI —— 用户最常要更新的就是它们）；
+    //   * `errors` 是**列表**，不是组件，必须跳过（否则 `v.update_available` 永远是 undefined）。
+    const map = {
+      ...((upd && upd.builtin) || {}),
+      ...((upd && upd.reshade) ? { reshade: upd.reshade } : {}),
+      ...((upd && upd.secondary_motion) ? { secondary_motion: upd.secondary_motion } : {}),
+      ...((upd && upd.poser) ? { poser: upd.poser } : {}),
+    };
     const outdated = Object.entries(map)
-      .filter(([, v]) => v && typeof v === "object" && v.update_available === true)
-      .map(([key, v]) => ({ key, current: v.current || "?", latest: v.latest || "?" }));
+      .filter(([, v]) => v && !Array.isArray(v) && typeof v === "object"
+        && v.update_available === true)
+      .map(([key, v]) => ({
+        key: v.display || key,
+        current: v.current || "?",
+        latest: v.latest || "?",
+      }));
     if (outdated.length) {
       const lines = outdated.map((r) => `· ${r.key}：${r.current} -> ${r.latest}`).join("\n");
       const go = await showModalDialog({

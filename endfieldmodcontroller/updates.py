@@ -285,9 +285,36 @@ def _sbm_local_version(config: AppConfig) -> str:
 # ---------------------------------------------------------------------------
 # 检查更新
 # ---------------------------------------------------------------------------
+def _builtin_local_version(config: AppConfig, key: str) -> str:
+    """读内置组件**本地已装版本**（读 marker 文件；没有就返回空串 = 未安装）。"""
+    try:
+        from . import runtime_deps
+
+        roots = {
+            "XXMI": config.builtin_runtime_path / "XXMI",
+            "XXMI-Libs": config.builtin_runtime_path / "XXMI",
+            "EFMI": config.builtin_runtime_path / "XXMI",
+        }
+        root = roots.get(key)
+        if root is None:
+            return ""
+        marker = runtime_deps._read_marker(root) or {}
+        if key == "XXMI":
+            return str(marker.get("version") or "")
+        # ⚠️ **不要退回 XXMI 的 `version`**（2026-10-03 实测踩到）：三者在同一个 marker 文件里，
+        # 图省事一律读 `version` 会让 Libs/EFMI 显示成 XXMI 的版本号（实测显示 v2.2.1），
+        # "有没有更新"的判断随之整个错掉。找不到自己的键就**如实留空**。
+        return str(marker.get(f"{key}_version") or "")
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def check_updates(config: AppConfig, log: Callable[[str], None] | None = None) -> dict[str, Any]:
     """查询各组件的最新可用版本（联网）。"""
-    report: dict[str, Any] = {"reshade": {}, "secondary_motion": {}, "poser": {}, "errors": []}
+    report: dict[str, Any] = {"reshade": {}, "secondary_motion": {}, "poser": {},
+                              # ⚠️ 内置组件（XXMI / XXMI-Libs / EFMI）单独一段：
+                              # 用户要更新的往往就是它们（2026-10-03 补）。
+                              "builtin": {}, "errors": []}
 
     # ReShade 官方最新版
     try:
@@ -378,6 +405,36 @@ def check_updates(config: AppConfig, log: Callable[[str], None] | None = None) -
         }
     except Exception as exc:  # noqa: BLE001
         report["errors"].append(f"Poser 检查失败: {exc}")
+
+    # ── 内置组件（XXMI / XXMI-Libs / EFMI）──────────────────────────────────
+    # ⚠️ 2026-10-03 补：这三项以前**完全不在检查范围内**，而用户最常要更新的就是 XXMI。
+    # 判定复用 `runtime_deps` 的"远端最新版"查询与本地 marker，不另造通道。
+    try:
+        from . import runtime_deps
+
+        specs = [
+            ("XXMI", runtime_deps.XXMI_REPO, runtime_deps.XXMI_ASSET_PATTERN, "XXMI"),
+            ("XXMI-Libs", runtime_deps.XXMI_LIBS_REPO, runtime_deps.XXMI_LIBS_ASSET_PATTERN, "XXMI-Libs"),
+            ("EFMI", runtime_deps.EFMI_REPO, runtime_deps.EFMI_ASSET_PATTERN, "EFMI"),
+        ]
+        for key, repo, pattern, label in specs:
+            try:
+                _url, latest, _asset, _digest = runtime_deps._latest_release_asset(repo, pattern)
+            except Exception as exc:  # noqa: BLE001
+                report["errors"].append(f"{label} 检查失败: {exc}")
+                continue
+            local = _builtin_local_version(config, key)
+            report["builtin"][key] = {
+                "display": label,
+                "current": local or "",
+                "latest": latest or "",
+                # ⚠️ 没有本地版本时算"未安装"而不是"有更新"（由依赖页负责首次安装）
+                "update_available": bool(local and latest and _version_tuple(latest) > _version_tuple(local)),
+                "installed": bool(local),
+                "kind": "builtin",
+            }
+    except Exception as exc:  # noqa: BLE001
+        report["errors"].append(f"内置组件检查失败: {exc}")
 
     _log(log, "更新检查完成: " + json.dumps({
         "reshade": report["reshade"].get("latest"),
