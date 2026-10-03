@@ -97,6 +97,8 @@ onMounted(async () => {
     if (window.__DEMO_STATE__) {
       store.state = window.__DEMO_STATE__;
       store.mods = store.state.mods || [];
+      // 快照里预置的封面（data URI）——file:// 下前端拿不到本地图片，只能内联
+      store.demoCovers = window.__DEMO_STATE__.demo_covers || {};
       store.config = store.state.config || {};
       store.ready = true;
       loadSettings();

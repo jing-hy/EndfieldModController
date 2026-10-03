@@ -2,7 +2,7 @@
 // Mod 库页（旧 #tab-library）：三个分区卡片 —— 皮肤 Mod / 下载 Mod / Mod 列表。
 // 分组与过滤规则照抄旧 renderMods：按 conflict_group||group 分组，
 // 跳过 _deps 分组与 kind=dependency/tool/assist（那些由依赖页 / 辅助页管）。
-import { ref, computed, onMounted, onUnmounted } from "vue";
+import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { call } from "../lib/bridge.js";
 import { store, refreshState } from "../store.js";
 import { loadSettings } from "../lib/settings.js";
@@ -53,9 +53,14 @@ const groups = computed(() => {
 
 async function loadCover(id) {
   if (covers.value[id]) return;
+  // demo 模式：封面来自快照（file:// 下前端读不到本地图片，快照里已内联成 data URI）
+  const preset = (store.demoCovers || {})[id];
+  if (preset) { covers.value[id] = preset; return; }
   try {
     const r = await call("get_mod_cover", id);
-    const uri = r && (r.data || r.uri || r.image || r.base64);
+    // ⚠️ 后端的字段名是 **data_uri**（其余几个是历史写法，留着兜底）——
+    // 迁移时我写成了 `r.data`，导致封面一直取不到、列表里全是"无封面"占位。
+    const uri = r && (r.data_uri || r.data || r.uri || r.image || r.base64);
     if (r && r.ok && uri) covers.value[id] = uri;
   } catch (e) { /* 没有封面很正常 */ }
 }
@@ -199,8 +204,19 @@ function speedText() {
     + `${Math.round((dl.value.done_bytes / dl.value.total_bytes) * 100)}% · ${humanSize(bps)}/s`;
 }
 
-onMounted(async () => { await refreshState().catch(() => {}); (store.state.mods || []).forEach((m) => loadCover(m.id)); });
+onMounted(async () => {
+  await refreshState().catch(() => {});
+  (store.state.mods || []).forEach((m) => loadCover(m.id));
+});
 onUnmounted(() => { if (timer) clearInterval(timer); if (dlTimer) clearInterval(dlTimer); });
+
+// ⚠️ Vue 里**子组件的 onMounted 先于父组件执行**，而 demo 模式的封面是父组件（App.vue）
+// 在自己的 onMounted 里才灌进 store 的 —— 那时封面还没到，一开始全是占位图。
+// 这里监听它，数据到位后把封面补齐。
+watch(() => store.demoCovers, (val) => {
+  if (!val) return;
+  (store.state.mods || []).forEach((m) => loadCover(m.id));
+}, { immediate: true });
 </script>
 
 <template>
@@ -237,28 +253,37 @@ onUnmounted(() => { if (timer) clearInterval(timer); if (dlTimer) clearInterval(
                原来是「通栏组框 + 内部固定 168px 大卡片」—— 每个角色往往只有 1 个 Mod，
                于是右侧 4/5 全空、卡片还很高，一屏只看得下 4 个。
                改成一行一个 Mod：缩略图 + 名字 + 状态 + ⋯，一屏能看十几个。 -->
-          <div class="divide-y" style="border-color: var(--border)">
+          <!-- 组内网格 + 横向卡片（GPT-6 Astra 方案）：
+               原来是 40x40 的紧凑行 —— 只能看出"有个人"，看不出长裙/短裙、制服/礼服、
+               有没有披风长靴，等于图片白放。现在封面 120x140（服装要竖看全身，不裁正方形），
+               名字与状态放右侧；无封面也占同样尺寸，避免组内视觉节奏被破坏。 -->
+          <div class="grid gap-3" style="grid-template-columns: repeat(auto-fill, minmax(320px, 1fr))">
             <div v-for="m in g.mods" :key="m.id"
-                 class="flex items-center gap-3 py-2 cursor-pointer rounded"
+                 class="relative flex gap-3 rounded-lg border p-2.5 cursor-pointer transition-colors"
+                 :style="{ borderColor: selected.has(String(m.id)) ? 'var(--accent)' : 'var(--border)',
+                           background: selected.has(String(m.id)) ? 'var(--accent-soft)' : 'var(--surface)' }"
                  @click="toggleMod(m)">
-              <span class="shrink-0 flex items-center justify-center rounded overflow-hidden"
-                    style="width: 40px; height: 40px; background: var(--surface-2)">
+              <span class="shrink-0 rounded-md overflow-hidden flex items-center justify-center"
+                    style="width: 120px; height: 140px; background: var(--surface-2)">
                 <img v-if="covers[m.id]" :src="covers[m.id]" class="w-full h-full object-cover" alt="" />
-                <ImageOff v-else :size="15" class="empty-icon" />
-              </span>
-              <span v-if="selected.has(String(m.id))"
-                    class="shrink-0 flex items-center justify-center rounded-full"
-                    style="width: 18px; height: 18px; background: var(--accent); color: #fff">
-                <Check :size="12" :stroke-width="3" />
-              </span>
-              <span class="min-w-0 flex-1">
-                <span class="block truncate text-sm" :title="m.name">{{ m.name }}</span>
-                <span class="block text-xs" style="color: var(--text-muted)">
-                  {{ selected.has(String(m.id)) ? "已启用" : "未启用" }}{{ m.kind === "unknown" ? " · 类型待确认" : "" }}
+                <span v-else class="flex flex-col items-center gap-1 empty-icon">
+                  <ImageOff :size="20" />
+                  <span class="text-xs">无封面</span>
                 </span>
               </span>
-              <button class="btn btn-mini shrink-0" title="更多：更改所属角色 / 修复 / 回滚 / 移出库"
-                      @click="openMenu(m, $event)">⋯</button>
+              <span class="min-w-0 flex-1 flex flex-col">
+                <span class="text-sm leading-5" style="display: -webkit-box; -webkit-line-clamp: 2;
+                      -webkit-box-orient: vertical; overflow: hidden" :title="m.name">{{ m.name }}</span>
+                <span class="mt-1.5 flex items-center gap-1.5 text-xs"
+                      :style="{ color: selected.has(String(m.id)) ? 'var(--accent)' : 'var(--text-muted)' }">
+                  <Check v-if="selected.has(String(m.id))" :size="12" :stroke-width="3" />
+                  {{ selected.has(String(m.id)) ? "已启用" : "未启用" }}{{ m.kind === "unknown" ? " · 类型待确认" : "" }}
+                </span>
+                <span class="mt-auto flex items-center justify-end">
+                  <button class="btn btn-mini shrink-0" title="更多：更改所属角色 / 修复 / 回滚 / 移出库"
+                          @click="openMenu(m, $event)">⋯</button>
+                </span>
+              </span>
             </div>
           </div>
         </div>
