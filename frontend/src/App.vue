@@ -123,6 +123,8 @@ onMounted(async () => {
       // demo 模式也要能看引导：快照里把 first_run.onboarding_done 置 false 即可复现首启
       const demoFr = store.state.first_run || {};
       if (demoFr.first_run && !demoFr.onboarding_done) tourVisible.value = true;
+      // demo 模式也要走一遍公告消费（否则快照里给了公告也看不到，等于没法验证这条链路）
+      await maybeShowAnnouncements();
       return;
     }
   }
