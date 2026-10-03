@@ -26,12 +26,27 @@ export const store = reactive({
   autoStartDeps: false,
 });
 
+// 「每次状态刷新之后要做的事」注册表。
+// 背景（2026-09-30 踩过、2026-10-03 仍然存在）：公告由后端**后台线程**拉取，而它要先等
+// 前端首屏就绪（最多 15 秒）再请求 —— 前端只在启动那一刻读一次 state.announcements，
+// 那时数据还没到，之后 refreshState() 刷了很多次却**没有人再读**，于是公告永远不弹。
+// 定式：把消费做成**幂等函数**并挂在数据刷新点上，而不是指望某个固定时刻数据已就位。
+const afterRefresh = [];
+
+export function onStateRefreshed(hook) {
+  if (typeof hook === "function" && !afterRefresh.includes(hook)) afterRefresh.push(hook);
+}
+
 export async function refreshState() {
   const data = await call("get_state");
   store.state = data || {};
   store.mods = (data && data.mods) || [];
   store.config = (data && data.config) || {};
   store.ready = true;
+  // 刷新后的消费点（公告之类的"后台线程稍后才产出"的数据要靠这里补上 —— 见 App.vue）
+  for (const hook of afterRefresh) {
+    try { hook(store.state); } catch (e) { /* 单个消费方出错不影响刷新本身 */ }
+  }
   return data;
 }
 

@@ -1437,18 +1437,24 @@ class EndfieldModControllerApi:
 
     def _estimate_update_total(self) -> int:
         """预估"一键更新"总共要处理多少项（用于进度条的分母）。"""
+        # ⚠️ 2026-10-03 校准：**不要写 `len(...) or 1`**。
+        # 用户实测「一键更新完成：实际 14 项，预估 9 项（预估公式待校准）」，
+        # 我把 dry_run 的 14 项真值逐项对齐后发现：随包资产(5) + 内置(4) + dlss5 组件(3)
+        # + 乳摇(1) + Poser(1) = 14 **完全正确**，多出来的那一项就是
+        # `len(依赖清单) or 1` —— 清单为空时 `0 or 1` **凭空加了 1 项**。
+        # 依赖清单为空 = 真的没有要处理的依赖项，就该加 0。
         est = 0
         try:
-            est += len(runtime_assets.manifest_entries(self.config)) or 1
-        except Exception:  # noqa: BLE001
-            est += 1
+            est += len(runtime_assets.manifest_entries(self.config))
+        except Exception:  # noqa: BLE001 - 读不到就当没有，别虚报
+            pass
         if self.config.use_builtin_runtime:
             est += 4                                  # XXMI / XXMI-Libs / EFMI / Poser
         est += len(dlss5_fetcher.COMPONENTS)          # ReShade 底座 / DLSS5-Feeder / iMMERSE
         try:
-            est += len(dependencies.load_manifest(self.config.dependency_manifest_path)) or 1
+            est += len(dependencies.load_manifest(self.config.dependency_manifest_path))
         except Exception:  # noqa: BLE001
-            est += 1
+            pass
         est += 1                                      # 乳摇（第三方工具）
         est += 1                                      # Endfield Poser（第三方插件）
         return max(est, 1)

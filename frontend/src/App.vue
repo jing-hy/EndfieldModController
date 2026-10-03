@@ -46,6 +46,22 @@ const notices = ref([]);
 let firstRunChecked = false;
 const tourVisible = ref(false);   // 新手引导浮层（挖孔高亮 + 箭头指向目标）
 let dragDepth = 0;
+// 公告消费（**幂等**）：后端公告由后台线程拉取，且要等首屏就绪（最多 15 秒）才请求，
+// 所以"启动那一刻读一次"必然读到空 —— 这正是 2026-09-30 记录、2026-10-03 仍然存在的 bug
+// （用户：「公告好像没出来」）。定式：做成幂等函数、挂在数据刷新点上，再留启动后定时兜底。
+const shownNoticeKeys = new Set();
+async function maybeShowAnnouncements() {
+  const list = normalizeAnnouncements(store.state && store.state.announcements);
+  const fresh = list.filter((n) => !shownNoticeKeys.has(n.key));
+  if (!fresh.length) return;
+  fresh.forEach((n) => shownNoticeKeys.add(n.key));
+  notices.value = [...notices.value, ...fresh];   // 追加，别覆盖掉已经在显示的
+  try {
+    // 告诉后端"这几条已展示"，下次启动不再弹（后端 announcements_seen 会从列表里摘掉）
+    await call("announcements_seen", fresh.map((n) => n.key));
+  } catch (e) { /* 记不上也不影响本次显示 */ }
+}
+
 async function dismissNotices() {
   notices.value = [];
   try { await call("announcements_seen"); } catch (e) { /* 忽略 */ }
@@ -141,7 +157,7 @@ onMounted(async () => {
       // 校验后再用：配置里残留的旧页签名会让 currentPage 变成 undefined、页面一片空白
       const lastTab = store.state.config && store.state.config.last_tab;
       if (!location.hash && PAGE_IDS.includes(lastTab)) store.tab = lastTab;
-      notices.value = normalizeAnnouncements(store.state.announcements);
+      await maybeShowAnnouncements();
       // 首次启动：**只提示一次**（判据用后端持久化的 onboarding_done，而不是"当前还没就绪"
       // 这类会一直为真的状态 —— 否则会连环弹）。
       const fr = store.state.first_run || {};
@@ -195,6 +211,13 @@ async function finishTour() {
   tourVisible.value = false;
   try { await call("save_config", { onboarding_done: true }); } catch (e) { /* 记不上也不影响本次 */ }
 }
+
+// 挂在"每次状态刷新之后"（切页、改设置、下载进度刷新……都会触发），
+// 这样公告一到就能补上；再留几个延迟兜底，覆盖"后台线程 15 秒内才拉到"的情况。
+onStateRefreshed(() => { maybeShowAnnouncements(); });
+[3000, 8000, 16000].forEach((delay) => {
+  setTimeout(() => { maybeShowAnnouncements(); }, delay);
+});
 </script>
 
 <template>
