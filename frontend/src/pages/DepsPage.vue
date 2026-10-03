@@ -171,11 +171,24 @@ async function checkAndComplete() {
 }
 
 const modDlMarks = new Map();          // 每条任务上次记下的状态与百分比台阶（避免刷屏）
-// ⚠️ 准备阶段的提示（读取香蕉网信息要 18~51 秒，这期间没有字节在动）
-const prepLabel = ref("");
+// ⚠️⚠️ **准备阶段的提示改成一个"实时算出来的阶段"，不再用可写的 ref**
+// （2026-10-03 用户：「现在下载 mod 是安装日志显示下载中，但是**下载速度卡片显示探测中**」）。
+//
+// 上一版我写的是 `const prepLabel = ref("")`，**只在"有任务没开始下"时设过一次
+// "探测中…"，之后没有任何地方清它** ⇒ 一旦设上就**永久显示"探测中"**，
+// 日志那边明明已经是"下载中"了，两个地方自相矛盾。
+// 根因是"用一个 sticky 变量表达一个瞬态状态"。现在改成**从当前任务状态实时推导**：
+//   * 有速度          → 显示速度
+//   * 任务都在准备期   → 「探测中…」（那段时间确实没有字节在动）
+//   * 下载中但还没速度 → 「—」（如实表示"这一秒没测到速度"，而不是骗人说在探测）
+//   * 什么都没跑      → 「—」
+const modDlPhase = ref("");            // "" | "prep" | "active"
 const speedText = computed(() => {
   if (speedBps.value > 0) return humanSize(speedBps.value) + "/s";
-  return prepLabel.value || "—";
+  // ⚠️ 只有**确实处在准备阶段**（所有任务都还没拿到大小/字节）才显示"探测中"。
+  // 一旦进入下载，即使这一秒速度为 0，也**不能再显示"探测中"**（那就是这次报的 bug）。
+  if (modDlPhase.value === "prep") return "探测中…";
+  return "—";
 });
 function humanSize(bytes) {
   const n = Number(bytes) || 0;
@@ -247,13 +260,23 @@ async function pollProgress() {
       // 现在：**有任务就活跃**，并把这个阶段如实显示出来。
       modDlActive.value = items.length > 0 && !md.done;
       modDlHasRecord.value = items.length > 0 || !!md.done;
-      if (items.length && !md.done) {
-        const prepping = items.filter((it) => !Number(it.size) && !Number(it.received));
-        if (prepping.length) {
-          const st = String(prepping[0].status || "准备中");
-          progressText.value = `Mod 下载：${st}…（${prepping.length} 个）`;
-          if (!speedBps.value) prepLabel.value = "探测中…";
-        }
+      // ⚠️ **阶段每轮都重算**（不是"设过一次就留着"）——
+      // 上一版用一个可写的 `prepLabel`、只设不清，导致日志已经是"下载中"、
+      // 速度卡片却永久停在"探测中"（2026-10-03 用户报的正是这个）。
+      if (!items.length || md.done) {
+        modDlPhase.value = "";
+      } else {
+        // 只要**有一个**任务已经在下载（状态含"下载"/拿到了 size 或字节），
+        // 就算进入下载阶段 —— 否则（全都还没开始）才是准备阶段。
+        const downloading = items.some((it) => {
+          const st = String(it.status || "");
+          return /下载|解压|已入库|完成/.test(st) || Number(it.size) > 0 || Number(it.received) > 0;
+        });
+        modDlPhase.value = downloading ? "active" : "prep";
+      }
+      if (modDlPhase.value === "prep") {
+        const st = String(items[0].status || "准备中");
+        progressText.value = `Mod 下载：${st}…（${items.length} 个）`;
       }
       if (items.length) {
         for (const it of items) {
