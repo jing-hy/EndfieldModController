@@ -1,11 +1,12 @@
 <script setup>
 // 辅助 Mod 页（旧 #tab-assist）：只列辅助/工具类 Mod，不参与换装。
-import { computed } from "vue";
+import { computed, onMounted, watch } from "vue";
 import { call } from "../lib/bridge.js";
 import { store, refreshState } from "../store.js";
 import { settings, loadSettings } from "../lib/settings.js";
 import Card from "../components/ui/Card.vue";
 import Switch from "../components/ui/Switch.vue";
+import { ImageOff } from "lucide-vue-next";
 import { Wrench } from "lucide-vue-next";
 import Btn from "../components/ui/Btn.vue";
 
@@ -38,6 +39,26 @@ async function toggleMod(mod) {
   } catch (e) { /* call 已弹窗 */ }
 }
 
+const covers = computed(() => store.covers);
+
+// 辅助 Mod 也要有预览图（用户 2026-10-03：「辅助性mod也要留预览」）——
+// 与「Mod 库」页共用 store.covers 缓存，同一次会话只取一次。
+async function loadCover(id) {
+  if (!id || covers.value[id]) return;
+  const preset = (store.demoCovers || {})[id];
+  if (preset) { covers.value[id] = preset; return; }
+  try {
+    const r = await call("get_mod_cover", id);
+    const uri = r && (r.data_uri || r.data || r.uri || r.image || r.base64);
+    if (r && r.ok && uri) covers.value[id] = uri;
+  } catch (e) { /* 没有封面很正常 */ }
+}
+function queueCovers(list) {
+  (list || []).forEach((m) => loadCover(m.id));
+}
+onMounted(() => { queueCovers(list.value); });
+watch(() => [list.value.length, store.demoCovers], () => { queueCovers(list.value); });
+
 async function rescan() { try { await call("scan"); } catch (e) { /* call 已弹窗 */ } }
 async function openLib() { try { await call("open_path_in_explorer", "library"); } catch (e) {} }
 </script>
@@ -68,7 +89,12 @@ async function openLib() { try { await call("open_path_in_explorer", "library");
         <div v-for="m in list" :key="m.id"
              class="py-2.5 flex items-center justify-between gap-4 cursor-pointer"
              @click="toggleMod(m)">
-          <div class="min-w-0">
+          <span class="shrink-0 rounded overflow-hidden flex items-center justify-center"
+                style="width: 44px; height: 44px; background: var(--surface-2)">
+            <img v-if="covers[m.id]" :src="covers[m.id]" class="w-full h-full object-cover" alt="" />
+            <ImageOff v-else :size="16" class="empty-icon" />
+          </span>
+          <div class="min-w-0 flex-1">
             <div class="font-medium truncate">{{ m.name }}</div>
             <!-- 组名常常就是它自己的名字（公共前置资源没有角色归属），一样就不要重复显示 -->
             <div v-if="m.group && m.group !== m.name" class="text-xs mt-0.5" style="color: var(--text-muted)">

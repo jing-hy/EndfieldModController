@@ -66,11 +66,33 @@ async function maybeShowAnnouncements() {
   const fresh = list.filter((n) => !shownNoticeKeys.has(n.key));
   if (!fresh.length) return;
   fresh.forEach((n) => shownNoticeKeys.add(n.key));
-  notices.value = [...notices.value, ...fresh];   // 追加，别覆盖掉已经在显示的
+
+  // ⚠️ 2026-10-03 用户点破：公告要的是**弹窗**，不是顶部那条卡片。
+  // （`alerts.json` 自己的说明就写着「管理器启动后**弹**一次、看完即记已读」——一直是弹窗语义，
+  //  是我把它实现成了顶部公告条，于是用户连着几轮说"没弹"，我却在一直查"数据没到"。）
+  // 多条公告**逐条弹**，一条一个框（用户定的规矩：一个弹窗只做一件事）。
+  for (const item of fresh) {
+    try {
+      await showModalDialog({
+        title: item.title || "公告",
+        message: item.body || "",
+        okText: "知道了",
+        showCancel: false,
+        link: item.link ? { url: item.link, text: item.link } : null,
+      });
+    } catch (e) { /* 弹窗失败不该影响启动 */ }
+  }
+  // 提示里若还有 URL，交给系统浏览器打开（与"能点的网址不另外配按钮"一致）
   try {
-    // 告诉后端"这几条已展示"，下次启动不再弹（后端 announcements_seen 会从列表里摘掉）
+    // 记已读：下次启动不再弹（后端会把这些 id 从公告列表里摘掉）
     await call("announcements_seen", fresh.map((n) => n.key));
   } catch (e) { /* 记不上也不影响本次显示 */ }
+}
+
+// 打开外部链接（弹窗里的网址点了直接开，与"能点的网址不另外配按钮"一致）
+async function openExternal(url) {
+  if (!url) return;
+  try { await call("open_external", String(url)); } catch (e) { /* call 已弹窗 */ }
 }
 
 async function dismissNotices() {
@@ -340,7 +362,9 @@ const announceTimer = setInterval(() => {
     <!-- 新手引导：挖孔高亮 + 箭头指向目标控件（用户要的"一个箭头指向按钮"） -->
     <OnboardingTour v-model="tourVisible" :steps="TOUR_STEPS" @finish="finishTour" />
 
-    <DialogHost />
+    <!-- ⚠️ 必须接 `open-link`：DialogHost 会 emit 它，但这里以前是裸的 `<DialogHost />`
+         ⇒ 弹窗/公告里的链接**点了没有任何反应**（用户定的规矩是"点击网址直接打开"）。 -->
+    <DialogHost @open-link="(url) => openExternal(url)" />
     <ToastHost />
   </div>
 </template>
