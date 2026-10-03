@@ -44,6 +44,17 @@ def _index_html() -> Path:
     return dist if dist.is_file() else WEB_DIR / "index.html"
 
 
+def _instance_root() -> Path:
+    """本进程该用的**数据根**（防多开的锁就放它下面）。
+
+    打包后 = `sys.executable` 所在目录（与全局口径一致：**数据根 = exe 旁边**）；
+    源码运行时退回模块所在目录（保持开发/测试时的原行为）。
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent.parent
+
+
 def _already_running() -> bool:
     """判断是否已经有控制器在跑。
 
@@ -55,15 +66,21 @@ def _already_running() -> bool:
     `set_component_addon failed ... config.json.tmp-10116`，同时两个管理器在跑）。
 
     锁文件方案不依赖 ctypes 语义：用 `O_CREAT|O_EXCL` 抢占 `<数据根>/runtime/.mc.lock`，
-    里面写自己的 PID；若文件已存在则读出来看那个 PID **是否还活着**
-    （进程名也对得上才算），活着就是"已有实例"，否则视为陈旧锁并接管。
+    里面写自己的 PID；若文件已存在则读出来看那个 PID **是否还活着**，活着就是"已有实例"，
+    否则视为陈旧锁并接管。
+
+    ⚠️ **数据根不能用无参 `AppConfig.load()`**（2026-10-03 当天第二次踩到）：
+    它读的是 `DEFAULT_CONFIG_PATH`（源码/插件所在位置），而用户实际运行的是**别处的 exe**
+    （例如 modtest 下的那份 exe）。于是两个实例算出的锁位置不一致
+    （一个写 modtest、一个写工作区），**互相看不见、谁都拦不住谁**，用户照样能开出两个、
+    然后撞上 `WinError 5 拒绝访问 ... config.json.tmp-8668-4`。
+    统一口径：**数据根 = exe 所在目录**（打包后取 `sys.executable`）。
     """
     try:
-        from .config import AppConfig
-
-        root = Path(AppConfig.load().runtime_path)
-        lock = root / ".mc.lock"
-        root.mkdir(parents=True, exist_ok=True)
+        root = _instance_root()
+        lock_dir = root / "runtime"
+        lock = lock_dir / ".mc.lock"
+        lock_dir.mkdir(parents=True, exist_ok=True)
         if lock.is_file():
             try:
                 pid = int(lock.read_text(encoding="utf-8").strip())

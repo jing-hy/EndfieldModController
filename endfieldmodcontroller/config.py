@@ -617,7 +617,7 @@ class AppConfig:
         # 且他此前反馈过"某文件老是被删掉"）。扫描通常只持续几十到几百毫秒，
         # 短暂退避后重试即可；多次仍失败才如实抛错。
         last_exc: OSError | None = None
-        for attempt in range(5):
+        for attempt in range(6):
             # 每次换一个临时名：被杀软"记住"的那个名字重试也大概率再被吃掉
             tmp = path.with_name(f"{path.name}.tmp-{os.getpid()}-{attempt}")
             try:
@@ -630,7 +630,11 @@ class AppConfig:
                     tmp.unlink()
                 except OSError:
                     pass
-                time.sleep(0.05 * (attempt + 1))     # 50/100/150/200ms 退避
+                # ⚠️ `WinError 5 拒绝访问` 通常是**另一个实例正在 replace 同一个文件**
+                # （用户实测：两个管理器同时跑，报 `config.json.tmp-8668-4 -> config.json`
+                #  拒绝访问）。这种占用比杀软扫描持续得久，退避要长一些；
+                # 另外 WinError 2（临时文件被吃掉）也用同一套退避，不必区分。
+                time.sleep(0.15 * (attempt + 1))     # 150/300/450/600ms
         assert last_exc is not None
         raise last_exc
 
