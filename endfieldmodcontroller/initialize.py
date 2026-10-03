@@ -445,7 +445,7 @@ def _check_dlss5_preset(config: AppConfig, report: Report, log: Callable[[str], 
                 if raw:
                     candidate = Path(raw)
                     preset_path = (candidate if candidate.is_absolute()
-                                   else dlss5 / raw.lstrip(".\\/"))
+                                   else dlss5 / (raw or "").lstrip(".\\/"))
                 break
     except OSError as exc:
         report.add("dlss5:preset", False, f"读取 ReShade.ini 失败: {exc}", manual=True)

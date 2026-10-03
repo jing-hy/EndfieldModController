@@ -437,11 +437,52 @@ class EndfieldModControllerApi:
                 cache[mod.id] = info
             item.update(info)
 
+    # 最近被前端调用过的 API 名（环形缓冲，只用于报错时给上下文）
+    _recent_calls: list[str] = []
+
+    def __getattribute__(self, name: str):
+        """给**前端能调到的每个公开方法**包一层：抛异常时把 traceback 记进日志。
+
+        为什么需要（2026-10-03，来自一份外部诊断包）：日志里只有
+        `[ui] 前端错误: rejection: 'NoneType' object has no attribute 'lstrip'`
+        —— Python 侧的堆栈在 pywebview 边界就丢了，**定位不到是哪一行**，
+        只能靠人肉去扫全文找可疑调用点。包一层之后，崩在哪一行直接写进日志。
+        只对公开（不以 `_` 开头）的可调用属性生效，属性访问/内部方法不受影响。
+        """
+        attr = object.__getattribute__(self, name)
+        if name.startswith("_") or not callable(attr):
+            return attr
+
+        def wrapper(*args, **kwargs):
+            recent = object.__getattribute__(self, "_recent_calls")
+            recent.append(name)
+            del recent[:-8]
+            try:
+                return attr(*args, **kwargs)
+            except Exception:  # noqa: BLE001 - 记完照旧抛出，行为不变
+                import traceback
+
+                try:
+                    from . import diagnostics
+
+                    diagnostics.log_event(
+                        self.config,
+                        f"后端异常 @ {name}(): {traceback.format_exc()}"[:4000],
+                        category="ui",
+                    )
+                except Exception:  # noqa: BLE001 - 记录失败不能掩盖原异常
+                    pass
+                raise
+
+        return wrapper
+
     def log_frontend_error(self, message: str) -> dict[str, Any]:
         """接收前端 JS 错误，写进控制器日志（前端崩了也能在后端看到原因）。"""
         from . import diagnostics
 
-        diagnostics.log_event(self.config, f"前端错误: {message}"[:2000], category="ui")
+        recent = list(getattr(self, "_recent_calls", []) or [])
+        context = f"（最近调用：{' → '.join(recent[-4:])}）" if recent else ""
+        diagnostics.log_event(self.config, f"前端错误: {message}{context}"[:2000], category="ui")
         return {"ok": True}
 
     def component_addon_status(self) -> dict[str, Any]:

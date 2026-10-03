@@ -1239,7 +1239,7 @@ def parse_mod_actions(mod_dir: Path, mods_root: Path) -> list[Action]:
             if var_assignments and internal_markers:
                 var_assignments = [
                     item for item in var_assignments
-                    if item[2].lstrip("$").lower() not in internal_markers
+                    if (item[2] or "").lstrip("$").lower() not in internal_markers
                 ]
             if var_assignments:
                 for target, own_ns, var_name, values in var_assignments:
@@ -1692,7 +1692,7 @@ def inject_panel_lists(
     if _PANEL_BEGIN in text:
         head, _, rest = text.partition(_PANEL_BEGIN)
         _, _, tail = rest.partition(_PANEL_END)
-        text = head.rstrip("\n") + "\n" + tail.lstrip("\n")
+        text = head.rstrip("\n") + "\n" + (tail or "").lstrip("\n")
 
     body: list[str] = [_PANEL_BEGIN]
     names: list[str] = []
@@ -1746,7 +1746,7 @@ def inject_panel_lists_for_actions(
         namespace = (group[0].namespace or "").strip("\\")
         if not namespace:
             continue
-        switchable = {a.var_name.lstrip("$").lower(): a.var_name.lstrip("$")
+        switchable = {(a.var_name or "").lstrip("$").lower(): (a.var_name or "").lstrip("$")
                       for a in actions if a.var_name}
         entries: list[tuple[int, Sequence[tuple[str, Sequence[str]]], Sequence[tuple[str, str]]]] = []
         for action in group:
@@ -1759,7 +1759,7 @@ def inject_panel_lists_for_actions(
                 # 条件里若要求"先切模式"（`$mode == N`），注入段里先设好它
                 presets = [
                     (name, value) for name, value in condition_switches(action.condition, switchable)
-                    if name.lower() != action.var_name.lstrip("$").lower()
+                    if name.lower() != (action.var_name or "").lstrip("$").lower()
                 ]
                 entries.append((action.wire_id, pairs, presets))
         names = inject_panel_lists(ini_path, entries)

@@ -362,7 +362,7 @@ def check_updates(config: AppConfig, log: Callable[[str], None] | None = None) -
         local = _poser_local_version(config)
         latest = str(release.get("tag_name") or "").lstrip("vV")
         report["poser"] = {
-            "current": local.lstrip("vV"),
+            "current": (local or "").lstrip("vV"),
             "latest": latest,
             "update_available": bool(latest and local and _version_tuple(latest) > _version_tuple(local)),
             "installed": not local,

@@ -733,3 +733,10 @@
 | 352 ★★★ | 点一次一键启动后，检查 `runtime\reshade\ReShade.ini` | `[STYLE]` 段**还在**、`Font=C:\WINDOWS\Fonts\msyh.ttc` **没被抹掉**（原来每次一键启动都会整份覆盖，只留 `[ADDON]`+`[GENERAL]`，字体/语言等段全丢） |
 | 353 ★★★ | 在 addon 面板把语言切成中文 → 退游戏 → 点一键启动 → 再进游戏 | 仍是中文（字体不再丢、语言也不被覆盖） |
 | 354 ★★ | 检查同一份 ini | `[endfield-enhancer]` / `[OVERLAY]` / `[STYLE]` 段都完整保留；只有 `AddonPath`/`EffectSearchPaths`/`TextureSearchPaths`/`PresetPath` 这 4 个键会被更新，且都是**相对路径** |
+
+## VV. 2026-10-03 追加：**外部反馈（0.9.5 打不开）的排查 + 后端异常可定位**
+
+| 编号 | 操作 | 预期结果 |
+| --- | --- | --- |
+| 355 ★★★ | 触发一次会崩的后端调用（例如没装 Poser 时检查更新） | 不再出现 `'NoneType' object has no attribute 'lstrip'`；真崩了也会在日志里留下 `后端异常 @ 方法名(): Traceback ...`（含文件名与行号），不再只有一句无处可查的"前端错误" |
+| 356 ★★ | 正常使用各页面 | 一切照旧（埋点只记录、不改变行为与返回值） |
