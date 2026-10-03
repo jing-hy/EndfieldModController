@@ -309,6 +309,15 @@ def ensure_poser(
     上游目前**只发预发布版**，所以这里必须 `include_prerelease=True`
     （`/releases/latest` 会跳过预发布，用它永远查不到 Poser）。
     """
+    # ⚠️ **尊重开关**（2026-10-03 用户实测：「poser 好像关了会自己打开」）。
+    # `ensure_all()` 的 steps 里 Poser 是无条件的一项，于是每次一键启动都会把它装回来 ——
+    # 用户关掉开关后，下一次启动又被自动打开（他会觉得"开关没用"）。
+    # 关掉时直接返回 `skipped`（这是 `ensure_all` 认的成功状态之一）：
+    # 既不下载也不安装，也**不动已经装好的那份**（想再开还能开）。
+    if not force and not getattr(config, "poser_injection", True):
+        return BuiltinResult(
+            "Poser", "skipped", "用户已关闭「摆姿 / MMD 播放」开关", "", str(config.poser_path)
+        )
     root = config.poser_path
     marker = _read_marker(root)
     url, version, asset_name, digest = _latest_release_asset(

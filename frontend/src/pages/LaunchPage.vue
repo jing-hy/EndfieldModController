@@ -1,6 +1,6 @@
 <script setup>
 // 启动页（旧 #tab-launch）：一键启动 + 六个注入开关（**与设置页共享同一份 settings 状态**）。
-import { ref } from "vue";
+import { ref, onMounted, onUnmounted } from "vue";
 import { call } from "../lib/bridge.js";
 import { useLogAutoScroll } from "../lib/autoscroll.js";
 import { showAlert } from "../lib/dialog.js";
@@ -47,6 +47,32 @@ async function toggleSwitch(sw) {
   } catch (e) { /* call() 已经弹过窗 */ }
 }
 
+// 启动页日志 = **真实启动日志**（`runtime\logs\launch.log`，后端 `read_launch_log`）。
+// 用户 2026-10-03：「现在日志展示的是 json，不是启动过程」—— 那次是我把 launch() 的
+// 返回值 JSON.stringify 出来顶掉了日志。这里恢复成"跟日志"：
+// 启动后立刻拉一次，然后 1.5 秒轮询一次，跟着看到「注入自检 / 拉起 XXMI / 进程监视」全过程。
+let logTimer = null;
+async function pullLaunchLog() {
+  try {
+    // 后端 `read_launch_log(tail)` 返回的是 `{ok, text}`（整段文本，不是数组）——
+    // 一开始我按 `lines`/`log` 猜字段，结果拿不到内容。
+    const r = await call("read_launch_log", 200);
+    const text = (r && r.text) || "";
+    if (!String(text).trim()) return;
+    consoleLog.value = String(text)
+      .split(/\r?\n/)
+      .filter((ln) => ln.trim())
+      .join("\n");
+  } catch (e) { /* 读不到就保持原样 */ }
+}
+function startLogPolling() {
+  if (logTimer) return;
+  logTimer = setInterval(pullLaunchLog, 1500);
+  // 一分钟足够覆盖"注入 → 拉起 XXMI → 进程监视"这段；之后停掉，不常驻
+  setTimeout(() => { if (logTimer) { clearInterval(logTimer); logTimer = null; } }, 60000);
+}
+onUnmounted(() => { if (logTimer) clearInterval(logTimer); });
+
 async function oneClick() {
   // ⚠️ **先检查运行环境是否齐备，缺就拒绝启动**（用户 2026-10-03 明确要求：
   // 「不存在应该拒绝启动弹出弹窗，然后跳转依赖开始下载」）。
@@ -82,13 +108,17 @@ async function oneClick() {
 
   running.value = true;
   try {
-    const result = await call("launch");
-    // launch 的返回就是 launcher.launch(...) 的字典（没有统一的 message 字段），
-    // 所以这里如实把结果打印出来；渲染 API 从 state 里取。
-    consoleLog.value = "已发起启动。\n" + JSON.stringify(result, null, 2).slice(0, 1200);
+    await call("launch");
     renderApi.value = store.state.render_api || "";
+    // ⚠️ **不要打印 launch() 的返回值**（2026-10-03 用户反馈：「现在日志展示的是 json，
+    // 不是启动过程」）—— 我一度把那坨字典 `JSON.stringify` 出来，结果启动页日志窗
+    // 全是 JSON，看不到真正的启动过程。
+    // 启动页要的是**日志本身**：后端 `read_launch_log()` 读的就是 `runtime\logs\launch.log`
+    //（与依赖页那个日志框同源）。先立刻拉一次，再开轮询持续跟。
+    await pullLaunchLog();
+    startLogPolling();
   } catch (e) {
-    consoleLog.value = "启动失败：" + (e && e.message ? e.message : String(e));
+    consoleLog.value = (consoleLog.value || "") + "\n启动失败：" + (e && e.message ? e.message : String(e));
   } finally {
     running.value = false;
   }
