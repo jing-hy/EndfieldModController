@@ -152,7 +152,36 @@ def static_checks() -> None:
         raise SystemExit("!! 缺少 web/dist/index.html —— 先 cd frontend && npm install && npm run build")
 
     # ③ 单元测试（必须指定 tests 目录）
-    run([sys.executable, "-m", "pytest", "tests", "-q"], label="pytest tests -q")
+    run_tests()
+
+
+def run_tests(attempts: int = 3) -> None:
+    """跑单元测试；**偶发失败要重试**（最多 `attempts` 次）。
+
+    为什么重试：`test_sbm_data_sync` 里会真的调 `robocopy`，在临时目录下**有概率**失败
+    （2026-10-03 遇到一次：`ok: False` 但单独跑又全过）。按本项目已定的约定
+    「**批量不要 fail-fast、失败项自动重试、上限 3 次**」，构建入口也不该被一次偶发卡死
+    ——不过重试完仍失败就必须中止（不能靠重试掩盖真失败），并把失败的测试名列出来。
+    """
+    last_output = ""
+    for attempt in range(1, attempts + 1):
+        result = subprocess.run(
+            [sys.executable, "-m", "pytest", "tests", "-q"],
+            cwd=str(ROOT), capture_output=True, text=True,
+        )
+        last_output = (result.stdout or "") + (result.stderr or "")
+        if result.returncode == 0:
+            summary = [ln for ln in last_output.splitlines() if " passed" in ln]
+            if attempt > 1:
+                print(f"[build] pytest 第 {attempt} 次通过（前 {attempt - 1} 次是偶发失败）", flush=True)
+            print(f"      {summary[-1] if summary else 'pytest ok'}", flush=True)
+            return
+        failed = [ln.strip() for ln in last_output.splitlines() if ln.startswith("FAILED")]
+        detail = "；".join(failed[:5]) or "（没解析出 FAILED 行，见下方输出）"
+        print(f"      pytest 第 {attempt}/{attempts} 次失败：{detail}", flush=True)
+    raise SystemExit(
+        f"!! pytest 连续 {attempts} 次失败，已中止，未产出任何产物\n{last_output[-4000:]}"
+    )
 
 
 def archive_old_exes(version: str) -> list[str]:
