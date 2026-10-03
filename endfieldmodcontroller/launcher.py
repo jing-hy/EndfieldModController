@@ -374,12 +374,31 @@ def prepare_reshade_runtime(config: AppConfig, controller_dir: Path) -> dict[str
                     pass
 
     actions_tsv = base / "actions.tsv"
-    # `runtime\reshade\ReShade.ini` 不是 ReShade 真正读的那份（它读 dlss5 里的），
-    # 但 initialize._rebuild_ini 会把它当"[endfield-enhancer] 段的历史来源"之一，
+    # ⚠️ 2026-10-03 实测修正：`core.py` 会给游戏进程设 `RESHADE_BASE_PATH_OVERRIDE`
+    # = `runtime\reshade`，**ReShade 就以此为基准目录**（今天 11:36 的 ReShade.log 是
+    # `Searching for add-ons ... in 'D:\zmdmod\modtest\runtime\reshade\Addons'` +
+    # `Failed to iterate all files ... error code 3`）。也就是说这份 ini **确实会被读**，
+    # 而它里面的 `AddonPath=Addons` 指向一个**从来没人创建**的子目录 ⇒ 所有 addon 都加载不到
+    # （现象：ReShade 界面在、但 DLSS5 / 第一人称 / 面板的标签全没有）。
+    #
+    # 所以两件事一起做：
+    #   ① `AddonPath` 写成**指向真正放 addon 的目录（dlss5）的绝对路径** —— 不论基准目录是谁都找得到；
+    #   ② 同时在基准目录下**建好 `Addons\` 并放一份 addon** 兜底（万一它优先看相对路径）。
+    addons_dir = reshade_dir / "Addons"
+    try:
+        addons_dir.mkdir(parents=True, exist_ok=True)
+        for name in (reshade_integration.ADDON_NAME,) + reshade_integration.LEGACY_ADDON_NAMES:
+            src = base / name
+            if src.is_file():
+                shutil.copy2(src, addons_dir / name)
+    except OSError as exc:
+        _append_log(config, f"往 runtime\\reshade\\Addons 放面板失败（忽略）: {exc}")
+
+    # `initialize._rebuild_ini` 会把这份当"[endfield-enhancer] 段的历史来源"之一，
     # 所以照旧写一份，保持既有行为。
     ini_text = "\n".join([
         "[ADDON]",
-        "AddonPath=Addons",
+        f"AddonPath={base}",          # ★ 绝对路径：指向真正放 addon 的地方
         "",
         "[GENERAL]",
         "EffectSearchPaths=reshade-shaders\\Shaders\\**",
