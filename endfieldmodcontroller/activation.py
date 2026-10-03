@@ -240,7 +240,17 @@ def resolve_active_set(
         # 现在：壁纸类保持互斥（同时开多个壁纸会互相抢同一张界面图），
         # 其它辅助分组改成**各自独立**（用 mod.id 当 key ⇒ 全部保留）。
         if not allow_same_character and getattr(mod, "kind", "") == "assist":
-            if key != mc_core.WALLPAPER_GROUP:
+            # ⚠️⚠️ **判据必须看 `mod.group`，不能看 `key`**（2026-10-03 修「壁纸互斥失效」）。
+            # 上一版写的是 `if key != WALLPAPER_GROUP: key = mod.id` —— 而 `key` 来自
+            # `mod.conflict_group`（辅助 Mod 的值是 `assist:<各自路径>`）⇒
+            # **那个比较永远成立** ⇒ 壁纸也被改成 `mod.id` ⇒ **两个壁纸可以同时开**。
+            #（用户实测问「壁纸互斥呢」，一看 `conflict_group` 两者各不相同就露馅了。）
+            #
+            # 现在：**壁纸类（`group == 加载页与壁纸`）统一用一个 key** ⇒ 组内互斥；
+            # 其它辅助分组各自独立（用 `mod.id`）⇒ 可以叠加。
+            if str(getattr(mod, "group", "") or "") == mc_core.WALLPAPER_GROUP:
+                key = mc_core.WALLPAPER_GROUP
+            else:
                 key = mod.id
         if allow_same_character:
             # 不用「角色」当 key，改用 Mod 自己的 id —— 于是同角色多个都进 chosen。

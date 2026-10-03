@@ -331,6 +331,33 @@ async function oneClick() {
   // ─────────────────────────────────────────────────────────────────────────
   if (!(await preflightGate())) return;
 
+  // 有可用更新就先弹窗引导去依赖页（用户 2026-10-03：「自动更新应该弹窗跳转到依赖页下载」）。
+  // 判据来自依赖页同源的 `check_component_updates`（返回 dict：{key: {current, latest, update_available}}）。
+  try {
+    const upd = await call("check_component_updates");
+    const map = (upd && (upd.components || upd.items || upd)) || {};
+    const outdated = Object.entries(map)
+      .filter(([, v]) => v && typeof v === "object" && v.update_available === true)
+      .map(([key, v]) => ({ key, current: v.current || "?", latest: v.latest || "?" }));
+    if (outdated.length) {
+      const lines = outdated.map((r) => `· ${r.key}：${r.current} -> ${r.latest}`).join("\n");
+      const go = await showModalDialog({
+        title: `${outdated.length} 个组件有新版本`,
+        message:
+          `这些组件有新版本可用：\n${lines}\n\n` +
+          "你现在没开「自动更新依赖」，所以程序不会自己下载。\n" +
+          "去「依赖」页点「一键更新全部组件」就能装上（那里有进度和速度）。\n\n" +
+          "想先不管、直接启动也可以。",
+        okText: "去依赖页更新", cancelText: "仍然启动",
+      });
+      if (go) {
+        store.autoStartDeps = true;
+        store.tab = "dependencies";
+        return;
+      }
+    }
+  } catch (e) { /* 查不到更新就照常启动，别因为检查本身挡住用户 */ }
+
   // ⚠️ **先检查运行环境是否齐备，缺就拒绝启动**（用户 2026-10-03 明确要求：
   // 「不存在应该拒绝启动弹出弹窗，然后跳转依赖开始下载」）。
   //

@@ -7,6 +7,7 @@
     python scripts/build_release.py --skip-modtest   # 不同步进测试目录
     python scripts/build_release.py --with-fake-old      # 额外构建伪旧版（测自更新用，约 +19s）
 python scripts/build_release.py --modtest-fake-old # 测试目录改放伪旧版（隐含 --with-fake-old）
+python scripts/build_release.py --modtest-both     # 最新版与伪旧版**都**放进测试目录
 
 产出（全部在 `dist\\`）：
 
@@ -328,14 +329,34 @@ def sync_to_modtest(source: Path, *, artifact: str = "latest") -> None:
     else:
         print("      测试目录里原本没有 exe", flush=True)
 
-    # ② 放指定的那一份
-    target = MODTEST_DIR / (f"{APP_NAME}.exe" if artifact == "latest" else source.name)
-    shutil.copy2(source, target)
-    after = sha256_of(target)
-    ok = after == sha256_of(source)
-    stamp = time.strftime("%H:%M:%S", time.localtime(target.stat().st_mtime))
-    print(f"      放入（{artifact}）：{target.name}  {target.stat().st_size:,} B  {stamp}", flush=True)
-    print(f"          sha256={after[:20]}…  与 dist 核对={'一致' if ok else '!! 不一致'}", flush=True)
+    # ② 放置。`artifact="both"` 时**最新版与伪旧版各放一份**
+    #（用户 2026-10-03：「这次构建最新版和伪旧版都放进 modtest」—— 两份都在，
+    #  方便直接测自更新：跑伪旧版 → 它自己更新成最新版）。
+    if artifact == "both":
+        dist = source.parent
+        candidates: list[tuple[str, Path, Path]] = []
+        latest = dist / f"{APP_NAME}.exe"
+        if latest.is_file():
+            candidates.append(("latest", latest, MODTEST_DIR / f"{APP_NAME}.exe"))
+        fake = sorted(dist.glob(f"{APP_NAME}-0.1.9-from-*.exe")) or \
+            sorted(p for p in dist.glob("*.exe") if p.name != f"{APP_NAME}.exe")
+        if fake:
+            candidates.append(("fake-old", fake[-1], MODTEST_DIR / fake[-1].name))
+        if not candidates:
+            print("      !! dist 里既没有最新版也没有伪旧版，什么都没放", flush=True)
+            return
+        pieces = candidates
+    else:
+        target = MODTEST_DIR / (f"{APP_NAME}.exe" if artifact == "latest" else source.name)
+        pieces = [(artifact, source, target)]
+
+    for kind, src, target in pieces:
+        shutil.copy2(src, target)
+        after = sha256_of(target)
+        ok = after == sha256_of(src)
+        stamp = time.strftime("%H:%M:%S", time.localtime(target.stat().st_mtime))
+        print(f"      放入（{kind}）：{target.name}  {target.stat().st_size:,} B  {stamp}", flush=True)
+        print(f"          sha256={after[:20]}…  与 dist 核对={'一致' if ok else '!! 不一致'}", flush=True)
     remaining = sorted(p.name for p in MODTEST_DIR.glob("*.exe"))
     print(f"      现在测试目录里的 exe：{', '.join(remaining) or '(无)'}", flush=True)
 
@@ -402,6 +423,12 @@ def main() -> int:
             sync_to_modtest(fake_old, artifact="fake-old")
         else:
             print(f"      !! 找不到伪旧版 {fake_old}，跳过", flush=True)
+    elif "--modtest-both" in args:
+        # 最新版 + 伪旧版**各放一份**（用户 2026-10-03：「这次构建最新版和伪旧版都放进 modtest」）
+        fake_old = DIST / f"{APP_NAME}-{FAKE_VERSION}-from-{version}.exe"
+        if not fake_old.is_file():
+            print(f"      !! 找不到伪旧版 {fake_old} —— 只放最新版", flush=True)
+        sync_to_modtest(latest, artifact="both")
     else:
         sync_to_modtest(latest, artifact="latest")
 

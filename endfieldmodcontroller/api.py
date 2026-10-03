@@ -361,30 +361,18 @@ class EndfieldModControllerApi:
             import webview  # type: ignore
         except Exception:  # noqa: BLE001
             return {"ok": False, "message": "当前环境没有 pywebview，请直接在输入框里填路径"}
-        window = None
-        try:
-            windows = list(getattr(webview, "windows", []) or [])
-            window = windows[0] if windows else None
-        except Exception:  # noqa: BLE001
-            window = None
-        if window is None:
-            return {"ok": False, "message": "窗口还没就绪，请直接在输入框里填路径"}
+        # 统一走原生 helper（原来这里自己实现了一套，与 choose_path 重复）
+        native = self._native_file_dialog(True, "选择 Mod 备份目录")
+        if native.get("cancelled"):
+            return {"ok": False, "cancelled": True, "message": "已取消"}
+        if not native.get("ok"):
+            return native
         current = modbackup.backup_dir(self.config)
         try:
             current.mkdir(parents=True, exist_ok=True)
         except OSError:
             pass
-        try:
-            try:
-                picked = window.create_file_dialog(webview.FOLDER_DIALOG, directory=str(current))
-            except TypeError:  # 老版本 pywebview 不接受 directory 参数
-                picked = window.create_file_dialog(webview.FOLDER_DIALOG)
-        except Exception as exc:  # noqa: BLE001
-            return {"ok": False, "message": f"打开文件夹选择框失败：{exc}"}
-        if not picked:
-            return {"ok": False, "cancelled": True, "message": "已取消"}
-        chosen = picked[0] if isinstance(picked, (list, tuple)) else picked
-        return self.set_mod_backup_dir(str(chosen))
+        return self.set_mod_backup_dir(str(native["path"]))
 
     def open_mod_backup_dir(self) -> dict[str, Any]:
         """打开备份文件夹（不存在就先建出来，免得点了没反应）。"""
@@ -2023,12 +2011,78 @@ class EndfieldModControllerApi:
     # ------------------------------------------------------------------
     # small utilities
     # ------------------------------------------------------------------
+    def _native_file_dialog(self, directory: bool, title: str = "") -> dict[str, Any]:
+        """用 **pywebview 的系统原生对话框**选路径。
+
+        返回 `{"ok": True, "path": …}` / `{"ok": False, "cancelled": True}` /
+        `{"ok": False, "message": …}`。
+
+        ⚠️ **为什么统一到这条路**（2026-10-03 用户报「mod 库的浏览点了没反应」）：
+        `tkinter` 被 `scripts/build_exe.py` 排除在打包之外（实测 exe 里
+        `tkinter`/`_tkinter` 各 0 次）⇒ 任何用 tkinter 的选择框在正式版里**必然失效**。
+        原生对话框不依赖 tkinter、也不要新依赖。所有"选路径"的地方都走这里，
+        别再各写一套（`choose_mod_backup_dir` 之前已经单独实现过一遍）。
+        """
+        try:
+            import webview  # type: ignore
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "message": f"当前环境没有 pywebview（{exc}），请直接把路径填进输入框"}
+        window = getattr(self, "_window", None)
+        if window is None:
+            try:
+                windows = list(getattr(webview, "windows", []) or [])
+                window = windows[0] if windows else None
+            except Exception:  # noqa: BLE001
+                window = None
+        if window is None:
+            return {"ok": False, "message": "窗口还没就绪，请直接把路径填进输入框"}
+        dialog_type = webview.FOLDER_DIALOG if directory else webview.OPEN_DIALOG
+        try:
+            try:
+                picked = window.create_file_dialog(dialog_type, allow_multiple=False)
+            except TypeError:      # 老版本 pywebview 不接受 allow_multiple
+                picked = window.create_file_dialog(dialog_type)
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "message": f"打开选择框失败：{exc}"}
+        if not picked:
+            return {"ok": False, "cancelled": True, "message": "cancelled"}
+        path = picked[0] if isinstance(picked, (list, tuple)) else picked
+        if not path:
+            return {"ok": False, "cancelled": True, "message": "cancelled"}
+        return {"ok": True, "path": str(path)}
+
     def choose_path(self, directory: bool = False, title: str = "选择路径") -> dict[str, Any]:
+        """弹出**系统原生的**选择框，返回用户选中的路径。
+
+        ⚠️ **为什么不用 tkinter**（2026-10-03 用户报「mod 库的浏览点了没反应」）：
+        这里原来用 `tkinter.filedialog`，而 `scripts/build_exe.py` 把
+        **`tkinter` 放进了排除名单**（`for skip in ("tkinter", "matplotlib", ...)`）
+        ⇒ **exe 里没有 tkinter**（实测：二进制里 `tkinter` / `_tkinter` 各出现 0 次）
+        ⇒ 这个函数**永远返回 `tkinter unavailable`** ⇒ 界面上就是"点了没反应"。
+
+        现在**优先用 pywebview 自带的原生选择框**（`window.create_file_dialog`）：
+        它是系统对话框、不依赖 tkinter、也不用新增任何依赖。
+        拿不到 window（源码模式/异常）时**退回 tkinter**；两条都不行才如实报错
+        —— 而且这次前端**会把原因弹出来**，不再静默。
+        """
+        # ── 首选：pywebview 原生对话框（统一走 helper）──────────────────────
+        native = self._native_file_dialog(directory, title)
+        if native.get("ok") or native.get("cancelled"):
+            return native
+        # 原生这条路走不通（比如源码模式下没有窗口）→ 记一条日志再退回 tkinter
+        launcher._append_log(
+            self.config, f"原生选择框不可用（改用 tkinter 兜底）：{native.get('message')}")
+
+        # ── 退回：tkinter（源码模式通常可用）────────────────────────────────
         try:
             import tkinter as tk
             from tkinter import filedialog
         except Exception as exc:  # noqa: BLE001
-            return {"ok": False, "message": f"tkinter unavailable: {exc}"}
+            launcher._append_log(self.config, f"选择路径失败：tkinter 也不可用（{exc}）")
+            return {"ok": False,
+                    "message": ("这个版本里没有可用的文件选择框。"
+                                "请直接把路径粘贴到输入框里，或者用「设置」页的"
+                                "「打开文件夹」按钮找到目录后复制路径。")}
         try:
             root = tk.Tk()
             root.withdraw()
@@ -2039,7 +2093,8 @@ class EndfieldModControllerApi:
                 selected = filedialog.askopenfilename(title=title)
             root.destroy()
         except Exception as exc:  # noqa: BLE001
-            return {"ok": False, "message": str(exc)}
+            launcher._append_log(self.config, f"选择路径失败：{exc}")
+            return {"ok": False, "message": f"打开选择框失败：{exc}"}
         if not selected:
             return {"ok": False, "message": "cancelled"}
         return {"ok": True, "path": selected}

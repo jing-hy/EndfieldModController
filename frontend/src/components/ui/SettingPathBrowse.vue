@@ -16,8 +16,22 @@ const props = defineProps({
 async function browse() {
   try {
     const r = await call("choose_path", props.kind === "dir", props.label || "选择路径");
-    if (r && r.ok && r.path) await saveSetting(props.k, r.path);
-  } catch (e) { /* call() 已经弹过窗 */ }
+    if (r && r.ok && r.path) {
+      await saveSetting(props.k, r.path);
+      return;
+    }
+    // ⚠️⚠️ **失败必须让用户看见**（2026-10-03 用户报「浏览点了没反应」）。
+    // 原来这里 `if (r && r.ok && r.path)` —— 失败时**什么都不做**，
+    // 而 exe 里 tkinter 被排除、后端总返回 ok=false ⇒ 按钮就是"点了没反应"。
+    const why = String((r && r.message) || "");
+    if (why === "cancelled") return;          // 用户自己取消，不用弹
+    await showAlert(
+      "选不了路径",
+      why || "系统没有返回可用的选择框。你可以直接把路径粘贴到输入框里。",
+    );
+  } catch (e) {
+    /* call() 已经弹过窗 */
+  }
 }
 </script>
 

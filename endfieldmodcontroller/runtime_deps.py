@@ -202,6 +202,15 @@ def _note(config: AppConfig | None, message: str) -> None:
         pass
 
 
+def _auto_update_enabled(config: AppConfig) -> bool:
+    """用户有没有打开「自动更新依赖」。
+
+    ⚠️ 关着的时候**一律不自动下载**（2026-10-03 用户：「自动更新应该弹窗跳转到依赖页下载」）——
+    只如实报告"有新版本"，由前端弹窗引导他去依赖页手动更新。
+    """
+    return bool(getattr(config, "auto_update_dependencies", False))
+
+
 def ensure_xxmi(config: AppConfig, progress: Progress = None, byte_progress: ByteProgress = None,
                 log: Callable[[str], None] | None = None) -> BuiltinResult:
     root = config.builtin_runtime_path / "XXMI"
@@ -210,11 +219,24 @@ def ensure_xxmi(config: AppConfig, progress: Progress = None, byte_progress: Byt
     if progress:
         progress(0, 3, "XXMI", "checking")
     url, version, asset_name, digest = _latest_release_asset(XXMI_REPO, XXMI_ASSET_PATTERN)
-    _note(config, f"XXMI：最新版 {version}，准备下载 {asset_name}")
     if existing and marker.get("version") == version:
         if progress:
             progress(1, 3, "XXMI", "up_to_date")
         return BuiltinResult("XXMI", "up_to_date", "already current", version, str(existing))
+    # ⚠️⚠️ **关了「自动更新依赖」就只报告、不下载**（2026-10-03 用户：
+    #     「**自动更新应该弹窗跳转到依赖页下载**」）。
+    # 背景：他 `auto_update_dependencies = False`，但一键启动仍在这里**同步下 51.4 MB**，
+    # 界面只显示 `builtin XXMI: checking` ⇒ 他的感受是「xxmi 又拉不起来」。
+    # 现在：有本地版本但版本旧 → 回 `update_available`（前端会弹窗引导去依赖页），
+    # 完全没有本地版本时才必须下载（否则没法用）。
+    if existing and not _auto_update_enabled(config):
+        _note(config, f"XXMI：本地 {marker.get('version') or '未知'}，远端 {version}"
+                      f"（未开启自动更新 ⇒ 只提示，不下载）")
+        if progress:
+            progress(1, 3, "XXMI", "update_available")
+        return BuiltinResult("XXMI", "update_available",
+                             f"有新版本 {version}（未开启自动更新）", version, str(existing))
+    _note(config, f"XXMI：最新版 {version}，准备下载 {asset_name}")
     _download_extract(url, asset_name, root, byte_progress, 1, 3, "XXMI",
                               expected_sha256=digest,
                               log=lambda m: _note(config, m))
@@ -357,7 +379,9 @@ def ensure_all(config: AppConfig, progress: Progress = None, byte_progress: Byte
         ("Poser", ensure_poser, 3),
     ]
     total = len(steps)
-    ok_status = {"installed", "up_to_date", "skipped", "present"}
+    # ⚠️ `update_available` 也算"正常结束"（它是"等用户决定"，不是失败）——
+    # 否则关掉自动更新时 `ensure_all` 会把每一项都当失败并重试 3 次（2026-10-03）。
+    ok_status = {"installed", "up_to_date", "skipped", "present", "update_available"}
     if progress:
         progress(0, total, "builtin", "start")
 
