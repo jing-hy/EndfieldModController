@@ -218,10 +218,15 @@ def download(url: str, dest_dir: Path, *, progress: Progress = None,
     try:
         dependencies._http_get(
             url, target, timeout=timeout, chunk_callback=progress, log=log,
-            # `parallel` 默认 None = **交给 fastnet 按实测决定**（探测到"还行但慢"才并发；
-            # 极慢的线路它会自己压回单连接 —— 见 fastnet.BOOST_FLOOR_MBPS 的实测数据）。
-            # 传 True 才强上并发（实测对极慢线路反而更慢，所以不是默认）。
-            policy="always" if parallel else "",
+            # ⚠️ 2026-10-03 改：旧注释写着"传 True 才强上并发（实测对极慢线路反而更慢，
+            # 所以不是默认）"—— **那条结论已被今天的实测推翻**：
+            #     无 VPN 直连香蕉网  单连接 0.008 MB/s ／ 4 连接 0.034 ／ 16 连接 0.104
+            #     （快 13 倍，16 条连接全部拿到数据，没被限流拒连）
+            # **最慢的线路上并发收益最大**。所以 Mod 下载现在**默认强上并发**：
+            # `policy="always"` 会跳过"判死线路"那一步（香蕉网没有镜像可换，判死没意义），
+            # 而去留给 fastnet 的**试用窗口**按实测速度决定 —— 并发没变快它会自己切回单连接。
+            # 只有调用方显式传 `parallel=False` 才退回"按实测决定"。
+            policy="always" if parallel is not False else "",
             # **不判死**：Mod 下载面对的是没有镜像可换的站点，慢也该下完（见上面常量说明）
             dead_mbps=MOD_DOWNLOAD_DEAD_MBPS,
             cancel=cancel,

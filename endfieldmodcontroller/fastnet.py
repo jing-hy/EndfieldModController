@@ -980,23 +980,31 @@ def _attempt_line(
             raise OSError(f"探测速度仅 {report.probe_mbps:.2f} MB/s（低于 {dead_mbps} MB/s 可用线），"
                           f"放弃这条线路")
         slow = report.probe_mbps < SLOW_MBPS
-        # 极慢线路**别并发**（见 BOOST_FLOOR_MBPS 的实测数据）：这里把并发压回单连接，
-        # 但**不判死** —— 慢慢下也比下不到强。
-        too_slow_to_boost = 0 < report.probe_mbps < BOOST_FLOOR_MBPS
-        need_boost = (policy == "always" or slow or stalled) and not too_slow_to_boost
-        if too_slow_to_boost:
-            _log(log, f"线路很慢（探测 {report.probe_mbps:.3f} MB/s）→ 用单连接继续下，不并发")
+        # ⚠️⚠️ **2026-10-03 拆掉"太慢就不许并发"这道门槛**。
+        #
+        # 原先这里是 `too_slow_to_boost = 0 < probe_mbps < BOOST_FLOOR_MBPS(0.1)` ——
+        # 探测低于 0.1 MB/s 就把并发压回单连接。它当时的依据是一次实测
+        #（"探测 0.036 时单连接 0.229、8 连接 0.174，并发反而慢 24%"）。
+        #
+        # **但今天无 VPN 直连香蕉网的三组对照结论正好相反**：
+        #     单连接   0.008 MB/s
+        #     4 连接   0.034 MB/s   （快 4.3 倍）
+        #     16 连接  0.104 MB/s   （快 13 倍）—— 16 条连接全部拿到数据，没被限流拒连
+        # **恰恰是最慢的线路上并发收益最大**，而这道门槛正好把最该用并发的场景排除了。
+        #
+        # 现在：**极慢线路也照样上并发**，去留完全交给下面的**试用窗口**决定 ——
+        # 上并发先跑 BOOST_TRIAL_SECONDS 秒，拿实测速度与单连接探测值比，
+        # 不划算就切回单连接（那套逻辑本来就在，比一个静态阈值可靠得多）。
+        # 只把线程数按探测速度收敛一点：极慢时别一上来就 20 条连接。
+        if 0 < report.probe_mbps < BOOST_FLOOR_MBPS:
+            threads = max(4, min(threads, 8))
+            _log(log, f"线路很慢（探测 {report.probe_mbps:.3f} MB/s）→ 仍用 {threads} 连接试一下"
+                      f"（实测最慢的线路上并发收益最大），试用窗口后按实测速度决定去留")
+        need_boost = policy == "always" or slow or stalled
 
         if not need_boost:
             # 链路够快：接着单连接把剩下的下完（不折腾）
-            # ⚠️ 也可能是"太慢到连并发都别上"（too_slow_to_boost）—— 两种情况要分开说，
-            # 否则会打出"0.01 MB/s（够快）"这种自相矛盾的日志。
-            report.reason = (
-                f"线路很慢（{report.probe_mbps:.3f} MB/s）→ 单连接慢慢下"
-                f"（并发在这种线路上反而更慢）"
-                if too_slow_to_boost else
-                f"单连接 {report.probe_mbps:.2f} MB/s（够快，不启用加速）"
-            )
+            report.reason = f"单连接 {report.probe_mbps:.2f} MB/s（够快，不启用加速）"
             _log(log, report.reason)
             rest, stalled2, note2 = _download_sequential(
                 url, work, offset=written, total=size, timeout=timeout, progress=progress,
