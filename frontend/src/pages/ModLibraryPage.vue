@@ -336,6 +336,13 @@ function queueCovers(mods) {
   pumpCovers();
 }
 
+// ⚠️ **C2：Esc 关闭 ⋯ 菜单**（0.9.5 的 `app.js:805` 有，换代时丢了）。
+onMounted(() => {
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && menu.value) closeMenu();
+  });
+});
+
 onMounted(async () => {
   await refreshState().catch(() => {});
   queueCovers(store.state.mods);
@@ -392,6 +399,12 @@ watch(() => store.demoCovers, (val) => {
       <div class="flex flex-wrap items-center gap-2">
         <Btn variant="primary" @click="prepare" :disabled="busy">生成控制器</Btn>
         <Btn @click="scan" :disabled="busy">重新扫描</Btn>
+        <!-- ⚠️ **C3：库状态行**（2026-10-03 补回归）。0.9.5 有一行
+             「已发现 N 个 Mod，按角色分组显示」（`app.js:643`），换代后丢了 ——
+             用户不知道自己库里到底有多少个、也没法判断扫描有没有生效。 -->
+        <span class="text-xs self-center" style="color: var(--text-muted)">
+          已发现 {{ store.state.mods ? store.state.mods.length : 0 }} 个 Mod，按角色分组显示
+        </span>
         <Btn @click="fixAll">一键修复所有 Mod</Btn>
         <span class="ml-auto flex items-center gap-2">
           <input v-model="keyword" class="field" style="width: 200px" placeholder="搜索 Mod / 角色…" />
@@ -466,7 +479,12 @@ watch(() => store.demoCovers, (val) => {
                 <span class="mt-auto flex items-center justify-between gap-2">
                   <Switch :model-value="selected.has(String(m.id))"
                           @update:model-value="() => toggleMod(m)" />
+                  <!-- ⚠️ **C2：⋯ 恢复"悬停即出"**（2026-10-03 补回归）。
+                       0.9.5 用 `mouseenter` 打开（`app.js:635`），用户当年明确要求过
+                       「**放上去就要出**」；换代后只剩 `@click`，要多点一次才出菜单。
+                       现在两个都留着：鼠标移上去就展开，点击仍然有效（触屏/键盘用户）。 -->
                   <button class="btn btn-mini shrink-0" title="更多：更改所属角色 / 修复 / 回滚 / 移出库"
+                          @mouseenter="openMenu(m, $event)"
                           @click="openMenu(m, $event)">⋯</button>
                 </span>
               </span>

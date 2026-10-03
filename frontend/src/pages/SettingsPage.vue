@@ -431,6 +431,49 @@ async function chooseModBackupDir() {
   await refreshState();
 }
 
+// ⚠️ **C9：「还原游戏本体」= 净化（不是"从备份还原"）**（见模板里的说明）。
+// 动作对齐 0.9.5：`game_clean_backup_and_clean(true)` —— 先整体备份，再移走第三方插件文件。
+// 破坏性动作按用户准则：**写清后果、按钮文字自解释、默认聚焦安全项**。
+async function restoreGameToVanilla() {
+  const ok = await showModalDialog({
+    title: "一键还原游戏本体",
+    message: [
+      "会把游戏目录里所有**第三方插件文件移走**，恢复成原版状态。",
+      "",
+      "· 会**先整体备份**，随时可以用「从备份还原游戏目录」搬回来",
+      "· loader proxy 会用系统原版文件补回",
+      "· Mod 库、配置与已装组件都不受影响",
+    ].join("\n"),
+    okText: "备份并还原", cancelText: "取消", focusCancel: true,
+  });
+  if (!ok) return;
+  showProgressToast("game-restore", "正在备份并还原游戏本体…（文件较多，请稍候）");
+  try {
+    const r = await call("game_clean_backup_and_clean", true);
+    if (r && r.ok === false) {
+      showToast(String(r.message || "还原失败"), "danger");
+    } else {
+      const actions = (r && (r.actions || r.moved)) || [];
+      await showModalDialog({
+        title: "游戏本体已还原",
+        message: [
+          (r && r.message) || "游戏目录已恢复为原版状态。",
+          actions.length ? `\n共处理 ${actions.length} 项：` : "",
+          ...actions.slice(0, 20).map((a) => "· " + (typeof a === "string" ? a : (a.label || a.name || a.path || ""))),
+          actions.length > 20 ? `…另有 ${actions.length - 20} 项` : "",
+          r && r.backup ? `\n备份位置：${r.backup}` : "",
+        ].filter((x) => x !== "").join("\n"),
+        okText: "知道了", showCancel: false,
+      });
+    }
+  } catch (e) {
+    showToast(String((e && e.message) || "还原失败"), "danger");
+  } finally {
+    hideProgressToast("game-restore");
+    await refreshState();
+  }
+}
+
 // 「自动检测」—— 一键找 XXMI / 3DMigoto Loader / 官方启动器 / 游戏本体 / 乳摇工具
 //（2026-10-03 补回归：0.9.5 有这个按钮，且每次刷新还会静默回填 detected_*；
 //  换代后全丢了，`grep detected_` 在现前端 0 命中 ⇒ 内置了 XXMI 那三个框也一直空着）。
@@ -514,7 +557,14 @@ useLogAutoScroll(probeBox, () => probeText);
 
     <Card title="维护操作（会改动文件，请确认后再点）">
       <div class="flex flex-wrap gap-2">
-        <Btn id="game-restore-btn" @click="showResult('game_clean_restore', '还原游戏目录')">还原游戏本体</Btn>
+        <!-- ⚠️ **C9：语义要与 0.9.5 一致**（2026-10-03 补回归）。
+           0.9.5 的「一键还原游戏本体」是 `game_clean_backup_and_clean(true)` ——
+           **先把游戏目录整体备份，再把所有第三方插件文件移走**，恢复到原版状态；
+           而换代后这里用了 `game_clean_restore`（= **从备份搬回来**），
+           和第 233 行的「从备份还原游戏目录」**变成了同一个 API** ⇒
+           "净化"这个动作反而只剩「备份并净化游戏目录」一个入口，
+           而新手引导第 4 步指着这个按钮、期望的正是"净化"语义。 -->
+        <Btn id="game-restore-btn" @click="restoreGameToVanilla">还原游戏本体</Btn>
         <Btn variant="danger" @click="resetDependencies">依赖清空并重新下载</Btn>
       </div>
       <div class="text-xs mt-2" style="color: var(--text-muted)">

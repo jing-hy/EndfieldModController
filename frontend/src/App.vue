@@ -66,16 +66,53 @@ async function pollCrash() {
       const path = String(fresh.path || fresh.bundle || "");
       const reason = String(fresh.reason || "process_disappeared");
       const mods = Array.isArray(fresh.mods) ? fresh.mods : [];
-      const ok = await showModalDialog({
-        title: "终末地异常退出",
-        message:
-          `游戏进程在启动后异常结束了（${reason}）。\n\n` +
-          `管理器已经把现场收集成一个诊断包：\n${path || "（路径读取失败）"}\n\n` +
-          (mods.length ? `当时启用的 Mod：\n· ${mods.join("\n· ")}\n\n` : "") +
-          "把这个 zip 发到 Issues 或 QQ 群，就能定位原因。",
-        okText: "打开诊断包", cancelText: "稍后",
+      // ⚠️⚠️ **C12：崩溃弹窗要把"接下来能做什么"给出来**（2026-10-03 补回归）。
+      // 0.9.5 的 `showCrashModal`（`app.js:3429-3505`）会按 `cause.kind` 分支，
+      // 展示**归因**与"收进包里的终末地日志清单"，并给「**去 Mod 库清理冲突**」+
+      // 「**一键关闭其中一个（自行选择）**」两个按钮 → 直接接到 `ConflictDialog`。
+      // 换代后这里只弹标题/路径/启用的 Mod，**"崩溃之后怎么处理"这条闭环断了** ——
+      // 用户看到"崩了、包在这"，然后呢？还是得自己去库里猜是哪两个冲突。
+      const cause = (fresh.cause && typeof fresh.cause === "object") ? fresh.cause : {};
+      const kind = String(cause.kind || fresh.cause_kind || "");
+      const isConflict = kind === "mod_conflict" || !!cause.conflict_group || !!cause.conflicts;
+      const lines = [
+        `游戏进程在启动后异常结束了（${reason}）。`,
+        "",
+      ];
+      if (isConflict) {
+        lines.push(
+          "**看起来是 Mod 资源冲突**：同时启用的 Mod 改了同一批资源。",
+          "",
+          "可以点「去清理冲突」—— 会列出来让你选保留哪一个，不用自己猜。",
+          "",
+        );
+      } else if (cause.detail || cause.reason) {
+        lines.push(`归因：${cause.detail || cause.reason}`, "");
+      }
+      lines.push(
+        `管理器已经把现场收集成一个诊断包：`,
+        path || "（路径读取失败）",
+        "",
+      );
+      if (mods.length) lines.push(`当时启用的 Mod：`, `· ${mods.join("\n· ")}`, "");
+      lines.push("把这个 zip 发到 Issues 或 QQ 群，就能定位原因。");
+      const choice = await showModalDialog({
+        title: isConflict ? "终末地异常退出（疑似 Mod 冲突）" : "终末地异常退出",
+        message: lines.join("\n"),
+        okText: "打开诊断包", cancelText: "知道了",
+        // 冲突时多给一个"去清理"的按钮（0.9.5 的主路径）
+        extraButtons: isConflict ? [{ text: "去清理冲突", value: "conflict" }] : [],
       });
-      if (ok && path) {
+      if (choice === "conflict") {
+        // 跳到 Mod 库并让那边自己把冲突窗弹出来（它读 `conflict_groups`）
+        store.tab = "library";
+        try {
+          const info = await call("conflict_groups");
+          const groups = (info && info.groups) || [];
+          if (groups.length) showToast(`发现 ${groups.length} 组冲突，在「Mod 库」页里处理`, "warn");
+          else showToast("当前没有检测到冲突组（可能是历史记录）", "info");
+        } catch (e) { /* 忽略 */ }
+      } else if (choice && path) {
         try { await call("open_path_in_explorer", path); } catch (e) { /* 忽略 */ }
       }
     }
