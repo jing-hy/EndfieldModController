@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import shutil
 import time
@@ -128,26 +129,47 @@ def _dir_bytes(path: Path) -> int:
 
 
 def pending(config: AppConfig, mods: Sequence[Any]) -> list[Any]:
-    """还没备份过的 Mod（索引里没有，且备份目录/旧 zip 也都不存在）。
+    """还没备份过的 Mod。
 
-    总开关关着时一律返回空 —— 这时"待备份"没有意义，界面也不该显示"还有 N 个待打包"。
+    ⚠️ **判据是"备份目录里到底有没有这份东西"，不是索引文档**
+    （2026-10-03 用户原话：「**去重应该是对文件夹去重，而不是根据已有文档去重**」）。
+
+    原先这里第一道判据是 `_index.json` 里的 `id`：
+        索引里登记过 ⇒ 视为已备份
+    问题是那份索引**是一份"文档"**，它可能与磁盘上的实际情况脱节 ——
+    索引登记了但文件夹被用户删了/搬了，就再也不会补回来；
+    反过来（有文件夹但索引丢了）虽然下面还有目录判据兜着，但主判据本身就站不住。
+    现在改成**只看磁盘**：
+      ① 备份目录里存在**名字相同**的文件夹 ⇒ 已备份；
+      ② 名字不保证一致（`safe_name` 会改写），所以再做一层**内容指纹**兜底：
+         取该 Mod 目录的「文件相对路径 + 大小」清单算一个摘要，与备份目录里
+         各文件夹的摘要比对，命中即视为同一份（这样"改过名的同一份 Mod"也不会重复灌）。
     """
     if not enabled(config):
         return []
-    known = {
-        str(entry.get("id") or "")
-        for entry in _read_index(config).get("entries", [])
-        if entry.get("id")
-    }
+    # ⚠️ 索引**不再参与去重**（用户：「去重应该是对文件夹去重，而不是根据已有文档去重」）——
+    # 它仍然会被写入（`status()`/界面展示用），只是不再是"备没备份过"的判据。
     target_dir = backup_dir(config)
+    # 备份目录里已有的**文件夹**（判据主体）
+    existing_folders: dict[str, Path] = {}
+    try:
+        for child in target_dir.iterdir():
+            if child.is_dir() and child.name != "_trash":
+                existing_folders[child.name] = child
+    except OSError:
+        existing_folders = {}
+    # ⭐ 判据只有一条：**备份目录里有没有这个名字的文件夹**
+    #（用户 2026-10-03：「去重应该是对文件夹去重，而不是根据已有文档去重」）。
+    # 索引不做判据（那是"文档"，会与磁盘脱节）；内容也不做判据 ——
+    # 我一度加了"内容指纹兜底"想处理改名的情况，结果把**两个内容相同但确实是不同 Mod**
+    # 的包误判成同一份（测试里 Alice / Bob 正是这种），反而漏备份。
     out: list[Any] = []
     for mod in mods:
-        if str(getattr(mod, "id", "")) in known:
+        if _safe_folder_name(mod) in existing_folders:
             continue
-        if (target_dir / _safe_folder_name(mod)).is_dir():
-            continue          # 已经备份过（索引丢过也没关系）
+        # 旧 zip 时代留下的：也算已备份（避免同一份既复制文件夹又留 zip）
         if (target_dir / _zip_name(mod)).is_file():
-            continue          # 早先打包时代留下的 zip：也算备份过，不重复
+            continue
         out.append(mod)
     return out
 

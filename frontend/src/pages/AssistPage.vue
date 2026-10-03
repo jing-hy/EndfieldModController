@@ -1,6 +1,6 @@
 <script setup>
 // 辅助 Mod 页（旧 #tab-assist）：只列辅助/工具类 Mod，不参与换装。
-import { computed, onMounted, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { call } from "../lib/bridge.js";
 import { store, refreshState } from "../store.js";
 import { settings, loadSettings } from "../lib/settings.js";

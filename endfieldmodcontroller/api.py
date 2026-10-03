@@ -52,12 +52,64 @@ def _tree_digest(root: Path) -> str:
 class EndfieldModControllerApi:
     def __init__(self, config_path: Path | None = None) -> None:
         self.config = AppConfig.load(config_path)
+        # ⚠️ **配置热重载**（2026-10-03 用户要求：「我没在运行管理器，实例读的不是应该随着修改
+        # 实时更新吗，**改一下就读一次**」）。
+        # 原来 `self.config` 是启动时 load 一次、之后一直用内存那份 —— 于是"改了设置不重启
+        # 就不生效"（实测：他把 `mod_backup_dir` 改成 `D:\zmdmod\mod集合` 并写进了 config.json，
+        # 但跑着的进程仍然往旧的 `mod-test\mod-backup` 备份）。
+        # 这里记下文件路径与 mtime；`config` 通过下面的 property 每次访问时比对，
+        # 磁盘上变了就**重新读一遍**（并保留进程内动态改过的那些字段的语义：读进来就是最新的）。
+        self._config_path = Path(self.config._config_path) if getattr(self.config, "_config_path", None) else None
+        self._config_mtime = self._config_file_mtime()
         # 数据根（程序目录）被改名/搬走时，`AppConfig.load` 会把配置里残留的旧绝对路径
         # 自动改回相对路径 —— 这里留痕，排查"路径怎么变了"时有据可查
         # （用户 2026-10-02 群反馈：「我把主路径改了文件名，然后他没识别出来」）。
         for note in list(getattr(self.config, "_relocated", []) or []):
             launcher._append_log(self.config, f"数据根与配置里记录的不同，已自动纠正路径 {note}")
         self.config.ensure_dirs()
+
+    # ── 配置热重载（用户 2026-10-03：「改一下就读一次」）──────────────────────
+    def _config_file_mtime(self) -> float:
+        try:
+            path = getattr(self, "_config_path", None)
+            return path.stat().st_mtime if path else 0.0
+        except OSError:
+            return 0.0
+
+    @property
+    def config(self):
+        """读取配置 —— **磁盘上变了就重新读一遍**。
+
+        为什么这么做：`self.config` 原先只是启动时 load 的一份内存副本，用户改了设置
+        （例如「Mod 备份目录」）之后，跑着的进程仍然按旧值干活，必须重启才生效 ——
+        他实测遇到的就是这个（改成了 mod集合，却还往 mod-backup 备份）。
+        判据用 **mtime**（比每次都读文件便宜），只有真的变了才重新 load；
+        load 会顺带做路径自愈与默认值迁移，与启动时走的是同一条路。
+        """
+        mtime = self._config_file_mtime()
+        path = getattr(self, "_config_path", None)
+        if path and mtime and mtime != getattr(self, "_config_mtime", None):
+            try:
+                reloaded = AppConfig.load(path)
+            except Exception:  # noqa: BLE001 —— 读坏了就继续用内存里这份，绝不因此崩
+                return self._config
+            self._config = reloaded
+            self._config_mtime = mtime
+            try:
+                from . import fastnet
+
+                fastnet.set_policy(getattr(reloaded, "download_boost", "auto"))
+                fastnet.set_line_mode(getattr(reloaded, "download_line", "auto"))
+                fastnet.set_proxy(getattr(reloaded, "download_proxy", ""))
+            except Exception:  # noqa: BLE001
+                pass
+        return self._config
+
+    @config.setter
+    def config(self, value) -> None:
+        self._config = value
+
+
         self._mods_cache = None
         self._dep_task: dict[str, Any] | None = None
         # Mod 下载（粘贴网址 → 并行下载 → 自动解压入库）：任务表 + 一把入库锁
