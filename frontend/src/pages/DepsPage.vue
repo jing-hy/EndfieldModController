@@ -48,6 +48,10 @@ function rowColor(d) {
 const speedBps = ref(0);      // 由 pollProgress 从 get_dependency_progress 里取
 const modDlActive = ref(false);        // 是否有 Mod 下载在跑（用来联动进度条与速度）
 const modDlHasRecord = ref(false);      // 有没有下载任务记录（决定是否显示「继续 / 清除记录」）
+// 「香蕉网高速下载」的显示状态（2026-10-03）：并发连接数 / 是否在加速 / 当前策略
+const mdThreads = ref(0);
+const mdAccelerating = ref(false);
+const mdPolicy = ref("");
 
 // ⚠️ **Mod 下载的控制**（2026-10-03 补回归）。
 // 0.9.5 有「暂停 / 终止 / 继续 / 清除记录」四个按钮（旧 app.js 的 renderModDownload +
@@ -230,6 +234,14 @@ async function pollProgress() {
           const sum = items.reduce((s, it) => s + Number(it.speed_bps || 0), 0);
           if (sum > 0) speedBps.value = sum;
         }
+
+        // ⚠️ **「香蕉网高速下载」的状态**（2026-10-03 用户：「香蕉网高速下载逻辑也加进去」）。
+        // 只让用户看到"下载多少 MB/s"是不够的 —— 他还需要知道**现在是不是在并发加速**
+        // （他 2026-10-03 报的正是"为什么下载这么慢"）。这里如实显示连接数与策略来源：
+        // 并发跑起来就是「⚡ 高速下载（N 连接）」；被设置关掉就提示去哪开。
+        mdThreads.value = Number(md.threads || 0);
+        mdAccelerating.value = !!md.accelerating;
+        mdPolicy.value = String(md.policy || "");
       }
 
       // ⚠️ **下载完成的弹窗**（2026-10-03 用户：「下载完 mod 应该和拖入 zip 一样有个弹窗」）。
@@ -373,7 +385,13 @@ useLogAutoScroll(logBox, () => logLines.value);
            可以把下载实时速度开个卡片放那里」）。不在下载时显示 —，不留一个假数字。 -->
       <div class="card"><div class="card-body">
         <div class="text-xl font-semibold">{{ speedText }}</div>
-        <div class="text-xs mt-0.5" style="color: var(--text-muted)">下载速度</div>
+        <!-- ⚠️ **「香蕉网高速下载」的状态**（2026-10-03 用户：「香蕉网高速下载逻辑也加进去」）。
+             只显示 MB/s 不够 —— 用户还要知道"现在到底有没有在并发加速"，
+             否则"下载慢"这件事他没法判断是线路问题、还是加速没开。 -->
+        <div class="text-xs mt-0.5" style="color: var(--text-muted)">
+          下载速度<template v-if="mdAccelerating">　⚡ 高速下载（{{ mdThreads }} 连接）</template>
+          <template v-else-if="mdPolicy === 'never'">　加速已关闭（设置 → 下载加速）</template>
+        </div>
       </div></div>
     </div>
 

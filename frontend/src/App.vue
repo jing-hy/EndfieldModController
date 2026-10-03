@@ -272,7 +272,12 @@ onMounted(async () => {
   window.addEventListener("unhandledrejection", (e) =>
     reportFrontendError("unhandledrejection", String((e.reason && e.reason.message) || e.reason)));
   // 桥没就绪时等一会儿（旧版有 pywebviewready + DOMContentLoaded 两道兜底，这里等价处理）
-  if (await waitForBridge()) {
+  // ⚠️ 2026-10-03：**要等到具体方法就绪**，不能只看"api 对象在不在"。
+  // pywebview 的 `api` 对象先出现、方法随后逐个注入 —— 原来只等"api 对象在"，
+  // 于是紧跟其后的 `call("ui_ready")` 撞上"api 在、方法还没挂上"的窗口期，
+  // 抛 `api[e] is not a function`（用户截图反馈的那条红框）。
+  // 现在等的是 boot 真正要用的第一个方法 `ui_ready` 出现为止。
+  if (await waitForBridge(15000, "ui_ready")) {
     // 告诉后端"界面已经起来了" —— `_warm_up` 第一件事就是等这个信号（最多 15 秒），
     // 等不到它就会白等满 15 秒才开始拉公告/角色表。前端此前**从没调用过**它（grep 无结果），
     // 所以公告要等 15 秒后才可能到。这里一进 boot 就先发信号。

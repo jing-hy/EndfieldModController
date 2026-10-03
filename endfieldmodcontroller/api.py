@@ -2872,6 +2872,22 @@ class EndfieldModControllerApi:
         payload["done_bytes"] = done_bytes
         payload["total_bytes"] = known_total
         payload["speed_bps"] = sum(float(item.get("speed_bps") or 0) for item in items)
+        # **「香蕉网高速下载」的状态**（2026-10-03 用户：「香蕉网高速下载逻辑也加进去」）。
+        # 前端要能如实说清"现在是不是在并发加速、用了多少条连接"，否则"下载很慢"这件事
+        # 用户没法判断是线路问题还是没开加速（他 2026-10-03 问的正是这个）。
+        # 数据源：`fastnet` 每次下载都会把报告存进 `_STATE["last"]`（含 `threads` /
+        # `boosted` / `reason` / `probe_mbps` / `mbps`）—— 任务字典里没有这些字段。
+        try:
+            from . import fastnet as _fastnet
+            with _fastnet._STATE_LOCK:
+                last_report = dict(_fastnet._STATE.get("last") or {})
+            payload["policy"] = _fastnet.get_policy()
+        except Exception:  # noqa: BLE001
+            last_report = {}
+            payload["policy"] = ""
+        payload["last_report"] = last_report
+        payload["threads"] = int(last_report.get("threads") or 0)
+        payload["accelerating"] = bool(last_report.get("boosted")) or payload["threads"] > 1
         # **卡死检测**：有任务长时间没有任何数据往来，就判它失败。
         # 用户 2026-10-02 实测遇到"卡片一直显示下载中、进度条 0/0、速度也没有"——
         # 那就是下载线程卡在探测/重试里了，界面必须如实收尾，不能永远挂着"进行中"。
@@ -2895,6 +2911,16 @@ class EndfieldModControllerApi:
             "ok": True, "items": items, "done": done, "counts": counts,
             "dir": payload.get("dir", str(moddl.downloads_dir(self.config))),
             "started_at": payload.get("started_at", ""),
+            # ⚠️ 这几个**必须一起返回**（2026-10-03）：上面虽然写进了 `payload`，
+            # 但这里 return 的是**重新构造的字典**、没有带上 payload ⇒ 前端永远拿到空值。
+            # 它们是「香蕉网高速下载」的状态显示依据（几连接 / 是否在加速 / 当前策略）。
+            "done_bytes": payload.get("done_bytes", 0),
+            "total_bytes": payload.get("total_bytes", 0),
+            "speed_bps": payload.get("speed_bps", 0),
+            "policy": payload.get("policy", ""),
+            "threads": payload.get("threads", 0),
+            "accelerating": payload.get("accelerating", False),
+            "last_report": payload.get("last_report", {}),
         }
 
     def active_download_count(self) -> int:

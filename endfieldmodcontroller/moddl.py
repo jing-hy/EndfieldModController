@@ -215,18 +215,32 @@ def download(url: str, dest_dir: Path, *, progress: Progress = None,
     dest_dir = Path(dest_dir)
     dest_dir.mkdir(parents=True, exist_ok=True)
     target = unique_path(dest_dir, name or file_name_from(url))
+    # ⚠️ **「香蕉网高速下载」（2026-10-03 用户要求：「香蕉网高速下载逻辑也加进去」）**。
+    #
+    # 并发对**慢线路**收益极大（今天三组实测）：
+    #     无 VPN 直连香蕉网  单连接 0.008 MB/s ／ 4 连接 0.034 ／ 16 连接 0.104（13 倍）
+    #     开 VPN            单连接 0.129 MB/s ／ 4 连接 0.090 ／ 16 连接 0.641（5 倍）
+    # 两次都是"4 条不够、十几条才吃满"，所以 Mod 下载**默认就强上并发**。
+    #
+    # 但要**尊重用户的开关**（设置页「下载与网络 → 下载加速」三个档）：
+    #   * `never`  → 走单连接（用户明确关了加速）；
+    #   * `always` → 直接并发；
+    #   * `auto`   → 也走并发 —— 因为"自动"的语义就是"慢时并发"，而香蕉网**没有镜像可换**，
+    #                `auto` 在这里唯一的后果就是"探测到慢就放弃并发"，正好把最该并发的场景排掉。
+    # 调用方显式传 `parallel=False`（比如用户在这里单独关掉）同样退回单连接。
+    #
+    # `policy="always"` 还会**跳过"判死线路"**那一步（`_attempt_line` 里 `policy != "always"`
+    # 才判死）—— 香蕉网没镜像，判死没有意义；去留交给 fastnet 的**试用窗口**：
+    # 上并发先跑 12 秒，实测没比单连接快就自己切回去。
+    try:
+        _user_policy = fastnet.get_policy()
+    except Exception:  # noqa: BLE001
+        _user_policy = "auto"
+    _policy = "never" if (parallel is False or _user_policy == "never") else "always"
     try:
         dependencies._http_get(
             url, target, timeout=timeout, chunk_callback=progress, log=log,
-            # ⚠️ 2026-10-03 改：旧注释写着"传 True 才强上并发（实测对极慢线路反而更慢，
-            # 所以不是默认）"—— **那条结论已被今天的实测推翻**：
-            #     无 VPN 直连香蕉网  单连接 0.008 MB/s ／ 4 连接 0.034 ／ 16 连接 0.104
-            #     （快 13 倍，16 条连接全部拿到数据，没被限流拒连）
-            # **最慢的线路上并发收益最大**。所以 Mod 下载现在**默认强上并发**：
-            # `policy="always"` 会跳过"判死线路"那一步（香蕉网没有镜像可换，判死没意义），
-            # 而去留给 fastnet 的**试用窗口**按实测速度决定 —— 并发没变快它会自己切回单连接。
-            # 只有调用方显式传 `parallel=False` 才退回"按实测决定"。
-            policy="always" if parallel is not False else "",
+            policy=_policy,
             # **不判死**：Mod 下载面对的是没有镜像可换的站点，慢也该下完（见上面常量说明）
             dead_mbps=MOD_DOWNLOAD_DEAD_MBPS,
             cancel=cancel,
