@@ -40,6 +40,7 @@ function rowColor(d) {
 
 // 下载实时速度：后端在 byte_progress 里采样并平滑过；不在下载时是 0 ⇒ 显示 —（不留假数字）
 const speedBps = ref(0);      // 由 pollProgress 从 get_dependency_progress 里取
+const modDlLines = ref([]);   // 「下载 Mod」那条链路的进度（拼成日志行显示）
 const speedText = computed(() => (speedBps.value > 0 ? humanSize(speedBps.value) + "/s" : "—"));
 function humanSize(bytes) {
   const n = Number(bytes) || 0;
@@ -78,6 +79,26 @@ async function pollProgress() {
     if (typeof p.percent === "number") percent.value = p.percent;
     if (Array.isArray(p.log) && p.log.length) logLines.value = p.log;
     speedBps.value = Number(p.speed_bps || 0);   // 下载实时速度（第 4 个卡片）
+
+    // ⚠️ Mod 下载（「下载 Mod」卡片）也在这里显示：用户 2026-10-03 要求
+    // 「mod下载应该跳转到依赖页下载，过程中显示日志那些」。
+    // 它是独立的任务（`_mod_dl`），跟组件下载不是同一份进度，所以这里单独拉一次、
+    // 把每条的状态拼成日志行贴到日志框顶部，失败了也看得到原因。
+    try {
+      const md = await call("mod_download_progress");
+      const items = (md && md.items) || [];
+      if (items.length) {
+        const lines = items.map((it) => {
+          const pct = it.size ? ` ${Math.round((it.received / it.size) * 100)}%` : "";
+          const size = it.size ? ` (${(it.received / 1048576).toFixed(1)}/${(it.size / 1048576).toFixed(1)} MB)` : "";
+          const msg = it.message ? ` — ${it.message}` : "";
+          return `[Mod 下载] ${it.status || "下载中"}${pct}${size}  ${it.name || it.url}${msg}`;
+        });
+        modDlLines.value = lines;
+      } else {
+        modDlLines.value = [];
+      }
+    } catch (e) { /* 没有 Mod 下载任务很正常 */ }
     progressText.value = p.total ? `${p.current}/${p.total}` : (p.message || "");
 
     // ⚠️ 用户 2026-10-03：「安装完成没动态，不会自动刷新组件状态，而且安装完还是待补齐」——
@@ -204,7 +225,7 @@ useLogAutoScroll(logBox, () => logLines.value);
               {{ logLines.length > 1 ? logLines.length + " 行" : "尚无日志" }}
             </span>
           </div>
-          <div v-if="logLines.length" ref="logBox" class="log-box" style="max-height: 420px; border-radius: 0">{{ logLines.join("\n") }}</div>
+          <div v-if="logLines.length || modDlLines.length" ref="logBox" class="log-box" style="max-height: 420px; border-radius: 0">{{ modDlLines.length ? modDlLines.join("\n") + "\n" + logLines.join("\n") : logLines.join("\n") }}</div>
           <div v-else class="log-empty" style="min-height: 52px; text-align: center">
             尚未开始。点「安装缺失依赖」后，这里会显示下载线路与安装过程。
           </div>

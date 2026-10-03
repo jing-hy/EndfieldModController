@@ -24,6 +24,8 @@ export const store = reactive({
   demoCovers: null,
   // 设置页点「依赖清空并重新下载」→ 清完跳到依赖页，由依赖页读这个标志自动开跑
   autoStartDeps: false,
+  // Mod 下载开始后跳到依赖页（那儿的日志框显示下载过程）
+  autoStartModDownload: false,
 });
 
 // 「每次状态刷新之后要做的事」注册表。

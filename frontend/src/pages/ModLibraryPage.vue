@@ -9,6 +9,7 @@ import { loadSettings } from "../lib/settings.js";
 import { settings, saveSetting } from "../lib/settings.js";
 import { humanSize } from "../lib/util.js";
 import Card from "../components/ui/Card.vue";
+import ModDownloadCard from "../components/ModDownloadCard.vue";
 import { Library } from "lucide-vue-next";
 import Btn from "../components/ui/Btn.vue";
 import Switch from "../components/ui/Switch.vue";
@@ -18,8 +19,6 @@ import { showAlert, showModalDialog, showToast } from "../lib/dialog.js";
 import { setStatus } from "../lib/status.js";
 
 const urls = ref("");
-const dl = ref({ items: [], counts: {}, done: true, total_bytes: 0, done_bytes: 0, speed_bps: 0 });
-const dlStatus = ref("");
 // 封面缓存在 store 里（跨页面存活）—— 见 store.js 的注释
 const covers = computed(() => store.covers);
 const busy = ref(false);
@@ -188,27 +187,7 @@ async function resolveConflicts(keep) {
 }
 async function fixAll() { try { await call("fix_all_mods"); } catch (e) {} }
 
-async function startDownload() {
-  const text = urls.value.trim();
-  if (!text) { await showAlert("没有网址", "先粘贴至少一个 http(s) 网址。"); return; }
-  try {
-    const r = await call("start_mod_download", text);
-    if (!r || r.ok === false) { await showAlert("没能开始下载", (r && r.message) || "未知原因"); return; }
-    dlStatus.value = `已开始 ${r.total} 个下载任务（并行）`;
-    pollDownload();
-  } catch (e) { /* call 已弹窗 */ }
-}
 
-async function pollDownload() {
-  try {
-    const s = await call("mod_download_progress");
-    if (!s) return;
-    dl.value = s;
-    if (!s.done && !dlTimer) dlTimer = setInterval(pollDownload, 1000);
-    if (s.done && dlTimer) { clearInterval(dlTimer); dlTimer = null; await refreshState();
-    loadSettings(); }
-  } catch (e) { /* 忽略 */ }
-}
 
 function speedText() {
   const bps = dl.value.speed_bps || 0;
@@ -248,7 +227,7 @@ onMounted(async () => {
   await refreshState().catch(() => {});
   queueCovers(store.state.mods);
 });
-onUnmounted(() => { if (timer) clearInterval(timer); if (dlTimer) clearInterval(dlTimer); coverQueue = []; });
+onUnmounted(() => { if (timer) clearInterval(timer); coverQueue = []; });
 
 // ⚠️ Vue 里**子组件的 onMounted 先于父组件执行**，而 demo 模式的封面是父组件（App.vue）
 // 在自己的 onMounted 里才灌进 store 的 —— 那时封面还没到，一开始全是占位图。
@@ -367,46 +346,7 @@ watch(() => store.demoCovers, (val) => {
       </div>
     </Card>
 
-    <Card id="mod-download-box" title="下载 Mod">
-      <div class="flex items-start justify-between gap-4">
-        <div class="text-xs" style="color: var(--text-muted)"
-             title="粘贴网址一行一个 → 并行下载；zip / 7z / rar 会自动解压进 Mod 库并识别角色。直接支持香蕉网（GameBanana）页面地址：会自动换成真实文件直链，并带出封面、作者与版本；打不开时请检查 VPN。">
-          粘贴网址，<b>一行一个</b>。支持香蕉网页面地址（自动取真实直链与封面）。
-        </div>
-        <Btn variant="primary" @click="startDownload">开始下载</Btn>
-      </div>
-      <textarea class="field mt-3" rows="2" v-model="urls"
-                placeholder="https://gamebanana.com/mods/721442&#10;https://example.com/another-mod.7z"></textarea>
-      <div class="flex items-center gap-2 mt-2">
-        <Btn size="sm" @click="call('open_download_dir')">打开下载目录</Btn>
-        <span class="text-xs" style="color: var(--text-muted)">{{ dlStatus }}</span>
-      </div>
-      <div v-if="dl.items && dl.items.length" class="mt-3 space-y-2">
-        <div class="flex items-center justify-between text-xs">
-          <span style="color: var(--text-muted)">
-            共 {{ dl.counts.total || dl.items.length }} 个 · 已入库 {{ dl.counts.imported || 0 }}
-            · 需手动解压 {{ dl.counts.manual || 0 }} · 失败 {{ dl.counts.failed || 0 }}
-          </span>
-          <span class="flex gap-2">
-            <Btn size="mini" v-if="!dl.done" @click="call('pause_mod_downloads')">暂停</Btn>
-            <Btn size="mini" v-if="!dl.done" @click="call('cancel_mod_downloads')">终止</Btn>
-            <Btn size="mini" @click="call('clear_mod_downloads')">清除记录</Btn>
-          </span>
-        </div>
-        <div class="text-xs" style="color: var(--text-muted)">{{ speedText() }}</div>
-        <div class="h-1.5 rounded-full overflow-hidden" style="background: var(--surface-2); border: 1px solid var(--border)">
-          <div class="h-full transition-all"
-               :style="{ width: (dl.total_bytes ? (dl.done_bytes / dl.total_bytes) * 100 : 0) + '%', background: 'var(--accent)' }"></div>
-        </div>
-        <div v-for="(it, i) in dl.items" :key="i" class="rounded border p-2.5 text-sm" style="border-color: var(--border)">
-          <div class="flex items-center justify-between gap-3">
-            <b class="truncate">{{ it.title || it.name || it.url }}</b>
-            <span class="text-xs shrink-0" style="color: var(--text-muted)">{{ it.status }} {{ it.percent || 0 }}%</span>
-          </div>
-          <div v-if="it.message" class="text-xs mt-1" style="color: var(--text-muted)">{{ it.message }}</div>
-        </div>
-      </div>
-    </Card>
+    <ModDownloadCard />
 
     <ConflictDialog v-if="conflicts" :groups="conflicts"
                     @resolve="resolveConflicts" @cancel="conflicts = null" />

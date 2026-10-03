@@ -268,16 +268,28 @@ onStateRefreshed(() => { maybeShowAnnouncements(); });
 // 启动后的一段时间里**每 5 秒轮询一次**：公告是后端后台线程稍后才填进去的
 // （实测启动后约 4 秒到），具体到几点不确定，所以用轮询兜住，而不是猜几个时刻。
 // 60 秒后自然停下，不做常驻轮询。消费一旦成功，`shownNoticeKeys` 会去重，不会重复弹。
+// ⚠️ 这些定时器**必须在窗口关闭时清掉**：App.vue 是根组件、永远不会 unmount，
+// 而 pywebview(WebView2) 关闭时要等 JS 把未完成的定时器跑完 —— 之前那个 60 秒轮询
+// 就导致**关程序时卡死**（用户 2026-10-03 反馈「mod 管理器现在又关闭时卡死」）。
+// 轮询本身也收紧：8 次 × 3 秒 = 24 秒足够（实测公告启动后约 4 秒就到）。
+const announceTimers = [];
 let announceTicks = 0;
-const announceTimer = setInterval(() => {
+announceTimers.push(setInterval(() => {
   announceTicks += 1;
   refreshThenShowAnnouncements();
-  if (announceTicks >= 12) clearInterval(announceTimer);
-}, 5000);
-// 另外仍留几个更早的兜底点，覆盖"公告来得特别快"的情况
-[1500, 3500].forEach((delay) => {
-  setTimeout(() => { refreshThenShowAnnouncements(); }, delay);
+  if (announceTicks >= 8) { clearInterval(announceTimers[0]); }
+}, 3000));
+[1200, 2500, 5000].forEach((delay) => {
+  announceTimers.push(setTimeout(() => { refreshThenShowAnnouncements(); }, delay));
 });
+
+// 关窗/刷新时一律清干净，绝不拖住退出流程
+function clearAnnounceTimers() {
+  announceTimers.forEach((t) => { clearInterval(t); clearTimeout(t); });
+  announceTimers.length = 0;
+}
+window.addEventListener("beforeunload", clearAnnounceTimers);
+window.addEventListener("pagehide", clearAnnounceTimers);
 </script>
 
 <template>

@@ -6,6 +6,7 @@ import { store, refreshState } from "../store.js";
 import { settings, loadSettings } from "../lib/settings.js";
 import Card from "../components/ui/Card.vue";
 import Switch from "../components/ui/Switch.vue";
+import ModDownloadCard from "../components/ModDownloadCard.vue";
 import { ImageOff } from "lucide-vue-next";
 import { Wrench } from "lucide-vue-next";
 import Btn from "../components/ui/Btn.vue";
@@ -109,5 +110,6 @@ async function openLib() { try { await call("open_path_in_explorer", "library");
         </div>
       </div>
     </Card>
+    <ModDownloadCard />
   </div>
 </template>
