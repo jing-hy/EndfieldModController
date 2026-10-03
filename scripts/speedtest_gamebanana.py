@@ -129,7 +129,7 @@ def main() -> int:
                 n = key.replace("conn", "")
                 print(f"  {n} 连接 / 单连接 = {results[key] / base:.1f} 倍")
     print()
-    print("  （把这段输出连同"当时 VPN 开没开"一起发回来即可）")
+    print("  （把这段输出连同『当时 VPN 开没开』一起发回来即可）")
     return 0
 
 
