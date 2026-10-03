@@ -13,7 +13,7 @@ import Badge from "../components/ui/Badge.vue";
 import SettingPath from "../components/ui/SettingPath.vue";
 import SettingPathBrowse from "../components/ui/SettingPathBrowse.vue";
 import SettingSwitch from "../components/ui/SettingSwitch.vue";
-import { showModalDialog, showToast } from "../lib/dialog.js";
+import { showModalDialog, showToast, showProgressToast, hideProgressToast } from "../lib/dialog.js";
 import SettingSelect from "../components/ui/SettingSelect.vue";
 
 const RE_INJECTION = [
@@ -85,6 +85,204 @@ async function clearDownloadLines() {
   showToast("线路记录已清空（下次下载会重新测速）", "success");
   await loadDownloadStatus();
 }
+// ─────────────────────────────────────────────────────────────────────────────
+// ⚠️⚠️ **A10：设置页「启动与诊断」按钮墙的结果原本无处可看**（2026-10-03 补回归）。
+//
+// 0.9.5 里这一整块 17 个按钮**每个都有可见结果**（0.9.5 的 `app.js` 里逐条写在
+// `#init-status` / `#update-status` / `#game-inject-status` 或专门的弹窗里）。
+// 换代到 Vue 后只剩 `run(method)` —— 返回值在模板里**一律被丢弃**：
+//   * 失败：2026-10-03 我给 `run()` 加了 danger toast（那一半已修）；
+//   * **成功：仍然什么都不显示** ⇒ 用户点了"游戏目录体检""检查组件更新""查看启动日志"
+//     之后完全不知道结果是什么，功能等于白点。
+//
+// 这里补一个统一的结果渲染：调后端 → 把返回结构整理成人话 → 弹窗/日志框展示。
+// 展示沿用现有 `showModalDialog`（正文是等宽的 <pre>，长路径会自然折行）与 `Btn`。
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 把任意后端返回值整理成可读文本（各接口结构不同，这里做通用兜底 + 针对性美化）。 */
+function formatResult(method, r) {
+  if (r == null) return "（没有返回内容）";
+  if (r.ok === false) return `失败：${r.message || r.reason || "未知原因"}`;
+  switch (method) {
+    case "read_launch_log": {
+      const text = String(r.text || r.log || "").trim();
+      if (!text) return "启动日志是空的（可能还没启动过，或日志刚被清过）。";
+      // 只给最后 400 行 —— 完整日志用户可以去运行目录看，弹窗里给尾巴最有用
+      const lines = text.split("\n");
+      const tail = lines.slice(-400).join("\n");
+      return `（共 ${lines.length} 行，这里显示最后 ${Math.min(400, lines.length)} 行）\n\n${tail}`;
+    }
+    case "poser_log_tail": {
+      const lines = r.lines || r.tail || [];
+      if (!lines.length) return r.message || "没有 Poser 日志（可能还没用过摆姿功能）。";
+      return `路径：${r.path || "（未知）"}\n\n` + lines.join("\n");
+    }
+    case "game_clean_audit": {
+      const findings = r.findings || [];
+      const head = [
+        `游戏目录：${r.game_dir || "（未定位）"}`,
+        `第三方注入文件：${r.injections || 0} 个`,
+        r.multi_instance ? `⚠ 检测到多个实例（${r.multi_instance}）` : "",
+        "",
+      ].filter((x) => x !== "");
+      if (!findings.length) return head.join("\n") + "没有发现问题。";
+      const body = findings.map((f) => {
+        const size = f.size_kb ? `　${f.size_kb} KB` : "";
+        return `· ${f.label || f.name || f.path}${size}${f.detail ? `　${f.detail}` : ""}`;
+      });
+      return head.join("\n") + `共 ${findings.length} 项：\n` + body.join("\n");
+    }
+    case "game_clean_backup_and_clean":
+    case "game_clean_restore":
+    case "clean_game_injections":
+    case "restore_game_injections": {
+      const actions = r.actions || r.moved || r.items || [];
+      const lines = [r.message || "完成。"];
+      if (Array.isArray(actions) && actions.length) {
+        lines.push("", `共 ${actions.length} 项：`);
+        for (const a of actions.slice(0, 60)) {
+          lines.push("· " + (typeof a === "string" ? a
+            : (a.label || a.name || a.path || JSON.stringify(a))));
+        }
+        if (actions.length > 60) lines.push(`…另有 ${actions.length - 60} 项`);
+      }
+      if (r.backup) lines.push("", `备份位置：${r.backup}`);
+      return lines.join("\n");
+    }
+    case "check_component_updates": {
+      const items = r.components || r.items || r.updates || [];
+      if (!items.length && !r.report) return r.message || "没有可检查的组件。";
+      const list = Array.isArray(items) ? items : Object.values(items);
+      const lines = list.map((c) => {
+        const cur = c.current || c.installed || "未装";
+        const latest = c.latest || c.available || "";
+        const tail = c.update_available ? `　→ ${latest}【有新版】` : "　（已是最新）";
+        return `· ${c.display || c.name || c.key}：${cur}${latest ? tail : ""}`;
+      });
+      return lines.length ? lines.join("\n") : (r.message || "检查完成。");
+    }
+    case "check_app_update": {
+      const lines = [];
+      if (r.current) lines.push(`当前版本：${r.current}`);
+      if (r.latest) lines.push(`最新版本：${r.latest}`);
+      if (r.published_at) lines.push(`发布时间：${r.published_at}`);
+      if (r.asset_size) lines.push(`更新包大小：${(Number(r.asset_size) / 1048576).toFixed(1)} MB`);
+      if (r.update_available) lines.push("", "**有新版本可以更新。**");
+      else lines.push("", "已经是最新版。");
+      if (r.notes) lines.push("", "更新说明：", String(r.notes).slice(0, 1200));
+      return lines.join("\n");
+    }
+    case "force_close_game": {
+      const killed = r.killed || [];
+      if (!killed.length) return "没有发现残留的游戏进程。";
+      return `已结束 ${killed.length} 个进程：\n` + killed.map((k) => `· ${k}`).join("\n") +
+        (r.errors && r.errors.length ? `\n\n有 ${r.errors.length} 项没能结束：\n` +
+          r.errors.map((e) => `· ${e}`).join("\n") : "");
+    }
+    default:
+      break;
+  }
+  // 通用兜底：优先挑常见的"内容字段"，都没有才把 JSON 打出来（截断）
+  for (const key of ["message", "text", "log", "summary"]) {
+    if (typeof r[key] === "string" && r[key].trim()) return r[key];
+  }
+  return JSON.stringify(r, null, 1).slice(0, 4000);
+}
+
+/** 调后端并把结果**展示出来**（成功也展示 —— 这正是 A10 要补的那一半）。 */
+async function showResult(method, title) {
+  const r = await run(method);          // 失败已由 run() 给 danger toast
+  if (r == null) return r;
+  if (r.ok === false) return r;         // 失败不弹两次
+  await showModalDialog({
+    title: title || "结果",
+    message: formatResult(method, r),
+    okText: "知道了", showCancel: false,
+  });
+  await refreshState();
+  return r;
+}
+
+// 「一键安装/更新全部组件」—— 这是个**长任务**，设置页这边不能只是静默跑完：
+// 0.9.5 会先弹确认框（列清会装什么），然后切到依赖页看日志/进度（那里是完整链路）。
+// 直接复用依赖页那套（`store.autoStartDeps`），不要再另造一份进度显示。
+async function startFullUpdate() {
+  const ok = await showModalDialog({
+    title: "一键安装/更新全部组件",
+    message: [
+      "会依次检查并补齐：XXMI 本体 / XXMI Libraries / EFMI / Poser / ReShade 底座 / 内置资产。",
+      "",
+      "**缺的会下载、旧的有新版会更新**，已经是最新的会跳过。",
+      "过程比较长（视网络几分钟到十几分钟）。点「开始」会跳到「依赖」页显示实时日志与进度。",
+    ].join("\n"),
+    okText: "开始", cancelText: "取消",
+  });
+  if (!ok) return;
+  store.autoStartDeps = true;
+  store.tab = "dependencies";
+}
+
+// 「更新 ReShade 底座」—— 长耗时，且**成功时原本完全静默**，用户会以为没反应而重复点。
+// 这里给 sticky 进度提示 + 结束时如实收尾（成功/失败都说话）。
+async function updateReshade() {
+  const ok = await showModalDialog({
+    title: "更新 ReShade 底座",
+    message: [
+      "会下载最新的 ReShade 运行库并替换 `d3d12.dll`。",
+      "",
+      "**替换前会自动备份旧的那份**，出问题可以还原。",
+      "游戏正在运行的话，建议先关掉它。",
+    ].join("\n"),
+    okText: "开始更新", cancelText: "取消",
+  });
+  if (!ok) return;
+  showProgressToast("reshade-update", "正在更新 ReShade 底座…（下载中，可能几分钟）");
+  try {
+    const r = await call("download_reshade");
+    if (r && r.ok === false) showToast(String(r.message || "更新失败"), "danger");
+    else showToast(String((r && r.message) || "ReShade 底座已就绪"), "success");
+  } catch (e) {
+    showToast(String((e && e.message) || "更新失败"), "danger");
+  } finally {
+    hideProgressToast("reshade-update");
+    await refreshState();
+  }
+}
+
+// 「打开 Mod 备份仓」—— 后端对"不在白名单里的路径"会返回 ok:false 而**不抛异常**，
+// 所以不看返回值就是静默失败（0.9.5 会把它写进状态行）。
+async function openModBackupDir() {
+  const r = await run("open_mod_backup_dir");
+  if (r && r.ok === false) showToast(String(r.message || "打不开备份目录"), "danger");
+}
+
+// 「一键检测全部」：把自检报告按 0.9.5 的语义整理出来（每条 check + 待人工处理项数）
+async function runFullCheck() {
+  const r = await run("ensure_initialized");
+  if (r == null) return;
+  if (r.ok === false) return;
+  const checks = r.checks || r.report || {};
+  const entries = Array.isArray(checks) ? checks
+    : Object.entries(checks).map(([k, v]) => ({ key: k, ...(v || {}) }));
+  const lines = entries.map((c) => {
+    const mark = c.ok === false ? "✗" : (c.manual ? "!" : "✓");
+    const extra = c.message ? `　${c.message}` : "";
+    return `${mark} ${c.label || c.key || c.name}${extra}`;
+  });
+  const actions = r.actions || [];
+  const pending = r.pending || [];
+  if (actions.length) lines.push("", "已自动处理：", ...actions.map((a) => `· ${a}`));
+  if (pending.length) lines.push("", `还有 ${pending.length} 项需要你处理：`,
+    ...pending.map((p) => `· ${p}`));
+  const bad = entries.filter((c) => c.ok === false).length;
+  await showModalDialog({
+    title: bad ? `自检完成：${bad} 项有问题` : "自检完成：全部正常",
+    message: lines.length ? lines.join("\n") : "自检完成，没有需要处理的内容。",
+    okText: "知道了", showCancel: false,
+  });
+  await refreshState();
+}
+
 // 详细状态：一个面板接住各类状态查询，结果落在纯黑日志框里（可复制）
 const probeText = ref("点上面的按钮查询：DLSS5 / Poser / 组件版本 / 完整性 / 初始化自检。");
 const probeBusy = ref(false);
@@ -252,7 +450,7 @@ useLogAutoScroll(probeBox, () => probeText);
             </div>
           </div>
           <div class="flex flex-wrap gap-2">
-            <Btn variant="primary" @click="run('ensure_initialized')">一键检测全部</Btn>
+            <Btn variant="primary" @click="runFullCheck">一键检测全部</Btn>
             <Btn @click="exportDiagnostics">导出诊断包</Btn>
           </div>
         </div>
@@ -266,7 +464,7 @@ useLogAutoScroll(probeBox, () => probeText);
 
     <Card title="维护操作（会改动文件，请确认后再点）">
       <div class="flex flex-wrap gap-2">
-        <Btn id="game-restore-btn" @click="run('game_clean_restore')">还原游戏本体</Btn>
+        <Btn id="game-restore-btn" @click="showResult('game_clean_restore', '还原游戏目录')">还原游戏本体</Btn>
         <Btn variant="danger" @click="resetDependencies">依赖清空并重新下载</Btn>
       </div>
       <div class="text-xs mt-2" style="color: var(--text-muted)">
@@ -362,23 +560,23 @@ useLogAutoScroll(probeBox, () => probeText);
     <Card title="启动与诊断">
       <div class="flex flex-wrap gap-2">
         <Btn variant="primary" @click="run('launch_official_gui')">启动官方 XXMI / EFMI 界面</Btn>
-        <Btn @click="run('read_launch_log')">查看启动日志</Btn>
+        <Btn @click="showResult('read_launch_log', '启动日志')">查看启动日志</Btn>
         <Btn @click="exportDiagnostics">导出诊断包</Btn>
-        <Btn @click="run('poser_log_tail')">打开 Poser 日志</Btn>
-        <Btn @click="run('force_close_game')">强制结束残留游戏</Btn>
+        <Btn @click="showResult('poser_log_tail', 'Poser 日志')">打开 Poser 日志</Btn>
+        <Btn @click="showResult('force_close_game', '强制结束残留游戏')">强制结束残留游戏</Btn>
       </div>
       <div class="flex flex-wrap gap-2 mt-2">
-        <Btn @click="run('clean_game_injections')">清理残留注入</Btn>
-        <Btn @click="run('restore_game_injections')">撤销清理</Btn>
-        <Btn @click="run('check_component_updates')">检查组件更新</Btn>
-        <Btn variant="primary" @click="run('start_full_update')">一键安装/更新全部组件</Btn>
-        <Btn @click="run('check_app_update')">检查程序更新</Btn>
-        <Btn @click="run('download_reshade')">更新 ReShade 底座</Btn>
+        <Btn @click="showResult('clean_game_injections', '清理残留注入')">清理残留注入</Btn>
+        <Btn @click="showResult('restore_game_injections', '撤销清理')">撤销清理</Btn>
+        <Btn @click="showResult('check_component_updates', '组件更新检查')">检查组件更新</Btn>
+        <Btn variant="primary" @click="startFullUpdate">一键安装/更新全部组件</Btn>
+        <Btn @click="showResult('check_app_update', '程序更新检查')">检查程序更新</Btn>
+        <Btn @click="updateReshade">更新 ReShade 底座</Btn>
       </div>
       <div class="flex flex-wrap gap-2 mt-2">
-        <Btn @click="run('game_clean_audit')">游戏目录体检</Btn>
-        <Btn variant="primary" @click="run('game_clean_backup_and_clean')">备份并净化游戏目录</Btn>
-        <Btn @click="run('game_clean_restore')">从备份还原游戏目录</Btn>
+        <Btn @click="showResult('game_clean_audit', '游戏目录体检')">游戏目录体检</Btn>
+        <Btn variant="primary" @click="showResult('game_clean_backup_and_clean', '备份并净化游戏目录')">备份并净化游戏目录</Btn>
+        <Btn @click="showResult('game_clean_restore', '还原游戏目录')">从备份还原游戏目录</Btn>
         <span class="text-xs self-center" style="color: var(--text-muted)">只移动不删除：先把非原版文件整体备份，再让本体回到原版状态。</span>
       </div>
     </Card>
@@ -397,7 +595,7 @@ useLogAutoScroll(probeBox, () => probeText);
         <div class="flex items-center gap-2">
           <span class="w-24 shrink-0" style="color: var(--text-muted)">Mod 备份仓：</span>
           <code class="flex-1 truncate" style="color: var(--text-muted)">{{ paths.mod_backup || "—" }}</code>
-          <Btn size="sm" @click="run('open_mod_backup_dir')">打开</Btn>
+          <Btn size="sm" @click="openModBackupDir">打开</Btn>
         </div>
       </div>
     </Card>
