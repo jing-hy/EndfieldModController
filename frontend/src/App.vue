@@ -13,6 +13,7 @@ import { showModalDialog, showToast } from "./lib/dialog.js";
 import { call } from "./lib/bridge.js";
 import DialogHost from "./components/DialogHost.vue";
 import OnboardingTour from "./components/OnboardingTour.vue";
+import CharacterPickerDialog from "./components/CharacterPickerDialog.vue";
 import ToastHost from "./components/ToastHost.vue";
 import AboutPage from "./pages/AboutPage.vue";
 import SettingsPage from "./pages/SettingsPage.vue";
@@ -150,6 +151,7 @@ onMounted(async () => {
       store.mods = store.state.mods || [];
       // 快照里预置的封面（data URI）——file:// 下前端拿不到本地图片，只能内联
       store.demoCovers = window.__DEMO_STATE__.demo_covers || {};
+      store.demoPending = window.__DEMO_STATE__.demoPending || null;
       store.config = store.state.config || {};
       store.ready = true;
       loadSettings();
@@ -371,7 +373,10 @@ window.addEventListener("pagehide", clearAnnounceTimers);
       </div>
     </div>
 
-    <!-- 新手引导：挖孔高亮 + 箭头指向目标控件（用户要的"一个箭头指向按钮"） -->
+    <!-- 角色归属待确认：预识别不确定时让用户选（识别错会让同角色互斥失效） -->
+    <CharacterPickerDialog />
+
+    <!-- 新手引导：挖孔高亮 + 气泡 -->
     <OnboardingTour v-model="tourVisible" :steps="TOUR_STEPS" @finish="finishTour" />
 
     <!-- ⚠️ 必须接 `open-link`：DialogHost 会 emit 它，但这里以前是裸的 `<DialogHost />`
