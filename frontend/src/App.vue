@@ -154,6 +154,27 @@ const currentPage = computed(() => pages[store.tab]);
 const currentName = computed(() => tabs.find((t) => t.id === store.tab)?.name || "");
 
 // 切页签要**写回** config.last_tab —— 之前只有启动时读、从不保存，"记住上次页签"实际不成立。
+// ── 下载中关窗口的确认（后端 `app.py::_on_closing` 会调 `window.mcAskExit()`）──────
+// ⚠️ **2026-10-03 补上**：后端那条链路早就写好了（有活跃下载时取消关闭、并执行
+// `window.mcAskExit && window.mcAskExit()`），但**前端从来没有定义它** ——
+// 于是用户点关闭时：什么也不弹、窗口也关不掉（现象就是"卡死、也没出弹窗"）。
+// 这里按后端约定实现：弹确认框；选「仍然退出」→ 调 `confirm_exit()` 让后端放行，
+// 然后再关一次窗；选「继续下载」→ 什么都不做（窗口保持打开）。
+window.mcAskExit = async function () {
+  try {
+    const ok = await showModalDialog({
+      title: "还在下载，确定要退出吗？",
+      message:
+        "现在退出会**中断正在进行的下载**（已下完的部分会保留，下次可以继续）。\n\n" +
+        "想让它跑完的话，选「继续下载」就行。",
+      okText: "仍然退出", cancelText: "继续下载",
+    });
+    if (!ok) return;
+    try { await call("confirm_exit"); } catch (e) { /* 忽略：下面照样再关一次 */ }
+    try { window.pywebview && window.pywebview.api && window.close(); } catch (e) { /* 忽略 */ }
+  } catch (e) { /* 弹窗都失败了就别再挡着，交给后端超时放行 */ }
+};
+
 async function goTab(id) {
   const changed = store.tab !== id;
   store.tab = id;

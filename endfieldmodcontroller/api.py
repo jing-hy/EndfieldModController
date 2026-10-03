@@ -2540,6 +2540,64 @@ class EndfieldModControllerApi:
             except OSError:
                 pass
 
+    def _retire_same_source(self, dest_dir: Any, *, source_url: str, file_url: str) -> list[str]:
+        """把库里**同一个来源**的旧版移出（进 `mod-trash`，可找回）。
+
+        用户 2026-10-03：「**对于确认下载地址一致的，要在入库的时候移出旧的**」。
+        场景：同一份 Mod 重下/换新版后，库里会新旧两份并存（他今天就得手动清）。
+
+        **判据必须"确认一致"**：只认 `download-info.json` 里记的
+        `来源网址` / `文件网址` **完全相等**（不猜名字、不比相似度）——
+        名字相同但来源不同的两个包（例如作者重发）不该被误伤。
+        只动 `library` 里、且**不是刚入库的这个目录**的那些。
+        """
+        import json as _json
+        import shutil as _shutil
+
+        new_dir = Path(str(dest_dir)).resolve() if dest_dir else None
+        src = str(source_url or "").strip()
+        fil = str(file_url or "").strip()
+        if new_dir is None or not (src or fil):
+            return []
+        trash = self.config.runtime_path / "backups" / "mod-trash"
+        retired: list[str] = []
+        try:
+            candidates = [d for d in self.config.library_path.iterdir() if d.is_dir()]
+        except OSError:
+            return []
+        for folder in candidates:
+            try:
+                if folder.resolve() == new_dir:
+                    continue
+            except OSError:
+                continue
+            info = folder / "download-info.json"
+            if not info.is_file():
+                continue                      # 没记录来源 ⇒ **不猜**，绝不动它
+            try:
+                data = _json.loads(info.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if not isinstance(data, dict):
+                continue
+            same = ((src and str(data.get("来源网址") or "").strip() == src)
+                    or (fil and str(data.get("文件网址") or "").strip() == fil))
+            if not same:
+                continue
+            try:
+                trash.mkdir(parents=True, exist_ok=True)
+                target = trash / folder.name
+                # 重名就加时间戳，绝不覆盖 trash 里已有的东西
+                if target.exists():
+                    import time as _t
+
+                    target = trash / f"{folder.name}.{_t.strftime('%Y%m%d-%H%M%S')}"
+                _shutil.move(str(folder), str(target))
+                retired.append(folder.name)
+            except OSError as exc:
+                launcher._append_log(self.config, f"Mod 下载: 旧版 {folder.name} 移出失败（{exc}）")
+        return retired
+
     def _mod_download_one(self, item: dict[str, Any], dest_dir: Path) -> None:
         url = item["url"]
         item["status"] = "下载中"
@@ -2716,6 +2774,22 @@ class EndfieldModControllerApi:
                 if written is not None:
                     item["info_file"] = str(written)
                     launcher._append_log(self.config, f"Mod 下载: 已写入下载信息 {written.name}")
+                # ⚠️ **同来源的旧版自动移出**（2026-10-03 用户：
+                #     「对于确认下载地址一致的，要在入库的时候移出旧的」）。
+                # 场景：同一份 Mod 修好后重新下载（或换了新版），库里会同时躺着新旧两份 ——
+                # 用户得手动去清，忘了就两个版本混着（他今天正是这样）。
+                # 判据 = `download-info.json` 里的**来源网址/文件网址完全一致**（这是"确认一致"），
+                # 动作 = 移进 `mod-trash`（**可找回**，不是删除），并如实记日志。
+                retired = self._retire_same_source(
+                    dest_dir,
+                    source_url=item.get("origin_url") or item.get("url") or "",
+                    file_url=item.get("url") or "",
+                )
+                if retired:
+                    item["retired"] = retired
+                    launcher._append_log(
+                        self.config,
+                        f"Mod 下载: 同来源的旧版已移出 —— {'、'.join(retired)}（在 runtime\\backups\\mod-trash 可找回）")
                 # **把香蕉网的封面存成 Mod 目录里的 `cover.<ext>`** —— 这样 Mod 库卡片就有图了
                 # （用户 2026-10-02：「mod库也读不出图片」）。刻意**复用现成通道**而不是另造：
                 # `core.find_cover()` 的 COVER_HINTS 里就有 "cover"，命中后前端 `loadCovers()`

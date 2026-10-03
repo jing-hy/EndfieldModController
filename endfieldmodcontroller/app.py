@@ -255,6 +255,20 @@ def main(argv: list[str] | None = None) -> int:
     # **下载中关窗口要拦一下**（用户 2026-10-02：「如果在下载的时候关闭 mod 管理器，
     # 要弹窗提示」）：`closing` 返回 False 就取消关闭，同时让界面弹一个确认框；
     # 用户在框里选"仍然退出"时前端会调 `api.confirm_exit()`，那时这里就放行。
+    #
+    # ⚠️⚠️ **2026-10-03 修「下载时关窗口会卡死、也没有弹窗」**：
+    # 后端这条链路一直是完整的（`has_active_downloads` / `confirm_exit` 都在），
+    # 但**前端从来没有定义 `window.mcAskExit`** —— 于是这里 `evaluate_js` 什么也没做、
+    # 却仍然 `return False` 取消关闭：用户看到的是"点了关闭没反应（卡死）、也没弹窗"。
+    # 两条都补上：
+    #   ① 前端加 `window.mcAskExit`（App.vue），弹确认框 → 用户选"仍然退出"时调
+    #      `api.confirm_exit()` 并再关一次窗；
+    #   ② 这里加**超时放行**：万一前端没响应（页面卡住/JS 报错），
+    #      也不能让窗口永远关不掉 —— 到点就放行，绝不把用户锁在里面。
+    import time as _time
+
+    _ask_at = {"t": 0.0}
+
     def _on_closing():
         try:
             if api.exit_confirmed:
@@ -263,10 +277,19 @@ def main(argv: list[str] | None = None) -> int:
                 return True
         except Exception:  # noqa: BLE001 —— 判据出问题不该把程序卡住关不掉
             return True
+        now = _time.monotonic()
+        # 已经问过、且超过 25 秒还没等到回应 ⇒ 放行（用户已经被拦过一次，不能无限拦）
+        if _ask_at["t"] and (now - _ask_at["t"]) > 25.0:
+            try:
+                api.exit_confirmed = True
+            except Exception:  # noqa: BLE001
+                pass
+            return True
+        _ask_at["t"] = now
         try:
             window.evaluate_js("window.mcAskExit && window.mcAskExit()")
         except Exception:  # noqa: BLE001
-            pass
+            return True          # 连脚本都发不出去 ⇒ 别再拦，直接放行
         return False
 
     try:
