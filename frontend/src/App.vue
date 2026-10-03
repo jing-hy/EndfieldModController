@@ -3,7 +3,7 @@ import { ref, computed, onMounted } from "vue";
 import {
   Library, Wrench, PackageCheck, Rocket, Settings, Info, Palette,
 } from "lucide-vue-next";
-import { store, refreshState, applyTheme, currentTheme, THEMES, PAGE_IDS } from "./store.js";
+import { store, refreshState, applyTheme, currentTheme, THEMES, PAGE_IDS, onStateRefreshed } from "./store.js";
 import { waitForBridge, reportFrontendError } from "./lib/bridge.js";
 import { loadSettings } from "./lib/settings.js";
 import { dragHasFiles, importDroppedFile } from "./lib/importMod.js";
