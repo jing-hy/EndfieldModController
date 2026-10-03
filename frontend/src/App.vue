@@ -150,6 +150,10 @@ onMounted(async () => {
     reportFrontendError("unhandledrejection", String((e.reason && e.reason.message) || e.reason)));
   // 桥没就绪时等一会儿（旧版有 pywebviewready + DOMContentLoaded 两道兜底，这里等价处理）
   if (await waitForBridge()) {
+    // 告诉后端"界面已经起来了" —— `_warm_up` 第一件事就是等这个信号（最多 15 秒），
+    // 等不到它就会白等满 15 秒才开始拉公告/角色表。前端此前**从没调用过**它（grep 无结果），
+    // 所以公告要等 15 秒后才可能到。这里一进 boot 就先发信号。
+    try { await call("ui_ready"); } catch (e) { /* 不支持也不影响 */ }
     try {
       await refreshState();
       // ⚠️ 必须把 config 灌进 settings —— 否则所有设置项/开关都显示成空（2026-10-02 实测：
@@ -217,7 +221,7 @@ async function finishTour() {
 // 挂在"每次状态刷新之后"（切页、改设置、下载进度刷新……都会触发），
 // 这样公告一到就能补上；再留几个延迟兜底，覆盖"后台线程 15 秒内才拉到"的情况。
 onStateRefreshed(() => { maybeShowAnnouncements(); });
-[3000, 8000, 16000].forEach((delay) => {
+[3000, 8000, 16000, 25000].forEach((delay) => {
   setTimeout(() => { maybeShowAnnouncements(); }, delay);
 });
 </script>

@@ -1018,6 +1018,10 @@ class EndfieldModControllerApi:
             return {"pending": False, "error": str(exc)}
 
     def get_state(self) -> dict[str, Any]:
+        # 双保险：前端**必然**会调 get_state()，所以它一到就等于"界面活着"。
+        # `_warm_up` 靠这个信号决定什么时候开始拉公告 / 角色表；只靠显式 ui_ready() 的话，
+        # 哪天前端漏调一次，所有人就要白等满 15 秒（2026-10-03 实际就是这个情况）。
+        self._ui_ready.set()
         from . import diagnostics, poser, secondary_motion
 
         # 留痕：用来判断前端是否真的完成了初始化（界面空白时先看这几行有没有）
