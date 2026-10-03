@@ -221,6 +221,41 @@ watch(() => store.demoCovers, (val) => {
 
 <template>
   <div class="space-y-4">
+    <!-- 两个开关放这里（紧邻 Mod 列表之上）：
+         上一版把它们挪到了页面最底部（理由是"设一次就不动"），结果用户找不到、
+         以为开关没了 —— 可见"总开关"这类东西必须待在它管的那块内容旁边。 -->
+    <Card title="皮肤 Mod">
+      <template #badge><Badge tone="muted">总开关</Badge></template>
+      <div class="space-y-0.5">
+        <div class="switch-row" @click="saveSetting('efmi_injection', !settings.efmi_injection)">
+          <span class="min-w-0">
+            <span class="text-sm font-medium">开启皮肤 Mod</span>
+            <span class="block text-xs mt-0.5" style="color: var(--text-muted)">
+              关掉后一个皮肤都不加载（Mods 目录会被清空，随时可开回来）。
+              ⚠️ 这不是停掉 EFMI 注入 —— 实测那样终末地会直接拉不起来。
+            </span>
+          </span>
+          <span class="flex items-center gap-2 shrink-0">
+            <span class="switch-state">{{ settings.efmi_injection ? "已开启" : "已关闭" }}</span>
+            <Switch :model-value="!!settings.efmi_injection" @update:model-value="(v) => saveSetting('efmi_injection', v)" />
+          </span>
+        </div>
+        <div class="switch-row" @click="saveSetting('allow_same_character_mods', !settings.allow_same_character_mods)">
+          <span class="min-w-0">
+            <span class="text-sm font-medium">强行关闭角色 Mod 互斥</span>
+            <span class="block text-xs mt-0.5" style="color: var(--text-muted)">
+              开启后勾选一个 Mod 不会再把同角色的其它 Mod 自动取消。<b>默认关闭</b> ——
+              同角色两个 Mod 同时生效常常会让游戏崩，只在确认它们改的不是同一批资源时再打开。
+            </span>
+          </span>
+          <span class="flex items-center gap-2 shrink-0">
+            <span class="switch-state">{{ settings.allow_same_character_mods ? "已开启" : "已关闭" }}</span>
+            <Switch :model-value="!!settings.allow_same_character_mods" @update:model-value="(v) => saveSetting('allow_same_character_mods', v)" />
+          </span>
+        </div>
+      </div>
+    </Card>
+
     <Card title="Mod 列表">
       <div class="flex flex-wrap items-center gap-2">
         <Btn variant="primary" @click="prepare" :disabled="busy">生成控制器</Btn>
@@ -327,30 +362,6 @@ watch(() => store.demoCovers, (val) => {
             <span class="text-xs shrink-0" style="color: var(--text-muted)">{{ it.status }} {{ it.percent || 0 }}%</span>
           </div>
           <div v-if="it.message" class="text-xs mt-1" style="color: var(--text-muted)">{{ it.message }}</div>
-        </div>
-      </div>
-    </Card>
-
-    <Card title="皮肤 Mod">
-      <template #badge><Badge tone="muted">总开关</Badge></template>
-      <div class="divide-y" style="border-color: var(--border)">
-        <div class="switch-row" @click="saveSetting('efmi_injection', !settings.efmi_injection)">
-          <div class="min-w-0">
-            <div class="font-medium">开启皮肤 Mod</div>
-            <div class="text-xs mt-0.5" style="color: var(--text-muted)">
-              总开关：关闭后一个皮肤都不加载（Mods 目录会被清空，随时可开回来）。⚠️ 注意这不是停掉 EFMI 注入 —— 实测那样终末地会直接拉不起来。
-            </div>
-          </div>
-          <Switch :model-value="!!settings.efmi_injection" @update:model-value="(v) => saveSetting('efmi_injection', v)" />
-        </div>
-        <div class="switch-row" @click="saveSetting('allow_same_character_mods', !settings.allow_same_character_mods)">
-          <div class="min-w-0">
-            <div class="font-medium">强行关闭角色 Mod 互斥</div>
-            <div class="text-xs mt-0.5" style="color: var(--text-muted)">
-              开启后勾选一个 Mod 不会再把同角色的其它 Mod 自动取消。<b>默认关闭</b> —— 同角色两个 Mod 同时生效常常会让游戏崩。
-            </div>
-          </div>
-          <Switch :model-value="!!settings.allow_same_character_mods" @update:model-value="(v) => saveSetting('allow_same_character_mods', v)" />
         </div>
       </div>
     </Card>
