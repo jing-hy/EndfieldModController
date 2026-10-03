@@ -2079,6 +2079,9 @@ def launch(
             prefer_internal_dependencies=bool(
                 getattr(config, "prefer_internal_dependencies", True)
             ),
+            # 把 staging 的警告（复制失败、旧产物没删干净）写进启动日志 ——
+            # 这样"某个 Mod 没就绪"能查到原因，而不是只看到一句无头无尾的失败。
+            log=lambda m: _append_log(config, m),
         )
 
     problems = config.validate()

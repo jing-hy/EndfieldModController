@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
@@ -637,6 +638,7 @@ def stage_and_prepare(
     hotkey_takeover: bool = False,
     allow_same_character: bool = False,
     prefer_internal_dependencies: bool = True,
+    log: Any = None,
 ) -> dict[str, Any]:
     """Plan, stage, patch and generate controller files for the selected mods.
 
@@ -758,6 +760,9 @@ def stage_and_prepare(
     managed_root.mkdir(parents=True, exist_ok=True)
 
     active_targets: list[str] = []
+    # 复制不过去的 Mod（失败**不打断启动**，只是如实记下来：
+    # 用户 2026-10-03「启动弹出失败弹窗，但 xxmi 成功拉起」—— 那是误报）
+    stage_failed: list[dict[str, str]] = []
     for mod in active_plan:
         dest = staging_root / f"MC_{mc_core.safe_name(mod.group)}_{mc_core.safe_name(mod.name)}"
         if dest.exists():
@@ -769,10 +774,27 @@ def stage_and_prepare(
                 shutil.rmtree(dest)
             except OSError as exc:
                 _log(log, f"WARN staging 旧产物没删干净（将就地覆盖）: {dest.name} ({exc})")
-        # `dirs_exist_ok=True`：目标已存在时**合并写入**而不是抛错。多一层保险，
-        # 免得任何一个残留目录（杀软扫描、EFMI 正在读）把整次启动打断。
-        shutil.copytree(mod.path, dest, dirs_exist_ok=True,
-                        ignore=shutil.ignore_patterns("d3dx.ini", "d3dx_user.ini"))
+        # ⚠️ **复制单个 Mod 失败绝不能打断整次启动**（用户 2026-10-03：
+        #    「启动弹出失败弹窗，**但 xxmi 成功拉起**」—— 报错是 `[WinError 3] 系统找不到指定的路径`，
+        #    指个别 dds/ini 复制不过去；而 XXMI 已经在别处拉起来了，用户却看到"启动失败"）。
+        #    这类失败多半是瞬时的（杀软正在扫那个文件、EFMI 恰好读了一下目录），所以：
+        #    先**重试两次**，仍失败就**记一条警告继续往下走**，让启动流程照常完成。
+        ok = False
+        last_exc: Exception | None = None
+        for attempt in range(3):
+            try:
+                shutil.copytree(mod.path, dest, dirs_exist_ok=True,
+                                ignore=shutil.ignore_patterns("d3dx.ini", "d3dx_user.ini"))
+                ok = True
+                break
+            except OSError as exc:
+                last_exc = exc
+                if attempt < 2:
+                    time.sleep(0.4 * (attempt + 1))   # 给杀软/占用者一点时间松手
+        if not ok:
+            stage_failed.append({"name": mod.name, "error": str(last_exc)})
+            _log(log, f"WARN staging 复制失败（跳过这个 Mod，不打断启动）: {mod.name} ({last_exc})")
+            continue
         try:
             for ini_path in mc_core.iter_ini_files(dest):
                 mc_core.sanitize_ini_control_flow(ini_path)
