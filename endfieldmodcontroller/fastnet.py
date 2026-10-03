@@ -599,12 +599,58 @@ def _clear_parts(dest: Path) -> None:
         pass
 
 
+def _probe_lines(urls: list[str], *, timeout: float = 3.0, log: Log = None) -> list[str]:
+    """并发预检各条线路（每条只取 1 字节），返回**真能拿到数据**的那些。
+
+    ⚠️ 2026-10-04：多线路抢块前**必须先体检**。用户的现场是「下载速度横线、进度条不动」：
+    26 个分块线程的第一次尝试全撞同一条线路，而机器上 `github.com` 被 hosts 指向
+    `127.0.0.1`（加速器残留）—— 直连**连得上但一个字节都不来**，于是所有线程一起挂到超时。
+    花 3 秒把这种线路挡在门外，比让几十个连接白等一分钟划算得多。
+
+    **全都不通时原样返回** —— 预检本身不许把下载卡死（真正的原因留给下载路径去报）。
+    """
+    if len(urls) < 2:
+        return urls
+
+    def one(target: str) -> bool:
+        try:
+            with _open(target, headers={"Range": "bytes=0-0"}, timeout=timeout) as response:
+                return bool(response.read(1))
+        except Exception:  # noqa: BLE001 —— 任何异常都只意味着"这条现在不能用"
+            return False
+
+    try:
+        with ThreadPoolExecutor(max_workers=min(8, len(urls))) as pool:
+            results = list(pool.map(one, urls))
+    except Exception:  # noqa: BLE001
+        return urls
+    alive = [target for target, ok in zip(urls, results) if ok]
+    if alive and len(alive) < len(urls):
+        dropped: list[str] = []
+        for target, ok in zip(urls, results):
+            if not ok:
+                try:
+                    dropped.append(urlsplit(target).netloc or target)
+                except ValueError:
+                    dropped.append(target)
+        _log(log, f"线路预检：{'、'.join(dropped)} 连得上但取不到数据（可能是 hosts/加速器残留"
+                  f"或该线路被限流），本次不参与抢块；用 {len(alive)} 条")
+    return alive or urls
+
+
 def _pick_line_url(urls: list[str], dead: set[str], attempt: int) -> str:
     """多线路动态抢块：这一块这次该用哪条线路。
 
-    规则：**第 1 次用主线路，失败就轮换到别的可用线路**；已淘汰（连挂两次）的不再选，
-    但如果全被淘汰了就退回全部（宁可再试一次，也不能因为淘汰逻辑把下载卡死）。
-    抽成纯函数是为了能单测 —— 这段"选谁"的判据是动态抢块的核心。
+    规则：**第 1 次用主线路（列表首位 = 最快的），失败才轮换到别的可用线路**；
+    已淘汰（连挂两次）的不再选，全被淘汰时退回全部（宁可再试一次，也不能把它卡死）。
+
+    ⚠️⚠️ **不许让不同线程从不同线路起步**（2026-10-04 实测，用户报「**速度怎么掉下去了**」）：
+    为了修"26 个线程全撞同一条主线路"，我曾按块序号把线程**均匀分散**到各条线路 ——
+    结果变成了**静态等分**：慢线路各分到 1/4 的线程、整体被最慢的那条拖住。
+    实测同一份 28.5 MB 资产：**分散 0.669 MB/s（42.6 秒） vs 主线路优先 2.955 MB/s（9.6 秒）**，
+    **慢了 4.4 倍**。这跟 2026-09-27「多线路混合 4+4+4 只有 1.16 MB/s，是负优化」是同一条教训。
+    正确做法：**集中用最快的线路，失败才换下一条**；"撞上一条连得上但不给数据的线路"
+    那个问题由 `_probe_lines()` 的**预检**解决（抢块前先各取 1 字节），不是靠分散。
     """
     live = [item for item in urls if item not in dead] or urls
     if not live:
@@ -677,6 +723,9 @@ def _download_parallel(
     line_fails: dict[str, int] = {}
     dead_urls: set[str] = set()
     if len(urls) > 1 and todo:
+        # 先体检：把"连得上但不给数据"的线路挡在门外（否则若干线程会一起挂到超时，
+        # 界面就是"速度横线 + 进度条不动"）
+        urls = _probe_lines(urls, log=log)
         _log(log, f"多线路动态抢块：{len(urls)} 条线路共用 {len(todo)} 块"
                   f"（谁空谁领，连挂两次的线路本次淘汰）")
 
@@ -693,7 +742,8 @@ def _download_parallel(
         for attempt in range(4):
             if cancel and cancel():
                 raise Cancelled("用户终止")
-            # 换线路：第 1 次用主线路，失败就轮到别的可用线路（连续失败的已淘汰）
+            # 换线路：第 1 次用**最快的**主线路，失败才轮到别的（连续失败的已淘汰）。
+            # ⚠️ 不要按块序号分散 —— 那等于"静态等分"，会被最慢的线路拖住（实测慢 4.4 倍）
             target_url = _pick_line_url(urls, dead_urls, attempt)
             try:
                 headers = {"Range": f"bytes={begin}-{end}"}
@@ -1074,6 +1124,50 @@ def resolve_lines(url: str, mode: str) -> list[Line]:
 # ---------------------------------------------------------------------------
 # 下载（导出给外部用的入口）
 # ---------------------------------------------------------------------------
+def _note_speed(done: int, total: int) -> None:
+    """把"当下这次下载的速度"记进**全局状态**，让任何界面都能读到。
+
+    ⚠️ 2026-10-04（用户报「进度条只是刷新慢，**速度卡一直横线**」）：
+    速度原先只在 `api._make_dep_progress().byte_progress` 里算，而**一键启动**那条路
+    （`launcher.launch` → `runtime_deps.ensure_all(progress=...)`）**根本没传 byte_progress**
+    ⇒ 依赖页读 `_dep_task.speed_bps` 永远是 0 ⇒ 横线；进度也只能靠"一项完成跳一下"。
+    现在改成**在 fastnet 内部采样**（任何调用方、任何路径都经过这里），UI 通过
+    `global_speed()` 就能拿到实时速度 —— 不再依赖调用方记不记得接线。
+    """
+    now = time.time()
+    with _STATE_LOCK:
+        previous = _STATE.get("speed_sample")
+        if not previous:
+            _STATE["speed_sample"] = (now, int(done))
+            return
+        prev_at, prev_done = previous
+        span = now - prev_at
+        # ⚠️⚠️ **基准点只在间隔够长时才滑动**（2026-10-04 实测踩到）：
+        # 回调是"每读 256 KB 一次"，实测间隔只有 **0.12 秒** —— 如果每次都把基准点推到最新，
+        # `span` 就永远到不了 0.4 秒，速度**永远算不出来**（实测 `global_speed()` 一直是 0）。
+        # 现在保持基准点不动、直到攒够 0.4 秒再算一次并滑动 —— 短间隔的采样直接忽略。
+        if span < 0.4:
+            return
+        if done >= prev_done:
+            instant = (int(done) - int(prev_done)) / span
+            old = float(_STATE.get("speed_bps") or 0.0)
+            _STATE["speed_bps"] = instant if old <= 0 else old * 0.6 + instant * 0.4
+            _STATE["speed_at"] = now
+        _STATE["speed_sample"] = (now, int(done))
+
+
+def global_speed() -> float:
+    """最近一次下载的平滑速度（MB/s 的字节口径 = B/s）；超过 3 秒没有新数据就归零。
+
+    归零是**故意的**：下载之间的空档（解压 / 安装 / 校验）不该继续挂着一个早就不动的
+    速度值，那会让用户以为卡住了（用户 2026-10-03 报过同类现象）。
+    """
+    with _STATE_LOCK:
+        value = float(_STATE.get("speed_bps") or 0.0)
+        at = float(_STATE.get("speed_at") or 0.0)
+    return value if (time.time() - at) <= 3.0 else 0.0
+
+
 def download(
     url: str,
     dest: Path,
@@ -1116,6 +1210,14 @@ def download(
     started = time.time()
     errors: list[str] = []
 
+    # ★ 速度的**全局出口**（2026-10-04）：不管调用方给不给 progress，都记一份全局速度。
+    # 起因：一键启动那条路（`launcher.launch`）没传 byte_progress ⇒ 依赖页速度卡一直横线。
+    # 在这里统一采样，任何下载路径（一键启动 / 安装组件 / Mod 下载）都能被 UI 读到。
+    def _tracked(done: int, total: int) -> None:
+        _note_speed(done, total)
+        if progress:
+            progress(done, total)
+
     # ★ 多线路动态抢块（2026-10-04 落地）：把其它候选线路的 URL 交给**第一条**线路的
     # 并发分块去共用 —— 实测比"单线路内并发"快 47%，而"每条线路各下自己那段"（静态等分）
     # 反而更慢（0.508 vs 0.664）。只给第一条：后面几条是它失败后的兜底，走原逻辑。
@@ -1132,7 +1234,7 @@ def download(
         report = _attempt_line(
             line.apply(url), dest, line=line,
             alt_urls=multi_alt if index == 0 and multi_alt else None,
-            log=log, progress=progress, timeout=line_timeout, policy=policy,
+            log=log, progress=_tracked, timeout=line_timeout, policy=policy,
             expected_size=expected_size, expected_sha256=expected_sha256,
             dead_mbps=dead_mbps, cancel=cancel,
         )

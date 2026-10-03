@@ -1964,8 +1964,15 @@ class EndfieldModControllerApi:
 
     def get_dependency_progress(self) -> dict[str, Any]:
         if self._dep_task is None:
+            # ⚠️ 2026-10-04：**没有依赖任务时也要给速度**。一键启动 / 「安装内置组件」
+            # 这些路径不经过 `_dep_task`（它们直接在 launcher / runtime_deps 里跑），
+            # 但下载确实在发生 —— 速度由 `fastnet` 全局采样。不给的话用户看到的就是
+            # 「进度条在动、速度卡一直横线」（2026-10-04 用户原话）。
+            from . import fastnet as _fastnet
+
             return {"running": False, "current": 0, "total": 0, "percent": 0.0, "message": "未开始",
-                    "log": [], "results": [], "speed_bps": 0.0, "bytes_received": 0}
+                    "log": [], "results": [], "speed_bps": _fastnet.global_speed(),
+                    "bytes_received": 0}
         snapshot = dict(self._dep_task)
         # 速度只在"刚刚还在下载"时有效：下载之间的空档（解压 / 安装 / 校验）超过 3 秒就报 0，
         # 否则卡片会一直挂着一个早就不动的速度值，看着像卡住了。
@@ -1974,6 +1981,12 @@ class EndfieldModControllerApi:
         sampled_at = snapshot.get("_speed_at")
         if not snapshot.get("running") or not sampled_at or (_t.time() - float(sampled_at)) > 3.0:
             snapshot["speed_bps"] = 0.0
+        if float(snapshot.get("speed_bps") or 0.0) <= 0:
+            # 本任务的采样还没到（例如走的是 `progress=` 而不是 `byte_progress=` 的那条路）
+            # ⇒ 用全局采样兜底 —— 同一次下载，别让界面显示成"没有速度"
+            from . import fastnet as _fastnet
+
+            snapshot["speed_bps"] = _fastnet.global_speed()
         snapshot.pop("_speed_bytes", None)
         snapshot.pop("_speed_at", None)
         return snapshot
