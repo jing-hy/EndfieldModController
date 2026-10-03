@@ -252,45 +252,24 @@ def main(argv: list[str] | None = None) -> int:
         text_select=True,
     )
 
-    # **下载中关窗口要拦一下**（用户 2026-10-02：「如果在下载的时候关闭 mod 管理器，
-    # 要弹窗提示」）：`closing` 返回 False 就取消关闭，同时让界面弹一个确认框；
-    # 用户在框里选"仍然退出"时前端会调 `api.confirm_exit()`，那时这里就放行。
+    # ⚠️⚠️ **关窗口不再做任何拦截**（2026-10-03 用户拍板：「**如果难搞就直接不要那个弹窗了**」）。
     #
-    # ⚠️⚠️ **2026-10-03 修「下载时关窗口会卡死、也没有弹窗」**：
-    # 后端这条链路一直是完整的（`has_active_downloads` / `confirm_exit` 都在），
-    # 但**前端从来没有定义 `window.mcAskExit`** —— 于是这里 `evaluate_js` 什么也没做、
-    # 却仍然 `return False` 取消关闭：用户看到的是"点了关闭没反应（卡死）、也没弹窗"。
-    # 两条都补上：
-    #   ① 前端加 `window.mcAskExit`（App.vue），弹确认框 → 用户选"仍然退出"时调
-    #      `api.confirm_exit()` 并再关一次窗；
-    #   ② 这里加**超时放行**：万一前端没响应（页面卡住/JS 报错），
-    #      也不能让窗口永远关不掉 —— 到点就放行，绝不把用户锁在里面。
-    import time as _time
-
-    _ask_at = {"t": 0.0}
-
+    # 这个功能前后试了两版，**两版都会卡死**，所以按用户的话直接砍掉：
+    #   ① 第一版：`closing` 返回 False 取消关闭 + `evaluate_js("window.mcAskExit()")`
+    #      让前端弹确认框。实测「点了关闭没反应、也没弹窗」——因为前端当时**根本没定义**
+    #      `window.mcAskExit`（后端一直在等一个不存在的回调）。
+    #   ② 第二版：补上前端弹窗 + 后端超时放行。实测**仍然卡死** ——
+    #      `closing` 一旦返回 False，pywebview 就进入收尾流程，此刻前端再
+    #      `await call("confirm_exit")`，桥可能已经断了、永远等不到返回，
+    #      而窗口又处在"被拒绝关闭"的状态。
+    # 结论：**在 pywebview 的 `closing` 里做异步交互本身就不稳**。
+    # 代价说明：下载中关窗口**不再提示**（已下载的部分会保留，下次从断点继续），
+    # 换来的是**任何时候都关得掉**——这个取舍是用户定的。
+    #
+    # （保留 `active_download_count` / `confirm_exit` 等能力，将来若要用原生
+    #  `MessageBoxW` 同步弹框可以接上；本次不接，见 app.py 里的 `_ask_native` 注释。）
     def _on_closing():
-        try:
-            if api.exit_confirmed:
-                return True
-            if not api.has_active_downloads():
-                return True
-        except Exception:  # noqa: BLE001 —— 判据出问题不该把程序卡住关不掉
-            return True
-        now = _time.monotonic()
-        # 已经问过、且超过 25 秒还没等到回应 ⇒ 放行（用户已经被拦过一次，不能无限拦）
-        if _ask_at["t"] and (now - _ask_at["t"]) > 25.0:
-            try:
-                api.exit_confirmed = True
-            except Exception:  # noqa: BLE001
-                pass
-            return True
-        _ask_at["t"] = now
-        try:
-            window.evaluate_js("window.mcAskExit && window.mcAskExit()")
-        except Exception:  # noqa: BLE001
-            return True          # 连脚本都发不出去 ⇒ 别再拦，直接放行
-        return False
+        return True
 
     try:
         events = getattr(window, "events", None)

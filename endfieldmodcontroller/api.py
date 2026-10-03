@@ -2851,11 +2851,15 @@ class EndfieldModControllerApi:
             "started_at": payload.get("started_at", ""),
         }
 
+    def active_download_count(self) -> int:
+        """还有几个下载任务在跑（关窗口的原生确认框要显示这个数字）。"""
+        with self._mod_dl_lock:
+            return sum(1 for item in self._mod_dl.get("items", [])
+                       if item.get("status") in ("等待中", "读取香蕉网信息", "下载中", "解压中"))
+
     def has_active_downloads(self) -> bool:
         """有没有正在跑的下载任务 —— 关窗口前要问一句（用户 2026-10-02 要求）。"""
-        with self._mod_dl_lock:
-            return any(item.get("status") in ("等待中", "读取香蕉网信息", "下载中", "解压中")
-                       for item in self._mod_dl.get("items", []))
+        return self.active_download_count() > 0
 
     def confirm_exit(self) -> dict[str, Any]:
         """用户在"正在下载，仍要退出吗"的框里点了"仍然退出"。

@@ -514,7 +514,25 @@ def _download_parallel(
             try:
                 headers = {"Range": f"bytes={begin}-{end}"}
                 with _open(url, headers=headers, timeout=timeout) as response:
-                    data = response.read()
+                    # ⚠️⚠️ **必须分块读 + 单块间隔超时**（2026-10-03 修「下载到一半一直不动」）。
+                    # 原来是 `data = response.read()` **一次性读整块** —— 那个调用只在
+                    # `timeout` 到点或数据读完时才返回，**中途一个字节都不给就无限期挂着**，
+                    # 单连接那条路的 `CHUNK_GAP_SECONDS` 保护在这里完全不生效。
+                    # 实测现场：912 MB 的包切了 20 个并发连接，**全部挂起**，
+                    # sidecar 里 `done: []`（一个块都没完成），文件停在 768 KB 不动，
+                    # 日志里连一条重试都没有（因为失败路径不记日志）。
+                    # 现在跟单连接一个规格：每读一小块就重设"多久没数据算卡死"。
+                    try:
+                        response.fp.raw._sock.settimeout(CHUNK_GAP_SECONDS)  # type: ignore[attr-defined]
+                    except (AttributeError, OSError):
+                        pass
+                    buf = bytearray()
+                    while True:
+                        chunk = response.read(READ_CHUNK)
+                        if not chunk:
+                            break
+                        buf.extend(chunk)
+                    data = bytes(buf)
                 if len(data) != end - begin + 1:
                     raise OSError(f"分块长度不符：{len(data)} != {end - begin + 1}")
                 # 每个线程自己开句柄 + seek，互不干扰
@@ -532,6 +550,11 @@ def _download_parallel(
                 last_error = exc
                 with lock:
                     state["retries"] += 1
+                    retry_no = state["retries"]
+                # ⚠️ **失败必须可见**（原来这条路径一声不响：20 个连接全挂、日志里什么都没有，
+                # 用户只能看到"下载中但进度条不动"）。前几次记一条，避免刷屏。
+                if retry_no <= 6:
+                    _log(log, f"分块 {begin}-{end} 第 {attempt + 1} 次失败：{exc}")
                 time.sleep(0.4 * (attempt + 1))
         raise OSError(f"分块 {begin}-{end} 重试 4 次仍失败：{last_error}")
 
