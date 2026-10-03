@@ -176,7 +176,31 @@ async function scan() { busy.value = true; try { await call("scan"); await refre
 async function prepare() {
   busy.value = true;
   try {
-    await call("prepare");
+    // ⚠️⚠️ **B11：被后端拒绝时不能静默**（2026-10-03 补回归）。
+    // staging 与 Mod 库重叠时后端**拒绝执行**并返回
+    // `{ok: false, blocked: "library_overlap", message: ...}`（保护用户的 Mod 库 ——
+    // 用户 2026-10-01 定下的硬规则）。0.9.5 拿到这个结构会弹「保护 Mod 库」说明框；
+    // 换代后这里**忽略返回值**、只在没冲突时给 toast ⇒ 点了没反应也不知道为什么。
+    const prep = await call("prepare");
+    if (prep && prep.ok === false) {
+      if (prep.blocked === "library_overlap") {
+        await showModalDialog({
+          title: "为了保护你的 Mod 库，已停止生成",
+          message: [
+            prep.message || "暂存目录和 Mod 库重叠了。",
+            "",
+            "这个检查是故意的：暂存目录若落在 Mod 库里面，每次生成控制器都会清空暂存目录，"
+              + "等于把你库里的 Mod 删掉。",
+            "",
+            "去「设置 → 工作区与 Mod 库」看一眼这两个路径，把它们分开就好。",
+          ].join("\n"),
+          okText: "知道了", showCancel: false,
+        });
+      } else {
+        await showAlert("生成控制器失败", prep.message || "未知原因");
+      }
+      return;
+    }
     // prepare 会刷新 runtime\_state\mod_conflicts.json，紧接着读一次结论
     const info = await call("conflict_groups");
     const groups = (info && info.groups) || [];

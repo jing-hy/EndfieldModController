@@ -49,6 +49,18 @@ const paths = computed(() => {
 // 与 `status`（当前策略/线路模式/是否正在并发加速/上次结果）。
 // 展示沿用现有 `Badge` 组件（tone: success/muted/warning/danger），与页面其余部分一致。
 const lineStatus = ref([]);
+// 渲染 API 的告警文案（同 LaunchPage：vulkan/d3d12 ⇒ 服装 Mod 不生效）
+const renderApiText = computed(() => {
+  const v = String((store.state.render_api || "")).toLowerCase();
+  if (v === "vulkan") return "Vulkan —— 服装 Mod 不生效，请在启动器里选 DirectX 11";
+  if (v === "d3d12") return "DirectX 12 —— 服装 Mod 不生效，请在启动器里选 DirectX 11";
+  if (v === "d3d11") return "DirectX 11";
+  return "未知（还没启动过）";
+});
+const renderApiWarn = computed(() => {
+  const v = String((store.state.render_api || "")).toLowerCase();
+  return v === "vulkan" || v === "d3d12";
+});
 const dlStatus = ref(null);
 const lastDownload = computed(() => {
   const s = dlStatus.value && dlStatus.value.last;
@@ -381,6 +393,44 @@ async function resetDependencies() {
   store.autoStartDeps = true;
   store.tab = "dependencies";
 }
+// ⚠️ **B10：Mod 备份目录必须走带校验的接口**（见模板里的说明）。
+// `set_mod_backup_dir` 会拒绝"落在 Mod 库 / 中转目录里"的位置并保持原值 ——
+// 因为备份仓落在库里面时，"同步备份"有可能变成删库（`modbackup._overlaps_library`）。
+const backupDirNote = ref("");
+
+async function setModBackupDir(value) {
+  backupDirNote.value = "";
+  try {
+    const r = await call("set_mod_backup_dir", String(value || ""));
+    if (r && r.ok === false) {
+      backupDirNote.value = String(r.message || "这个位置不能用");
+      showToast(backupDirNote.value, "danger");
+    } else {
+      showToast(r && r.message ? String(r.message) : "备份目录已更新", "success");
+    }
+  } catch (e) {
+    backupDirNote.value = String((e && e.message) || "设置失败");
+  }
+  await refreshState();
+}
+
+async function chooseModBackupDir() {
+  backupDirNote.value = "";
+  try {
+    const r = await call("choose_mod_backup_dir");
+    if (r && r.ok === false) {
+      if (r.cancelled) return;                       // 用户自己取消，不算错误
+      backupDirNote.value = String(r.message || "没能选这个目录");
+      showToast(backupDirNote.value, "danger");
+      return;
+    }
+    showToast("备份目录已更新", "success");
+  } catch (e) {
+    backupDirNote.value = String((e && e.message) || "选择失败");
+  }
+  await refreshState();
+}
+
 // 「自动检测」—— 一键找 XXMI / 3DMigoto Loader / 官方启动器 / 游戏本体 / 乳摇工具
 //（2026-10-03 补回归：0.9.5 有这个按钮，且每次刷新还会静默回填 detected_*；
 //  换代后全丢了，`grep detected_` 在现前端 0 命中 ⇒ 内置了 XXMI 那三个框也一直空着）。
@@ -479,7 +529,21 @@ useLogAutoScroll(probeBox, () => probeText);
       <SettingPathBrowse k="library_dir" label="Mod 库目录" placeholder="library" kind="dir" />
       <SettingSwitch k="mod_backup_enabled" label="Mod 备份（默认开，关了就不备份）"
         hint="关掉后不再把 Mod 库里的 Mod 复制进备份仓；已有的备份一个都不会删（只增不减）。" />
-      <SettingPath k="mod_backup_dir" label="Mod 备份目录" placeholder="mod-backup" hint="留空 = 主路径下的 mod-backup（只增不减）" />
+      <!-- ⚠️⚠️ **B10：备份目录要走带校验的接口**（2026-10-03 补回归）。
+           0.9.5 对这个字段**特判**走 `set_mod_backup_dir` —— 它会拒绝"落在 Mod 库 /
+           中转目录里"的位置并**保持原值**（`modbackup._overlaps_library`），
+           因为备份仓一旦落在库里面，"同步备份"就可能变成**删库**。
+           换代后它走了通用 `save_config`（直接 setattr），**把这道校验绕过了**
+           （现前端 grep `set_mod_backup_dir` / `choose_mod_backup_dir` 全 0 命中）。
+           这里恢复成专用控件：写入走 `set_mod_backup_dir`，"选择…"走
+           `choose_mod_backup_dir`（后端自己弹原生选目录框）。 -->
+      <div class="flex items-center gap-3 py-1.5">
+        <span class="w-56 shrink-0 text-sm" title="留空 = 主路径下的 mod-backup（只增不减）">Mod 备份目录</span>
+        <input class="field flex-1" :value="settings.mod_backup_dir ?? ''" placeholder="mod-backup"
+               @change="setModBackupDir($event.target.value)" />
+        <Btn size="sm" @click="chooseModBackupDir">选择…</Btn>
+      </div>
+      <div v-if="backupDirNote" class="text-xs pb-1" style="color: var(--warn)">{{ backupDirNote }}</div>
       <SettingPathBrowse k="staging_mods_dir" label="Staging Mods 目录" placeholder="留空 = 自动：<主路径>/builtin/XXMI/EFMI/Mods" kind="dir" hint="EFMI 实际加载的位置" />
       <SettingPath k="dependency_manifest" label="依赖清单" placeholder="dependencies.json" />
     </Card>
@@ -614,7 +678,8 @@ useLogAutoScroll(probeBox, () => probeText);
             </div>
             <div class="flex items-center gap-2">
               <span class="w-32 shrink-0" style="color: var(--text-muted)">渲染 API</span>
-              <Badge tone="muted">{{ store.state.render_api || "unknown" }}</Badge>
+              <!-- ⚠️ 不能只显示裸值：vulkan/d3d12 时**服装 Mod 不生效**（0.9.5 就是这么写的文案） -->
+        <Badge :tone="renderApiWarn ? 'warn' : 'muted'">{{ renderApiText }}</Badge>
             </div>
             <div class="flex items-center gap-2">
               <span class="w-32 shrink-0" style="color: var(--text-muted)">ReShade 面板</span>

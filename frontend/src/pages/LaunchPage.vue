@@ -1,6 +1,6 @@
 <script setup>
 // 启动页（旧 #tab-launch）：一键启动 + 六个注入开关（**与设置页共享同一份 settings 状态**）。
-import { ref, onMounted, onUnmounted } from "vue";
+import { ref, computed, onMounted, onUnmounted } from "vue";
 import { call } from "../lib/bridge.js";
 import { showModalDialog } from "../lib/dialog.js";
 import { refreshState } from "../store.js";
@@ -15,17 +15,55 @@ import Switch from "../components/ui/Switch.vue";
 
 const consoleLog = ref("就绪。点「一键启动」：先跑初始化自检（缺什么补什么），再拉起 XXMI Launcher。");
 const renderApi = ref("");
+// ⚠️ **渲染 API 的告警文案**（2026-10-03 补回归）。0.9.5 是这么写的：
+//   vulkan / d3d12 → 「上次启动：X（**服装 Mod 不生效**，请在启动器里点 DirectX 11 启动）」
+//   d3d11          → 「上次启动：DirectX 11」
+//   其它           → 「上次启动：未知」
+// 换代后只显示裸值（`vulkan` / `d3d11`），用户看到 "vulkan" 根本不知道**服装 Mod 不会生效** ——
+// 而这是"我装了 Mod 怎么没效果"最常见的原因。
+const renderApiText = computed(() => {
+  const v = String(renderApi.value || "").toLowerCase();
+  if (v === "vulkan") return "上次启动：Vulkan —— 服装 Mod 不生效，请在启动器里选 DirectX 11 启动";
+  if (v === "d3d12") return "上次启动：DirectX 12 —— 服装 Mod 不生效，请在启动器里选 DirectX 11 启动";
+  if (v === "d3d11") return "上次启动：DirectX 11";
+  return "上次启动：未知（还没启动过，或读不到渲染 API）";
+});
+const renderApiWarn = computed(() => {
+  const v = String(renderApi.value || "").toLowerCase();
+  return v === "vulkan" || v === "d3d12";
+});
 const running = ref(false);
 
+// ⚠️ **B8 / B9：开关要"真的有用"**（2026-10-03 补回归）。
+// 用户定过：「那些**滑块要真的有用，不要就做表面功夫**，你确定一下」。
+// 0.9.5 里这两个开关**拨动即装卸**：
+//   * 乳摇（SecondaryMotion）：`secondary_motion_install` / `secondary_motion_uninstall`
+//     + `secondary_motion_status` 报告「已就位 / 未注入 | plugin\sbm.dll 在/不在」；
+//   * Poser：开启时 `poser_install`（补安装包 + 写游戏目录文件）+ `poser_status` 报告
+//     「plugin\poser.dll 已就位 | loader XX 版 | 表情校准 N 份」。
+// 换代后乳摇那个**连 apply 都没有**（只 `saveSetting` 写了个配置值），Poser 的 apply
+// 只调 `set_poser_enabled`（仅重命名 dll、**不装机**）—— 后端那 5 个方法前端零调用。
+// 结果就是"拨了开关看着变了、实际什么都没装"，正是用户最反感的表面功夫。
 const SWITCHES = [
   { k: "dlss5_addon_enabled", name: "DLSS5 神经渲染", desc: "把游戏自身的 DLSS 输出替换成 DLSS5 神经渲染",
     apply: (v) => call("set_component_addon", "dlss5", v) },
   { k: "firstperson_addon_enabled", name: "第一人称视角", desc: "进游戏按 F1 切换第一人称",
     apply: (v) => call("set_component_addon", "firstperson", v) },
   { k: "efmi_injection", name: "皮肤 Mod", desc: "EFMI 服装 Mod 注入（关掉后不加载任何皮肤）" },
-  { k: "secondary_motion_injection", name: "ShakingBreastManager", desc: "乳摇物理效果" },
+  { k: "secondary_motion_injection", name: "ShakingBreastManager", desc: "乳摇物理效果",
+    // 拨动即装卸（不止写配置）：开启走 `secondary_motion_install`（装 proxy + plugin\sbm.dll
+    // + 数据文件），关闭走 `secondary_motion_uninstall`。
+    apply: (v) => call(v ? "secondary_motion_install" : "secondary_motion_uninstall") },
   { k: "poser_injection", name: "Endfield Poser", desc: "摆姿 / MMD 播放",
-    apply: (v) => call("set_poser_enabled", v) },
+    // ⚠️ **首次开启要先装机**（`poser_install` 补安装包 + 写游戏目录文件），
+    // 装好之后再翻 `set_poser_enabled` 这个"开关 dll"的动作 —— 0.9.5 就是这个顺序。
+    apply: async (v) => {
+      if (v) {
+        const inst = await call("poser_install");
+        if (inst && inst.ok === false) return inst;      // 装机失败就别翻开关了
+      }
+      return call("set_poser_enabled", v);
+    } },
   { k: "hotkey_takeover", name: "Mod 快捷键锁定", desc: "把 Mod 自带快捷键锁成内部键，避免 Mod 之间抢键",
     apply: (v) => call("set_hotkey_takeover", v) },
 ];
@@ -214,6 +252,66 @@ async function preflightGate() {
   if (!(await riskGate())) return false;
   await fileWatchdogGate();
   return true;
+}
+
+// ⚠️ **B1：完整性检查要显示结果、并能一键修复**（2026-10-03 补回归）。
+// 0.9.5（app.js:1957-1980）：`check_integrity` → 有缺失就弹「是否自动修复？」→
+// `repair_integrity()` + 打开日志窗看进度。
+// 换代后只剩 `run('check_integrity')`：**结果丢弃、`repair_integrity` 前端零调用** ——
+// 标签写着「检查/修复完整性」，实际**只能检查、结果还看不见**。
+async function checkIntegrity() {
+  const r = await run("check_integrity");
+  if (!r || r.ok === false) return r;
+  const checks = r.checks || [];
+  const bad = checks.filter((c) => c.ok === false);
+  const lines = checks.map((c) => `${c.ok ? "✓" : "✗"} ${c.message || c.key}${c.ok ? "" : `\n    ${c.path}`}`);
+  if (!bad.length) {
+    await showModalDialog({
+      title: "完整性检查：全部正常", message: lines.join("\n") || "没有可检查的项。",
+      okText: "知道了", showCancel: false,
+    });
+    return r;
+  }
+  const go = await showModalDialog({
+    title: `完整性检查：${bad.length} 项缺失`,
+    message: lines.join("\n") + "\n\n要不要现在自动修复？（会重新下载/补齐缺失的组件文件）",
+    okText: "自动修复", cancelText: "先不修",
+  });
+  if (!go) return r;
+  showProgressToast("integrity-repair", "正在修复完整性…（缺什么补什么，可能要下载）");
+  try {
+    const fixed = await call("repair_integrity");
+    const after = (fixed && fixed.integrity && fixed.integrity.checks) || [];
+    const stillBad = after.filter((c) => c.ok === false);
+    await showModalDialog({
+      title: stillBad.length ? `修复完成，还有 ${stillBad.length} 项没修好` : "完整性已修复",
+      message: stillBad.length
+        ? stillBad.map((c) => `✗ ${c.message || c.key}\n    ${c.path}`).join("\n")
+        : "所有缺失项都已补齐。",
+      okText: "知道了", showCancel: false,
+    });
+    await refreshState();
+  } catch (e) {
+    showToast(String((e && e.message) || "修复失败"), "danger");
+  } finally {
+    hideProgressToast("integrity-repair");
+  }
+  return r;
+}
+
+// ⚠️ **B7：清空日志**（0.9.5 的日志弹窗里有「清空」，`clear_launch_log` 前端零调用）。
+async function clearLaunchLog() {
+  const ok = await showModalDialog({
+    title: "清空启动日志",
+    message: "会清空 `runtime\\logs\\launch.log`。\n\n排查问题时日志很有用，建议**先导出一份诊断包**再清。",
+    okText: "清空", cancelText: "取消", focusCancel: true,
+  });
+  if (!ok) return;
+  const r = await run("clear_launch_log");
+  if (r && r.ok !== false) {
+    showToast("启动日志已清空", "success");
+    await pullLaunchLog();
+  }
 }
 
 async function oneClick() {
@@ -429,13 +527,19 @@ useLogAutoScroll(logBox, () => consoleLog.value);
       <Btn @click="run('launch_secondary_motion')">启动插件界面（乳摇管理器）</Btn>
       <Btn @click="run('open_poser_web_ui')">打开摆姿页（Poser）</Btn>
       <Btn @click="run('prepare_launch')">生成控制器</Btn>
-      <Btn @click="run('check_integrity')">检查/修复完整性</Btn>
+      <Btn @click="checkIntegrity">检查/修复完整性</Btn>
       <Btn @click="run('audit_game_injections')">检查游戏目录注入</Btn>
-      <span v-if="renderApi" class="text-xs self-center" style="color: var(--text-muted)">{{ renderApi }}</span>
+      <span v-if="renderApi" class="text-xs self-center"
+              :style="{ color: renderApiWarn ? 'var(--warn)' : 'var(--text-muted)' }">{{ renderApiText }}</span>
     </div>
 
     <div class="log-card">
-      <div class="log-card-head"><span>运行日志</span></div>
+      <div class="log-card-head">
+        <span>运行日志</span>
+        <!-- ⚠️ **清空日志**（2026-10-03 补回归）：0.9.5 的日志弹窗里有「清空」，
+             换代后 `clear_launch_log` 前端零调用 —— 日志越滚越长却没法清。 -->
+        <Btn size="sm" @click="clearLaunchLog">清空</Btn>
+      </div>
       <div ref="logBox" class="log-box" style="max-height: 260px; border-radius: 0">{{ consoleLog }}</div>
     </div>
   </div>

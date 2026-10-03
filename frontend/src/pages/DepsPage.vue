@@ -47,7 +47,10 @@ function rowColor(d) {
 // 下载实时速度：后端在 byte_progress 里采样并平滑过；不在下载时是 0 ⇒ 显示 —（不留假数字）
 const speedBps = ref(0);      // 由 pollProgress 从 get_dependency_progress 里取
 const modDlActive = ref(false);        // 是否有 Mod 下载在跑（用来联动进度条与速度）
-const modDlHasRecord = ref(false);      // 有没有下载任务记录（决定是否显示「继续 / 清除记录」）
+const modDlHasRecord = ref(false);
+// 已经提示过的「失败 / 太慢」任务（每个只弹一次，避免每秒轮询重复弹）
+// 已经提示过的「失败 / 太慢」任务（每个只弹一次，避免每秒轮询重复弹）
+const modDlWarned = new Set();
 // 「香蕉网高速下载」的显示状态（2026-10-03）：并发连接数 / 是否在加速 / 当前策略
 const mdThreads = ref(0);
 const mdAccelerating = ref(false);
@@ -242,6 +245,41 @@ async function pollProgress() {
         mdThreads.value = Number(md.threads || 0);
         mdAccelerating.value = !!md.accelerating;
         mdPolicy.value = String(md.policy || "");
+      }
+
+      // ⚠️⚠️ **B6：下载失败时要说清"是网络问题、建议开加速器"**（2026-10-03 补回归）。
+      // 后端 `moddl.download()` 一直会返回第三个值"是不是网太慢/连不上"
+      //（`looks_like_slow`：10 KB/s 就是没开加速器的典型症状），任务项上也会带标记；
+      // 但**前端从没弹过这类窗**（现前端 grep `VPN` / `访问不上` / `unreachable` 全 0 命中）——
+      // 而用户 2026-10-02 明确要求过：「弹窗建议开 vpn，而不是纯失败」。
+      // 实测佐证（今天）：无 VPN 直连香蕉网 0.008 MB/s，开 VPN 后单连接 0.129 MB/s
+      //（16 连接 0.641 MB/s）—— 这条提示是真有用，不是安慰话。
+      for (const it of items) {
+        const warnKey = String(it.url || it.name || "");
+        if (!/失败/.test(String(it.status || ""))) continue;
+        if (modDlWarned.has(warnKey)) continue;         // 每个任务只提示一次
+        modDlWarned.add(warnKey);
+        const msg = String(it.message || "");
+        const sluggish = it.slow === true || it.unreachable === true ||
+          /太慢|慢到|超时|timed out|timeout|无法访问|连不上|卡死/i.test(msg);
+        await showModalDialog({
+          title: sluggish ? "这个下载源连不上或太慢" : "Mod 下载失败",
+          message: sluggish
+            ? [
+                `「${it.name || warnKey}」没能下下来：`,
+                "",
+                msg || "",
+                "",
+                "**香蕉网在国内直连常常只有 10 KB/s 左右**，这多半不是你或程序的问题。",
+                "",
+                "建议：",
+                "· 开加速器 / VPN 后重试（实测能把单连接从 0.008 提到 0.129 MB/s）",
+                "· 或者点上面的「继续」，它会从断点接着下，已下完的部分不用重来",
+                "· 「设置 → 下载与网络」里可以确认「下载加速」没被关掉",
+              ].filter((x) => x !== "").join("\n")
+            : [`「${it.name || warnKey}」下载失败：`, "", msg || "（没有更多信息，详见右侧日志）"].join("\n"),
+          okText: "知道了", showCancel: false,
+        });
       }
 
       // ⚠️ **下载完成的弹窗**（2026-10-03 用户：「下载完 mod 应该和拖入 zip 一样有个弹窗」）。
