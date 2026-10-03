@@ -609,16 +609,30 @@ class AppConfig:
         # **原子写**：直接 write_text 覆盖时，写到一半被杀/断电会留下半截 JSON，
         # 下次启动解析失败 → 配置静默重置（"配置莫名清空"就是这么来的）。
         # 先写同目录临时文件再 os.replace：目标要么是旧的完整文件，要么是新的完整文件。
-        tmp = path.with_name(path.name + f".tmp-{os.getpid()}")
-        try:
-            tmp.write_text(payload, encoding="utf-8")
-            os.replace(tmp, path)
-        except OSError:
+        # ⚠️ **必须重试**（2026-10-03 用户实测）：
+        #     set_component_addon failed: [WinError 2] 系统找不到指定的文件。:
+        #         'D:\zmdmod\modtest\config.json.tmp-10116' -> 'D:\zmdmod\modtest\config.json'
+        # `tmp.write_text()` 明明成功了，可轮到 `os.replace` 时**临时文件已经没了** ——
+        # 这是**杀软实时扫描**把刚写出的文件吃掉的特征（用户机器上就有，
+        # 且他此前反馈过"某文件老是被删掉"）。扫描通常只持续几十到几百毫秒，
+        # 短暂退避后重试即可；多次仍失败才如实抛错。
+        last_exc: OSError | None = None
+        for attempt in range(5):
+            # 每次换一个临时名：被杀软"记住"的那个名字重试也大概率再被吃掉
+            tmp = path.with_name(f"{path.name}.tmp-{os.getpid()}-{attempt}")
             try:
-                tmp.unlink()
-            except OSError:
-                pass
-            raise
+                tmp.write_text(payload, encoding="utf-8")
+                os.replace(tmp, path)
+                return
+            except OSError as exc:
+                last_exc = exc
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
+                time.sleep(0.05 * (attempt + 1))     # 50/100/150/200ms 退避
+        assert last_exc is not None
+        raise last_exc
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
