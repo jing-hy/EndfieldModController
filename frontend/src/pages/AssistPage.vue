@@ -21,8 +21,12 @@ async function openLib() { try { await call("open_path_in_explorer", "library");
       <Btn @click="openLib">打开 Mod 库文件夹</Btn>
       <span class="text-xs" style="color: var(--text-muted)">{{ status }}</span>
     </div>
-    <Card v-if="!list.length" title="没有辅助 Mod">
-      <p class="text-sm" style="color: var(--text-muted)">把 .zip / .7z / .rar 拖到页面任意处即可导入。</p>
+    <Card v-if="!list.length" title="辅助 Mod">
+      <div class="empty-state">
+        <div class="empty-title">这里还没有辅助 Mod</div>
+        <div>辅助 Mod 是"不绑角色"的工具类 Mod（例如公共前置资源）。</div>
+        <div>把 .zip / .7z / .rar 拖到窗口任意处即可导入，导入后会自动归类到这里。</div>
+      </div>
     </Card>
     <Card v-else :title="`辅助 Mod（${list.length}）`">
       <div class="divide-y" style="border-color: var(--border)">

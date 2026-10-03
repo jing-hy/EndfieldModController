@@ -58,3 +58,60 @@ class FeedAddonToggleTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# 2026-10-03：判据必须是「文件 + 运行时证据」两条，不能只看文件
+# （用户转来的反馈：XXMI/EFMI 强制 -force_d3d11 时游戏建不出 DLSS 特性，
+#   停用 feeder 等于把 DLSS5 关掉 —— v0.9.5 就是这么坏的。）
+# ---------------------------------------------------------------------------
+
+def _feed_check(monkeypatch, tmp_path, *, present, enabled, render_api):
+    """跑一次 _check_dlss5_feed_redundant，返回 (report, 是否调用了停用/启用)。"""
+    from endfieldmodcontroller import initialize, launcher, reshade_integration
+    from endfieldmodcontroller.config import AppConfig
+
+    config = AppConfig()
+    config.auto_disable_feed_on_native_dlss = True
+    calls = []
+
+    monkeypatch.setattr(launcher, "feed_addon_status",
+                        lambda cfg: {"present": present, "on": enabled})
+    monkeypatch.setattr(launcher, "set_feed_addon_enabled",
+                        lambda cfg, on, log=None: (calls.append(on), {"ok": True, "moved": True})[1])
+    monkeypatch.setattr(reshade_integration, "detect_game_dir", lambda cfg, allow_scan=True: tmp_path)
+    monkeypatch.setattr(reshade_integration, "native_dlss_present",
+                        lambda game_dir: {"present": present, "files": ["nvngx_dlss.dll"] if present else []})
+    monkeypatch.setattr(reshade_integration, "detect_render_api", lambda game_dir: render_api)
+
+    report = initialize.Report()
+    initialize._check_dlss5_feed_redundant(config, report, None)
+    entries = [e for e in report.checks if e.get("key") == "dlss5:feed"]
+    return (entries[0] if entries else None), calls
+
+
+def test_feed_kept_when_running_d3d11(monkeypatch, tmp_path):
+    """★ 核心回归：游戏目录里有 DLSS 文件，但运行时是 d3d11 ⇒ **绝不能停用** feeder。"""
+    entry, calls = _feed_check(monkeypatch, tmp_path, present=True, enabled=True, render_api="d3d11")
+    assert calls == [], f"d3d11 下不许停用喂帧组件，却调用了 {calls}"
+    assert entry is not None and "保持启用" in entry["message"]
+
+
+def test_feed_kept_when_render_api_unknown(monkeypatch, tmp_path):
+    """证据不足时保守：不确定就留着 feeder（停错等于 DLSS5 全废）。"""
+    entry, calls = _feed_check(monkeypatch, tmp_path, present=True, enabled=True, render_api="unknown")
+    assert calls == []
+
+
+def test_feed_disabled_only_on_d3d12(monkeypatch, tmp_path):
+    """真的跑 D3D12、用得上游戏自己的 DLSS 时，才停用。"""
+    entry, calls = _feed_check(monkeypatch, tmp_path, present=True, enabled=True, render_api="d3d12")
+    assert calls == [False]
+    assert entry is not None and "已自动停用" in entry["message"]
+
+
+def test_feed_restored_when_misdisabled_on_d3d11(monkeypatch, tmp_path):
+    """★ 自愈：被 v0.9.5 那个只看文件的判据误停用的机器，自检要把它放回来。"""
+    entry, calls = _feed_check(monkeypatch, tmp_path, present=True, enabled=False, render_api="d3d11")
+    assert calls == [True], "d3d11 下被停用的 feeder 必须自动放回"
+    assert entry is not None and "放回" in entry["message"]

@@ -415,6 +415,14 @@ class AppConfig:
     # 自带 DLSS 的游戏上它多余，且会与游戏自己的 DLSS（以及 OptiScaler 这类第三方 NGX
     # 注入器）抢同一条 NGX 链路。停用 = 把文件移进 `runtime\dlss5\_disabled\`（**可逆**：
     # 关掉这个开关，下次自检会自动放回）。默认 True。
+    #
+    # ⚠️ **判据是「文件 + 运行时证据」两条**（2026-10-03 修）：
+    # 只看游戏目录里有没有 `sl.interposer.dll` / `nvngx_dlss.dll` **不够** ——
+    # XXMI/EFMI 会强制 `-force_d3d11`，那时游戏**根本建不出 DLSS 特性**
+    # （`Player.log` 里是 `Forcing GfxDevice: Direct3D 11`），喂帧组件反而是 DLSS5 的
+    # **必需**环节，停掉它等于把 DLSS5 彻底关掉。所以现在还要 `detect_render_api()` 判定
+    # **运行时确实跑在 D3D12**（读的是游戏自己的 Player.log）才停用；d3d11 / unknown 一律
+    # **保持启用**，并且会把被误停用的自动放回。
     auto_disable_feed_on_native_dlss: bool = True
     dependency_manifest: str = "dependencies.json"
     launch_extra_args: list[str] = field(default_factory=list)

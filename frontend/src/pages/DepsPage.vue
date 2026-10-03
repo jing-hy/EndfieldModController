@@ -74,7 +74,16 @@ onUnmounted(() => { if (timer) clearInterval(timer); });
       <div class="text-xs mt-1.5" style="color: var(--text-muted)">{{ progressText }}</div>
     </div>
 
-    <div class="log-box h-48">{{ logLines.join("\n") }}</div>
+    <div class="log-card">
+      <div class="log-card-head">
+        <span>安装日志</span>
+        <span class="text-xs" style="color: var(--text-muted); font-weight: 400">
+          {{ logLines.length ? logLines.length + " 行" : "尚无日志" }}
+        </span>
+      </div>
+      <div v-if="logLines.length" class="log-box" style="max-height: 260px; border-radius: 0">{{ logLines.join("\n") }}</div>
+      <div v-else class="log-empty">尚未开始。点「自动安装/更新」后，下载线路尝试、断点续传与组件安装过程会显示在这里。</div>
+    </div>
 
     <Card v-if="deps.length" title="组件状态">
       <div class="divide-y" style="border-color: var(--border)">

@@ -87,8 +87,13 @@ def test_set_feed_addon_enabled_only_touches_feed(tmp_path):
 
 
 # --------------------------------------------------------------- 自检行为
-def test_initialize_auto_disables_feed_on_native_dlss(tmp_path):
+def test_initialize_auto_disables_feed_on_native_dlss(tmp_path, monkeypatch):
     config, _game, dlss5 = _env(tmp_path, native_dlss=True, feed_enabled=True)
+    # 2026-10-03：判据改成「文件 + **运行时证据**」两条 —— 只有当游戏真的跑在 D3D12 上、
+    # 用得上自己那套 DLSS 时，"喂帧组件多余"才成立。这里把运行时证据钉成 d3d12，
+    # 否则测试会跟着跑测机器上的真实 Player.log 飘。
+    monkeypatch.setattr("endfieldmodcontroller.reshade_integration.detect_render_api",
+                        lambda game_dir: "d3d12")
     report = initialize.Report()
     logs: list[str] = []
 

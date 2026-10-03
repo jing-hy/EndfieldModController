@@ -31,7 +31,14 @@ const tabs = [
   { id: "settings", name: "设置", icon: Settings },
   { id: "about", name: "说明", icon: Info },
 ];
+const THEME_LABELS = { light: "浅色", dark: "深色", amber: "琥珀", cyan: "青蓝", violet: "紫罗兰", emerald: "翡翠" };
 const theme = ref(currentTheme());
+const themeLabel = computed(() => THEME_LABELS[theme.value] || theme.value);
+// 版本号只在拿得到时才显示（拿不到时不要留一个 "v..."）
+const versionText = computed(() => {
+  const v = store.state.version;
+  return v ? (String(v).startsWith("v") ? String(v) : "v" + v) : "";
+});
 // 拖放导入：提示层**松开鼠标就消失**（用户要求「应该是释放就消失」），拖拽计数避免子元素抖动
 const dragging = ref(false);
 // 公告条（用户每次启动都会看到；点关闭就告诉后端"已读"）
@@ -145,13 +152,13 @@ onMounted(async () => {
           class="w-full flex items-center gap-2.5 px-3 py-2 rounded text-sm"
           style="color: var(--text-muted)">
           <Palette :size="16" />
-          <span>主题：{{ theme }}</span>
+          <span>主题：{{ themeLabel }}</span>
         </button>
         <div v-if="themeOpen" class="absolute bottom-12 left-2 right-2 card p-1.5 shadow-lg z-20">
           <button v-for="t in THEMES" :key="t" @click="pickTheme(t)"
             class="w-full text-left px-2.5 py-1.5 rounded text-sm"
             :style="t === theme ? { background: 'var(--accent-soft)', color: 'var(--accent)' } : {}">
-            {{ t }}
+            {{ THEME_LABELS[t] }}
           </button>
         </div>
       </div>
@@ -173,15 +180,20 @@ onMounted(async () => {
           </div>
         </div>
       </div>
-      <header class="h-12 px-6 flex items-center justify-between border-b sticky top-0 z-10"
+      <header class="h-14 px-6 flex items-center justify-between border-b sticky top-0 z-10"
               style="background: var(--surface); border-color: var(--border)">
-        <h1 class="text-base font-semibold">{{ currentName }}</h1>
-        <span class="text-xs" style="color: var(--text-muted)">v{{ store.state.version || "…" }}</span>
+        <div>
+          <h1 class="page-title">{{ currentName }}</h1>
+        </div>
+        <!-- 版本号：拿不到就**整个不显示**（评审：原来显示成 `v...`，像加载失败） -->
+        <span v-if="versionText" class="text-xs" style="color: var(--text-muted)">{{ versionText }}</span>
       </header>
-      <div class="p-6 max-w-4xl">
-        <component :is="currentPage" v-if="currentPage" />
-        <div v-else class="card p-6 text-sm" style="color: var(--text-muted)">
-          「{{ currentName }}」还在迁移中（新前端逐页搬，这一页暂时用旧界面）。
+      <div class="px-6 py-5">
+        <div class="page-inner">
+          <component :is="currentPage" v-if="currentPage" />
+          <div v-else class="card p-6 text-sm" style="color: var(--text-muted)">
+            「{{ currentName }}」还在迁移中（新前端逐页搬，这一页暂时用旧界面）。
+          </div>
         </div>
       </div>
     </main>

@@ -49,12 +49,16 @@ async function run(method, ...args) { try { return await call(method, ...args); 
 
     <Card title="注入开关">
       <div class="divide-y" style="border-color: var(--border)">
-        <div v-for="s in SWITCHES" :key="s.k" class="py-3 flex items-center justify-between gap-4">
+        <div v-for="s in SWITCHES" :key="s.k" class="switch-row"
+             @click="saveSetting(s.k, !settings[s.k])">
           <div class="min-w-0">
             <div class="font-medium">{{ s.name }}</div>
             <div class="text-xs mt-0.5" style="color: var(--text-muted)">{{ s.desc }}</div>
           </div>
-          <Switch :model-value="!!settings[s.k]" @update:model-value="(v) => saveSetting(s.k, v)" />
+          <div class="flex items-center gap-2 shrink-0">
+            <span class="switch-state">{{ settings[s.k] ? "已开启" : "已关闭" }}</span>
+            <Switch :model-value="!!settings[s.k]" @update:model-value="(v) => saveSetting(s.k, v)" />
+          </div>
         </div>
       </div>
     </Card>
@@ -68,6 +72,9 @@ async function run(method, ...args) { try { return await call(method, ...args); 
       <span v-if="renderApi" class="text-xs self-center" style="color: var(--text-muted)">{{ renderApi }}</span>
     </div>
 
-    <div class="log-box h-56">{{ consoleLog }}</div>
+    <div class="log-card">
+      <div class="log-card-head"><span>运行日志</span></div>
+      <div class="log-box" style="max-height: 260px; border-radius: 0">{{ consoleLog }}</div>
+    </div>
   </div>
 </template>

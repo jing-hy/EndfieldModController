@@ -1013,6 +1013,30 @@ def _check_dlss5_feed_redundant(config: AppConfig, report: Report,
     native = reshade_integration.native_dlss_present(game_dir)
     hits = "、".join(native.get("files") or [])
 
+    # ⚠️ **光看文件不够**（2026-10-03 核实了用户转来的反馈）：
+    # `native_dlss_present()` 只回答"游戏目录里有没有 sl.interposer.dll / nvngx_dlss.dll"，
+    # 但 XXMI/EFMI 会强制 `-force_d3d11`，那时游戏**根本建不出 DLSS 特性**
+    # （`Player.log` 里是 `Forcing GfxDevice: Direct3D 11`），喂帧组件反而是 DLSS5 的
+    # **必需**环节 —— 停掉它等于把 DLSS5 彻底关掉（v0.9.5 就是这么把它弄坏的）。
+    # 只有游戏**真的跑在 D3D12 上**、用得上自己那套 DLSS 时，"feeder 多余"才成立。
+    # 用的是运行时证据（游戏自己的 Player.log），不是文件存在性。
+    try:
+        render_api = reshade_integration.detect_render_api(game_dir)
+    except Exception:  # noqa: BLE001
+        render_api = "unknown"
+    feed_redundant = render_api == "d3d12"
+
+    if native.get("present") and status.get("on") and not feed_redundant:
+        report.add(
+            "dlss5:feed", True,
+            f"游戏目录里有自带 DLSS 的组件（{hits}），但**运行时并不是在跑它自己的 DLSS**"
+            f"（检测到渲染 API：{render_api}）—— 这种情况下游戏建不出 DLSS 特性，"
+            f"喂帧组件（dlss5-feed.addon64）是 DLSS5 的必需环节，**保持启用**"
+            f"（停掉它等于把 DLSS5 关掉，v0.9.5 就是这么坏的）。"
+            f"若你确实想让游戏用自己的 DLSS，请在 XXMI/EFMI 里去掉强制 -force_d3d11。",
+        )
+        return
+
     if native.get("present") and status.get("on"):
         result = launcher.set_feed_addon_enabled(config, False, log=log)
         if result.get("ok") and result.get("moved"):
@@ -1029,11 +1053,15 @@ def _check_dlss5_feed_redundant(config: AppConfig, report: Report,
                        manual=True)
         return
 
-    if not native.get("present") and not status.get("on"):
+    # 需要放回的两种情况：游戏不自带 DLSS；或自带但运行时根本不走它自己的 DLSS
+    # （后者正是被 v0.9.5 那个只看文件的判据误停用的机器，必须能自愈）。
+    if (not native.get("present") or not feed_redundant) and not status.get("on"):
         result = launcher.set_feed_addon_enabled(config, True, log=log)
         if result.get("ok") and result.get("moved"):
             report.add("dlss5:feed", True,
-                       "当前游戏未检测到自带 DLSS → 已把之前停用的喂帧组件**放回**",
+                       ("当前游戏未检测到自带 DLSS" if not native.get("present")
+                        else f"游戏自带 DLSS 但运行时不在 D3D12（{render_api}），喂帧组件是必需的")
+                       + " → 已把之前停用的喂帧组件**放回**",
                        fixed=True)
         else:
             report.add("dlss5:feed", True, "喂帧组件已停用，且当前游戏未检测到自带 DLSS（放回失败，稍后重试）")

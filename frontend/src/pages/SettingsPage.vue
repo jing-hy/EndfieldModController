@@ -121,7 +121,7 @@ async function openPath(kind) { await run("open_path_in_explorer", kind); }
       <SettingSwitch k="auto_update_dependencies" label="启动前自动更新依赖" />
       <SettingSwitch k="require_admin" label="启动时请求管理员权限" />
       <SettingSwitch k="auto_disable_feed_on_native_dlss" label="游戏自带 DLSS 时自动停用喂帧组件"
-        hint="终末地自带 DLSS：喂帧组件（dlss5-feed）会与游戏自己的 DLSS 抢同一条 NGX 链路。开启时自检会自动把它停用（文件移进 runtime\dlss5\_disabled，可逆）。" />
+        hint="终末地自带 DLSS 时，喂帧组件会与游戏自己的 DLSS 抢同一条 NGX 链路。开启时自检会把它停用（移进 runtime\dlss5\_disabled，可逆）—— 但只有游戏**确实跑在 D3D12** 时才停：被 XXMI/EFMI 强制 -force_d3d11 时游戏建不出自己的 DLSS，喂帧组件是 DLSS5 的必需环节，此时会保持启用。" />
       <SettingSwitch k="inject_reshade_ui" label="注入统一控制面板（自研 ReShade addon）"
         hint="放进 ReShade 真正读取的目录（d3d12.dll 所在处）。关掉后不注入面板；此时「整合 Mod 快捷键」会拒绝锁键。" />
       <SettingSwitch k="prefer_internal_dependencies" label="依赖包优先用控制器维护的那份"

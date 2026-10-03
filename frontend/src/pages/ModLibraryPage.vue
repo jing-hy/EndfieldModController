@@ -197,7 +197,7 @@ onUnmounted(() => { if (timer) clearInterval(timer); if (dlTimer) clearInterval(
   <div class="space-y-4">
     <Card title="皮肤 Mod">
       <div class="divide-y" style="border-color: var(--border)">
-        <div class="py-3 flex items-center justify-between gap-4">
+        <div class="switch-row" @click="saveSetting('efmi_injection', !settings.efmi_injection)">
           <div class="min-w-0">
             <div class="font-medium">开启皮肤 Mod</div>
             <div class="text-xs mt-0.5" style="color: var(--text-muted)">
@@ -206,7 +206,7 @@ onUnmounted(() => { if (timer) clearInterval(timer); if (dlTimer) clearInterval(
           </div>
           <Switch :model-value="!!settings.efmi_injection" @update:model-value="(v) => saveSetting('efmi_injection', v)" />
         </div>
-        <div class="py-3 flex items-center justify-between gap-4">
+        <div class="switch-row" @click="saveSetting('allow_same_character_mods', !settings.allow_same_character_mods)">
           <div class="min-w-0">
             <div class="font-medium">强行关闭角色 Mod 互斥</div>
             <div class="text-xs mt-0.5" style="color: var(--text-muted)">
@@ -266,7 +266,12 @@ onUnmounted(() => { if (timer) clearInterval(timer); if (dlTimer) clearInterval(
         <Btn @click="fixAll">一键修复所有 Mod（实验性）</Btn>
         <span class="text-xs" style="color: var(--text-muted)">同角色自动互斥，选择自动保存。把 .zip / .7z / .rar 拖到页面任意处即可导入。</span>
       </div>
-      <div class="mt-3 space-y-4">
+      <div v-if="!groups.length" class="empty-state">
+        <div class="empty-title">还没有发现 Mod</div>
+        <div>把 .zip / .7z / .rar 拖到窗口任意处即可导入；也可以在上面粘贴网址下载。</div>
+        <div>如果你已经把 Mod 放进 Mod 库目录了，点「重新扫描」。</div>
+      </div>
+      <div v-else class="mt-3 space-y-4">
         <div v-for="g in groups" :key="g.name" class="rounded-lg border p-3" style="border-color: var(--border)">
           <div class="flex items-center justify-between mb-3">
             <h3 class="font-semibold">{{ g.name }}</h3>
