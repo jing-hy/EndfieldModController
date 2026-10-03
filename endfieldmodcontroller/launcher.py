@@ -350,6 +350,14 @@ def _sync_enhancer_section(source: Path, target: Path,
                                "CameraMeshHeadHiding",
                                "CameraSmoothPerspectiveTransition",
                                "ShortcutFirstPerson",
+                               # ⚠️ **2026-10-03 改变主意：`Language` 重新纳入同步**。
+                               # 上一版我把它排除在外（理由"它是用户偏好，别覆盖用户的选择"），
+                               # 但实测结果是：**addon 每次游戏启动都把它读的那份 ini 写成出厂值**
+                               #（`Language=2` 英文、`CameraEFMICompatibility=0` …），
+                               # 于是"一键启动时同步成中文 → 游戏一跑又被写回英文"，
+                               # 用户看到的就是「第一人称打开又是英文」且每次都要手动再改一遍。
+                               # 用户明确要中文，所以改成每次一键启动都写回 `Language=1`。
+                               "Language",
                            )) -> int:
     """把源 ini 里 `[endfield-enhancer]` 段的关键项同步进目标 ini，返回改了几项。
 
