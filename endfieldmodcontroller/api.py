@@ -2960,11 +2960,51 @@ class EndfieldModControllerApi:
                 })
         return {"pending": pending, "total": len(pending), "known": self.known_characters()}
 
+    def set_mod_kind(self, mod_id: str, kind: str) -> dict[str, Any]:
+        """把 Mod 在「皮肤 Mod」与「辅助 Mod」之间移动（用户手动纠正误识别）。
+
+        用户 2026-10-03：「**一些被误识别的 mod 可以在辅助和皮肤之间移动**」。
+        自动判据（`core.infer_kind_and_group`）永远只能猜，猜错了必须让用户一句话改过来 ——
+        与"角色归属"同一套做法：写进该 Mod 目录下的 `mod.meta.json`，此后扫描即为显式值。
+
+        `kind` 只接受 `assist`（辅助 Mod）与 `character`（皮肤 Mod）两个值。
+        """
+        want = str(kind or "").strip().lower()
+        if want not in ("assist", "character"):
+            return {"ok": False, "message": "只能移到「辅助 Mod」或「皮肤 Mod」"}
+        target = next((m for m in self._mods() if m.id == mod_id), None)
+        if target is None:
+            return {"ok": False, "message": f"找不到 Mod: {mod_id}"}
+
+        meta_path = target.path / "mod.meta.json"
+        payload: dict[str, Any] = {}
+        if meta_path.is_file():
+            try:
+                loaded = json.loads(meta_path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    payload = loaded
+            except (OSError, json.JSONDecodeError):
+                payload = {}
+        payload["kind"] = want
+        payload.setdefault("id", target.id)
+        payload.setdefault("name", target.name)
+        # 移成辅助 Mod 时清掉角色归属（辅助 Mod 不参与同角色互斥）；
+        # 移回皮肤 Mod 时不动 group，让用户自己再选一次归属。
+        if want == "assist":
+            payload.pop("character", None)
+        try:
+            meta_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError as exc:
+            return {"ok": False, "message": f"写入失败: {exc}"}
+        return {"ok": True, "kind": want, "name": target.name}
+
     def set_mod_character(self, mod_id: str, character: str) -> dict[str, Any]:
         """把用户选定的角色写进该 Mod 的 `mod.meta.json`，此后扫描即为高置信。"""
         character = (character or "").strip()
-        if not character:
-            return {"ok": False, "message": "角色名不能为空"}
+        # ⚠️ **允许留空 = 未分类**。原来这里写死"角色名不能为空"，而前端文案一直写着
+        # "留空 = 保持未分类"，两边直接打架（用户 2026-10-03：「说了留空 = 保持未分类，
+        # 设定又说不能留空」）。语义上"未分类"是合法状态：壁纸/加载页这类 Mod 本就不属于
+        # 任何角色，不应该被迫选一个。
         target = next((m for m in self._mods() if m.id == mod_id), None)
         if target is None:
             return {"ok": False, "message": f"找不到 Mod: {mod_id}"}

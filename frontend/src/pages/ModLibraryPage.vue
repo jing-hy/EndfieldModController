@@ -151,6 +151,13 @@ async function menuAct(act) {
       // 改成真正的下拉选择器（CharacterAssignDialog）。
       assignRef.value.openFor(m);
       return;
+    } else if (act === "toAssist" || act === "toSkin") {
+      // 用户 2026-10-03：「一些被误识别的 mod 可以在辅助和皮肤之间移动」——
+      // 自动判据只能猜，猜错了要让用户一句话改过来（写进该 Mod 的 mod.meta.json）。
+      const want = act === "toAssist" ? "assist" : "character";
+      const r = await call("set_mod_kind", m.id, want);
+      if (r && r.ok === false) await showAlert("移动失败", r.message || "未知原因");
+      else showToast(want === "assist" ? `「${m.name}」已移到辅助 Mod` : `「${m.name}」已移到皮肤 Mod`, "success");
     } else if (act === "open") {
       const mod = (store.state.mods || []).find((x) => String(x.id) === m.id);
       if (mod && mod.path) await call("open_path_in_explorer", mod.path);
@@ -369,6 +376,10 @@ watch(() => store.demoCovers, (val) => {
          :style="{ left: menu.x + 'px', top: menu.y + 'px' }">
       <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('character')">更改所属角色…</button>
       <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('fix')">修复 Mod 文件</button>
+            <button v-if="m.kind !== 'assist'" class="w-full text-left px-3 py-1.5 text-sm"
+                    @click="menuAct('toAssist', m)">移到「辅助 Mod」</button>
+            <button v-else class="w-full text-left px-3 py-1.5 text-sm"
+                    @click="menuAct('toSkin', m)">移到「皮肤 Mod」</button>
       <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('rollback')">回滚</button>
       <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('open')">打开所在目录</button>
       <div style="height:1px;background:var(--border)" class="my-1"></div>
