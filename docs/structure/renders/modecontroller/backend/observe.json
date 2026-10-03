@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "id": "modecontroller.backend.observe",
+  "updated_at": "2026-10-02T07:47:47.230Z",
+  "mode": "groups",
+  "reading": {
+    "zh": "按一次事故的脉络读：采集事实 → 判定是不是崩了、崩在哪 → 记住它（或者后来跑通了就把记忆撤掉）→ 把现场打包给人看 → 继续盯守，好让下一次也被抓到。",
+    "en": "Follow one incident: collect the facts, judge whether it was a crash and why, remember it (or withdraw the memory when a later run succeeds), package the scene for a human, and keep watching so the next one is captured too."
+  },
+  "order": [
+    "modecontroller.backend.observe.evidence",
+    "modecontroller.backend.observe.sample",
+    "modecontroller.backend.observe.logs",
+    "modecontroller.backend.observe.device",
+    "modecontroller.backend.observe.classify",
+    "modecontroller.backend.observe.memory",
+    "modecontroller.backend.observe.conflict-state",
+    "modecontroller.backend.observe.report",
+    "modecontroller.backend.observe.bundle",
+    "modecontroller.backend.observe.diag-bundle",
+    "modecontroller.backend.observe.watch",
+    "modecontroller.backend.observe.proc-monitor",
+    "modecontroller.backend.observe.file-watch"
+  ],
+  "groups": [
+    {
+      "id": "collect",
+      "title": {
+        "zh": "采集事实",
+        "en": "Collect Facts"
+      },
+      "children": [
+        "modecontroller.backend.observe.evidence",
+        "modecontroller.backend.observe.sample",
+        "modecontroller.backend.observe.logs",
+        "modecontroller.backend.observe.device"
+      ]
+    },
+    {
+      "id": "judge",
+      "title": {
+        "zh": "判定与记忆",
+        "en": "Judge & Remember"
+      },
+      "children": [
+        "modecontroller.backend.observe.classify",
+        "modecontroller.backend.observe.memory",
+        "modecontroller.backend.observe.conflict-state"
+      ]
+    },
+    {
+      "id": "output",
+      "title": {
+        "zh": "打包产出",
+        "en": "Package It Up"
+      },
+      "children": [
+        "modecontroller.backend.observe.report",
+        "modecontroller.backend.observe.bundle",
+        "modecontroller.backend.observe.diag-bundle"
+      ]
+    },
+    {
+      "id": "watch",
+      "title": {
+        "zh": "持续盯守",
+        "en": "Keep Watching"
+      },
+      "children": [
+        "modecontroller.backend.observe.watch",
+        "modecontroller.backend.observe.proc-monitor",
+        "modecontroller.backend.observe.file-watch"
+      ]
+    }
+  ]
+}

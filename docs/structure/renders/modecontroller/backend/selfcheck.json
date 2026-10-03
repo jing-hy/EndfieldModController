@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "id": "modecontroller.backend.selfcheck",
+  "updated_at": "2026-10-02T07:47:47.142Z",
+  "mode": "layers",
+  "reading": {
+    "zh": "最上面是编排，接着按实际执行顺序排的各组检查（运行时文件 → DLSS5 → 子插件 → Mod/中转 → 面板键位），最下面是修复入口 —— 它**故意就是同一条链**，而不是第二套实现。",
+    "en": "Top is the orchestration, then the check groups in the order they run (runtime files → DLSS5 → sub-plugins → mods/staging → panel keys), and at the bottom the repair entry — which is deliberately the same chain, not a second implementation."
+  },
+  "order": [
+    "modecontroller.backend.selfcheck.core",
+    "modecontroller.backend.selfcheck.runtime",
+    "modecontroller.backend.selfcheck.dlss5",
+    "modecontroller.backend.selfcheck.plugins",
+    "modecontroller.backend.selfcheck.mods",
+    "modecontroller.backend.selfcheck.panel",
+    "modecontroller.backend.selfcheck.integrity"
+  ]
+}

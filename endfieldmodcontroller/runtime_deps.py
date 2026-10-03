@@ -12,7 +12,7 @@ import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from . import dependencies
 from .config import AppConfig
@@ -202,6 +202,56 @@ def _note(config: AppConfig | None, message: str) -> None:
         pass
 
 
+def _skip_online_check(
+    config: AppConfig,
+    key: str,
+    marker: dict,
+    path: Any,
+    local_version: str,
+    progress: Progress = None,
+    index: int = 0,
+    *,
+    force: bool = False,
+) -> BuiltinResult | None:
+    """「自动更新依赖」关着 + 本地就位 ⇒ **一次网络都不发**，直接算"已是最新"。
+
+    ⚠️ 2026-10-03 用户实测（原话：「为什么真正启动这么慢，在干什么，日志也没有」）：
+    点一次「一键启动」花了 **62 秒**，日志里是
+
+        23:37:00 builtin XXMI: start → checking → up_to_date   （1.8s）
+        23:37:02 XXMI-Libs                                     （1.4s）
+        23:37:03 EFMI                                          （1.3s）
+        23:37:05 builtin Poser: start
+        23:37:59 builtin Poser: installed                      ← **54 秒在下载新版**
+
+    而他的「自动更新依赖」是**关着**的 —— `ensure_xxmi` 早就尊重这个开关（只报告不下载），
+    可 `ensure_xxmi_libs` / `ensure_efmi` / `ensure_poser` **都没写这条判断**，
+    于是上游一发新版，启动流程就**静默下载几十 MB**，用户看到的就是"卡住、日志也不动"。
+
+    现在统一：**关着自动更新 + 本地已就位 ⇒ 一个请求都不发**。
+    想检查有没有新版：依赖页的「检查状态（不下载）」（`updates.check_updates`）才联网；
+    用户在依赖页亲手点「一键更新全部组件」走 `force=True`，照旧真的更新。
+    """
+    if force:
+        return None                      # 显式更新：一律照旧（真的联网、真的下载）
+    if getattr(config, "auto_update_dependencies", False):
+        return None
+    try:
+        from . import launcher
+    except Exception:  # noqa: BLE001
+        launcher = None
+    message = (f"{key}：本地已就位（{local_version or '未知'}）"
+               f"—— 未开启自动更新，跳过联网检查（想查新版去依赖页）")
+    if launcher is not None:
+        try:
+            launcher._append_log(config, message)
+        except Exception:  # noqa: BLE001
+            pass
+    if progress:
+        progress(index + 1, 3, key, "up_to_date")
+    return BuiltinResult(key, "up_to_date", "already current", local_version, str(path))
+
+
 def _auto_update_enabled(config: AppConfig) -> bool:
     """用户有没有打开「自动更新依赖」。
 
@@ -219,29 +269,20 @@ def ensure_xxmi(config: AppConfig, progress: Progress = None, byte_progress: Byt
     marker = _read_marker(root)
     if progress:
         progress(0, 3, "XXMI", "checking")
+    # 关着自动更新 + 本地就位 ⇒ 不联网（2026-10-03：这是"一键启动 62 秒"的第一层原因）
+    if existing is not None:
+        skipped = _skip_online_check(config, "XXMI", marker, existing,
+                                     marker.get("version") or "", progress, 0, force=force)
+        if skipped is not None:
+            return skipped
     url, version, asset_name, digest = _latest_release_asset(XXMI_REPO, XXMI_ASSET_PATTERN)
     if existing and marker.get("version") == version:
         if progress:
             progress(1, 3, "XXMI", "up_to_date")
         return BuiltinResult("XXMI", "up_to_date", "already current", version, str(existing))
-    # ⚠️⚠️ **关了「自动更新依赖」就只报告、不下载**（2026-10-03 用户：
-    #     「**自动更新应该弹窗跳转到依赖页下载**」）。
-    # 背景：他 `auto_update_dependencies = False`，但一键启动仍在这里**同步下 51.4 MB**，
-    # 界面只显示 `builtin XXMI: checking` ⇒ 他的感受是「xxmi 又拉不起来」。
-    # 现在：有本地版本但版本旧 → 回 `update_available`（前端会弹窗引导去依赖页），
-    # 完全没有本地版本时才必须下载（否则没法用）。
-    # force=True 时绕过这个开关（2026-10-03 修「告诉我更新完了，但是一键启动又说没有」）：
-    # 那个开关的语义是「启动时要不要自动更新」（用户原话：「自动更新应该弹窗跳转到
-    # 依赖页下载」= 不自动下载、引导到依赖页）；而用户在依赖页亲手点「一键更新全部
-    # 组件」是显式指令，必须真的更新，否则这个按钮就是个摆设。
-    # 实测：关着开关时点「一键更新」报"更新完成"，而 XXMI 仍是 v2.2.1。
-    if existing and not _auto_update_enabled(config) and not force:
-        _note(config, f"XXMI：本地 {marker.get('version') or '未知'}，远端 {version}"
-                      f"（未开启自动更新 ⇒ 只提示，不下载）")
-        if progress:
-            progress(1, 3, "XXMI", "update_available")
-        return BuiltinResult("XXMI", "update_available",
-                             f"有新版本 {version}（未开启自动更新）", version, str(existing))
+    # 走到这里只有两种情形：**本地根本没有**（必须下载，否则没法用），或者用户显式点了
+    # 「一键更新全部组件」（`force=True`）/ 开着「自动更新依赖」—— 都要真的下。
+    # 「关着开关、本地旧版」那条路已经在 `_skip_online_check` 里提前返回了。
     _note(config, f"XXMI：最新版 {version}，准备下载 {asset_name}")
     _download_extract(url, asset_name, root, byte_progress, 1, 3, "XXMI",
                               expected_sha256=digest,
@@ -271,6 +312,11 @@ def ensure_xxmi_libs(config: AppConfig, progress: Progress = None, byte_progress
     marker = _read_marker(target)
     if progress:
         progress(0, 3, "XXMI-Libs", "checking")
+    if d3d11.is_file():
+        skipped = _skip_online_check(config, "XXMI-Libs", marker, target,
+                                     marker.get("version") or "", progress, 1, force=force)
+        if skipped is not None:
+            return skipped
     release = _release_info(XXMI_LIBS_REPO)
     version = str(release.get("tag_name") or "")
     assets = {str(asset.get("name") or ""): asset for asset in (release.get("assets") or [])}
@@ -311,6 +357,11 @@ def ensure_efmi(config: AppConfig, progress: Progress = None, byte_progress: Byt
     marker = _read_marker(target)
     if progress:
         progress(0, 3, "EFMI", "checking")
+    if core_ini.is_file():
+        skipped = _skip_online_check(config, "EFMI", marker, target,
+                                     marker.get("version") or "", progress, 2, force=force)
+        if skipped is not None:
+            return skipped
     url, version, asset_name, digest = _latest_release_asset(EFMI_REPO, EFMI_ASSET_PATTERN)
     if core_ini.is_file() and marker.get("version") == version:
         if progress:
@@ -356,10 +407,19 @@ def ensure_poser(
         )
     root = config.poser_path
     marker = _read_marker(root)
+    present = (root / "plugin" / "poser.dll").is_file() or (root / "poser.dll").is_file()
+    # ⚠️ **这条就是"一键启动慢 54 秒"的根**（2026-10-03 用户实测）：上游发了 0.5.2，
+    # 而他关着「自动更新依赖」，这里却**照样在启动流程里静默下载整个安装包**
+    # （日志：`23:37:05 builtin Poser: start` → `23:37:59 builtin Poser: installed`）。
+    # 本地已就位就一个请求都不发；要查新版去依赖页，要真更新用 `force=True`（依赖页那个按钮）。
+    if present:
+        skipped = _skip_online_check(config, "Poser", marker, root,
+                                     marker.get("version") or "", progress, 2, force=force)
+        if skipped is not None:
+            return skipped
     url, version, asset_name, digest = _latest_release_asset(
         POSER_REPO, POSER_ASSET_PATTERN, include_prerelease=True
     )
-    present = (root / "plugin" / "poser.dll").is_file() or (root / "poser.dll").is_file()
     if not force and present and marker.get("version") == version:
         return BuiltinResult("Poser", "up_to_date", "already current", version, str(root))
     _download_extract(url, asset_name, root, byte_progress, 1, 1, "Poser", expected_sha256=digest, log=log)

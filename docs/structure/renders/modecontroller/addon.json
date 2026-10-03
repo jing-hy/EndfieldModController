@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "id": "modecontroller.addon",
+  "updated_at": "2026-10-02T08:38:22.692Z",
+  "mode": "layers",
+  "max_columns": 1,
+  "reading": {
+    "zh": "自上而下：面板本体（动作清单 → 每项一个按钮）→ 按键注入（点一下怎么变成 EFMI 轮询真的读到的“按下”）→ 把这两层在不开游戏的情况下钉住的离线自测。",
+    "en": "Top to bottom: the panel itself (action list → one button per entry) → the key injection (how a click becomes a \"key down\" that EFMI's polling actually sees) → the offline self-test that pins both layers without launching the game."
+  },
+  "order": [
+    "modecontroller.addon.panel",
+    "modecontroller.addon.vkey-inject",
+    "modecontroller.addon.tests"
+  ]
+}

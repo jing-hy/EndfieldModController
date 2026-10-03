@@ -1,0 +1,34 @@
+---
+uid: b1d15007
+id: modecontroller.tests.upkeep
+parent: modecontroller.tests
+tags: [tests]
+name: {zh: "运维与数据测试", en: "Upkeep & Data Tests"}
+description:
+  zh: >
+      运维与数据的测试：Mod 包修复与回滚、库备份、Poser 插件、角色表同步、乳摇参数同步、公告版本过滤，以及完整性检查链。
+      
+  en: >
+      Tests for upkeep and data: mod package repair and rollback, library backup, the Poser plugin, character-table sync, jiggle-parameter sync, alert version gating, and the integrity check chain.
+      
+revision: 45e4d6d07cf81770c867c10f0f053a5efbf5e978
+updated_at: "2026-10-03T15:48:42.331Z"
+fingerprint: bc3e11683efdf10c5ed11be663a3f87a94355d14405636eae370db04bfdfef79
+source:
+  - path: "tests/test_modfix.py"
+    line: 1
+    end_line: 179
+  - path: "tests/test_mod_backup.py"
+    line: 1
+    end_line: 228
+  - path: "tests/test_poser.py"
+    line: 1
+    end_line: 264
+  - path: "tests/test_alerts.py"
+    line: 1
+    end_line: 200
+  - path: "tests/test_integrity.py"
+    line: 1
+    end_line: 212
+apis: []
+---

@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "id": "modecontroller.scripts",
+  "updated_at": "2026-10-02T08:38:45.757Z",
+  "mode": "groups",
+  "reading": {
+    "zh": "只在开发机用，**不进 exe**。设计上就是“一个脚本管一件事”：想知道 exe 怎么来的看构建组（面板注入链路的离线自测也在这里），要发版看发布组，程序里某张表要重生成看数据组。",
+    "en": "Dev-machine only, never shipped inside the exe. One script per job by design — read the build group if you wonder how the exe is made (it also holds the panel's offline injection self-test), the release group if you are publishing, and the data group when a table in the program needs regenerating."
+  },
+  "order": [
+    "modecontroller.scripts.build-exe",
+    "modecontroller.scripts.exe-entry",
+    "modecontroller.scripts.build-addon",
+    "modecontroller.scripts.test-addon-hook",
+    "modecontroller.scripts.assets-bundle",
+    "modecontroller.scripts.pack-ngx",
+    "modecontroller.scripts.build-release",
+    "modecontroller.scripts.release-version",
+    "modecontroller.scripts.prepare-release",
+    "modecontroller.scripts.upload-assets",
+    "modecontroller.scripts.push",
+    "modecontroller.scripts.snapshot",
+    "modecontroller.scripts.fetch-characters",
+    "modecontroller.scripts.gen-pinyin",
+    "modecontroller.scripts.gen-hints",
+    "modecontroller.scripts.make-demo",
+    "modecontroller.scripts.self-check",
+    "modecontroller.scripts.setup-reshade"
+  ],
+  "groups": [
+    {
+      "id": "build",
+      "title": {
+        "zh": "构建产物",
+        "en": "Build Artefacts"
+      },
+      "children": [
+        "modecontroller.scripts.build-exe",
+        "modecontroller.scripts.exe-entry",
+        "modecontroller.scripts.build-addon",
+        "modecontroller.scripts.test-addon-hook",
+        "modecontroller.scripts.assets-bundle",
+        "modecontroller.scripts.pack-ngx"
+      ]
+    },
+    {
+      "id": "release",
+      "title": {
+        "zh": "发布流水线",
+        "en": "Release Pipeline"
+      },
+      "children": [
+        "modecontroller.scripts.build-release",
+        "modecontroller.scripts.release-version",
+        "modecontroller.scripts.prepare-release",
+        "modecontroller.scripts.upload-assets",
+        "modecontroller.scripts.push",
+        "modecontroller.scripts.snapshot"
+      ]
+    },
+    {
+      "id": "data",
+      "title": {
+        "zh": "生成数据表",
+        "en": "Generate Data Tables"
+      },
+      "children": [
+        "modecontroller.scripts.fetch-characters",
+        "modecontroller.scripts.gen-pinyin",
+        "modecontroller.scripts.gen-hints",
+        "modecontroller.scripts.make-demo"
+      ]
+    },
+    {
+      "id": "dev",
+      "title": {
+        "zh": "开发便利",
+        "en": "Dev Conveniences"
+      },
+      "children": [
+        "modecontroller.scripts.self-check",
+        "modecontroller.scripts.setup-reshade"
+      ]
+    }
+  ]
+}

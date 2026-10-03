@@ -82,6 +82,83 @@ def _fix_console() -> None:
             pass
 
 
+def _refresh_memory_log(version: str, *, dry_run: bool = False) -> None:
+    """导出「记忆日志」并**单独提交**这一个文件（用户 2026-10-03 的要求）。
+
+    原话：「还有 dsh 的记忆也一起上传源码」→「每次传源码记忆都一起」→
+    「**或者不传记忆但是需要一个类似记忆的日志，每次上传**」。
+    也就是说：**不要把 `memory.db` 本身推上去**（二进制、夹着本机路径与第三方反馈者的设备信息），
+    而是每次推送时刷新一份**可读、可 diff** 的 `docs/AI-记忆日志.md`。
+
+    三条安全约定：
+    * 生成失败 / 没有记忆库（别人 clone 下来跑）⇒ 只提示，**绝不阻断推送**；
+    * 用 `git commit -- <该文件>` 提交 —— **只动这一个文件**，不碰工作区里其它未提交的改动，
+      也不清空别人已暂存的内容；
+    * `--dry-run` 时只生成、不提交。
+    """
+    script = ROOT / "scripts" / "memory_log.py"
+    target = ROOT / "docs" / "AI-记忆日志.md"
+    if not script.is_file():
+        print("      没有 scripts/memory_log.py —— 跳过", flush=True)
+        return
+    run = subprocess.run([sys.executable, str(script)], cwd=str(ROOT), capture_output=True,
+                         text=True, encoding="utf-8", errors="replace")
+    for line in ((run.stdout or "") + (run.stderr or "")).strip().splitlines():
+        print("      " + line, flush=True)
+    if run.returncode != 0 or not target.is_file():
+        print("      !! 记忆日志没生成 —— 跳过（不影响推送）", flush=True)
+        return
+    if dry_run:
+        print("      --dry-run：只生成，不提交", flush=True)
+        return
+    rel = str(target.relative_to(ROOT))
+    changed = git("status", "--porcelain", "--", rel).stdout.strip()
+    if not changed:
+        print("      记忆日志无变化，无需提交", flush=True)
+        return
+    # ⚠️ 它是**未跟踪的新文件**时，`git commit -- <路径>` 是不认的，必须先 add
+    git("add", "--", rel)
+    commit = git("commit", "-m", f"记忆日志：随 {version or 'main'} 自动刷新", "--", rel)
+    out = ((commit.stdout or "") + (commit.stderr or "")).strip().splitlines()
+    for line in out[-3:]:
+        print("      " + line, flush=True)
+    if commit.returncode != 0:
+        print("      !! 记忆日志提交失败（不影响推送，下次会再试）", flush=True)
+
+
+def _refresh_structure(version: str, *, dry_run: bool = False) -> None:
+    """把 normify 结构树同步进 `docs/structure/` 并单独提交（用户 2026-10-03：「结构树也一起上传」）。
+
+    结构数据平时落在 dsh 的 profile 目录（不进 git）；这里每次推送前整份镜像到仓库，
+    别人 clone 下来能直接看架构图、也能跟着源码 diff。同步失败同样**不阻断推送**。
+    """
+    script = ROOT / "scripts" / "sync_structure.py"
+    if not script.is_file():
+        print("      没有 scripts/sync_structure.py —— 跳过", flush=True)
+        return
+    run = subprocess.run([sys.executable, str(script)], cwd=str(ROOT), capture_output=True,
+                         text=True, encoding="utf-8", errors="replace")
+    for line in ((run.stdout or "") + (run.stderr or "")).strip().splitlines():
+        print("      " + line, flush=True)
+    rel = "docs/structure"
+    if run.returncode != 0 or not (ROOT / rel).is_dir():
+        print("      !! 结构树没同步成功 —— 跳过（不影响推送）", flush=True)
+        return
+    if dry_run:
+        print("      --dry-run：只同步，不提交", flush=True)
+        return
+    if not git("status", "--porcelain", "--", rel).stdout.strip():
+        print("      结构树无变化，无需提交", flush=True)
+        return
+    git("add", "--", rel)
+    commit = git("commit", "-m", f"结构树：随 {version or 'main'} 自动同步", "--", rel)
+    out = ((commit.stdout or "") + (commit.stderr or "")).strip().splitlines()
+    for line in out[-3:]:
+        print("      " + line, flush=True)
+    if commit.returncode != 0:
+        print("      !! 结构树提交失败（不影响推送，下次会再试）", flush=True)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="快照 + 推 main 到 GitHub")
     ap.add_argument("--dry-run", action="store_true", help="只打印将执行的命令，不真的推")
@@ -113,24 +190,32 @@ def main(argv: list[str] | None = None) -> int:
             print("      !! 快照失败 —— 按约定中止推送（修好快照，或用 --skip-snapshot 显式跳过）", flush=True)
             return 1
 
-    # ② 准备 token 与命令
+    # ② 记忆日志：**每次推送都刷新并单独提交**（用户 2026-10-03 的要求）
+    print("[2/5] 刷新记忆日志（docs/AI-记忆日志.md，随源码一起走）…", flush=True)
+    _refresh_memory_log(version, dry_run=args.dry_run)
+
+    # ③ 结构树：同样每次推送都同步一份进仓库（用户 2026-10-03：「结构树也一起上传」）
+    print("[3/5] 同步结构树（docs/structure/）…", flush=True)
+    _refresh_structure(version, dry_run=args.dry_run)
+
+    # ④ 准备 token 与命令
     token = get_token()
     if not token:
         print("      !! 找不到 GH_TOKEN（进程环境与 HKCU\\Environment 都没有）—— 无法推送", flush=True)
         return 1
     url = f"https://{token}@github.com/{REPO}.git"
-    print(f"[2/3] 远端：https://github.com/{REPO}.git  （token {mask(token)}）", flush=True)
+    print(f"[4/5] 远端：https://github.com/{REPO}.git  （token {mask(token)}）", flush=True)
 
     before_local = git("rev-parse", args.branch).stdout.strip()
     ahead = git("rev-list", "--count", f"origin/{args.branch}..{args.branch}").stdout.strip()
     print(f"      本地 {args.branch} = {before_local[:12]}   领先 origin  {ahead or '?'} 个提交", flush=True)
 
     if args.dry_run:
-        print("[3/3] --dry-run：不执行 git push", flush=True)
+        print("[5/5] --dry-run：不执行 git push", flush=True)
         return 0
 
-    # ③ 推
-    print(f"[3/3] git push {args.branch}:{args.branch} …", flush=True)
+    # ⑤ 推
+    print(f"[5/5] git push {args.branch}:{args.branch} …", flush=True)
     res = subprocess.run(["git", "push", url, f"{args.branch}:{args.branch}"], cwd=str(ROOT),
                          capture_output=True, text=True, encoding="utf-8", errors="replace")
     for line in ((res.stdout or "") + (res.stderr or "")).strip().splitlines():

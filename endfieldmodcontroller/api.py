@@ -2257,21 +2257,65 @@ class EndfieldModControllerApi:
 
         return secondary_motion.status(self.config)
 
+    def _persist_injection_switch(
+        self, key: str, enabled: bool, result: dict[str, Any]
+    ) -> dict[str, Any]:
+        """把「拨动即装卸」的结果落进配置（2026-10-03 修「这两个开关关不掉」）。
+
+        现象（用户 2026-10-03 实测，日志可查）：点 ShakingBreastManager / Endfield Poser
+        的开关，后端**确实**执行了卸载/停用（`runtime\\logs` 里有动作记录），但界面立刻
+        又弹回「已开启」，怎么点都关不掉。
+
+        根因：前端拨完开关必然 `refreshState() + loadSettings()`，而 `loadSettings()`
+        是**从 config 整份重灌**的 —— 动作做了、配置没写，界面就被旧值覆盖回来。
+        更糟的是 `initialize._check_secondary_motion` / `runtime_deps.ensure_poser`
+        都按配置决定要不要注入，配置没变 ⇒ 下次一键启动照样装回去。
+
+        **写配置的判据 = 「动作确实发生了」或「明确成功」**：
+        * `ok=True`（含"本来就是目标状态、无需改动"这种幂等成功）⇒ 写；
+        * `ok=False` 但 `actions` 非空（做了一半，例如"找不到 sbm 注入源"时仍写好了
+          管理器配置）⇒ 也写 —— 用户点的就是"开/关"，**他的意愿必须被记下**，
+          否则下次自检会按旧配置把它反向做回去；遗留问题由 `message`/`warnings` 告知。
+        * 失败且什么都没做（未定位到游戏目录、dll 被游戏占用…）⇒ 一个字都不改，
+          前端会把开关拨回原位并弹窗；这里负责把原因补成**人话**（`remove_injection`
+          失败时原本只有 `warnings`，界面只能弹「未知原因」）。
+
+        返回里 `{config: {键: 值}}` 是给前端的信号：**出现了就别再把开关拨回去**。
+        """
+        if not isinstance(result, dict):
+            result = {"ok": True}
+        warnings = [str(w) for w in (result.get("warnings") or [])]
+        ok = result.get("ok", True) is not False
+        acted = bool(result.get("actions"))
+        if not (ok or acted):
+            message = str(result.get("message") or "").strip()
+            result["message"] = message or ("；".join(warnings) if warnings else "没能完成这个动作")
+            return result
+        setattr(self.config, key, bool(enabled))
+        try:
+            self.config.save()
+        except Exception as exc:  # noqa: BLE001 - 动作已生效，写盘失败只作提示
+            result["warning"] = f"动作已生效，但写配置失败：{exc}"
+        result["config"] = {key: bool(enabled)}
+        return result
+
     def secondary_motion_install(self) -> dict[str, Any]:
         from . import secondary_motion
 
         launcher._append_log(self.config, "补齐乳摇注入 requested from UI")
-        return secondary_motion.ensure_injection(
+        result = secondary_motion.ensure_injection(
             self.config, log=lambda message: launcher._append_log(self.config, message)
         )
+        return self._persist_injection_switch("secondary_motion_injection", True, result)
 
     def secondary_motion_uninstall(self) -> dict[str, Any]:
         from . import secondary_motion
 
         launcher._append_log(self.config, "卸载乳摇注入 requested from UI")
-        return secondary_motion.remove_injection(
+        result = secondary_motion.remove_injection(
             self.config, log=lambda message: launcher._append_log(self.config, message)
         )
+        return self._persist_injection_switch("secondary_motion_injection", False, result)
 
     def launch_secondary_motion(self) -> dict[str, Any]:
         from . import secondary_motion
@@ -2290,17 +2334,37 @@ class EndfieldModControllerApi:
         return poser.status(self.config)
 
     def poser_install(self) -> dict[str, Any]:
-        """装/修：先确保安装包就位（下载走与 XXMI 同一条链路），再调它的安装向导。"""
+        """装/修：安装包不在位才去取，然后在位就交给它自己的向导补游戏目录里的文件。
+
+        ⚠️ **2026-10-03 第二次修（用户：「mmd 的 Mod 的开关关了之后再点就打不开了」）**：
+
+        * 第一次修的是"开关守卫拦住显式指令" —— `runtime_deps.ensure_poser` 有一道
+          「开关关着就跳过」的守卫（那是给**一键启动**用的，免得用户关掉后下次启动又装回来），
+          而用户**亲手点**开关打开时也被它拦住，只回一句「用户已关闭「摆姿 / MMD 播放」开关」。
+        * 但当时改成了无条件 `force=True`，**副作用是每点一次"开"都要重新下载整个安装包**
+          （`ensure_poser` 的 `up_to_date` 短路带 `not force`）—— 网络一慢/一断，开关就还是
+          "打不开"，而用户其实**本地早就装好了**。
+
+        所以正确的语义是分开的：
+          * **本地安装包已在位** ⇒ 一个字节都不下，直接进 `ensure_injection`（它会自己按
+            `_payload_present` 判断、缺文件才跑上游向导）；
+          * **本地没有** ⇒ 才去下载，这时必须 `force=True` 绕开开关守卫（用户是显式点击）。
+        "要不要**更新**到最新版"是依赖页那个入口的事（那里才是 force 全量检查）。
+        """
         from . import poser
 
         launcher._append_log(self.config, "安装/修复 Endfield Poser requested from UI")
-        pack = poser.ensure_pack(self.config, log=lambda message: launcher._append_log(self.config, message))
-        if not pack.get("ok") and not pack.get("status"):
-            return pack
-        result = poser.ensure_injection(
-            self.config, log=lambda message: launcher._append_log(self.config, message)
-        )
-        result["pack"] = pack
+        log = lambda message: launcher._append_log(self.config, message)  # noqa: E731
+        pack: dict[str, Any] | None = None
+        if not poser.status(self.config, include_web=False).get("pack_ready"):
+            pack = poser.ensure_pack(self.config, log=log, force=True)
+        else:
+            launcher._append_log(self.config, "Poser 安装包已在位 → 不下载，直接补游戏目录里的文件")
+        if pack is not None and not pack.get("ok") and not pack.get("status"):
+            return pack            # 本地没有、下载也失败 ⇒ 如实报错，别再往下走
+        result = poser.ensure_injection(self.config, log=log)
+        if pack is not None:
+            result["pack"] = pack
         return result
 
     def poser_uninstall(self) -> dict[str, Any]:
@@ -2312,13 +2376,19 @@ class EndfieldModControllerApi:
         )
 
     def set_poser_enabled(self, enabled: bool = True) -> dict[str, Any]:
-        """开关落地：重命名 `plugin\\poser.dll`（可逆、不动 proxy、不动其它插件）。"""
+        """开关落地：重命名 `plugin\\poser.dll`（可逆、不动 proxy、不动其它插件）。
+
+        ⚠️ 用户 2026-10-03：「这两个按钮关不掉」—— 与乳摇同一根因：动作做了但
+        `poser_injection` 没写，前端 `loadSettings()` 一重灌就弹回「已开启」。
+        统一走 `_persist_injection_switch` 落配置。
+        """
         from . import poser
 
         launcher._append_log(self.config, f"Endfield Poser 开关 → {bool(enabled)} requested from UI")
-        return poser.set_enabled(
+        result = poser.set_enabled(
             self.config, bool(enabled), log=lambda message: launcher._append_log(self.config, message)
         )
+        return self._persist_injection_switch("poser_injection", bool(enabled), result)
 
     def open_poser_web_ui(self) -> dict[str, Any]:
         """打开它自带的摆姿页（http://127.0.0.1:18923）——只读状态，不代它下写操作。"""

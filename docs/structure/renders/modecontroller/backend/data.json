@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "id": "modecontroller.backend.data",
+  "updated_at": "2026-10-02T07:47:59.671Z",
+  "mode": "layers",
+  "reading": {
+    "zh": "四件数据侧的活：把角色表保持最新（别名取并集、绝不丢拼音）、拉上游乳摇参数但不覆盖用户调过的值、把变量名翻成面板上的人话、以及按 3DMigoto 真正的读法体检生成的 ini。",
+    "en": "Four data-side jobs: keep the character table fresh (aliases unioned, never dropping pinyin), pull upstream jiggle parameters without overwriting the user's tuning, turn variable names into human words for the panel, and lint generated inis the way 3DMigoto actually reads them."
+  },
+  "order": [
+    "modecontroller.backend.data.character-alias",
+    "modecontroller.backend.data.sbm",
+    "modecontroller.backend.data.hotkey-hints",
+    "modecontroller.backend.data.ini-lint"
+  ]
+}

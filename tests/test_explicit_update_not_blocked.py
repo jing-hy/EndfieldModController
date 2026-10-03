@@ -30,12 +30,19 @@ def test_ensure_all_accepts_force() -> None:
         assert sig.parameters["force"].default is False, f"{fn.__name__} 的 force 默认应为 False"
 
 
-def test_force_guard_present_in_ensure_xxmi() -> None:
-    """★ 那道守卫必须写 `and not force`，否则显式更新会被自动更新开关挡掉。"""
-    src = inspect.getsource(R.ensure_xxmi)
-    assert "_auto_update_enabled(config) and not force" in src, (
-        "ensure_xxmi 的守卫没有 `and not force` —— "
-        "关着自动更新的用户在依赖页点「一键更新」会只检查不下载")
+def test_local_copy_short_circuits_the_online_check() -> None:
+    """★ 关着「自动更新依赖」+ 本地已就位 ⇒ **一次网络都不发**。
+
+    2026-10-03 用户实测「为什么真正启动这么慢，在干什么，日志也没有」：一次「一键启动」
+    花了 **62 秒**，其中 Poser 那步 54 秒在**静默下载新版**（`23:37:05 builtin Poser: start`
+    → `23:37:59 builtin Poser: installed`）—— 而他的「自动更新依赖」是关着的。
+    `ensure_xxmi` 早就有那条守卫，**其余三个（Libs / EFMI / Poser）都漏了**。
+    """
+    for fn in (R.ensure_xxmi, R.ensure_xxmi_libs, R.ensure_efmi, R.ensure_poser):
+        src = inspect.getsource(fn)
+        assert "_skip_online_check(" in src, (
+            f"{fn.__name__} 缺「本地已就位就不联网」这条早退 —— "
+            "关着自动更新的用户会在启动流程里被静默下载几十 MB")
 
 
 def test_ensure_all_passes_force_down() -> None:
@@ -57,11 +64,11 @@ def test_start_full_update_sends_force() -> None:
 
 
 def test_force_actually_bypasses_switch(monkeypatch, tmp_path: Path) -> None:
-    """行为验证：force=True 时**不能**走 `update_available` 那条早退分支。
+    """行为验证：本地就位时，`force=False` **不联网**，`force=True` 照旧真的去下载。
 
-    用一个"远端有新版、本地有旧版、开关关着"的场景：
-    * `force=False` ⇒ 应当返回 `update_available`（只提示不下载）；
-    * `force=True`  ⇒ 应当**继续往下走**（真的去下载）。
+    场景："远端有新版、本地有旧版、自动更新开关关着"。
+    * `force=False` ⇒ 一个请求都不发（返回 `up_to_date`，用本地版本号）；
+    * `force=True`  ⇒ 继续往下走（真的去下载）—— 用户在依赖页亲手点的更新不能被开关挡住。
     """
     from endfieldmodcontroller.config import AppConfig
 
@@ -70,14 +77,15 @@ def test_force_actually_bypasses_switch(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(R, "_find_xxmi_exe", lambda _root: tmp_path / "XXMI Launcher.exe")
     (tmp_path / "XXMI Launcher.exe").write_bytes(b"MZ")
     monkeypatch.setattr(R, "_read_marker", lambda _root: {"version": "v1.0.0"})
+
+    queried: list[str] = []
     monkeypatch.setattr(R, "_latest_release_asset",
-                        lambda *a, **k: ("http://x/y.zip", "v9.9.9", "y.zip", ""))
+                        lambda *a, **k: (queried.append("query"), ("http://x/y.zip", "v9.9.9", "y.zip", ""))[1])
 
-    # force=False：早退成 update_available
     r1 = R.ensure_xxmi(cfg, force=False)
-    assert str(r1.status) == "update_available", f"未开自动更新时应只提示，实际 {r1.status}"
+    assert str(r1.status) == "up_to_date", f"本地就位且未开自动更新时应直接算最新，实际 {r1.status}"
+    assert queried == [], "这时**不该联网**（用户实测就是它把启动拖到 62 秒）"
 
-    # force=True：必须继续走到下载（这里让下载抛错，以证明它**没有**早退）
     def _boom(*a, **k):
         raise RuntimeError("REACHED_DOWNLOAD")
 

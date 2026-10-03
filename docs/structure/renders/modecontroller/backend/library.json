@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "id": "modecontroller.backend.library",
+  "updated_at": "2026-10-02T07:47:46.872Z",
+  "mode": "groups",
+  "reading": {
+    "zh": "按一个 Mod 被处理的顺序从左往右读：先读出事实（属于谁、是什么类型、声明了什么），再把目录变成数据（扫描 → 动作 → 控制器产物 → 持久变量），接着是安全与依赖的几道判定，最后才是启动期的小工具。",
+    "en": "Read left to right, in the order a mod goes through: first the facts (which character, what kind, what it declares), then turning folders into data (scan → actions → controller artefacts → persisted variables), then the safety-and-dependency checks, and finally the launch-time helpers."
+  },
+  "order": [
+    "modecontroller.backend.library.util",
+    "modecontroller.backend.library.ini-parse",
+    "modecontroller.backend.library.character",
+    "modecontroller.backend.library.classify",
+    "modecontroller.backend.library.scan",
+    "modecontroller.backend.library.actions",
+    "modecontroller.backend.library.controller",
+    "modecontroller.backend.library.user-vars",
+    "modecontroller.backend.library.ini-sanitize",
+    "modecontroller.backend.library.hotkey",
+    "modecontroller.backend.library.deps-detect",
+    "modecontroller.backend.library.launch-env",
+    "modecontroller.backend.library.prepare"
+  ],
+  "groups": [
+    {
+      "id": "facts",
+      "title": {
+        "zh": "读出事实",
+        "en": "Read The Facts"
+      },
+      "children": [
+        "modecontroller.backend.library.util",
+        "modecontroller.backend.library.ini-parse",
+        "modecontroller.backend.library.character",
+        "modecontroller.backend.library.classify"
+      ]
+    },
+    {
+      "id": "turn-into",
+      "title": {
+        "zh": "把目录变成数据",
+        "en": "Turn Folders Into Data"
+      },
+      "children": [
+        "modecontroller.backend.library.scan",
+        "modecontroller.backend.library.actions",
+        "modecontroller.backend.library.controller",
+        "modecontroller.backend.library.user-vars"
+      ]
+    },
+    {
+      "id": "safety",
+      "title": {
+        "zh": "安全与依赖",
+        "en": "Safety & Dependencies"
+      },
+      "children": [
+        "modecontroller.backend.library.ini-sanitize",
+        "modecontroller.backend.library.hotkey",
+        "modecontroller.backend.library.deps-detect"
+      ]
+    },
+    {
+      "id": "legacy",
+      "title": {
+        "zh": "启动环境与旧入口",
+        "en": "Launch Env & Legacy Path"
+      },
+      "children": [
+        "modecontroller.backend.library.launch-env",
+        "modecontroller.backend.library.prepare"
+      ]
+    }
+  ]
+}

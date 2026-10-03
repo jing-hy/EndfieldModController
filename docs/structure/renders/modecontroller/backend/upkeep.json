@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "id": "modecontroller.backend.upkeep",
+  "updated_at": "2026-10-02T07:47:59.736Z",
+  "mode": "layers",
+  "reading": {
+    "zh": "长期维护，按侵入性从低到高读：查组件版本 → 更新程序自己 → 修复坏掉的 Mod 包 → 把库镜像进备份仓 → 最后是那条能阻断启动的远端公告通道。",
+    "en": "Keeping things healthy over time, from the least to the most invasive: check component versions → update the program itself → repair a broken mod package → mirror the library into a backup repo → and the remote announcement channel that can gate a launch."
+  },
+  "order": [
+    "modecontroller.backend.upkeep.component-updates",
+    "modecontroller.backend.upkeep.self-update",
+    "modecontroller.backend.upkeep.modfix",
+    "modecontroller.backend.upkeep.modbackup",
+    "modecontroller.backend.upkeep.alerts"
+  ]
+}

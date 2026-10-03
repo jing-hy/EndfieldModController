@@ -26,6 +26,8 @@ PROXY_NAMES = ("d3dcompiler_47.dll", "vulkan-1.dll")
 # 正版系统 DLL 都是几 MB，proxy 只有十几~几十 KB
 PROXY_MAX_SIZE = 200_000
 PLUGIN_NAME = "sbm.dll"
+# 插件被"开关"停用时的后缀（Poser 用它把 poser.dll 改名，而不是删除）
+DISABLED_SUFFIXES = (".endfieldmodcontroller.disabled", ".mc_disabled")
 
 
 def _log(log: Callable[[str], None] | None, message: str) -> None:
@@ -51,18 +53,40 @@ def _is_proxy(path: Path) -> bool:
 
 
 def _other_plugin_dlls(game: Path) -> list[str]:
-    """`plugin\\` 下除 sbm.dll 之外的插件 DLL（例如 Endfield Poser 的 poser.dll）。
+    """`plugin\\` 下除 sbm.dll 之外的插件（**含被开关停用的那几份**）。
 
     存在的意义：两套 loader 都会加载 plugin 下**所有** dll，所以卸载乳摇时若还有
     别的插件在，就**不能**把 proxy 还原成系统原版（那会把对方一起废掉）。
+
+    ⚠️ 2026-10-03 修（用户「mmd 的 Mod 的开关关了之后再点就打不开了」的根因之一）：
+    以前只看 `*.dll`，而 Endfield Poser 被开关停用时叫
+    `poser.dll.endfieldmodcontroller.disabled` ⇒ 乳摇卸载**看不见它** ⇒ 把
+    d3dcompiler_47 / vulkan-1 还原成系统原版 ⇒ **Poser 的底座被顺手拆掉** ——
+    之后哪怕把 poser.dll 改回名字，游戏里也永远不加载（还得靠 `poser.ensure_loader` 再补）。
+    **停用的插件也算"还在"**，保留 loader 才是安全的。
     """
+    found: list[str] = []
     try:
-        return sorted(
-            item.name for item in (game / "plugin").glob("*.dll")
-            if item.is_file() and item.name.lower() != PLUGIN_NAME.lower()
-        )
+        entries = sorted((game / "plugin").iterdir())
     except OSError:
         return []
+    for item in entries:
+        try:
+            if not item.is_file():
+                continue
+        except OSError:
+            continue
+        name = item.name.lower()
+        if name.startswith(PLUGIN_NAME.lower()):
+            continue                              # 乳摇自己（含它的残渣）
+        if name.endswith(".dll"):
+            found.append(item.name)
+            continue
+        for suffix in DISABLED_SUFFIXES:
+            if name.endswith(suffix) and name[: -len(suffix)].endswith(".dll"):
+                found.append(item.name[: -len(suffix)])   # 报原文件名，日志好读
+                break
+    return found
 
 
 def status(config: AppConfig) -> dict[str, Any]:

@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "id": "modecontroller.backend.activation",
+  "updated_at": "2026-10-02T07:47:46.942Z",
+  "mode": "layers",
+  "reading": {
+    "zh": "严格按顺序的五步：先由护栏拒绍不安全的目录布局，再规划依赖（每个只要一份），然后解出最终激活集（同角色互斥），顺带收编手动放的 Mod，**最后**才写中转树。",
+    "en": "Five steps in strict order: the guard refuses unsafe layouts first, then dependencies are planned (one copy each), then the active set is resolved (same-character exclusivity), hand-placed mods are adopted, and only then is the staging tree written."
+  },
+  "order": [
+    "modecontroller.backend.activation.guard",
+    "modecontroller.backend.activation.plan-deps",
+    "modecontroller.backend.activation.resolve",
+    "modecontroller.backend.activation.manual-import",
+    "modecontroller.backend.activation.stage"
+  ]
+}

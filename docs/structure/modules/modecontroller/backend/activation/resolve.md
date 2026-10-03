@@ -1,0 +1,47 @@
+---
+uid: b1d0b003
+id: modecontroller.backend.activation.resolve
+parent: modecontroller.backend.activation
+tags: [resolve]
+name: {zh: "激活集解析", en: "Active-Set Resolution"}
+description:
+  zh: >
+      定出最终真正会加载的那一套：筛出非依赖候选，按同角色互斥（开关关了就都留），依赖只在被引用时才激活，并产出一份含 selected / dropped / missing / blocked 的报告。
+      
+  en: >
+      Decide the final set that will actually load: filter to non-dependency candidates, apply same-character exclusivity (or keep all when the switch is off), activate dependencies only on demand, and produce a report of selected / dropped / missing / blocked.
+      
+revision: 45e4d6d07cf81770c867c10f0f053a5efbf5e978
+updated_at: "2026-10-03T15:48:42.293Z"
+fingerprint: 36b80ba47e779dacffd640523cdba8db99d995903dae115ca0d68e471c71d1f2
+source:
+  - path: "endfieldmodcontroller/activation.py"
+    line: 98
+    end_line: 172
+  - path: "endfieldmodcontroller/activation.py"
+    line: 277
+    end_line: 472
+apis:
+  - protocol: rpc
+    path: "resolve_active_set"
+    description:
+      zh: >
+          定出最终会加载的那一套：同角色互斥（可旁路）、依赖按需激活，并产出 dropped/missing/blocked 报告。
+          
+      en: >
+          Decide the final set that will load: same-character exclusivity (bypassable), on-demand dependencies, and a report of dropped/missing/blocked.
+          
+  - protocol: rpc
+    path: "ActivationReport"
+    description:
+      zh: >
+          一次激活集解析的结构化结果（selected / dropped / dependencies / blocked）。
+          
+      en: >
+          The structured result of a resolution pass (selected / dropped / dependencies / blocked).
+          
+deps:
+  - kind: call
+    to: modecontroller.backend.activation.plan-deps
+    label: {zh: "规划依赖", en: "Plans dependencies"}
+---

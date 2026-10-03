@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "id": "modecontroller.backend.game",
+  "updated_at": "2026-10-02T07:47:47.297Z",
+  "mode": "groups",
+  "reading": {
+    "zh": "这一层全都碰游戏目录，所以按风险顺序读：先探测与审计（只读），再是可逆的安全操作，然后是 ReShade 本体，最后是顺带搭车的几个可选子插件。",
+    "en": "Everything here touches the game folder, so read it in risk order: detect and audit first (read-only), then the reversible safety operations, then ReShade itself, and finally the optional sub-plugins that ride along."
+  },
+  "order": [
+    "modecontroller.backend.game.detect",
+    "modecontroller.backend.game.clean-audit",
+    "modecontroller.backend.game.injection-audit",
+    "modecontroller.backend.game.clean-restore",
+    "modecontroller.backend.game.safe-mode",
+    "modecontroller.backend.game.reshade-deploy",
+    "modecontroller.backend.game.panel",
+    "modecontroller.backend.game.poser",
+    "modecontroller.backend.game.jiggle",
+    "modecontroller.backend.game.dll-injector"
+  ],
+  "groups": [
+    {
+      "id": "look",
+      "title": {
+        "zh": "动手前先看清",
+        "en": "Look Before Touching"
+      },
+      "children": [
+        "modecontroller.backend.game.detect",
+        "modecontroller.backend.game.clean-audit",
+        "modecontroller.backend.game.injection-audit"
+      ]
+    },
+    {
+      "id": "safety",
+      "title": {
+        "zh": "净化与安全模式",
+        "en": "Clean & Safe Mode"
+      },
+      "children": [
+        "modecontroller.backend.game.clean-restore",
+        "modecontroller.backend.game.safe-mode"
+      ]
+    },
+    {
+      "id": "reshade",
+      "title": {
+        "zh": "ReShade 本体",
+        "en": "ReShade Itself"
+      },
+      "children": [
+        "modecontroller.backend.game.reshade-deploy",
+        "modecontroller.backend.game.panel"
+      ]
+    },
+    {
+      "id": "plugins",
+      "title": {
+        "zh": "子插件",
+        "en": "Sub-Plugins"
+      },
+      "children": [
+        "modecontroller.backend.game.poser",
+        "modecontroller.backend.game.jiggle",
+        "modecontroller.backend.game.dll-injector"
+      ]
+    }
+  ]
+}

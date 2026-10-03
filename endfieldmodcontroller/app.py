@@ -1,6 +1,7 @@
 """EndfieldModController desktop entry point."""
 from __future__ import annotations
 
+import atexit
 import json
 import os
 import sys
@@ -55,60 +56,88 @@ def _instance_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
-def _already_running() -> bool:
-    """判断是否已经有控制器在跑。
+# ⚠️ PID 存活检查本身**不足以**判断"是不是我们的实例" —— Windows 会很快复用 PID，
+# 而 PyInstaller onefile 每次启动都会创建**父子两个同名的** `EndfieldModController.exe`
+# 进程，于是"锁里那个早就退出的 PID"极容易被本次启动的父/子进程复用 ⇒ 误判成
+# 「已有实例在运行」⇒ 静默退出 ⇒ 用户看到的就是**双击、弹完 UAC、什么都没发生**。
+# 2026-10-03 反馈者诊断包实证：`runtime\logs` 里连续四条
+# 「已有实例在运行 → 本次启动静默退出（防多开）」，而他那个窗口其实早关了。
+# 现在的判据是**三件套**：PID 活着 + 进程指纹（exe 路径 + 创建时间）对得上 +（或）屏幕上
+# 真的有一个我们的窗口；三者都不成立才算陈旧锁，**直接接管**。
+_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+_LOCK_NAME = ".mc.lock"
+_TITLE_PREFIX = "EndfieldModController"
 
-    ⚠️ 2026-10-03 改成**锁文件 + PID 存活检查**。原先用命名互斥体
-    （`CreateMutexW` + `GetLastError()==183`），实测**怎么都判不出来**：
-    ctypes 的 `get_last_error()` 在这条调用链上取不到可靠值（哪怕用了
-    `use_last_error=True` 并声明了 restype/argtypes），连续调用永远返回 False
-    ⇒ 用户能开出两个实例、互相踩 `config.json`（他实测就是这个现象：
-    `set_component_addon failed ... config.json.tmp-10116`，同时两个管理器在跑）。
 
-    锁文件方案不依赖 ctypes 语义：用 `O_CREAT|O_EXCL` 抢占 `<数据根>/runtime/.mc.lock`，
-    里面写自己的 PID；若文件已存在则读出来看那个 PID **是否还活着**，活着就是"已有实例"，
-    否则视为陈旧锁并接管。
+def _lock_path() -> Path:
+    """防多开的锁文件：`<数据根>/runtime/.mc.lock`。
 
-    ⚠️ **数据根不能用无参 `AppConfig.load()`**（2026-10-03 当天第二次踩到）：
+    ⚠️ **数据根不能用无参 `AppConfig.load()`**（2026-10-03 踩到）：
     它读的是 `DEFAULT_CONFIG_PATH`（源码/插件所在位置），而用户实际运行的是**别处的 exe**
     （例如 modtest 下的那份 exe）。于是两个实例算出的锁位置不一致
     （一个写 modtest、一个写工作区），**互相看不见、谁都拦不住谁**，用户照样能开出两个、
     然后撞上 `WinError 5 拒绝访问 ... config.json.tmp-8668-4`。
     统一口径：**数据根 = exe 所在目录**（打包后取 `sys.executable`）。
     """
+    lock_dir = _instance_root() / "runtime"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    return lock_dir / _LOCK_NAME
+
+
+def _process_fingerprint(pid: int) -> str:
+    """进程指纹 = `<exe 全路径小写>|<创建时间>`；取不到返回空串。
+
+    **创建时间那一半是必须的**：光比 exe 路径挡不住"旧锁里的 PID 被复用给同一个 exe 的
+    新进程"（onefile 的父/子进程都叫这个名字），一比创建时间就露馅了。
+    """
+    if os.name != "nt":
+        return ""
     try:
-        root = _instance_root()
-        lock_dir = root / "runtime"
-        lock = lock_dir / ".mc.lock"
-        lock_dir.mkdir(parents=True, exist_ok=True)
-        if lock.is_file():
-            try:
-                pid = int(lock.read_text(encoding="utf-8").strip())
-                if pid == os.getpid():
-                    return False          # 锁就是本进程写的 ⇒ 本进程是持有者
-                if _pid_alive(pid):
-                    return True           # 别的活着的实例在持有
-            except (OSError, ValueError):
-                pass
-            # 走到这里 = 陈旧锁（进程早没了 / 内容坏了）⇒ 删掉后重新抢
-            try:
-                lock.unlink()
-            except OSError:
-                pass
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.restype = ctypes.c_void_p
+        kernel32.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_bool, ctypes.c_uint32]
+        handle = kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+        if not handle:
+            return ""
         try:
-            fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                fh.write(str(os.getpid()))
-            return False
-        except FileExistsError:
-            # 竞态：刚好被别人抢到了
-            return True
-    except Exception:  # noqa: BLE001 - 判断失败一律当作"没有别的实例"，绝不因此起不来
-        return False
+            size = ctypes.c_uint32(32768)
+            buf = ctypes.create_unicode_buffer(size.value)
+            kernel32.QueryFullProcessImageNameW.restype = ctypes.c_bool
+            kernel32.QueryFullProcessImageNameW.argtypes = [
+                ctypes.c_void_p, ctypes.c_uint32, ctypes.c_wchar_p, ctypes.POINTER(ctypes.c_uint32),
+            ]
+            ok = kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size))
+            path = buf.value.lower() if ok else ""
+
+            creation = wintypes.FILETIME()
+            exit_t = wintypes.FILETIME()
+            kernel_t = wintypes.FILETIME()
+            user_t = wintypes.FILETIME()
+            kernel32.GetProcessTimes.restype = ctypes.c_bool
+            kernel32.GetProcessTimes.argtypes = [
+                ctypes.c_void_p, ctypes.POINTER(wintypes.FILETIME), ctypes.POINTER(wintypes.FILETIME),
+                ctypes.POINTER(wintypes.FILETIME), ctypes.POINTER(wintypes.FILETIME),
+            ]
+            has_time = bool(kernel32.GetProcessTimes(
+                handle, ctypes.byref(creation), ctypes.byref(exit_t),
+                ctypes.byref(kernel_t), ctypes.byref(user_t),
+            ))
+            started = ((creation.dwHighDateTime << 32) | creation.dwLowDateTime) if has_time else 0
+            if not path and not started:
+                return ""
+            return f"{path}|{started}"
+        finally:
+            kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+            kernel32.CloseHandle(ctypes.c_void_p(handle))
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def _pid_alive(pid: int) -> bool:
-    """这个 PID 是不是还活着（并且确实是本程序）。"""
+    """这个 PID 是不是还活着。"""
     if os.name == "nt":
         try:
             import ctypes
@@ -117,8 +146,7 @@ def _pid_alive(pid: int) -> bool:
             # 声明类型：不声明的话 64 位下句柄会被截断（这个坑刚踩过）
             kernel32.OpenProcess.restype = ctypes.c_void_p
             kernel32.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_bool, ctypes.c_uint32]
-            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-            handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+            handle = kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
             if not handle:
                 return False
             kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
@@ -133,16 +161,151 @@ def _pid_alive(pid: int) -> bool:
         return False
 
 
-def _warn_already_running() -> None:
-    """已有实例在跑时**静默退出**（用户要求「重复启动不要弹窗，直接不启动就行」）。
+def _our_windows() -> list[int]:
+    """屏幕上属于本程序的**可见窗口**（标题以 `EndfieldModController` 开头）。
 
-    只往日志写一行，方便以后排查"为什么双击了没反应"。
+    按标题前缀找而不是精确标题：标题里带版本号（`EndfieldModController v1.0.4`），
+    前缀匹配连"旧版本实例"也能认出来 —— 这正是双击图标时该被拉到前面的那个窗口。
+    """
+    if os.name != "nt":
+        return []
+    try:
+        import ctypes
+
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        found: list[int] = []
+        proto = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+
+        def _visit(hwnd, _lparam):
+            try:
+                if not user32.IsWindowVisible(hwnd):
+                    return True
+                length = int(user32.GetWindowTextLengthW(hwnd) or 0)
+                if length <= 0:
+                    return True
+                buf = ctypes.create_unicode_buffer(length + 1)
+                user32.GetWindowTextW(hwnd, buf, length + 1)
+                if buf.value.startswith(_TITLE_PREFIX):
+                    found.append(int(hwnd or 0))
+            except Exception:  # noqa: BLE001
+                pass
+            return True
+
+        callback = proto(_visit)
+        user32.EnumWindows.argtypes = [proto, ctypes.c_void_p]
+        user32.EnumWindows(callback, None)
+        return found
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _focus_our_window() -> bool:
+    """把已经开着的那个窗口拉到最前面（双击图标 = 想看到它，而不是"没反应"）。"""
+    try:
+        import ctypes
+
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        for hwnd in _our_windows():
+            try:
+                user32.ShowWindow(ctypes.c_void_p(hwnd), 9)          # SW_RESTORE
+                user32.SetForegroundWindow(ctypes.c_void_p(hwnd))
+                return True
+            except Exception:  # noqa: BLE001
+                continue
+    except Exception:  # noqa: BLE001
+        pass
+    return False
+
+
+def _read_lock(lock: Path) -> dict:
+    """读锁内容。兼容老格式（纯 PID 文本）—— 那种锁没有指纹，只能靠窗口兜底。"""
+    try:
+        raw = lock.read_text(encoding="utf-8").strip()
+    except OSError:
+        return {}
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+        if isinstance(data, dict):
+            return data
+    except ValueError:
+        pass
+    try:
+        return {"pid": int(raw), "legacy": True}
+    except ValueError:
+        return {}
+
+
+def _release_lock() -> None:
+    """退出前把锁还回去（**内容还是自己的 PID 才删**，别误删别人接管后的锁）。"""
+    try:
+        lock = _lock_path()
+        if int(_read_lock(lock).get("pid") or 0) == os.getpid():
+            lock.unlink()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _already_running() -> bool:
+    """判断是否已经有控制器在跑（真的在跑：进程还是那个进程，或窗口还在）。
+
+    ⚠️ 历史：2026-10-03 之前用命名互斥体（`CreateMutexW`），实测怎么都判不出来
+    （ctypes 的 `get_last_error()` 在这条调用链上取不到可靠值），于是换成锁文件 + PID。
+    现在在 PID 之上再补两道：**进程指纹**（exe 路径 + 创建时间，挡 PID 复用）与
+    **窗口存在性**（挡"锁残留但进程早没了"），见文件上方那段注释。
+    """
+    try:
+        lock = _lock_path()
+        if lock.is_file():
+            info = _read_lock(lock)
+            pid = int(info.get("pid") or 0)
+            if pid and pid == os.getpid():
+                return False                  # 锁就是本进程写的 ⇒ 本进程是持有者
+            if pid and _pid_alive(pid):
+                recorded = str(info.get("fp") or "")
+                current = _process_fingerprint(pid)
+                same_process = bool(recorded and current and recorded == current)
+                if same_process or _our_windows():
+                    return True               # 真的还有一个实例（进程对得上，或窗口就在屏幕上）
+                # 落到这里 = PID 活着，但**不是写这把锁的那个进程**（PID 被系统复用了），
+                # 而且屏幕上也没有我们的窗口 ⇒ 陈旧锁，接管（"关掉再打开没反应"的根因）
+            # 陈旧锁（进程早没了 / 内容坏了 / PID 被复用）⇒ 删掉后重新抢
+            try:
+                lock.unlink()
+            except OSError:
+                pass
+        try:
+            fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            return True                       # 竞态：刚好被别人抢到了
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({
+                "pid": os.getpid(),
+                "fp": _process_fingerprint(os.getpid()),
+            }, ensure_ascii=False))
+        return False
+    except Exception:  # noqa: BLE001 - 判断失败一律当作"没有别的实例"，绝不因此起不来
+        return False
+
+
+def _warn_already_running() -> None:
+    """已有实例在跑：**先把那个窗口拉到前台**，再写一行日志，然后安静退出。
+
+    用户 2026-09-29 要求「重复启动不要弹窗，直接不启动就行」——这条不变；
+    但**完全没有反馈**会让人以为程序坏了（2026-10-03 反馈：「关掉管理器，显示要管理员
+    权限，然后就没反应了」）。现在能叫醒就叫醒（窗口跳到最前面），叫不醒才安静退出。
     """
     try:
         from . import launcher
         from .config import AppConfig
 
-        launcher._append_log(AppConfig.load(), "已有实例在运行 → 本次启动静默退出（防多开）")
+        focused = _focus_our_window()
+        launcher._append_log(
+            AppConfig.load(),
+            "已有实例在运行 → 本次启动退出（防多开）"
+            + ("，已把那个窗口调到最前面" if focused else "") ,
+        )
     except Exception:  # noqa: BLE001
         pass
 
@@ -197,14 +360,19 @@ def main(argv: list[str] | None = None) -> int:
     except Exception:  # noqa: BLE001
         pass
 
+    # 抢到锁之后的任何正常退出都要还锁（`os._exit` 那条路已在下面显式调用）
+    atexit.register(_release_lock)
+
     api = EndfieldModControllerApi()
 
     if "--cli" in argv:
         print(json.dumps(api.get_state(), ensure_ascii=False, indent=2))
+        _release_lock()
         return 0
 
     if webview is None:
         print("pywebview is not installed. Run: pip install -r requirements.txt")
+        _release_lock()
         return 1
 
     # **清理 onefile 的环境变量残留**（2026-10-01 用户实测到弹窗
@@ -284,6 +452,9 @@ def main(argv: list[str] | None = None) -> int:
         api.shutdown()
     except Exception:  # noqa: BLE001
         pass
+    # **先把防多开的锁还回去**：`os._exit` 会跳过 atexit/finally，锁就成了"残留锁"，
+    # 下一次启动只能靠 PID/指纹去猜（2026-10-03 反馈者那四条"已有实例在运行"就是这么来的）。
+    _release_lock()
     os._exit(0)
     return 0
 

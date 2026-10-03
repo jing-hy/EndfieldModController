@@ -7,7 +7,7 @@ import { refreshState } from "../store.js";
 import { loadSettings } from "../lib/settings.js";
 import { useLogAutoScroll } from "../lib/autoscroll.js";
 import { showAlert } from "../lib/dialog.js";
-import { settings, saveSetting } from "../lib/settings.js";
+import { settings, saveSetting, syncConfig } from "../lib/settings.js";
 import { store } from "../store.js";
 import Card from "../components/ui/Card.vue";
 import Btn from "../components/ui/Btn.vue";
@@ -44,6 +44,11 @@ const running = ref(false);
 // 换代后乳摇那个**连 apply 都没有**（只 `saveSetting` 写了个配置值），Poser 的 apply
 // 只调 `set_poser_enabled`（仅重命名 dll、**不装机**）—— 后端那 5 个方法前端零调用。
 // 结果就是"拨了开关看着变了、实际什么都没装"，正是用户最反感的表面功夫。
+//
+// ⚠️ 2026-10-03 第二修：这两个 apply 当时**只装卸、不写配置**，配置键一直是 true ⇒
+// 界面弹回「已开启」+ 下次一键启动照旧注入（用户原话：「这两个按钮关不掉」）。
+// 现在后端在这三个接口里统一落 `secondary_motion_injection` / `poser_injection`
+// （`api._persist_injection_switch`），开关状态与"下次启动要不要注入"永远一致。
 const SWITCHES = [
   { k: "dlss5_addon_enabled", name: "DLSS5 神经渲染", desc: "把游戏自身的 DLSS 输出替换成 DLSS5 神经渲染",
     apply: (v) => call("set_component_addon", "dlss5", v) },
@@ -69,23 +74,50 @@ const SWITCHES = [
 ];
 
 // 切换一个开关：有专用接口的走专用接口（它们还要动文件/注入库），其余只写配置。
+//
+// ⚠️ 2026-10-03 修「乳摇 / Poser 这两个开关**关不掉**」（用户实测：点一下界面弹回「已开启」）：
+//   ① 这两个走 `apply`，动作**真的做了**（日志里有"卸载乳摇注入/已停用 Poser"），但
+//      `secondary_motion_injection` / `poser_injection` 没跟着写 —— 而后端是**按配置**
+//      决定下次启动要不要注入的，前端 `loadSettings()` 又是从配置整份重灌的，于是
+//      动作做了、界面弹回、下次一键启动照样装回来。现在后端会在动作成功后落配置并
+//      回传 `{config: {键: 值}}`，这里照它回显（`syncConfig` 同步进 store，防止被下一次
+//      `refreshState()+loadSettings()` 覆盖）。
+//   ② 装卸要动游戏目录里的文件，一次点击要跑几百毫秒到几秒；**处理期间再点一下就变成
+//      "关了又开"**（日志里能看到同一秒内 uninstall 和 install 交替）。加一把互斥锁。
+const pendingSwitches = new Set();
 async function toggleSwitch(sw) {
+  if (pendingSwitches.has(sw.k)) return;       // 上一个动作还没落地，忽略这次点击
   const next = !settings[sw.k];
+  pendingSwitches.add(sw.k);
   settings[sw.k] = next;                       // 先动界面，避免点了没反应
   try {
     if (sw.apply) {
       const r = await sw.apply(next);
-      if (r && r.ok === false) {
-        settings[sw.k] = !next;                // 后端拒绝（例如非 50 系开 DLSS5）→ 回滚
+      // 后端回传 `config` = **你的选择已经落进配置**（它才是下次启动的依据）。
+      const persisted = !!(r && r.config && typeof r.config === "object" && sw.k in r.config);
+      if (r && r.ok === false && !persisted) {
+        settings[sw.k] = !next;                // 后端根本没动手（例如非 50 系开 DLSS5）→ 回滚
+        syncConfig(sw.k, !next);
         await showAlert("没能改这个开关", r.message || "未知原因");
         return;
       }
+      if (r && r.ok === false && persisted) {
+        // 做了但没做全（例如找不到注入源、游戏正在运行占用 dll）：**开关保持你点的样子**
+        // （配置已记下），把遗留问题说清楚 —— 因为弹窗让开关自己弹回去才是真正的"关不掉"。
+        await showAlert("开关已改，但有遗留问题", r.message
+          || (r.warnings || []).join("\n") || "未知原因");
+      }
+      // 以后端落盘的结果为准（它才是下次启动的依据）
+      const applied = persisted ? r.config[sw.k] : next;
+      settings[sw.k] = applied;
+      syncConfig(sw.k, applied);
     } else {
       await saveSetting(sw.k, next);
     }
     await refreshState();
     loadSettings();
   } catch (e) { /* call() 已经弹过窗 */ }
+  finally { pendingSwitches.delete(sw.k); }
 }
 
 // 启动页日志 = **真实启动日志**（`runtime\logs\launch.log`，后端 `read_launch_log`）。

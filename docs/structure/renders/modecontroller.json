@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "id": "modecontroller",
+  "updated_at": "2026-10-02T08:38:19.592Z",
+  "mode": "grid",
+  "max_columns": 2,
+  "reading": {
+    "zh": "从后端包看起 —— 程序所有的判断都在那里。前端只单向调用后端（反过来那条不算依赖），addon 是我们自己注入游戏进程的原生面板（后端负责把它部署进 ReShade 真正会扫的目录），scripts 是开发机上的构建与发布工具，tests 把前面几者的离线行为钉住。",
+    "en": "Start at the backend package — it holds every decision the program makes. The web layer only calls into it (never the other way round), the addon tree is our own native panel injected into the game process (the backend deploys it into ReShade's directory), scripts drive builds and releases from the dev machine, and tests pin the offline behaviour of both."
+  },
+  "order": [
+    "modecontroller.backend",
+    "modecontroller.addon",
+    "modecontroller.web",
+    "modecontroller.scripts",
+    "modecontroller.tests"
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "modecontroller.backend.launch",
+  "updated_at": "2026-10-02T07:47:47.075Z",
+  "mode": "layers",
+  "reading": {
+    "zh": "按启动链跑的顺序读：一头一尾是进程处理与原子写原语，中间依次是签名 → 注入库 → loader 运行时 → DLSS5 注入目标 → add-on → EFMI 全局，最后才是序列本体（core）—— 因为它是把这些一个个叫起来的那一环。",
+    "en": "Read it as the launch chain runs: processes and atomic-IO primitives at the edges, then signing → injection library → loader runtime → DLSS5 targets → add-ons → EFMI globals, and the sequence itself (core) last, because it is what calls all of them."
+  },
+  "order": [
+    "modecontroller.backend.launch.guard",
+    "modecontroller.backend.launch.fs-util",
+    "modecontroller.backend.launch.xxmi-signing",
+    "modecontroller.backend.launch.injection-lib",
+    "modecontroller.backend.launch.migoto-runtime",
+    "modecontroller.backend.launch.dlss5-targets",
+    "modecontroller.backend.launch.addons",
+    "modecontroller.backend.launch.efmi-globals",
+    "modecontroller.backend.launch.core"
+  ]
+}

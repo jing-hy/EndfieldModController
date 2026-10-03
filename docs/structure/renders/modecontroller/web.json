@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "id": "modecontroller.web",
+  "updated_at": "2026-10-02T07:48:00.002Z",
+  "mode": "groups",
+  "reading": {
+    "zh": "原生 JS、无框架、无构建 —— 一个 app.js 加上页面骨架与样式。按界面区域读：先是壳与通向 Python 的桥，再是 Mod 库页，然后是“把游戏跑起来”的那些，最后是压在所有东西上面的弹窗/日志/引导层。",
+    "en": "Native JS, no framework, no build step — one app.js plus the page skeleton and styles. Read it by UI area: the shell and the bridge to Python first, then the library page, then everything that runs the game, and finally the dialog/log/tour layer that sits on top of all of it."
+  },
+  "order": [
+    "modecontroller.web.state",
+    "modecontroller.web.theme",
+    "modecontroller.web.markup",
+    "modecontroller.web.bridge",
+    "modecontroller.web.boot",
+    "modecontroller.web.mods-render",
+    "modecontroller.web.mods-menu",
+    "modecontroller.web.import",
+    "modecontroller.web.launch",
+    "modecontroller.web.deps",
+    "modecontroller.web.config-ui",
+    "modecontroller.web.crash-poll",
+    "modecontroller.web.dialogs",
+    "modecontroller.web.log",
+    "modecontroller.web.tour"
+  ],
+  "groups": [
+    {
+      "id": "shell",
+      "title": {
+        "zh": "壳与桥接",
+        "en": "Shell & Bridge"
+      },
+      "children": [
+        "modecontroller.web.state",
+        "modecontroller.web.theme",
+        "modecontroller.web.markup",
+        "modecontroller.web.bridge",
+        "modecontroller.web.boot"
+      ]
+    },
+    {
+      "id": "library",
+      "title": {
+        "zh": "Mod 库页",
+        "en": "Library Page"
+      },
+      "children": [
+        "modecontroller.web.mods-render",
+        "modecontroller.web.mods-menu",
+        "modecontroller.web.import"
+      ]
+    },
+    {
+      "id": "run",
+      "title": {
+        "zh": "跑起来",
+        "en": "Running The Thing"
+      },
+      "children": [
+        "modecontroller.web.launch",
+        "modecontroller.web.deps",
+        "modecontroller.web.config-ui",
+        "modecontroller.web.crash-poll"
+      ]
+    },
+    {
+      "id": "interaction",
+      "title": {
+        "zh": "弹窗、日志与引导",
+        "en": "Dialogs, Log, Tour"
+      },
+      "children": [
+        "modecontroller.web.dialogs",
+        "modecontroller.web.log",
+        "modecontroller.web.tour"
+      ]
+    }
+  ]
+}

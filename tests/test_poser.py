@@ -61,6 +61,7 @@ def _fake_pack(root: Path) -> Path:
     _write(root / "tools" / "deploy.ps1", b"# fake deploy\n")
     _write(root / "plugin" / "poser.dll", FAKE_POSER_DLL)
     _write(root / "plugin" / "d3dcompiler_47.dll", POSER_PROXY)
+    _write(root / "plugin" / "vulkan-1.dll", POSER_PROXY)   # 真实包里两个 loader proxy 都有
     return root
 
 
@@ -309,7 +310,10 @@ def test_ensure_poser_uses_release_list_and_win64_asset(env, monkeypatch):
     monkeypatch.setattr(github, "releases_list", fake_releases_list)
     monkeypatch.setattr(runtime_deps, "_download_extract", fake_download_extract)
 
-    result = runtime_deps.ensure_poser(env.config)
+    # ⚠️ 必须 `force=True`：2026-10-03 起「自动更新依赖关着 + 本地已就位 ⇒ 不联网」
+    # 是启动流程的既定行为（用户实测"一键启动 62 秒"就是被这个坑的），
+    # 这条测试验的是**下载链路**（预发布版 + win64 资产），所以走显式更新那条路。
+    result = runtime_deps.ensure_poser(env.config, force=True)
     assert result.status == "installed"
     assert captured["repo"] == "OedoSoldier/Endfield-Poser"
     assert captured["kwargs"].get("include_prerelease") is True
@@ -334,3 +338,67 @@ def test_web_status_degrades_quietly(env, monkeypatch):
     monkeypatch.setattr(poser.urllib.request, "urlopen", boom)
     info = poser.web_status()
     assert info["reachable"] is False and info["reason"]
+
+
+# --------------------------------------------------------------- loader 自补（2026-10-03 用户实测）
+def test_ensure_loader_replaces_system_copy_and_keeps_backup(env):
+    """游戏目录里是**系统原版**（几 MB）时：备份原版 → 放我们包里的 proxy。"""
+    system = _write(env.game / "d3dcompiler_47.dll", SYSTEM_DLL)
+    assert reshade_integration.looks_like_loader_proxy(system) is False
+
+    result = poser.ensure_loader(env.config)
+
+    assert result["ok"], result
+    target = env.game / "d3dcompiler_47.dll"
+    assert reshade_integration.looks_like_loader_proxy(target) is True, "proxy 必须被放进去"
+    backup = env.game / "d3dcompiler_47.dll.bak"
+    assert backup.is_file() and backup.stat().st_size == SYSTEM_DLL.__len__(), "原版要留备份"
+    assert any("部署 loader d3dcompiler_47.dll" in a for a in result["actions"])
+
+
+def test_ensure_loader_is_a_noop_when_proxy_already_there(env):
+    _write(env.game / "d3dcompiler_47.dll", POSER_PROXY)
+
+    result = poser.ensure_loader(env.config)
+
+    assert result["actions"] == [], f"已经有 loader 就别再动它：{result}"
+
+
+def test_reopen_uses_our_loader_instead_of_the_upstream_wizard(env, monkeypatch):
+    """★ 核心回归：**只缺 loader** 时不许去跑上游向导。
+
+    用户实测（2026-10-03）：向导看到游戏目录里那个系统原版的 `d3dcompiler_47.dll`，
+    判定「文件已被其他程序替换，无法确认为本插件」直接 exit 1 ⇒ 开关永远打不开。
+    现在这条路由我们自己的 `ensure_loader` 兜住。
+    """
+    _write(env.game / "d3dcompiler_47.dll", SYSTEM_DLL)
+    _write(env.game / "plugin" / "poser.dll", FAKE_POSER_DLL)
+    _write(env.game / "plugin" / "poser-install.json", b"{}")   # 有记录
+
+    def fake_status(cfg, **kw):
+        # 真实反映"loader 在不在"：补之前为空、补完就是 poser ⇒ 第二次不该再要向导
+        return {
+            "installed": True, "parked": False, "record": True, "record_consistent": None,
+            "loader_kind": ("poser" if reshade_integration.looks_like_loader_proxy(
+                env.game / "d3dcompiler_47.dll") else ""),
+            "face_count": 37, "pack_ready": True,
+        }
+
+    monkeypatch.setattr(poser, "status", fake_status)
+
+    def _no_wizard(*args, **kwargs):  # pragma: no cover
+        raise AssertionError("只缺 loader 时不该跑上游向导")
+
+    monkeypatch.setattr(poser, "_run_wizard", _no_wizard)
+
+    result = poser.ensure_injection(env.config)
+
+    assert result["ok"] is True, result
+    assert any("部署 loader" in a for a in result["actions"]), result["actions"]
+
+
+def test_other_plugins_sees_disabled_poser(env):
+    """关乳摇时不能把 Poser 的底座拆掉 —— 停用中的 Poser（`.disabled`）也算"还在"。"""
+    _write(env.game / "plugin" / "poser.dll.endfieldmodcontroller.disabled", FAKE_POSER_DLL)
+    assert secondary_motion._other_plugin_dlls(env.game) == ["poser.dll"], \
+        "停用副本必须被认出来，否则卸载乳摇会把 loader 一起还原"

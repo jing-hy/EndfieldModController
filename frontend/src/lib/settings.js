@@ -18,6 +18,19 @@ export function loadSettings() {
   settingsReady.value = true;
 }
 
+/** 把一个键同步回 `store.state.config`（`loadSettings()` 的唯一数据来源）。
+ *
+ *  必须同步的理由见下面 `saveSetting` 里的注释：`loadSettings()` 是"整份重灌"的，
+ *  store 里还是旧值的话，**下一次任何 refreshState()+loadSettings() 都会把你刚改的
+ *  值覆盖回去**，用户看到的是「关了开关马上又自己打开」。
+ *  除了保存设置，**拨动即装卸的开关**（乳摇 / Poser，走各自的 apply）也要用它。
+ */
+export function syncConfig(key, value) {
+  if (!store.state) return;
+  if (!store.state.config || typeof store.state.config !== "object") store.state.config = {};
+  store.state.config[key] = value;
+}
+
 export async function saveSetting(key, value) {
   settings[key] = value;
   try {
@@ -37,10 +50,7 @@ export async function saveSetting(key, value) {
     //   整份重灌"的，如果这里不同步，**下一次任何 refreshState()+loadSettings()
     //   （切页、改别的设置、刷状态都会触发）就会拿旧值把你刚改的覆盖回去**。
     //   用户看到的现象就是「关了开关马上又自己打开」（2026-10-03 反馈）。
-    if (store.state) {
-      if (!store.state.config || typeof store.state.config !== "object") store.state.config = {};
-      store.state.config[key] = applied;
-    }
+    syncConfig(key, applied);
     return result;
   } catch (e) {
     return null;   // call() 已经弹过窗，调用方不必再处理

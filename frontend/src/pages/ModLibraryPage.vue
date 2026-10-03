@@ -9,11 +9,22 @@ import { loadSettings } from "../lib/settings.js";
 import { settings, saveSetting } from "../lib/settings.js";
 import { humanSize } from "../lib/util.js";
 import Card from "../components/ui/Card.vue";
+// ⚠️ 与 CharacterAssignDialog 同一类漏网：模板 `<template #badge><Badge …>` 用到了它，
+// 但这里从来没 import（依赖页 / 设置页都有）⇒ 「皮肤 Mod 总开关」那个角标一直渲染不出来。
+import Badge from "../components/ui/Badge.vue";
 import ModDownloadCard from "../components/ModDownloadCard.vue";
 import { Library } from "lucide-vue-next";
 import Btn from "../components/ui/Btn.vue";
 import Switch from "../components/ui/Switch.vue";
 import ConflictDialog from "../components/ConflictDialog.vue";
+// ⚠️⚠️ **2026-10-03 真因**：模板里一直写着 `<CharacterAssignDialog ref="assignRef" />`，
+// 但这个组件**从来没被 import 过** —— 于是 Vue 把那个标签当成"未知自定义元素"，
+// `assignRef.value` 拿到的是一个 **DOM 元素**（`<characterassigndialog>`）而不是组件实例，
+// 调 `assignRef.value.openFor(...)` 直接抛
+// `TypeError: l.value.openFor is not a function`，又被 menuAct 的空 catch 吞掉
+// ⇒ 用户看到的就是「更改所属角色点了没反应、弹窗不出来」。
+// 辅助页（AssistPage）第 10 行有 import，所以那边一直正常 —— 这就是"服装页不行、辅助页行"的原因。
+import CharacterAssignDialog from "../components/CharacterAssignDialog.vue";
 import { Check, ImageOff } from "lucide-vue-next";
 import { showAlert, showModalDialog, showToast } from "../lib/dialog.js";
 import { setStatus } from "../lib/status.js";
@@ -118,8 +129,17 @@ function openMenu(mod, event) {
 }
 function closeMenu() { menu.value = null; }
 
-async function menuAct(act) {
-  const m = menu.value;
+// ⚠️ 2026-10-03 三修（用户：「Mod 的更多中点击更改角色归属无反应」）—— 三个真 bug 叠在一起：
+//   ① 卡片上那个黄色标签直接调 `menuAct('assign', mod)`，而函数**只看 `menu.value`**；
+//      那时浮层根本没打开 ⇒ `if (!m) return` 当场返回 ⇒ 点了完全没反应。
+//      现在第二个参数优先（从 ⋯ 菜单里调用仍然走 `menu.value`）。
+//   ② `'assign'` 这个动作名**一个分支都没有**（下面只写了 `'character'`）⇒ 就算 m 拿得到，
+//      也会掉到函数末尾什么都不做。现在两个名字走同一条路。
+//   ③ 这里的 catch 原来是空的（注释说"call() 已经弹过窗"），但**本地异常**（典型：弹窗组件
+//      的 ref 还没挂上时的 `TypeError`）会被静默吞掉 —— 用户看到的同样是"点了没反应"。
+//      现在控制台留痕，并在界面上说一句。
+async function menuAct(act, mod = null) {
+  const m = mod || menu.value;
   if (!m) return;
   closeMenu();
   try {
@@ -170,7 +190,7 @@ async function menuAct(act) {
       const r = await call("delete_mod", m.id);
       if (r && r.ok === false) await showAlert("移出失败", r.message || "未知原因");
       else showToast(r && r.moved_to ? `已移出库：${r.moved_to}` : "已移出 服装 Mod", "success");
-    } else if (act === "character") {
+    } else if (act === "character" || act === "assign") {
       if (!chars.value.length) {
         const r = await call("known_characters");
         // ⚠️ 后端 `known_characters()` 返回的是**纯数组 list[str]**（不是 {characters:[...]}），
@@ -181,6 +201,11 @@ async function menuAct(act) {
       // 于是文案写着"输入角色名（留空 = 保持未分类）"却没法输入，
       // `pick === true ? "" : String(pick)` **永远把归属设成空**。
       // 改成真正的下拉选择器（CharacterAssignDialog）。
+      if (!assignRef.value) {
+        await showAlert("选角色的窗口没准备好",
+          "界面刚重载过、弹窗还没挂上。稍等一下再点一次就好（这次没有改动任何东西）。");
+        return;
+      }
       assignRef.value.openFor(m);
       return;
     } else if (act === "toAssist" || act === "toSkin") {
@@ -197,7 +222,12 @@ async function menuAct(act) {
     }
     await refreshState();
     loadSettings();
-  } catch (e) { /* call() 已经弹过窗 */ }
+  } catch (e) {
+    // 不许静默吞（2026-10-03）：本地异常（TypeError 之类）不是 call() 弹的那种窗，
+    // 空 catch 会让用户看到"点了没反应"、我们这边也查不到任何线索。
+    console.error("[ModLibrary] menuAct 失败", act, e);
+    await showAlert("这个操作没能完成", (e && e.message) ? String(e.message) : String(e));
+  }
 }
 
 async function scan() { busy.value = true; try { await call("scan"); await refreshState();

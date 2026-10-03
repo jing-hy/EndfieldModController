@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "id": "modecontroller.backend.api",
+  "updated_at": "2026-10-02T07:47:47.011Z",
+  "mode": "groups",
+  "reading": {
+    "zh": "这一层就是界面看到的东西 —— 按用户实际操作的顺序读：先是首屏与 Mod 库，再是启动那一条连同它的屏障，然后是组件与设置，最后是维护与取证。",
+    "en": "This is the surface the UI sees — read it in the order a user actually touches it: first the state and the library, then the launch path with its guard rails, then components and settings, and finally maintenance and evidence."
+  },
+  "order": [
+    "modecontroller.backend.api.state",
+    "modecontroller.backend.api.mods",
+    "modecontroller.backend.api.import",
+    "modecontroller.backend.api.launch",
+    "modecontroller.backend.api.risk",
+    "modecontroller.backend.api.inject-guard",
+    "modecontroller.backend.api.deps",
+    "modecontroller.backend.api.settings",
+    "modecontroller.backend.api.update",
+    "modecontroller.backend.api.maintenance",
+    "modecontroller.backend.api.plugins",
+    "modecontroller.backend.api.logs"
+  ],
+  "groups": [
+    {
+      "id": "library",
+      "title": {
+        "zh": "首屏与 Mod 库",
+        "en": "State & Library"
+      },
+      "children": [
+        "modecontroller.backend.api.state",
+        "modecontroller.backend.api.mods",
+        "modecontroller.backend.api.import"
+      ]
+    },
+    {
+      "id": "run",
+      "title": {
+        "zh": "启动与屏障",
+        "en": "Launch & Guard Rails"
+      },
+      "children": [
+        "modecontroller.backend.api.launch",
+        "modecontroller.backend.api.risk",
+        "modecontroller.backend.api.inject-guard"
+      ]
+    },
+    {
+      "id": "settings",
+      "title": {
+        "zh": "组件与设置",
+        "en": "Components, Settings, Update"
+      },
+      "children": [
+        "modecontroller.backend.api.deps",
+        "modecontroller.backend.api.settings",
+        "modecontroller.backend.api.update"
+      ]
+    },
+    {
+      "id": "care",
+      "title": {
+        "zh": "维护与取证",
+        "en": "Care & Evidence"
+      },
+      "children": [
+        "modecontroller.backend.api.maintenance",
+        "modecontroller.backend.api.plugins",
+        "modecontroller.backend.api.logs"
+      ]
+    }
+  ]
+}

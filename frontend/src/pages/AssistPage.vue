@@ -130,9 +130,17 @@ async function menuAct(act) {
   if (!m) return;
   closeMenu();
   try {
-    if (act === "character") {
-      const mod = (store.state.mods || []).find((x) => String(x.id) === m.id);
-      if (mod && assignRef.value) { assignRef.value.openFor(mod); return; }
+    if (act === "character" || act === "assign") {
+      // 从菜单里调时 `menu` 只存了 id/name，**必须**拿回完整的 mod（它带 `kind: "assist"`），
+      // 否则弹窗会按"服装"打开、辅助的分组下拉根本不出现（2026-10-03 核对）。
+      const full = (store.state.mods || []).find((x) => String(x.id) === m.id);
+      if (!assignRef.value) {
+        await showAlert("选分类的窗口没准备好",
+          "界面刚重载过、弹窗还没挂上。稍等一下再点一次就好（这次没有改动任何东西）。");
+        return;
+      }
+      assignRef.value.openFor(full || m);
+      return;
     } else if (act === "toSkin") {
       const r = await call("set_mod_kind", m.id, "character");
       if (r && r.ok === false) await showAlert("移动失败", r.message || "未知原因");
@@ -162,7 +170,11 @@ async function menuAct(act) {
     }
     await call("scan");
     await refreshState();
-  } catch (e) { /* call 已弹窗 */ }
+  } catch (e) {
+    // 与服装页同一处理（2026-10-03）：本地异常不许被空 catch 吞掉，否则就是"点了没反应"。
+    console.error("[Assist] menuAct 失败", act, e);
+    await showAlert("这个操作没能完成", (e && e.message) ? String(e.message) : String(e));
+  }
 }
 
 async function rescan() { try { await call("scan"); } catch (e) { /* call 已弹窗 */ } }

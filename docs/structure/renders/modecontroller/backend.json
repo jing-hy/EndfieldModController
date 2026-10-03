@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "id": "modecontroller.backend",
+  "updated_at": "2026-10-02T07:34:17.473Z",
+  "mode": "groups",
+  "reading": {
+    "zh": "按依赖顺序读：先看事实（配置、Mod 库、数据表），再看“把勾选变成一次能玩的启动”这条链（激活 → 启动 → 自检），然后是程序之外的东西（要下载的组件、游戏目录本身），最后是运行时外壳（界面调的 js_api、进程入口、可观测性、自维护）。",
+    "en": "Read it in dependency order: first the facts (config, the mod library, the data tables), then the chain that turns a selection into a running game (activation → launch → self-check), then everything outside the program (components to download, the game folder itself), and finally the runtime skin (the js_api the UI calls, the shell, telemetry, and self-maintenance)."
+  },
+  "order": [
+    "modecontroller.backend.config",
+    "modecontroller.backend.library",
+    "modecontroller.backend.data",
+    "modecontroller.backend.activation",
+    "modecontroller.backend.launch",
+    "modecontroller.backend.selfcheck",
+    "modecontroller.backend.components",
+    "modecontroller.backend.game",
+    "modecontroller.backend.api",
+    "modecontroller.backend.shell",
+    "modecontroller.backend.observe",
+    "modecontroller.backend.upkeep"
+  ],
+  "groups": [
+    {
+      "id": "model",
+      "title": {
+        "zh": "事实与数据",
+        "en": "Facts & Data"
+      },
+      "children": [
+        "modecontroller.backend.config",
+        "modecontroller.backend.library",
+        "modecontroller.backend.data"
+      ]
+    },
+    {
+      "id": "pipeline",
+      "title": {
+        "zh": "把勾选变成一次运行",
+        "en": "Turn Selection Into A Run"
+      },
+      "children": [
+        "modecontroller.backend.activation",
+        "modecontroller.backend.launch",
+        "modecontroller.backend.selfcheck"
+      ]
+    },
+    {
+      "id": "outside",
+      "title": {
+        "zh": "外部世界",
+        "en": "Outside World"
+      },
+      "children": [
+        "modecontroller.backend.components",
+        "modecontroller.backend.game"
+      ]
+    },
+    {
+      "id": "runtime",
+      "title": {
+        "zh": "运行时与维护",
+        "en": "Runtime & Upkeep"
+      },
+      "children": [
+        "modecontroller.backend.api",
+        "modecontroller.backend.shell",
+        "modecontroller.backend.observe",
+        "modecontroller.backend.upkeep"
+      ]
+    }
+  ]
+}

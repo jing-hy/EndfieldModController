@@ -430,6 +430,78 @@ def set_enabled(config: AppConfig, enabled: bool, log: Log = None) -> dict[str, 
     return {"ok": True, "changed": True, "message": "已停用 Poser（下次进游戏不再加载）", "path": str(parked)}
 
 
+LOADER_PROXY_NAMES = ("d3dcompiler_47.dll", "vulkan-1.dll")
+# 系统原版都是几 MB，proxy 只有几十 KB（与 secondary_motion 同一判据）
+PROXY_MAX_SIZE = 200_000
+
+
+def _proxy_source(config: AppConfig, name: str) -> Path | None:
+    """安装包里那份 proxy（`runtime\\poser\\d3dcompiler_47.dll` / `vulkan-1.dll`）。"""
+    root = config.poser_path
+    for candidate in (root / name, root / "plugin" / name):
+        try:
+            if candidate.is_file() and candidate.stat().st_size < PROXY_MAX_SIZE:
+                return candidate
+        except OSError:
+            continue
+    return None
+
+
+def ensure_loader(config: AppConfig, log: Log = None) -> dict[str, Any]:
+    """把 loader proxy 部署进游戏目录 —— **不跑上游向导**。
+
+    为什么需要它（2026-10-03 用户实测「mmd 的 Mod 的开关关了之后再点就打不开了」）：
+
+    * 关掉开关只是把 `plugin\\poser.dll` 改个名，但**「关乳摇」会把游戏目录里的
+      `d3dcompiler_47.dll` / `vulkan-1.dll` 还原成系统原版**（那时 Poser 正停在
+      `.disabled`，乳摇那边看不到它）⇒ loader 底座没了 ⇒ 之后即使把 dll 改回名字，
+      游戏里也永远不加载。
+    * 这时 `_needs_install()` 会说"loader proxy 已不在位"，于是去跑上游 `tools\\deploy.ps1`
+      —— 而**向导会拒绝干活**：
+      `文件已被其他程序替换，无法确认为本插件，已保留：…\\d3dcompiler_47.dll`（exit 1）。
+      它是在保护"别覆盖别人的东西"，合理，但对我们就是"打不开"。
+
+    所以这一步**按乳摇那套成熟规则自己部署**：目标已经是 proxy 就跳过；否则先把原版备份成
+    `*.bak`，再把安装包里的 proxy 复制过去。两套 loader 都会加载 `plugin\\*.dll`，
+    所以谁的 proxy 都行 —— 补上就能让 Poser 在游戏里生效。
+    """
+    from . import reshade_integration
+
+    actions: list[str] = []
+    warnings: list[str] = []
+    game = game_dir(config)
+    if game is None:
+        return {"ok": False, "message": "未定位到游戏目录", "actions": actions, "warnings": warnings}
+
+    # `d3dcompiler_47.dll` 是**必需**的那个 proxy：只要它已经是 loader，游戏就能加载
+    # `plugin\*.dll`（各 loader 都是"扫一遍全加载"）⇒ 一个都不动，别去多改系统文件。
+    if reshade_integration.looks_like_loader_proxy(game / LOADER_PROXY_NAMES[0]):
+        return {"ok": True, "actions": actions, "warnings": warnings}
+
+    for name in LOADER_PROXY_NAMES:
+        target = game / name
+        source = _proxy_source(config, name)
+        if source is None:
+            warnings.append(f"安装包里没有 {name} 的 proxy，跳过")
+            continue
+        if reshade_integration.looks_like_loader_proxy(target):
+            continue                       # 已经有 loader 了（不管是谁装的）
+        try:
+            if target.is_file() and not (game / f"{name}.bak").is_file():
+                shutil.copy2(target, game / f"{name}.bak")
+                actions.append(f"备份原版 {name} → {name}.bak")
+            shutil.copy2(source, target)
+            actions.append(f"部署 loader {name}")
+        except OSError as exc:
+            warnings.append(f"部署 {name} 失败: {exc}")
+
+    for action in actions:
+        _log(log, action)
+    for warning in warnings:
+        _log(log, f"WARN {warning}")
+    return {"ok": not warnings, "actions": actions, "warnings": warnings}
+
+
 def _needs_install(state: dict[str, Any]) -> tuple[bool, str]:
     """判断是否需要（重新）跑上游安装向导。"""
     if not state.get("installed"):
@@ -472,6 +544,15 @@ def ensure_injection(config: AppConfig, log: Log = None) -> dict[str, Any]:
 
     state = status(config, include_web=False)
     needs, reason = _needs_install(state)
+    # ⚠️ **"缺 loader"自己补，别去麻烦上游向导**（2026-10-03 用户实测：向导会拒绝干活 ——
+    # 它看到游戏目录里那个系统原版的 d3dcompiler_47.dll，判定"不是本插件"就 exit 1）。
+    # 补完重新判一次，真的还缺 dll / 记录 / 表情资源时才跑向导（那时它会认自己的 proxy）。
+    if needs and "loader" in reason:
+        loader = ensure_loader(config, log=log)
+        actions.extend(loader.get("actions") or [])
+        warnings.extend(loader.get("warnings") or [])
+        state = status(config, include_web=False)
+        needs, reason = _needs_install(state)
     if needs:
         running = _game_running()
         if running:

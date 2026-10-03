@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "id": "modecontroller.backend.components",
+  "updated_at": "2026-10-02T07:47:47.363Z",
+  "mode": "groups",
+  "reading": {
+    "zh": "按一件事来读：从清单决定要什么 → 把它拿回来（走这台机器真能用的那条线）→ 校验着装上去；另一条线是让随包/内置件始终符合基线；而最底下垫着的，是那层“在本地网络里够得到 GitHub”的本事。",
+    "en": "Read it as one job: decide what is needed from the manifest, fetch it (over a line that actually works here), install it validated; separately keep the bundled/built-in pieces matching their baseline; and underneath all of it sits the network layer that reaches GitHub at all."
+  },
+  "order": [
+    "modecontroller.backend.components.manifest",
+    "modecontroller.backend.components.download",
+    "modecontroller.backend.components.install",
+    "modecontroller.backend.components.builtin",
+    "modecontroller.backend.components.assets-baseline",
+    "modecontroller.backend.components.assets-ensure",
+    "modecontroller.backend.components.github",
+    "modecontroller.backend.components.fastnet",
+    "modecontroller.backend.components.dlss5"
+  ],
+  "groups": [
+    {
+      "id": "get",
+      "title": {
+        "zh": "定清单、拿回来、装上去",
+        "en": "Decide, Fetch, Install"
+      },
+      "children": [
+        "modecontroller.backend.components.manifest",
+        "modecontroller.backend.components.download",
+        "modecontroller.backend.components.install"
+      ]
+    },
+    {
+      "id": "builtin",
+      "title": {
+        "zh": "内置组件与随包资产",
+        "en": "Built-in & Bundled Assets"
+      },
+      "children": [
+        "modecontroller.backend.components.builtin",
+        "modecontroller.backend.components.assets-baseline",
+        "modecontroller.backend.components.assets-ensure"
+      ]
+    },
+    {
+      "id": "network",
+      "title": {
+        "zh": "够到上游",
+        "en": "Reaching Upstream"
+      },
+      "children": [
+        "modecontroller.backend.components.github",
+        "modecontroller.backend.components.fastnet",
+        "modecontroller.backend.components.dlss5"
+      ]
+    }
+  ]
+}
