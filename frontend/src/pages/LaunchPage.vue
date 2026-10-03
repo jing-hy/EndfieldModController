@@ -2,6 +2,9 @@
 // 启动页（旧 #tab-launch）：一键启动 + 六个注入开关（**与设置页共享同一份 settings 状态**）。
 import { ref, onMounted, onUnmounted } from "vue";
 import { call } from "../lib/bridge.js";
+import { showModalDialog } from "../lib/dialog.js";
+import { refreshState } from "../store.js";
+import { loadSettings } from "../lib/settings.js";
 import { useLogAutoScroll } from "../lib/autoscroll.js";
 import { showAlert } from "../lib/dialog.js";
 import { settings, saveSetting } from "../lib/settings.js";

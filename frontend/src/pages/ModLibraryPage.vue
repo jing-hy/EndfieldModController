@@ -195,7 +195,82 @@ async function resolveConflicts(keep) {
     loadSettings();
   } catch (e) { /* call 已弹窗 */ }
 }
-async function fixAll() { try { await call("fix_all_mods"); } catch (e) {} }
+// ⚠️ **「一键修复所有 Mod」补齐确认 / 进度 / 结果**（2026-10-03 修回归）。
+// 0.9.5 是：确认框（讲清会备份、可回滚、跳过已修的）→ `fix_all_mods(true)`
+// → `setInterval` 轮询 `fix_all_progress`，把「修复中 3/29：名字」写进状态行
+// → 完成后列出失败项。
+// 换代到 Vue 之后只剩一句 `await call("fix_all_mods")`：**没有确认、没有进度、没有结果**
+//（后端 `fix_all_progress` 前端零调用）—— 这是个要跑 29 个 Mod 的后台长任务，
+// 全程零反馈会让人以为卡死了。这里按 0.9.5 的语义补回来，展示沿用现有 Btn/Card/Toast。
+const fixRunning = ref(false);
+const fixText = ref("");
+let fixTimer = null;
+
+function stopFixPoll() {
+  if (fixTimer) { clearInterval(fixTimer); fixTimer = null; }
+}
+
+async function fixAll() {
+  const ok = await showModalDialog({
+    title: "一键修复所有 Mod",
+    message: [
+      "会逐个修复「服装 Mod」里还没修过的那些。",
+      "",
+      "• 每个 Mod 修复前都会**备份**，可随时用 ⋯→「回滚」还原",
+      "• 已经修过的会跳过",
+      "• 过程中界面不会卡（后台跑，这里显示进度）",
+    ].join("\n"),
+    okText: "开始修复", cancelText: "取消",
+  });
+  if (!ok) return;
+
+  const started = await call("fix_all_mods", true);
+  if (started && started.ok === false) {
+    showToast(String(started.message || "启动修复失败"), "danger");
+    return;
+  }
+  if (started && started.already) {
+    showToast("已经有一轮修复在进行中", "info");
+  } else {
+    showToast(`已开始修复${started && started.count ? ` ${started.count} 个` : ""} Mod…`, "success");
+  }
+
+  fixRunning.value = true;
+  fixText.value = "修复中…";
+  stopFixPoll();
+  fixTimer = setInterval(async () => {
+    let p = null;
+    try { p = await call("fix_all_progress"); } catch (e) { /* 忽略单次失败 */ }
+    if (!p) return;
+    const cur = Number(p.current || 0);
+    const total = Number(p.total || 0);
+    if (p.running) {
+      fixText.value = total
+        ? `修复中 ${cur}/${total}：${p.name || ""}`
+        : `修复中：${p.name || ""}`;
+      return;
+    }
+    // 跑完了
+    stopFixPoll();
+    fixRunning.value = false;
+    fixText.value = "";
+    const results = Array.isArray(p.results) ? p.results : [];
+    const failed = results.filter((r) => r && r.ok === false);
+    await scan();
+    await refreshState();
+    if (failed.length) {
+      await showModalDialog({
+        title: `修复完成（${results.length - failed.length} 成功 / ${failed.length} 失败）`,
+        message: "这几项没修好：\n\n" +
+          failed.slice(0, 12).map((r) => `• ${r.name || r.id || "?"}：${r.message || "未知原因"}`).join("\n") +
+          (failed.length > 12 ? `\n…另有 ${failed.length - 12} 项` : ""),
+        okText: "知道了",
+      });
+    } else {
+      showToast(`修复完成，共 ${results.length} 个 Mod`, "success");
+    }
+  }, 800);
+}
 
 
 
@@ -237,7 +312,7 @@ onMounted(async () => {
   await refreshState().catch(() => {});
   queueCovers(store.state.mods);
 });
-onUnmounted(() => { if (timer) clearInterval(timer); coverQueue = []; });
+onUnmounted(() => { if (timer) clearInterval(timer); stopFixPoll(); coverQueue = []; });
 
 // ⚠️ Vue 里**子组件的 onMounted 先于父组件执行**，而 demo 模式的封面是父组件（App.vue）
 // 在自己的 onMounted 里才灌进 store 的 —— 那时封面还没到，一开始全是占位图。

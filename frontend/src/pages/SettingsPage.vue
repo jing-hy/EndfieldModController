@@ -2,10 +2,10 @@
 // 设置页（对应旧 index.html 的 #tab-settings）。
 // ⚠️ 所有表单项都走 `SettingPath / SettingSwitch / SettingSelect`，它们内部按"只发改动的那一个键"
 //    调 save_config（旧版语义），所以这里不碰保存细节，只负责分组与按钮。
-import { computed, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { call } from "../lib/bridge.js";
 import { useLogAutoScroll } from "../lib/autoscroll.js";
-import { store, applyTheme, THEMES } from "../store.js";
+import { store, applyTheme, THEMES, refreshState } from "../store.js";
 import { settings, saveSetting } from "../lib/settings.js";
 import Card from "../components/ui/Card.vue";
 import Btn from "../components/ui/Btn.vue";
@@ -43,7 +43,48 @@ const paths = computed(() => {
   const root = store.state.data_root || "";
   return { controller: root, reshade: c.reshade_dll || "", staging: c.staging_mods_dir || "", mod_backup: c.mod_backup_dir || "" };
 });
-const lineStatus = computed(() => []);
+// ⚠️ **线路状况**（2026-10-03 修回归：原先硬编码 `computed(() => [])` ⇒ 那一格永远不渲染，
+// 用户"下载卡住时不知道为什么"的排查入口就这么没了）。
+// 数据源 = `get_download_settings()` 的 `lines`（每条线路的历史速度/可用性/被封锁状态）
+// 与 `status`（当前策略/线路模式/是否正在并发加速/上次结果）。
+// 展示沿用现有 `Badge` 组件（tone: success/muted/warning/danger），与页面其余部分一致。
+const lineStatus = ref([]);
+const dlStatus = ref(null);
+const lastDownload = computed(() => {
+  const s = dlStatus.value && dlStatus.value.last;
+  if (!s || (!s.mbps && !s.line)) return "";
+  const parts = [];
+  if (s.line) parts.push(String(s.line));
+  if (s.mbps) parts.push(`${Number(s.mbps).toFixed(2)} MB/s`);
+  if (s.threads && Number(s.threads) > 1) parts.push(`临时并发 ${s.threads} 连接`);
+  if (s.ok === false) parts.push("失败");
+  return parts.join(" · ");
+});
+
+async function loadDownloadStatus() {
+  try {
+    const d = await call("get_download_settings");
+    if (!d || typeof d !== "object") return;
+    dlStatus.value = d;
+    const lines = (d.lines || []).map((l) => ({
+      name: String(l.line || ""),
+      ok: l.ok === true,
+      blocked: !!l.blocked,
+      mbps: Number(l.mbps || 0),
+      fails: Number(l.fails || 0),
+    })).filter((l) => l.name);
+    // 有速度的排前面（用户最关心"哪条线路能跑"）
+    lines.sort((a, b) => (b.mbps - a.mbps) || (Number(a.blocked) - Number(b.blocked)));
+    lineStatus.value = lines;
+  } catch (e) { /* 拿不到就不显示，不影响设置页其它部分 */ }
+}
+
+async function clearDownloadLines() {
+  const r = await run("clear_download_lines");
+  if (r && r.ok === false) return;      // run() 已 toast
+  showToast("线路记录已清空（下次下载会重新测速）", "success");
+  await loadDownloadStatus();
+}
 // 详细状态：一个面板接住各类状态查询，结果落在纯黑日志框里（可复制）
 const probeText = ref("点上面的按钮查询：DLSS5 / Poser / 组件版本 / 完整性 / 初始化自检。");
 const probeBusy = ref(false);
@@ -142,6 +183,30 @@ async function resetDependencies() {
   store.autoStartDeps = true;
   store.tab = "dependencies";
 }
+// 「自动检测」—— 一键找 XXMI / 3DMigoto Loader / 官方启动器 / 游戏本体 / 乳摇工具
+//（2026-10-03 补回归：0.9.5 有这个按钮，且每次刷新还会静默回填 detected_*；
+//  换代后全丢了，`grep detected_` 在现前端 0 命中 ⇒ 内置了 XXMI 那三个框也一直空着）。
+// 回填逻辑收在后端 `autodetect_paths()`：只填**空**字段，不覆盖你手填过的路径。
+async function autodetectPaths() {
+  const r = await run("autodetect_paths");
+  if (!r || r.ok === false) return;              // run() 已经 toast 过
+  await store.refreshState();
+  const filled = Object.keys(r.filled || {});
+  const skipped = Object.keys(r.skipped || {});
+  if (filled.length) {
+    showToast(`已自动填入：${filled.join("、")}`, "success");
+  } else if (skipped.length) {
+    showToast(`检测到 ${skipped.length} 项，但都已填过（不覆盖你的设置）`, "info");
+  } else {
+    showToast("没有检测到可自动填入的路径", "info");
+  }
+}
+
+onMounted(() => {
+  // 线路状况进页面就查一次（0.9.5 的 refreshDownloadStatus 也是打开设置页时刷新）
+  loadDownloadStatus();
+});
+
 // ⚠️ **不能把 kind 当路径传**（2026-10-03 修）。
 // 后端 `open_path_in_explorer(target)` / `open_path(target)` 期望的是**真实路径**，
 // 而模板传进来的是 `"controller"` / `"reshade"` / `"staging"` 这类**标签** ⇒
@@ -222,6 +287,16 @@ useLogAutoScroll(probeBox, () => probeText);
     </Card>
 
     <Card title="② 游戏与启动器（留空即自动搜索）">
+      <!-- ⚠️ **自动检测**（2026-10-03 补回归）：0.9.5 有这个按钮，且每次刷新状态还会
+           静默回填 `detected_*`；换代到 Vue 后两条都丢了 ⇒ 即使内置了 XXMI，
+           下面几个框也会一直空着。回填逻辑在后端 `autodetect_paths()`：
+           **只填空字段，不覆盖你手填过的**。 -->
+      <div class="flex items-center justify-between gap-2 pb-1.5">
+        <span class="text-xs" style="color: var(--text-muted)">
+          不确定路径就点右边，它会找 XXMI / 3DMigoto Loader / 官方启动器 / 游戏本体
+        </span>
+        <Btn size="sm" @click="autodetectPaths">自动检测</Btn>
+      </div>
       <SettingPathBrowse k="official_launcher" label="官方启动器" placeholder="留空 = 自动搜索 Hypergryph Launcher" kind="file" />
       <SettingPathBrowse k="game_exe" label="Endfield.exe" placeholder="留空 = 自动搜索游戏目录" kind="file" />
       <SettingPathBrowse k="xxmi_launcher" label="XXMI Launcher" placeholder="留空 = 自动搜索" kind="file" />
@@ -240,10 +315,24 @@ useLogAutoScroll(probeBox, () => probeText);
       <SettingPath k="download_proxy" label="下载代理" placeholder="留空即自动（环境变量 → 系统代理 → 直连）" />
       <SettingSelect k="download_boost" label="下载加速" :options="DL_BOOST" />
       <SettingSelect k="download_line" label="下载线路" :options="DL_LINE" />
-      <div v-if="lineStatus.length" class="flex flex-wrap gap-1.5 pt-1">
-        <Badge v-for="l in lineStatus" :key="l.name" :tone="l.ok ? 'success' : 'muted'">
-          {{ l.name }} {{ l.ok ? "可用" : "不可用" }}
-        </Badge>
+      <!-- ⚠️ **线路状况**（2026-10-03 修回归：0.9.5 有，换代后变成硬编码空数组）。
+           作用：下载卡住时，这里是"哪条线路能跑、跑到多少"的唯一入口。
+           展示沿用现有 Badge / Btn（size="sm"），与页面其余部分风格一致。 -->
+      <div class="pt-1">
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-xs" style="color: var(--text-muted)">
+            线路状况{{ lastDownload ? `　上次下载：${lastDownload}` : "（暂无记录，下次下载后会显示实测速度）" }}
+          </span>
+          <Btn v-if="lineStatus.length" size="sm" @click="clearDownloadLines">清除线路记录</Btn>
+        </div>
+        <div v-if="lineStatus.length" class="flex flex-wrap gap-1.5 pt-1.5">
+          <Badge v-for="l in lineStatus" :key="l.name"
+                 :tone="l.blocked ? 'danger' : (l.ok ? 'success' : (l.mbps > 0 ? 'warning' : 'muted'))">
+            {{ l.name }}
+            {{ l.blocked ? "已封锁" : (l.mbps > 0 ? `${l.mbps.toFixed(2)} MB/s` : (l.ok ? "可用" : "未测速")) }}
+            <template v-if="l.fails">（失败 {{ l.fails }} 次）</template>
+          </Badge>
+        </div>
       </div>
     </Card>
 

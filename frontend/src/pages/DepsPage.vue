@@ -6,6 +6,7 @@ import { call } from "../lib/bridge.js";
 import { useLogAutoScroll } from "../lib/autoscroll.js";
 import { store, refreshState } from "../store.js";
 import { loadSettings } from "../lib/settings.js";
+import { showToast, showAlert, showModalDialog } from "../lib/dialog.js";
 import Card from "../components/ui/Card.vue";
 import Btn from "../components/ui/Btn.vue";
 import Badge from "../components/ui/Badge.vue";
@@ -46,6 +47,58 @@ function rowColor(d) {
 // 下载实时速度：后端在 byte_progress 里采样并平滑过；不在下载时是 0 ⇒ 显示 —（不留假数字）
 const speedBps = ref(0);      // 由 pollProgress 从 get_dependency_progress 里取
 const modDlActive = ref(false);        // 是否有 Mod 下载在跑（用来联动进度条与速度）
+const modDlHasRecord = ref(false);      // 有没有下载任务记录（决定是否显示「继续 / 清除记录」）
+
+// ⚠️ **Mod 下载的控制**（2026-10-03 补回归）。
+// 0.9.5 有「暂停 / 终止 / 继续 / 清除记录」四个按钮（旧 app.js 的 renderModDownload +
+// bindDownloadListClicks），换代到 Vue 后全丢了 —— 后端 `pause_mod_downloads` /
+// `cancel_mod_downloads` / `resume_mod_downloads` / `clear_mod_downloads` 四个方法一直健在，
+// 而现前端 grep 这四个名字**全 0 命中** ⇒ 下载太慢或下错了**没法停**。
+async function modDlControl(act) {
+  const map = {
+    pause:  ["pause_mod_downloads",  "已暂停（断点保留，点「继续」可接着下）"],
+    resume: ["resume_mod_downloads", "已继续下载"],
+    cancel: ["cancel_mod_downloads", "已终止（半成品会清掉）"],
+    clear:  ["clear_mod_downloads",  "已清除下载记录"],
+  };
+  const entry = map[act];
+  if (!entry) return;
+  if (act === "cancel") {
+    const ok = await showModalDialog({
+      title: "终止下载",
+      message: "会停下所有 Mod 下载任务，**已下完的部分会被清掉**。\n\n确定终止吗？\n（只是想暂存进度就选「暂停」，那会保留断点。）",
+      okText: "终止并清掉半成品", cancelText: "取消", focusCancel: true,
+    });
+    if (!ok) return;
+  }
+  try {
+    const r = await call(entry[0]);
+    if (r && r.ok === false) { showToast(String(r.message || "操作失败"), "danger"); return; }
+    showToast(entry[1], act === "cancel" ? "warning" : "success");
+  } catch (e) {
+    showToast(String((e && e.message) || "操作失败"), "danger");
+    return;
+  }
+  await sleep(300);          // 给后端一点时间落状态
+  await pollProgress();      // 立刻刷新一次，按钮与进度条跟着变
+}
+
+// 「检查并补齐」——**要 await、要刷新、要有反馈**（原来模板里裸调 call，结果全丢）
+async function checkAndComplete() {
+  try {
+    const r = await call("ensure_initialized");
+    await refreshState();
+    await refresh();
+    if (r && r.ok === false) {
+      showToast(String(r.message || "检查失败"), "danger");
+    } else {
+      showToast("已检查并补齐缺失组件", "success");
+    }
+  } catch (e) {
+    showToast(String((e && e.message) || "检查失败"), "danger");
+  }
+}
+
 const modDlMarks = new Map();          // 每条任务上次记下的状态与百分比台阶（避免刷屏）
 // ⚠️ 准备阶段的提示（读取香蕉网信息要 18~51 秒，这期间没有字节在动）
 const prepLabel = ref("");
@@ -122,6 +175,7 @@ async function pollProgress() {
       // 用户看到的是"未开始 + 速度横线"，以为程序没动。
       // 现在：**有任务就活跃**，并把这个阶段如实显示出来。
       modDlActive.value = items.length > 0 && !md.done;
+      modDlHasRecord.value = items.length > 0 || !!md.done;
       if (items.length && !md.done) {
         const prepping = items.filter((it) => !Number(it.size) && !Number(it.received));
         if (prepping.length) {
@@ -278,8 +332,22 @@ useLogAutoScroll(logBox, () => logLines.value);
   <div class="space-y-4">
     <div class="flex flex-wrap gap-2">
       <Btn @click="refresh">重新扫描</Btn>
-      <Btn @click="call('ensure_initialized')">检查并补齐</Btn>
+      <!-- ⚠️ 原来这里是模板里裸调 `call('ensure_initialized')`（2026-10-03 修）：
+           连 `await` 都没有 ⇒ 结果丢弃、页面也不刷新、失败也看不到。 -->
+      <Btn @click="checkAndComplete">检查并补齐</Btn>
       <Btn id="dep-update-all-btn" variant="primary" @click="start">安装缺失依赖</Btn>
+
+      <!-- ⚠️ **Mod 下载的控制按钮**（2026-10-03 补回归）。
+           0.9.5 有 暂停 / 终止 / 继续 / 清除记录 四个按钮，换代到 Vue 后**全没了**
+           （后端四个方法一直健在，现前端 grep 全 0 命中）——
+           下载链接下错、或者线路太慢想停下时，用户**没有任何办法停**。
+           展示沿用现有 Btn（size="sm"），只在有任务/有记录时出现。 -->
+      <template v-if="modDlActive">
+        <Btn size="sm" @click="modDlControl('pause')">暂停</Btn>
+        <Btn size="sm" variant="danger" @click="modDlControl('cancel')">终止</Btn>
+      </template>
+      <Btn v-else-if="modDlHasRecord" size="sm" @click="modDlControl('resume')">继续</Btn>
+      <Btn v-if="modDlHasRecord" size="sm" @click="modDlControl('clear')">清除记录</Btn>
     </div>
 
     <!-- 两列（GPT-6 Astra 评审：摘要/进度/日志全占首屏，真正要看的组件列表起点太低）：

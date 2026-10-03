@@ -1132,6 +1132,52 @@ class EndfieldModControllerApi:
             # 只读、轻量（十来次存在性判断），不在这里触发任何补齐动作。
             "file_watchdog": self._file_watchdog(),
         }
+    def autodetect_paths(self) -> dict[str, Any]:
+        """**自动检测外部程序路径并回填配置**（2026-10-03 补回归）。
+
+        0.9.5 有「自动检测 XXMI」按钮，另外每次刷新状态时还会**静默回填**
+        `detected_xxmi / detected_migoto_loader / detected_official_launcher`
+        （旧 `app.js:1474-1491` + `asStoredPath`）。换代到 Vue 之后这两条全丢了
+        （`grep detected_` 在现前端 **0 命中**）⇒ 即使内置了 XXMI，那三个路径框也会一直空着。
+
+        现在把这件事收进后端统一做（前端不该拼路径）：
+          * 依次调用 `config.auto_detect_*`（它们各自"工作区内嵌优先、再退外部安装"）；
+          * 只回填**当前为空**的字段 —— 不覆盖用户显式填过的路径；
+          * 存进 config 后 `save()`（写盘时会按 `save_config` 同一套规则做相对化/归一化）。
+        """
+        from . import config as _cfg
+
+        detected = {
+            "xxmi_launcher": _cfg.auto_detect_xxmi(refresh=True),
+            "migoto_loader": _cfg.auto_detect_migoto_loader(refresh=True),
+            "official_launcher": _cfg.auto_detect_official_launcher(refresh=True),
+            "game_exe": _cfg.auto_detect_game_dir(refresh=True),
+            "secondary_motion_dir": _cfg.auto_detect_secondary_motion(),
+        }
+        filled: dict[str, str] = {}
+        skipped: dict[str, str] = {}
+        for key, value in detected.items():
+            if not value:
+                continue
+            if str(getattr(self.config, key, "") or "").strip():
+                skipped[key] = value          # 已有值：只报告，不覆盖
+            else:
+                filled[key] = value
+                setattr(self.config, key, value)
+        try:
+            self.config.normalize_blank_paths()
+        except Exception:  # noqa: BLE001
+            pass
+        if filled:
+            try:
+                self.config.save()
+            except Exception as exc:  # noqa: BLE001
+                return {"ok": False, "message": f"检测到了路径但写配置失败：{exc}",
+                        "filled": filled, "skipped": skipped}
+        return {"ok": True, "filled": filled, "skipped": skipped,
+                "message": ("已回填 " + "、".join(filled) if filled
+                            else "没有发现需要回填的空路径")}
+
     def save_config(self, data: dict[str, Any]) -> dict[str, Any]:
         self._invalidate_mods()
         known = set(self.config.to_dict().keys())
