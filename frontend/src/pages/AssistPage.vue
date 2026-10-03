@@ -87,7 +87,7 @@ async function openLib() { try { await call("open_path_in_explorer", "library");
   <div class="space-y-4">
     <div class="flex flex-wrap items-center gap-2">
       <Btn variant="primary" @click="rescan">重新扫描</Btn>
-      <Btn @click="openLib">打开 服装 Mod文件夹</Btn>
+      <Btn @click="openLib">打开 Mod 文件夹</Btn>
       <span class="text-xs" style="color: var(--text-muted)">{{ status }}</span>
     </div>
     <Card v-if="!list.length" title="辅助 Mod">
@@ -110,10 +110,13 @@ async function openLib() { try { await call("open_path_in_explorer", "library");
            **两类用两套卡片形态**（用户明确要求）：壁纸类看着像"一件作品"，用**服装 Mod 那种大封面
            卡片**（120×140，能看出是哪张图）；功能性 Mod（隐藏 UI、去水印这类）没有观赏性，
            保持**紧凑列表行**更好扫。 -->
-      <div v-for="grp in assistGroups" :key="grp.name" class="mb-4 last:mb-0">
-        <div class="flex items-center justify-between mb-1.5">
-          <h4 class="text-xs font-semibold" style="color: var(--text-muted)">{{ grp.name }}</h4>
-          <span class="text-xs" style="color: var(--text-muted)">{{ grp.mods.length }} 个</span>
+      <div v-for="grp in assistGroups" :key="grp.name"
+           class="rounded-lg border p-3 mb-3 last:mb-0" style="border-color: var(--border)">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="font-semibold">{{ grp.name }}</h3>
+          <span class="text-xs" style="color: var(--text-muted)">
+            {{ grp.mods.length }} 个 Mod · 已启用 {{ grp.mods.filter((m) => selected.has(String(m.id))).length }}
+          </span>
         </div>
 
         <!-- ① 壁纸类：大封面卡片（对齐服装 Mod 的卡片） -->
