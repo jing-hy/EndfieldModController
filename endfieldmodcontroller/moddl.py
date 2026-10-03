@@ -364,6 +364,32 @@ def gamebanana_id(url: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
+# ⚠️ 小于这个大小的文件视为**配套小文件**（作者单独发的 `_Core.ini` / 补丁 ini 之类）。
+# 很多 Mod 的「主包 + 配套」是**分开的文件**，只下主包会缺关键 ini、装上去毫无效果
+#（2026-10-03 实测：CharacterChange 1.3.1 缺 `_Core.ini`，作者在 Read me 里明写需要它，
+#  而它作为 `_core_2.zip`(275 B) 单独挂在同一个 Mod 页面上）。
+AUX_FILE_MAX_BYTES = 2 * 1024 * 1024
+
+
+def split_mod_files(files: list[dict]) -> tuple[dict | None, list[dict]]:
+    """从文件列表里挑出**主包**，并把**配套小文件**一起返回。
+
+    * **主包** = 未归档的中**最新**那个（按 `_tsDateAdded`）——
+      不能取"列表第一个"：API 的 `_aFiles` **不是**按时间排的，
+      实测那个 Mod 把 1.3.1(86 MB) 排在 1.8.2(957 MB) 前面，取第一个就下到了旧版。
+    * **配套** = 其余未归档的**小文件**（< 2 MB），下载完主包后自动一起下。
+    """
+    live = [f for f in files if not f.get("archived")]
+    pool = live or list(files)
+    if not pool:
+        return None, []
+    big = [f for f in pool if not f.get("aux")]
+    main_pool = big or pool
+    main = max(main_pool, key=lambda f: (f.get("added") or 0, f.get("size") or 0))
+    aux = [f for f in pool if f is not main and f.get("aux")]
+    return main, aux
+
+
 def gamebanana_profile(mod_id: int, *, timeout: int = EXTRA_TIMEOUT) -> dict:
     """取一个 Mod 的元数据（含真实下载直链与封面图）。
 
@@ -402,6 +428,13 @@ def gamebanana_profile(mod_id: int, *, timeout: int = EXTRA_TIMEOUT) -> dict:
                 "file": entry.get("_sFile") or "",
                 "size": int(entry.get("_nFilesize") or 0),
                 "url": link,
+                # ⚠️ **必须带上时间戳**（2026-10-03 修）：API 的 `_aFiles` **不是**按时间排的，
+                # 之前"取第一个未归档的"会挑到旧版 —— 实测那个 Mod 的列表是
+                # 1.3.1(86MB) / _core_2 / _core_ffd68 / 1.8.2(957MB)，取第一个就下了 1.3.1。
+                "added": int(entry.get("_tsDateAdded") or 0),
+                # 配套小文件（作者单独发的 `_Core.ini` 这类）：主包缺它不工作，
+                # 所以要能识别出来一并下载。
+                "aux": bool(entry.get("_nFilesize") is not None and int(entry.get("_nFilesize") or 0) < AUX_FILE_MAX_BYTES),
                 "version": entry.get("_sVersion") or "",
                 "archived": bool(entry.get("_bIsArchived")),
             })

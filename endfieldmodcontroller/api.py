@@ -2491,6 +2491,10 @@ class EndfieldModControllerApi:
     def _mod_download_one(self, item: dict[str, Any], dest_dir: Path) -> None:
         url = item["url"]
         item["status"] = "下载中"
+        # ⚠️ **必须在函数开头初始化**（2026-10-03 踩到）：它只在下面的 GameBanana 分支里被赋值，
+        # 而普通 URL 直接下载不走那条路 ⇒ 后面读它就成了 `UnboundLocalError`，
+        # 整个下载线程静默挂掉、任务永远停在"下载中"（7 个测试一起红了）。
+        aux_files: list[dict[str, Any]] = []
 
         # 速度：滑动窗口（最近 5 秒）算，别用"总字节/总耗时"——那会被开头那段探测拖低，
         # 也别用瞬时值——那会跳。用户 2026-10-02：「下载过程要有进度条显示速度」。
@@ -2528,7 +2532,18 @@ class EndfieldModControllerApi:
                 launcher._append_log(self.config, f"Mod 下载: 香蕉网 {banana_id} 访问失败：{exc}")
                 return
             files = profile["files"]
-            picked = next((entry for entry in files if not entry.get("archived")), files[0])
+            # ⚠️⚠️ **按更新时间挑主包，并把配套小文件一起下**（2026-10-03 用户实测：
+            #     「uimod 好像没生效」）。
+            # 原先这里是 `next((entry for entry in files if not archived), files[0])`
+            # —— 取"列表第一个未归档的"，而 API 的 `_aFiles` **不是按时间排的**：
+            # 那个 Mod 的顺序是 1.3.1(86MB) / _core_2 / _core_ffd68 / 1.8.2(957MB)，
+            # 于是下载到了 **1.3.1 旧版**；而真正的 `_Core.ini`（作者单独发的
+            # `_core_2.zip`，275 B）**从来没被下载过** —— 主包缺它根本不工作。
+            picked, aux_files = moddl.split_mod_files(files)
+            if picked is None:
+                item["status"] = "失败"
+                item["message"] = "这个页面里没有可下载的文件"
+                return
             item["title"] = profile["name"]
             item["author"] = profile["author"]
             item["game"] = profile["game"]
@@ -2542,7 +2557,9 @@ class EndfieldModControllerApi:
             if item["version"]:
                 notes.append(str(item["version"]))
             if len(files) > 1:
-                notes.append(f"共 {len(files)} 个文件，已取最新那个")
+                notes.append(f"共 {len(files)} 个文件，已按更新时间取最新主包")
+            if aux_files:
+                notes.append(f"另有 {len(aux_files)} 个配套小文件会一并下载")
             item["note"] = " · ".join(notes)
             if profile["game"] and "endfield" not in profile["game"].lower():
                 item["message"] = f"⚠ 这个 Mod 属于「{profile['game']}」，不是终末地的"
@@ -2563,6 +2580,23 @@ class EndfieldModControllerApi:
             # 暂停要留断点（下次能续），终止不留
             keep_partial=bool(self._mod_dl.get("pause")),
             log=lambda message: launcher._append_log(self.config, message))
+        # ⚠️ **配套小文件一并下载**（2026-10-03）：作者单独发的 `_Core.ini` 这类文件
+        # 主包缺它根本不工作（实测那个 UI Mod 就是），而它一直没被下载过。
+        # 失败**不算主包失败**（主包已经下好了），只记一条日志。
+        if path is not None and aux_files:
+            for extra in aux_files:
+                if cancelled():
+                    break
+                try:
+                    launcher._append_log(
+                        self.config, f"Mod 下载: 配套文件 {extra.get('file')}（{extra.get('size')} B）")
+                    moddl.download(
+                        extra["url"], dest_dir, name=extra.get("file") or "",
+                        cancel=cancelled,
+                        log=lambda message: launcher._append_log(self.config, message))
+                except Exception as exc:  # noqa: BLE001 —— 配套失败不影响主包
+                    launcher._append_log(
+                        self.config, f"Mod 下载: 配套文件 {extra.get('file')} 失败（已忽略）：{exc}")
         if path is None:
             # 「已暂停」/「已终止」不是失败，如实标出来（用户点的，别报成错误）
             if error in ("已暂停", "已终止"):
