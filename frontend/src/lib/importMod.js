@@ -6,6 +6,19 @@ import { setStatus } from "./status.js";
 
 const CHUNK = 1024 * 1024;
 
+/** Mod 库目录（用于"手动解压该放哪"的提示）。拿不到就返回空串，调用方给兜底文案。 */
+async function libraryDir() {
+  try {
+    // ⚠️ 用后端的 `log()`（它返回 `{library, staging, runtime, controller, reshade}` 的
+    // **解析好的真实路径**）。不要自己拼 `data_root + library_dir` ——
+    // `get_state` 里没有 `library` 字段，而配置里的 `library_dir` 可能是相对路径。
+    const dirs = await call("log");
+    return String((dirs && dirs.library) || "");
+  } catch (e) {
+    return "";
+  }
+}
+
 export function dragHasFiles(event) {
   const types = event.dataTransfer && event.dataTransfer.types;
   return !!types && Array.prototype.indexOf.call(types, "Files") >= 0;
@@ -27,7 +40,26 @@ function sliceToBase64(file, start, end) {
 export async function importDroppedFile(file, { onDone, onNeedConfirm } = {}) {
   if (!file) return;
   if (!/\.(zip|7z|rar)$/i.test(file.name)) {
-    await showAlert("导入 Mod", "目前只支持 .zip / .7z / .rar 压缩包（其他格式请先解压再拖进来）。");
+    // ⚠️ **"不支持"也要给出目标库地址**（2026-10-03 用户：「下载或拖入**解压失败或不支持**
+    // 没有弹出**目标库和文件原位置**，让用户手动解压」）。
+    // 这条在前端就拦下了（还没发给后端），所以用户拖的那个包**就在他自己手上**，
+    // 缺的只是"该解压到哪" —— 那就是 Mod 库。
+    hideProgressToast("import");
+    await showModalDialog({
+      title: "这个格式不能自动导入",
+      message: [
+        `拖进来的是：${file.name}`,
+        "程序只能自动解压 .zip / .7z / .rar。",
+        "",
+        "**它应该解压到**（把解压出来的 Mod 文件夹放进这里）：",
+        `  ${(await libraryDir()) || "（Mod 库目录，见设置页「工作区与 Mod 库」）"}`,
+        "",
+        "手动做法：把它解压，得到里面的 Mod 文件夹"
+          + "（如果解压出来套了好几层，保留最外层那一层），整个放进上面的目录，"
+          + "再回界面点「重新扫描」。",
+      ].join("\n"),
+      okText: "知道了", showCancel: false,
+    });
     return;
   }
   try {

@@ -167,11 +167,22 @@ class ImportArchiveTests(unittest.TestCase):
                 self.assertIn(".rar", begin["message"])
 
     def test_broken_7z_reports_readable_error(self) -> None:
-        """坏包不能把进程搞崩，要如实回报（并提示装 7-Zip / 用 Windows 自带 tar）。"""
+        """坏包不能把进程搞崩，要如实回报**可读的中文原因**。
+
+        ⚠️ 2026-10-03 调整断言：这种包现在会被**解压前的完整性预检**
+        （`archive_check.verify_archive`）先拦住 —— 因为"文件头不对、多半没下完"
+        比等解压时才抛一句 `BadZipFile` 有用得多（用户实测报过
+        `解压失败：Bad CRC-32 for file '…/Endmin_HandOnCheek.dds'`：
+        那种消息既没告诉他为什么、也没说该怎么办）。
+        所以把"必须含『解压失败』四个字"改成"必须是**可读的中文说明**"。
+        """
         blob = b"this is definitely not an archive" * 64
         result = self._import_chunked("broken.7z", blob)
         self.assertFalse(result.get("ok"), result)
-        self.assertIn("解压失败", result["message"])
+        message = result["message"]
+        # 仍然必须是一句**人话**（不是裸异常名 / 英文堆栈），并且要提到 7z
+        self.assertIn("7z", message)
+        self.assertTrue(any(ch in message for ch in "的不像完整"), message)
         self.assertFalse((self.library / "broken").exists())
 
     def test_archive_tool_is_discoverable(self) -> None:

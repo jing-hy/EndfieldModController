@@ -297,19 +297,32 @@ async function pollProgress() {
         // ⚠️ **B5：有「需手动解压」的包时要告诉用户去哪拿**（2026-10-03 补回归）。
         // 后端把解压不了的包标成「需手动解压」并**保留文件**（不删），
         // 0.9.5 会列出这些文件 + 给一个「打开下载目录」按钮（`open_download_dir`）。
-        // 换代后前端对这个状态**完全没有处理** ⇒ 包下完了、装不上、也不知道文件在哪。
+        //
+        // ⚠️⚠️ **2026-10-03 用户明确要求**：「**下载或拖入解压失败或不支持没有弹出
+        // 目标库和文件原位置，让用户手动解压**」—— 所以弹窗里**必须同时给出**
+        // ① 那个包在哪（`source_path`）② 要解压到哪（`target_dir`），
+        // 而不是只写一句"请手动解压"。后端现在会回这两个字段。
         const manual = items.filter((it) => it.status === "需手动解压");
         if (manual.length && !modDlManualShown) {
           modDlManualShown = true;
+          const first = manual[0] || {};
           const open = await showModalDialog({
             title: `${manual.length} 个包需要你手动解压`,
             message: [
-              "这些包程序认不出来（不是 zip/7z/rar，或包本身坏了），所以**原样留在下载目录**：",
+              "这些包程序没法自动解压（不是 zip/7z/rar，或者包本身下坏了），"
+                + "所以**原样留在磁盘上、没有删除**：",
               "",
-              ...manual.slice(0, 8).map((it) => `· ${it.name || it.path || "?"}`),
+              ...manual.slice(0, 8).map((it) => "· " + (it.source_path || it.path || it.name || "?")),
               manual.length > 8 ? `…另有 ${manual.length - 8} 个` : "",
               "",
-              "手动解压后，把里面的 Mod 文件夹放进 Mod 库再点「重新扫描」即可。",
+              "**它应该解压到**（把解压出来的 Mod 文件夹放进这里）：",
+              `  ${first.target_dir || store.state.library || "（Mod 库目录）"}`,
+              "",
+              "手动做法：把上面的包解压，得到里面的 Mod 文件夹"
+                + "（如果解压出来套了好几层，保留最外层那一层），整个放进上面的目录，"
+                + "再回界面点「重新扫描」。",
+              "",
+              "（如果消息里说了是 CRC/损坏，那多半是**下载过程中坏了**，重新下一次即可。）",
             ].filter((x) => x !== "").join("\n"),
             okText: "打开下载目录", cancelText: "知道了",
           });

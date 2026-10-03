@@ -35,6 +35,34 @@ IMPORT_SUFFIXES = (".zip", ".7z", ".rar")
 # 挡住"误拖一个几十 GB 的包把磁盘塞满"这种自伤；一旦触发就彻底清理并如实说明。
 # 8 GB：正常 Mod（含那个 912 MB 的）都在它之下，而它又远小于"误拖整个盘"的量级。
 IMPORT_HARD_CAP_BYTES = 8 * 1024 ** 3
+
+
+def _manual_extract_hint(reason: str, archive: Path, library: Path) -> str:
+    """把一条解压错误变成**用户可以照做的指引**（含文件地址与目标地址）。
+
+    用户 2026-10-03 原话：「**解压失败弹窗应该给出文件地址和目标地址，让用户自行解压
+    放进去，下载的解压也是**」。所以这里统一产出：原因 + 压缩包在哪 + 应该解压到哪 +
+    一条可以直接复制的命令（用 Windows 自带 tar，不必先装 7-Zip）。
+    """
+    archive = Path(archive)
+    library = Path(library)
+    stem = archive.stem
+    lines = [
+        str(reason or "解压失败").strip(),
+        "",
+        "**压缩包**（已原样保留，没有删除）：",
+        f"  {archive}",
+        "",
+        "**它应该解压到**（把解压出来的 Mod 文件夹放进这里）：",
+        f"  {library}",
+        "",
+        f"手动做法：把上面那个包解压，得到 `{stem}` 文件夹（如果解压出来是好几层，"
+        f"只保留最外层那一层就行），整个文件夹放进 Mod 库，再回界面点「重新扫描」。",
+        "",
+        "如果手边没有解压软件，Windows 自带的 tar 就能解（在 PowerShell 里跑）：",
+        f'  tar -xf "{archive}" -C "{library}"',
+    ]
+    return "\n".join(lines)
 IMPORT_SUFFIX_HINT = " / ".join(IMPORT_SUFFIXES)
 
 
@@ -2395,6 +2423,34 @@ class EndfieldModControllerApi:
 
         suffix = Path(name).suffix.lower()
         launcher._append_log(self.config, f"导入: 开始解压 {name}（{archive_path.stat().st_size} B）")
+        # ⚠️ **解压前先验完整性**（2026-10-03 补）。
+        # 用户实测报过 `解压失败：Bad CRC-32 for file 'Female Images + Dark Mode/…/Endmin_HandOnCheek.dds'`
+        # —— CRC-32 是 zip 给每个文件存的校验和，对不上说明**内容在传输/写入时坏了**
+        #（不是 Mod 的问题、也不是解压器的错）。原来的体验是"解压到一半才炸"，
+        # 用户看到一句 `BadZipFile` 不知道该重下还是该换包。
+        # 现在先跑一次检查，坏了就明确说"传输过程中坏了、建议重新下载"。
+        try:
+            from . import archive_check
+
+            verdict = archive_check.verify_archive(
+                archive_path,
+                warn=lambda message: launcher._append_log(self.config, message),
+            )
+            if not verdict.get("ok"):
+                launcher._append_log(
+                    self.config, f"导入: {name} 完整性检查未通过（{verdict.get('kind')}）")
+                # ⚠️ **必须给出"文件在哪、要解压到哪"**（2026-10-03 用户要求：
+                # 「解压失败弹窗应该给出文件地址和目标地址，让用户自行解压放进去，
+                #  **下载的解压也是**」）。用户拿到一个坏包时，最有用的不是"失败了"，
+                # 而是**这两个路径** —— 他可以自己去别处下/修，然后手动放进去。
+                return {"ok": False, "integrity": verdict.get("kind"),
+                        "source_path": str(archive_path),
+                        "target_dir": str(self.config.library_path),
+                        "message": _manual_extract_hint(
+                            verdict.get("message") or "压缩包损坏，请重新下载",
+                            archive_path, self.config.library_path)}
+        except Exception as exc:  # noqa: BLE001 —— 检查本身出问题不该挡住导入
+            launcher._append_log(self.config, f"导入: 完整性检查出错（忽略继续）：{exc}")
         base = re.sub(r'[\\/:*?"<>|]', "_", Path(name).stem).strip() or "imported_mod"
         dest = self.config.library_path / base
         counter = 1
@@ -2418,7 +2474,13 @@ class EndfieldModControllerApi:
         except Exception as exc:  # noqa: BLE001  （BadZipFile / RuntimeError / OSError …）
             launcher._append_log(self.config, f"导入失败（解压）: {exc}")
             shutil.rmtree(dest, ignore_errors=True)
-            return {"ok": False, "message": f"解压失败：{exc}"}
+            # ⚠️ 同上面：**给出文件地址与目标地址**，让用户能自己解压放进去
+            #（2026-10-03 用户要求：「…让用户自行解压放进去，下载的解压也是」）。
+            return {"ok": False,
+                    "source_path": str(archive_path),
+                    "target_dir": str(self.config.library_path),
+                    "message": _manual_extract_hint(
+                        f"解压失败：{exc}", archive_path, self.config.library_path)}
 
         # 很多 Mod 包外面还套了一层同名目录；若里面只有一个子目录且没有文件，把内容提上来，
         # 否则扫描时会把那一层当成 Mod 名、角色也识别不到。
@@ -2788,9 +2850,20 @@ class EndfieldModControllerApi:
         item["percent"] = 100
         if not moddl.is_extractable(path.name):
             # **不去猜**：非 zip/7z/rar 一律留在临时目录，让用户自己解压（用户 2026-10-02 选的方案）
+            #
+            # ⚠️ **必须给出"文件在哪、要放到哪"**（2026-10-03 用户：「**下载或拖入解压失败
+            # 或不支持没有弹出目标库和文件原位置，让用户手动解压**」—— 这正是那条 issue）。
+            # 只写"请手动解压后把文件夹拖进 Mod 库"是不够的：用户不知道**那个文件在哪**、
+            # 也**不知道该放到哪个目录**。这里把两个路径都带上，并用同一个 helper 生成
+            # 可照做的指引（含一条能直接复制的 tar 命令）。
             item["status"] = "需手动解压"
-            item["message"] = ("这个格式不能自动解压（只支持 " + " / ".join(moddl.EXTRACTABLE_SUFFIXES)
-                               + "），请手动解压后把文件夹拖进 Mod 库")
+            item["source_path"] = str(path)
+            item["target_dir"] = str(self.config.library_path)
+            # 注意措辞：状态叫「需手动解压」，消息里也要出现这四个字（测试与用户搜索都依赖它）
+            item["message"] = _manual_extract_hint(
+                "需手动解压：这个格式不能自动解压（只支持 "
+                + " / ".join(moddl.EXTRACTABLE_SUFFIXES) + "）",
+                path, self.config.library_path)
             return
 
         item["status"] = "解压中"
@@ -2865,8 +2938,17 @@ class EndfieldModControllerApi:
                     except OSError as exc:
                         launcher._append_log(self.config, f"Mod 下载: 封面没存进库（{exc}）")
         else:
+            # ⚠️ **下载侧的解压失败也要给出两个路径**（2026-10-03 用户：
+            # 「issue 反馈的应该也是类似问题，**下载或拖入解压失败或不支持没有弹出
+            # 目标库和文件原位置**，让用户手动解压」）。
+            # `_import_archive_file` 现在会回 `source_path` / `target_dir`，
+            # 这里**优先用它给的**（它拿到的 `path` 才是最终落盘的那个、可能已被按内容补过后缀）；
+            # 万一没有（旧路径 / 异常兜底），就用本任务自己的 `path` 与 Mod 库补上。
             item["status"] = "需手动解压"
-            item["message"] = result.get("message") or "解压失败，请手动处理"
+            item["source_path"] = str(result.get("source_path") or path)
+            item["target_dir"] = str(result.get("target_dir") or self.config.library_path)
+            item["message"] = result.get("message") or _manual_extract_hint(
+                "解压失败，请手动处理", path, self.config.library_path)
 
     def mod_download_progress(self) -> dict[str, Any]:
         """给前端轮询：任务列表 + 计数（下载中/已入库/需手动解压/失败）。
@@ -3063,7 +3145,19 @@ class EndfieldModControllerApi:
         name = Path(str(file_name or "")).name
         suffix = Path(name).suffix.lower()
         if suffix not in IMPORT_SUFFIXES:
-            return {"ok": False, "message": f"目前只支持 {IMPORT_SUFFIX_HINT}（其他格式请先解压）"}
+            # ⚠️ **"不支持"也要说清目标库在哪**（2026-10-03 用户：「下载或拖入**解压失败
+            # 或不支持**没有弹出**目标库和文件原位置**，让用户手动解压」）。
+            # 这条比"解压失败"更早触发（文件还没传完就拒了），所以拿不到"文件在哪"——
+            # 但**目标库**是明确的，而且用户拖的那个包就在他自己手上。
+            return {"ok": False,
+                    "target_dir": str(self.config.library_path),
+                    "message": (
+                        f"这个格式不能自动导入（只支持 {IMPORT_SUFFIX_HINT}）：{name or '（没拿到文件名）'}\n\n"
+                        f"**它应该解压到**（把解压出来的 Mod 文件夹放进这里）：\n"
+                        f"  {self.config.library_path}\n\n"
+                        "手动做法：把你拖进来的那个包解压，得到里面的 Mod 文件夹"
+                        "（如果解压出来套了好几层，保留最外层那一层），"
+                        "整个放进上面的目录，再回界面点「重新扫描」。")}
         import time as _time
 
         incoming = self.config.runtime_path / "_incoming"
@@ -3188,7 +3282,19 @@ class EndfieldModControllerApi:
         name = Path(str(file_name or "")).name
         suffix = Path(name).suffix.lower()
         if suffix not in IMPORT_SUFFIXES:
-            return {"ok": False, "message": f"目前只支持 {IMPORT_SUFFIX_HINT}（其他格式请先解压）"}
+            # ⚠️ **"不支持"也要说清目标库在哪**（2026-10-03 用户：「下载或拖入**解压失败
+            # 或不支持**没有弹出**目标库和文件原位置**，让用户手动解压」）。
+            # 这条比"解压失败"更早触发（文件还没传完就拒了），所以拿不到"文件在哪"——
+            # 但**目标库**是明确的，而且用户拖的那个包就在他自己手上。
+            return {"ok": False,
+                    "target_dir": str(self.config.library_path),
+                    "message": (
+                        f"这个格式不能自动导入（只支持 {IMPORT_SUFFIX_HINT}）：{name or '（没拿到文件名）'}\n\n"
+                        f"**它应该解压到**（把解压出来的 Mod 文件夹放进这里）：\n"
+                        f"  {self.config.library_path}\n\n"
+                        "手动做法：把你拖进来的那个包解压，得到里面的 Mod 文件夹"
+                        "（如果解压出来套了好几层，保留最外层那一层），"
+                        "整个放进上面的目录，再回界面点「重新扫描」。")}
         # ⚠️ **两条路的限额必须一致**（2026-10-03）：原来是 300 MB，而分块那条是 600 MB，
         # 同一个包"拖进去"和"走另一条路"结果不同，用户会莫名其妙。
         # 现在共用同一个**防呆**上限（见 `IMPORT_HARD_CAP_BYTES` 的说明）。
