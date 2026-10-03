@@ -40,7 +40,8 @@ function rowColor(d) {
 
 // 下载实时速度：后端在 byte_progress 里采样并平滑过；不在下载时是 0 ⇒ 显示 —（不留假数字）
 const speedBps = ref(0);      // 由 pollProgress 从 get_dependency_progress 里取
-const modDlLines = ref([]);   // 「下载 Mod」那条链路的进度（拼成日志行显示）
+const modDlActive = ref(false);        // 是否有 Mod 下载在跑（用来联动进度条与速度）
+const modDlMarks = new Map();          // 每条任务上次记下的状态与百分比台阶（避免刷屏）
 const speedText = computed(() => (speedBps.value > 0 ? humanSize(speedBps.value) + "/s" : "—"));
 function humanSize(bytes) {
   const n = Number(bytes) || 0;
@@ -77,26 +78,50 @@ async function pollProgress() {
     const nowRunning = !!p.running;
     running.value = nowRunning;
     if (typeof p.percent === "number") percent.value = p.percent;
-    if (Array.isArray(p.log) && p.log.length) logLines.value = p.log;
+    // ⚠️ 不能无脑 `logLines.value = p.log`：Mod 下载那些行是**追加**进同一个日志框的，
+    // 整份替换会把它们冲掉（用户要的是"向下滚"）。这里只在**组件安装日志真的变了**
+    // 或者**之前没有过组件日志**时替换，并把已有的 Mod 下载行接在后面。
+    if (Array.isArray(p.log) && p.log.length) {
+      const base = p.log;
+      const tail = logLines.value.filter((ln) => String(ln).startsWith("[Mod 下载]"));
+      const merged = tail.length ? [...base, ...tail] : base;
+      const changed = merged.length !== logLines.value.length
+        || merged.some((ln, i) => ln !== logLines.value[i]);
+      if (changed) logLines.value = merged;
+    }
     speedBps.value = Number(p.speed_bps || 0);   // 下载实时速度（第 4 个卡片）
 
-    // ⚠️ Mod 下载（「下载 Mod」卡片）也在这里显示：用户 2026-10-03 要求
-    // 「mod下载应该跳转到依赖页下载，过程中显示日志那些」。
-    // 它是独立的任务（`_mod_dl`），跟组件下载不是同一份进度，所以这里单独拉一次、
-    // 把每条的状态拼成日志行贴到日志框顶部，失败了也看得到原因。
+    // ⚠️ Mod 下载（「下载 Mod」卡片）也在这里显示 —— 用户 2026-10-03 明确了形态：
+    // 「mod下载**不是日志式的向下滚**，而是同一条」**说反了**，随后纠正为
+    // 「现在是同一条原地更新，**我需要向下滚**」⇒ 要的是**日志式、不断向下追加**。
+    // 所以这里不是"每轮把整块文本替换掉"，而是**把新的进展追加到日志框末尾并滚到底**。
+    // 同时把它的总进度/速度接到上面的进度条与「下载速度」卡片上（用户：「没联动进度条和下载速度」）。
     try {
       const md = await call("mod_download_progress");
       const items = (md && md.items) || [];
+      modDlActive.value = items.length > 0 && !md.done;
       if (items.length) {
-        const lines = items.map((it) => {
-          const pct = it.size ? ` ${Math.round((it.received / it.size) * 100)}%` : "";
-          const size = it.size ? ` (${(it.received / 1048576).toFixed(1)}/${(it.size / 1048576).toFixed(1)} MB)` : "";
-          const msg = it.message ? ` — ${it.message}` : "";
-          return `[Mod 下载] ${it.status || "下载中"}${pct}${size}  ${it.name || it.url}${msg}`;
-        });
-        modDlLines.value = lines;
-      } else {
-        modDlLines.value = [];
+        for (const it of items) {
+          const pct = it.size ? Math.floor((it.received / it.size) * 100) : -1;
+          const key = String(it.url || it.name || "");
+          const prev = modDlMarks.get(key) || { status: "", step: -1 };
+          // 只在"状态变了"或"进度跨过 10% 台阶"时追加一行 —— 否则每秒一条会把日志淹掉
+          const step = pct >= 0 ? Math.floor(pct / 10) : -1;
+          if (it.status !== prev.status || step > prev.step) {
+            modDlMarks.set(key, { status: String(it.status || ""), step });
+            const size = it.size
+              ? ` (${(it.received / 1048576).toFixed(1)}/${(it.size / 1048576).toFixed(1)} MB)`
+              : "";
+            const msg = it.message ? ` — ${it.message}` : "";
+            logLines.value = [...logLines.value, `[Mod 下载] ${it.status || "下载中"}${size}  ${it.name || it.url}${msg}`];
+          }
+        }
+      }
+      // 联动：进度条与「下载速度」卡片 —— Mod 下载期间用它的数据
+      if (modDlActive.value && md.total_bytes) {
+        percent.value = Math.min(99, Math.round((md.done_bytes / md.total_bytes) * 100));
+        progressText.value = `Mod 下载 ${(md.done_bytes / 1048576).toFixed(1)}/${(md.total_bytes / 1048576).toFixed(1)} MB`;
+        if (md.speed_bps) speedBps.value = Number(md.speed_bps);
       }
     } catch (e) { /* 没有 Mod 下载任务很正常 */ }
     progressText.value = p.total ? `${p.current}/${p.total}` : (p.message || "");
@@ -225,7 +250,7 @@ useLogAutoScroll(logBox, () => logLines.value);
               {{ logLines.length > 1 ? logLines.length + " 行" : "尚无日志" }}
             </span>
           </div>
-          <div v-if="logLines.length || modDlLines.length" ref="logBox" class="log-box" style="max-height: 420px; border-radius: 0">{{ modDlLines.length ? modDlLines.join("\n") + "\n" + logLines.join("\n") : logLines.join("\n") }}</div>
+          <div v-if="logLines.length" ref="logBox" class="log-box" style="max-height: 420px; border-radius: 0">{{ logLines.join("\n") }}</div>
           <div v-else class="log-empty" style="min-height: 52px; text-align: center">
             尚未开始。点「安装缺失依赖」后，这里会显示下载线路与安装过程。
           </div>
