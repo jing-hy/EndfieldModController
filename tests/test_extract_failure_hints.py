@@ -69,7 +69,12 @@ def test_broken_zip_import_reports_paths(tmp_path: Path) -> None:
         assert result.get("ok") is False, result
         assert result.get("source_path"), "必须给出源文件地址"
         assert result.get("target_dir"), "必须给出目标库地址"
-        assert str(broken) in result["message"]
+        # ⚠️ 用 `source_path` 而不是我传进去的那个路径：失败时包会被**搬进
+        # `runtime\需手动解压\`**（临时目录的文件随后会被 finally 清掉，
+        # 直接给它的路径等于给一个马上失效的地址 —— 用户实测报过"显示找不到"）。
+        source = Path(str(result["source_path"]))
+        assert source.is_file(), f"给的路径必须真实存在：{source}"
+        assert str(source) in result["message"]
         assert result["target_dir"] in result["message"]
     finally:
         case.tearDown()

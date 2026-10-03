@@ -2,6 +2,8 @@
 // 全局弹窗宿主：渲染 uiState.dialog，语义与旧 app.js 的 showModalDialog 完全一致
 // （正文用 textContent 等价方式渲染 → 这里直接用插值，**不解析 markdown**）。
 import { ref, watch, nextTick, onUnmounted } from "vue";
+import { computed } from "vue";
+import { call } from "../lib/bridge.js";
 import { uiState, resolveDialog } from "../lib/dialog.js";
 import Btn from "./ui/Btn.vue";
 
@@ -38,6 +40,72 @@ watch(() => uiState.dialog, async (dialog) => {
 }, { immediate: true });
 
 onUnmounted(stopHold);
+
+// ⚠️⚠️ **弹窗正文的轻量渲染**（2026-10-03 用户：「**你这里并不会渲染成加粗**」）。
+//
+// 原来这里是 `{{ uiState.dialog.message }}` —— **纯文本插值**，`dialog.js` 的注释里也
+// 明确写着"不允许写 markdown"。所以我写的 `**压缩包**` 会**原样显示成星号**，
+// 界面很难看。现在做一层**受控**渲染：
+//   * 先**整体 HTML 转义**（正文可能含用户文件名，绝不能直接 v-html 注入）；
+//   * 再把 `**…**` 换成 `<b>`；
+//   * 再把**路径**（`X:\…` 或 `/…`）自动变成可点击的 `<a>`，点一下调
+//     `open_path_in_explorer` 打开它的所在位置 —— 用户不用再手动复制路径。
+// 只此三种变换，其余一律按纯文本走。
+
+/** HTML 转义（顺序很重要：& 必须最先）。 */
+function escapeHtml(text) {
+  return String(text == null ? "" : text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// 形如 `D:\a\b`（含空格的路径用引号包着的情况也认）
+const PATH_RE = /([A-Za-z]:\\[^\n<>"']+?|(?:\\\\)[^\n<>"']+?)(?=[\s，。；、）)\]"]|$)/g;
+
+const renderedMessage = computed(() => {
+  const raw = String(uiState.dialog?.message ?? "");
+  let html = escapeHtml(raw);
+  // `**加粗**`（转义后 ** 不受影响）
+  html = html.replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");
+  // 路径 → 可点击。跳过已经被包进 <b> 里的情况（正则只认盘符/UNC 开头，够用）
+  html = html.replace(PATH_RE, (match) => {
+    const clean = match.replace(/[.,;:，。；：]+$/, "");
+    const tail = match.slice(clean.length);
+    return `<a class="dlg-path" data-path="${clean}" title="点击打开所在位置">${clean}</a>${tail}`;
+  });
+  return html;
+});
+
+/** 弹窗里出现的第一个路径（有的话就给一个「打开文件夹」按钮）。 */
+const firstPath = computed(() => {
+  const raw = String(uiState.dialog?.message ?? "");
+  const m = raw.match(/[A-Za-z]:\\[^\n<>"']+/);
+  return m ? m[0].replace(/[.,;:，。；：)\]]+$/, "") : "";
+});
+
+/** 点路径 / 点按钮 → 让后端在资源管理器里定位它（后端有白名单，安全）。 */
+async function openPath(path) {
+  const target = String(path || "").trim();
+  if (!target) return;
+  try {
+    const r = await call("open_path_in_explorer", target);
+    const { showToast } = await import("../lib/dialog.js");
+    if (r && r.ok === false) showToast(String(r.message || "打不开这个位置"), "danger");
+  } catch (e) {
+    /* 打不开就算了，用户还能手动复制 */
+  }
+}
+
+// 事件委托：`v-html` 出来的链接没法直接绑 @click
+function onMessageClick(event) {
+  const el = event.target && event.target.closest && event.target.closest("a[data-path]");
+  if (!el) return;
+  event.preventDefault();
+  openPath(el.getAttribute("data-path"));
+}
 </script>
 <template>
   <div v-if="uiState.dialog" class="fixed inset-0 z-50 flex items-center justify-center"
@@ -53,9 +121,12 @@ onUnmounted(stopHold);
              而 Windows 路径没有空格、会被当成**一个超长单词**，于是一行撑出弹窗外。
              `overflow-wrap: anywhere` 允许在任意字符处断行（含 `/`），再配 `max-width: 100%`
              把宽度约束在弹窗内；限高 + 滚动是额外保险（超长堆栈仍然要能看全）。 -->
-        <pre class="whitespace-pre-wrap m-0 text-sm leading-6"
+        <!-- ⚠️ 用 `v-html` 渲染**受控**轻量标记（`**加粗**` + 可点路径）——
+             内容已先在 `renderedMessage` 里整体 HTML 转义，只放行我们自己的 <b>/<a>。 -->
+        <pre class="whitespace-pre-wrap m-0 text-sm leading-6 dlg-body"
              style="max-width: 100%; overflow-wrap: anywhere; word-break: break-word;
-                    max-height: 46vh; overflow-y: auto">{{ uiState.dialog.message }}</pre>
+                    max-height: 46vh; overflow-y: auto"
+             v-html="renderedMessage" @click="onMessageClick"></pre>
         <a v-if="uiState.dialog.link && uiState.dialog.link.url" :href="uiState.dialog.link.url"
            class="text-accent text-xs mt-2 inline-block" @click.prevent="$emit('open-link', uiState.dialog.link.url)">
           {{ uiState.dialog.link.text || uiState.dialog.link.url }}
@@ -66,6 +137,10 @@ onUnmounted(stopHold);
         <span v-if="holdLeft > 0" class="text-xs mr-auto" style="color: var(--text-muted)">
           请先读完（{{ holdLeft }} 秒后可操作）
         </span>
+        <!-- ⚠️ **路径旁边要有「打开」入口**（2026-10-03 用户：「**还有没有打开按钮**」）。
+             出现路径时才显示；点它等同于点路径本身（后端有白名单，安全）。 -->
+        <Btn v-if="firstPath" variant="secondary" :disabled="holdLeft > 0"
+             class="mr-auto" @click="openPath(firstPath)">打开文件夹</Btn>
         <Btn v-if="uiState.dialog.showCancel" ref="cancelBtn" variant="secondary"
              :disabled="holdLeft > 0" @click="resolveDialog(false)">
           {{ uiState.dialog.cancelText }}

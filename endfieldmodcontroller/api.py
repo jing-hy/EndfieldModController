@@ -37,6 +37,37 @@ IMPORT_SUFFIXES = (".zip", ".7z", ".rar")
 IMPORT_HARD_CAP_BYTES = 8 * 1024 ** 3
 
 
+def _keep_failed_import(config: Any, archive: Path, name: str = "") -> Path:
+    r"""把导入失败的包**搬到用户能找到的地方**并返回它的新路径。
+
+    ⚠️ **为什么必须搬**（2026-10-03 用户：「**而且它显示的文件地址也显示找不到**」）：
+    拖入时包先落在 `runtime\\_incoming\\<token>.zip`，而 `import_mod_finish()` 与
+    `import_mod_archive()` 的 `finally` **不管成功失败都会删掉它** ⇒ 我在弹窗里给出的
+    `source_path` **在显示出来的时候就已经不存在了**，用户点"打开文件夹"只会看到"找不到"。
+
+    现在失败时**不删**，搬进 `<数据根>\runtime\需手动解压\`（固定、可见、不会被自动清理），
+    返回搬过去之后的路径 —— 那个路径**真的存在**，用户可以自己去解压。
+    搬不动（磁盘满 / 权限）就退回原路径并保持文件不动，**绝不因为搬不动就把包弄丢**。
+    """
+    archive = Path(archive)
+    try:
+        dest_dir = Path(config.runtime_path) / "需手动解压"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        # ⚠️ **用用户认识的原始文件名**（`name`），而不是内部的 `<token>.zip`。
+        # 拖入时落盘名是 `<时间戳>-<pid>-<hash>.zip`，直接搬过去用户根本不知道那是啥
+        #（实测：提示里出现 `1791028589-39772-59503.zip`，毫无意义）。
+        wanted = Path(str(name or "")).name or archive.name
+        target = dest_dir / wanted
+        counter = 1
+        while target.exists():
+            counter += 1
+            target = dest_dir / f"{Path(wanted).stem}_{counter}{Path(wanted).suffix}"
+        archive.replace(target)          # 同盘 move；跨盘会退化成 copy+unlink
+        return target
+    except OSError:
+        return archive
+
+
 def _manual_extract_hint(reason: str, archive: Path, library: Path) -> str:
     """把一条解压错误变成**用户可以照做的指引**（含文件地址与目标地址）。
 
@@ -50,7 +81,7 @@ def _manual_extract_hint(reason: str, archive: Path, library: Path) -> str:
     lines = [
         str(reason or "解压失败").strip(),
         "",
-        "**压缩包**（已原样保留，没有删除）：",
+        "**压缩包**（已帮你留好，没有删除）：",
         f"  {archive}",
         "",
         "**它应该解压到**（把解压出来的 Mod 文件夹放进这里）：",
@@ -2443,12 +2474,15 @@ class EndfieldModControllerApi:
                 # 「解压失败弹窗应该给出文件地址和目标地址，让用户自行解压放进去，
                 #  **下载的解压也是**」）。用户拿到一个坏包时，最有用的不是"失败了"，
                 # 而是**这两个路径** —— 他可以自己去别处下/修，然后手动放进去。
+                # 把包**搬到用户能找到的地方**（临时目录会被 finally 清掉，
+                # 直接给它的路径等于给一个马上失效的地址）
+                kept = _keep_failed_import(self.config, archive_path, name)
                 return {"ok": False, "integrity": verdict.get("kind"),
-                        "source_path": str(archive_path),
+                        "source_path": str(kept),
                         "target_dir": str(self.config.library_path),
                         "message": _manual_extract_hint(
                             verdict.get("message") or "压缩包损坏，请重新下载",
-                            archive_path, self.config.library_path)}
+                            kept, self.config.library_path)}
         except Exception as exc:  # noqa: BLE001 —— 检查本身出问题不该挡住导入
             launcher._append_log(self.config, f"导入: 完整性检查出错（忽略继续）：{exc}")
         base = re.sub(r'[\\/:*?"<>|]', "_", Path(name).stem).strip() or "imported_mod"
@@ -2476,11 +2510,12 @@ class EndfieldModControllerApi:
             shutil.rmtree(dest, ignore_errors=True)
             # ⚠️ 同上面：**给出文件地址与目标地址**，让用户能自己解压放进去
             #（2026-10-03 用户要求：「…让用户自行解压放进去，下载的解压也是」）。
+            kept = _keep_failed_import(self.config, archive_path, name)
             return {"ok": False,
-                    "source_path": str(archive_path),
+                    "source_path": str(kept),
                     "target_dir": str(self.config.library_path),
                     "message": _manual_extract_hint(
-                        f"解压失败：{exc}", archive_path, self.config.library_path)}
+                        f"解压失败：{exc}", kept, self.config.library_path)}
 
         # 很多 Mod 包外面还套了一层同名目录；若里面只有一个子目录且没有文件，把内容提上来，
         # 否则扫描时会把那一层当成 Mod 名、角色也识别不到。
