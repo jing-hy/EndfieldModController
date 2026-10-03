@@ -71,7 +71,7 @@ global persist $enabled = 1
         original = (summer.path / "mod.ini").read_text(encoding="utf-8")
         records = core.patch_mod_hotkeys(summer.path, self.root / "backups", summer.id)
         patched = (summer.path / "mod.ini").read_text(encoding="utf-8")
-        self.assertIn("key = no_modifiers vk_f24", patched.lower())
+        self.assertIn("key = no_modifiers vk_f23", patched.lower())
         self.assertIn("[key", patched.lower())
         core.restore_mod_hotkeys(summer.path, records)
         self.assertEqual((summer.path / "mod.ini").read_text(encoding="utf-8"), original)

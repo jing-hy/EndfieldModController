@@ -1616,10 +1616,35 @@ def find_unbalanced_asm_inis(root: Path, *, limit: int = 40) -> list[dict[str, A
     return found
 
 
+# ⚠️⚠️ **"锁键"要绑的那个键，必须是面板协议里永远不发的键**（2026-10-03 定案）
+#
+# 设计意图（用户原话）：「按之前的设计应该是想让这些快捷键都不被触发，
+# **你只要绑同一个没人按的就行**」—— 把所有 Mod 的 `[Key*]` 统一改写到同一个
+# "没人按的键"，从而**锁住 Mod 自带热键**（否则游戏里会误触发），
+# 真正的操作改由控制器面板走内部通道发送。
+#
+# **原来的 bug**：那个键选成了 `VK_F24` —— 而 F24 恰好是**面板协议的提交键**
+#（见 `reshade_addon/src/endfieldmodcontroller_addon.cpp`）：
+#     数字位：`VK_F13 + n`  ⇒ **F13..F22**
+#     提交键：`VK_F24`
+# 于是面板一提交，**所有 Mod 都读到 F24、全部一起切档**。
+# 用户实测现象：「按陈千语的时候壁纸也会跟着动」。
+#
+# **修法**：改绑 `VK_F23` —— 它是 F13..F24 里**唯一既不在数字位范围、也不是提交键**的键。
+# ⚠️ 改动面板协议（增删数字位或换提交键）时**必须同步复核这里**。
+LOCKED_MOD_HOTKEY = "VK_F23"
+
+
+def hotkey_for_mod(mod_id: str) -> str:
+    """Mod 被锁后统一绑定的键（所有 Mod 相同：它是"没人按的键"）。"""
+    return LOCKED_MOD_HOTKEY
+
+
 def patch_mod_hotkeys(
     mod_dir: Path,
     backup_root: Path | None = None,
     mod_id: str | None = None,
+    key_allocator: "Callable[[str], str] | None" = None,
 ) -> list[PatchRecord]:
     """Rebind original mod hotkeys to a harmless unused key.
 
@@ -1630,7 +1655,13 @@ def patch_mod_hotkeys(
     mod_dir = mod_dir.resolve()
     mod_id = mod_id or stable_id(str(mod_dir), mod_dir.name)
     records: list[PatchRecord] = []
-    safe_key = "no_modifiers VK_F24"
+    # ⚠️ **统一绑 `LOCKED_MOD_HOTKEY`（F23）**：目的是"锁住 Mod 自带热键"，
+    # 所有 Mod 绑**同一个**没人按的键即可（用户 2026-10-03 明确：
+    # 「你只要绑同一个没人按的就行」）。
+    # 原来的 bug 是那个键误选成 F24 = 面板协议的**提交键** ⇒ 一提交所有 Mod 齐动。
+    # 键由调用方**按动作段顺序分配**（保证全局唯一，见 `assign_hotkeys`）；
+    # 没传就退回按 mod_id 派生（单 Mod 单独打补丁的场景）。
+    _assigned = key_allocator or (lambda _n: hotkey_for_mod(mod_id))
     for ini_path in iter_ini_files(mod_dir):
         original = read_text(ini_path)
         lines = original.splitlines()
@@ -1648,7 +1679,9 @@ def patch_mod_hotkeys(
                 prefix = line[: len(line) - len(line.lstrip())]
                 if "=" in stripped:
                     key_name = stripped.split("=", 1)[0].strip()
-                    new_lines.append(f"{prefix}{key_name} = {safe_key}")
+                    new_lines.append(
+                        f"{prefix}{key_name} = no_modifiers {_assigned(key_name)}"
+                    )
                     changed = True
                     continue
             new_lines.append(line)

@@ -94,7 +94,7 @@ class KeyLabelTests(unittest.TestCase):
         self.assertEqual(key_label("backspace"), "Backspace")
         self.assertEqual(key_label("VK_OEM_COMMA"), ",")
         self.assertEqual(key_label("VK_LBUTTON"), "鼠标左键")
-        self.assertEqual(key_label("no_modifiers VK_F24"), "F24")
+        self.assertEqual(key_label("no_modifiers VK_F23"), "F23")
 
     def test_modifiers(self) -> None:
         self.assertEqual(key_label("ctrl alt shift VK_F1"), "Ctrl+Alt+Shift+F1")
@@ -473,7 +473,7 @@ class HotkeySwitchTests(unittest.TestCase):
         """开关打开 = **铺面板 + 锁 Mod 按键**（2026-10-02 晚恢复的「Mod 快捷键锁定」）。
 
         锁键是为了治"多个 Mod 抢同一个真实键"：Mod 的 `key` 行被改写成
-        `no_modifiers vk_f24`，手按原键失效，操作集中到游戏内面板。面板本身走
+        `no_modifiers vk_f23`，手按原键失效，操作集中到游戏内面板。面板本身走
         **F13..F24 内部通道**（切档逻辑注入在 Mod 自己的 ini 里），与 `key` 段无关，
         所以锁键不影响面板 —— 这正是它今天能重新启用的原因。
         """
@@ -485,7 +485,7 @@ class HotkeySwitchTests(unittest.TestCase):
         self.assertTrue(opened["ready"])
         self.assertTrue((self.dlss5 / reshade_integration.ADDON_NAME).is_file())
         # 开关打开 ⇒ Mod 原键被锁定（防抢键）
-        self.assertTrue(all("vk_f24" in key for key in self._staged_keys()), self._staged_keys())
+        self.assertTrue(all("vk_f23" in key for key in self._staged_keys()), self._staged_keys())
         # `panel_info.txt` 的 takeover 含义：Mod 原键**是否真被锁住** ⇒ 这里应为 1
         self.assertIn("takeover=1", (self.dlss5 / "panel_info.txt").read_text(encoding="utf-8"))
 
@@ -495,7 +495,7 @@ class HotkeySwitchTests(unittest.TestCase):
         controller_ini = self.staging / "MC_Controller" / "controller.ini"
         ini_text = controller_ini.read_text(encoding="utf-8")
         self.assertIn("key = VK_F13", ini_text)
-        self.assertIn("key = VK_F24", ini_text)
+        self.assertIn("key = VK_F24", ini_text)   # 面板协议的提交键（未变）
         key_lines = [line.strip().lower() for line in ini_text.splitlines()
                      if line.strip().lower().startswith("key =")]
         self.assertTrue(key_lines, "controller.ini 里应该有 key 行")
@@ -626,7 +626,7 @@ class PanelKeyLinkTests(unittest.TestCase):
         check = self._check()
         self.assertFalse(check["ok"])
         self.assertIn("F13", check["message"])
-        self.assertIn("F24", check["message"])
+        self.assertIn("F13", check["message"])   # 冲突检测针对面板协议键（未变）
 
     def test_legacy_staging_keys_are_flagged(self) -> None:
         self._write_efmi("GetAsyncKeyState")

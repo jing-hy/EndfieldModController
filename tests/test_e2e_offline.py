@@ -71,14 +71,14 @@ $hat = 0,1
         original = (self.library / "陈" / "夏日" / "mod.ini").read_text(encoding="utf-8")
         self.assertIn("key = no_modifiers VK_9", original)
 
-        # Managed staging：开关默认开 ⇒ **Mod 自带热键被锁定**（写成 `no_modifiers vk_f24`），
+        # Managed staging：开关默认开 ⇒ **Mod 自带热键被锁定**（写成 `no_modifiers vk_f23`），
         # 手按原键失效、操作集中到游戏内面板 —— 治"多个 Mod 抢同一个键"。
         # 2026-10-02 晚恢复（面板已改走 F13..F24 内部通道，锁键不再影响它）。
         managed = api.config.managed_mods_path
         self.assertTrue(managed.is_dir())
         self.assertTrue((api.config.controller_dir / "controller.ini").is_file())
         staged_text = "\n".join(p.read_text(encoding="utf-8") for p in api.config.staging_mods_path.rglob("mod.ini"))
-        self.assertIn("key = no_modifiers vk_f24", staged_text.lower())
+        self.assertIn("key = no_modifiers vk_f23", staged_text.lower())
         self.assertNotIn("key = no_modifiers vk_9", staged_text.lower())
         self.assertGreaterEqual(prepare["patch_count"], 1)
         # 用户的 Mod 库原件一个字节都不许动
@@ -90,7 +90,7 @@ $hat = 0,1
         restored = api.prepare([summer["id"]])
         staged_text = "\n".join(p.read_text(encoding="utf-8") for p in api.config.staging_mods_path.rglob("mod.ini"))
         self.assertIn("key = no_modifiers vk_9", staged_text.lower())
-        self.assertNotIn("vk_f24", staged_text.lower())
+        self.assertNotIn("vk_f23", staged_text.lower())
         self.assertEqual(restored["patch_count"], 0)
 
         # ReShade add-on and action list are deployed outside the game dir —— 且必须落在
