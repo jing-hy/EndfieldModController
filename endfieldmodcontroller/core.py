@@ -89,7 +89,15 @@ def sha256_text(text: str) -> str:
 
 
 def safe_name(name: str) -> str:
+    """把任意名字弄成**目录名/文件名安全**的样子。
+
+    ⚠️ 2026-10-03 修：原来只做了一遍替换，于是组名「加载页 / 壁纸」会变成
+    **`加载页 _ 壁纸`**（斜杠变下划线、两边空格原样留着）—— 既难看，又让
+    `MC_加载页 _ 壁纸_xxx` 这种目录名一出现就被用户当成 bug 报上来。
+    现在再压一遍空白：连续空白并成一个下划线、首尾下划线去掉。
+    """
     name = re.sub(r"[^\w\-. \u4e00-\u9fff]+", "_", name.strip())
+    name = re.sub(r"\s+", "_", name).strip("_")
     return name or uuid.uuid4().hex[:8]
 
 
@@ -871,12 +879,12 @@ WALLPAPER_DIR_HINTS = (
 # 出现这些说明它确实是"角色换装"，那就不能算壁纸类
 WALLPAPER_NEGATIVE_HINTS = ("meshes", "textures", "texture", "materials")
 
-WALLPAPER_GROUP = "加载页 / 壁纸"
+WALLPAPER_GROUP = "加载页与壁纸"
 
 # 辅助 Mod 的**子类**（用户 2026-10-03：「辅助 Mod 是标签，实际页面卡片中需要在卡片细分
 # 加载页和功能类之类的」）—— 「辅助 Mod」只是标签页，页内卡片还要按子类分组显示。
-ASSIST_GROUP_HIDE = "界面 / 功能类"
-ASSIST_GROUP_TOOL = "工具 / 画质类"
+ASSIST_GROUP_HIDE = "界面功能类"
+ASSIST_GROUP_TOOL = "工具画质类"
 ASSIST_GROUP_OTHER = "其它辅助"
 # 命中这些词判成"界面/功能类"（隐藏 UI、去水印、改 HUD 这类）
 ASSIST_FUNC_HINTS = (

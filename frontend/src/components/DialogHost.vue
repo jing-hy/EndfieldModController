@@ -22,7 +22,11 @@ watch(() => uiState.dialog, async (dialog) => {
     <div class="card w-[min(560px,92vw)] shadow-lg" style="background: var(--surface)">
       <div class="card-head">{{ uiState.dialog.title }}</div>
       <div class="card-body">
-        <pre class="whitespace-pre-wrap break-words m-0 text-sm leading-6">{{ uiState.dialog.message }}</pre>
+        <!-- ⚠️ 必须限高 + 可滚动：报错原文（例如 Python 的 copytree 异常）动辄好几行、
+             还带很长的绝对路径，不限高会**直接撑出弹窗外面**（用户 2026-10-03：
+             「而且这个内容都到弹窗外面了，这也要处理」）。 -->
+        <pre class="whitespace-pre-wrap break-words m-0 text-sm leading-6"
+             style="max-height: 46vh; overflow-y: auto">{{ uiState.dialog.message }}</pre>
         <a v-if="uiState.dialog.link && uiState.dialog.link.url" :href="uiState.dialog.link.url"
            class="text-accent text-xs mt-2 inline-block" @click.prevent="$emit('open-link', uiState.dialog.link.url)">
           {{ uiState.dialog.link.text || uiState.dialog.link.url }}

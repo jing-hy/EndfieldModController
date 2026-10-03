@@ -77,7 +77,11 @@ async function pollProgress() {
     if (!p) return;
     const nowRunning = !!p.running;
     running.value = nowRunning;
-    if (typeof p.percent === "number") percent.value = p.percent;
+    // 优先用**字节口径**的进度（跟着实际大小走）；拿不到才退回项数口径。
+    // 用户 2026-10-03：「进度条不要一卡一卡的，应该跟着实际大小走」——
+    // 项数口径下 138 MB 的大包只算 1 项，进度条会长时间停着不动。
+    if (typeof p.byte_percent === "number" && p.expected_bytes > 0) percent.value = p.byte_percent;
+    else if (typeof p.percent === "number") percent.value = p.percent;
     // ⚠️ 不能无脑 `logLines.value = p.log`：Mod 下载那些行是**追加**进同一个日志框的，
     // 整份替换会把它们冲掉（用户要的是"向下滚"）。这里只在**组件安装日志真的变了**
     // 或者**之前没有过组件日志**时替换，并把已有的 Mod 下载行接在后面。
@@ -124,7 +128,9 @@ async function pollProgress() {
         if (md.speed_bps) speedBps.value = Number(md.speed_bps);
       }
     } catch (e) { /* 没有 Mod 下载任务很正常 */ }
-    progressText.value = p.total ? `${p.current}/${p.total}` : (p.message || "");
+    progressText.value = p.total
+      ? `第 ${p.current}/${p.total} 项` + (p.computed_bytes ? ` · ${(p.computed_bytes / 1048576).toFixed(1)} MB` : "")
+      : (p.message || "");
 
     // ⚠️ 用户 2026-10-03：「安装完成没动态，不会自动刷新组件状态，而且安装完还是待补齐」——
     // 这里原来**只更新进度条**，从不在跑完时刷新组件清单，于是 `deps` / `missingCount`

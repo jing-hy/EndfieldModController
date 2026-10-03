@@ -1404,8 +1404,18 @@ class EndfieldModControllerApi:
             done = int(task.get("current", 0))
             total_items = max(int(task.get("total", 0)), 1)
             inner = (received / expected) if expected else 0.0
-            # 只把"当前这一项内部的字节进度"并进总百分比，量纲保持一致（项 → 项）
+            # **字节口径**：累计"已下字节 / 预期总字节"，前端进度条优先用它 ——
+            # 用户 2026-10-03：「进度条不要一卡一卡的，应该跟着实际大小走」。
+            # 原因：项数口径下 138 MB 的资产包**只算 1 项**，进度条涨到 1/N 就停住，
+            # 直到那一项整个下完才跳一下，看起来就是"一卡一卡"。
+            task["computed_bytes"] = int(task.get("computed_bytes", 0)) + int(received)
+            if expected:
+                task["expected_bytes"] = int(task.get("expected_bytes", 0)) + int(expected)
+            # 项数口径保留（某些下载拿不到 Content-Length 时它仍可用）
             task["percent"] = min(99.0, (done + min(max(inner, 0.0), 1.0)) / total_items * 100.0)
+            exp_all = int(task.get("expected_bytes", 0))
+            if exp_all > 0:
+                task["byte_percent"] = min(99.0, task["computed_bytes"] / exp_all * 100.0)
             if expected:
                 task["message"] = f"{key}: {received / 1048576:.1f}/{expected / 1048576:.1f} MB"
             else:
@@ -1474,7 +1484,7 @@ class EndfieldModControllerApi:
             "full": True,
             "current": 0,
             "total": 0,
-            "percent": 0.0,
+            "percent": 0.0, "byte_percent": 0.0, "computed_bytes": 0, "expected_bytes": 0,
             "message": "准备自动安装/更新...",
             "log": [],
             "results": [],

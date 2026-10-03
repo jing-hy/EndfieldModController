@@ -761,8 +761,18 @@ def stage_and_prepare(
     for mod in active_plan:
         dest = staging_root / f"MC_{mc_core.safe_name(mod.group)}_{mc_core.safe_name(mod.name)}"
         if dest.exists():
-            shutil.rmtree(dest, ignore_errors=True)
-        shutil.copytree(mod.path, dest, ignore=shutil.ignore_patterns("d3dx.ini", "d3dx_user.ini"))
+            # ⚠️ 不能用 `ignore_errors=True`：删不掉（文件被占用 / 只读）时它会静默放过，
+            # 紧接着 copytree 就撞上残留报 `[WinError 183] 当文件已存在时，无法创建该文件`
+            # —— 用户 2026-10-03 实测就是这个（`MC_加载页 _ 壁纸_xxx\Startscreens` 已存在）。
+            # 删干净最好；实在删不掉就交给下面的 `dirs_exist_ok=True` 合并写入，别再抛异常。
+            try:
+                shutil.rmtree(dest)
+            except OSError as exc:
+                _log(log, f"WARN staging 旧产物没删干净（将就地覆盖）: {dest.name} ({exc})")
+        # `dirs_exist_ok=True`：目标已存在时**合并写入**而不是抛错。多一层保险，
+        # 免得任何一个残留目录（杀软扫描、EFMI 正在读）把整次启动打断。
+        shutil.copytree(mod.path, dest, dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns("d3dx.ini", "d3dx_user.ini"))
         try:
             for ini_path in mc_core.iter_ini_files(dest):
                 mc_core.sanitize_ini_control_flow(ini_path)
