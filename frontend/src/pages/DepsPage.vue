@@ -91,6 +91,69 @@ async function modDlControl(act) {
   await pollProgress();      // 立刻刷新一次，按钮与进度条跟着变
 }
 
+// ⚠️ **B4：组件就地更新**（点这一行的按钮只更新它，不用跑整包）。
+// 后端没有"只更新某一个"的接口，但 `start_full_update` 会**跳过已是最新的**，
+// 所以这里就是"确认 → 跑一遍（只会有这一个真的动）→ 结果如实报"。
+async function updateComponent(d) {
+  const ok = await showModalDialog({
+    title: `更新 ${d.display || d.key}`,
+    message: [
+      `当前：${d.version || "未装"}`,
+      d.latest ? `最新：${d.latest}` : "",
+      "",
+      "会下载并替换它。**已经是最新的其它组件会自动跳过**，不会白下。",
+    ].filter((x) => x !== "").join("\n"),
+    okText: "开始更新", cancelText: "取消",
+  });
+  if (!ok) return;
+  showProgressToast("comp-update", `正在更新 ${d.display || d.key}…`);
+  try {
+    const r = await call("start_full_update");
+    if (r && r.ok === false) showToast(String(r.message || "更新失败"), "danger");
+    else showToast("已开始更新，进度见右侧日志", "success");
+  } catch (e) {
+    showToast(String((e && e.message) || "更新失败"), "danger");
+  } finally {
+    hideProgressToast("comp-update");
+    await refreshState();
+  }
+}
+
+// ⚠️ **B3：dry-run「检查状态」**（2026-10-03 补回归）。
+// 0.9.5 的依赖页有一个「检查状态」按钮 → `startFullUpdate(true)`（**只检查不装**）。
+// 换代后三个按钮是"重新扫描 / 检查并补齐 / 安装缺失依赖"，**没有 dry-run** ——
+// 用户想"先看看会装什么"只能直接开跑。
+async function dryRunCheck() {
+  showProgressToast("dep-dryrun", "正在检查组件状态…（只检查，不下载）");
+  try {
+    // ⚠️ 用 `check_component_updates`（**同步**返回结果）—— 一开始我写的是
+    // `start_full_update(true)`，但它起的是**后台任务**、立刻返回的是任务状态，
+    // 拿不到"缺什么/有什么可更新"的清单（那个要轮询 `get_dependency_progress`）。
+    // `check_component_updates` 正好就是"只看不装"，与本按钮语义一致。
+    const r = await call("check_component_updates");
+    const comps = (r && (r.components || r.items || r.updates)) || [];
+    const list = Array.isArray(comps) ? comps : Object.values(comps);
+    const missing = list.filter((c) => !c.current && !c.installed);
+    const up = list.filter((c) => c.update_available);
+    await showModalDialog({
+      title: "检查完成（没有下载任何东西）",
+      message: [
+        missing.length ? `缺失 ${missing.length} 个：\n` + missing.map((x) => `· ${x.display || x.name || x}`).join("\n") : "没有缺失的组件。",
+        "",
+        up.length ? `有 ${up.length} 个可以更新：\n` + up.map((x) => `· ${x.display || x.name || x}`).join("\n") : "没有可更新的组件。",
+        "",
+        "要装/要更新的话，点上面的「安装缺失依赖」或「一键安装/更新全部组件」。",
+      ].join("\n"),
+      okText: "知道了", showCancel: false,
+    });
+  } catch (e) {
+    showToast(String((e && e.message) || "检查失败"), "danger");
+  } finally {
+    hideProgressToast("dep-dryrun");
+    await refreshState();
+  }
+}
+
 // 「检查并补齐」——**要 await、要刷新、要有反馈**（原来模板里裸调 call，结果全丢）
 async function checkAndComplete() {
   try {
@@ -410,6 +473,7 @@ useLogAutoScroll(logBox, () => logLines.value);
       <!-- ⚠️ 原来这里是模板里裸调 `call('ensure_initialized')`（2026-10-03 修）：
            连 `await` 都没有 ⇒ 结果丢弃、页面也不刷新、失败也看不到。 -->
       <Btn @click="checkAndComplete">检查并补齐</Btn>
+      <Btn @click="dryRunCheck">检查状态（不下载）</Btn>
       <Btn id="dep-update-all-btn" variant="primary" @click="start">安装缺失依赖</Btn>
 
       <!-- ⚠️ **Mod 下载的控制按钮**（2026-10-03 补回归）。
@@ -473,7 +537,15 @@ useLogAutoScroll(logBox, () => logLines.value);
             <div class="font-medium truncate">{{ d.display || d.key }}</div>
             <div class="text-xs mt-0.5" style="color: var(--text-muted)">{{ d.version || "" }}</div>
           </div>
-          <Badge :tone="tone(d)">{{ d.status || "未知" }}</Badge>
+          <div class="flex items-center gap-2 shrink-0">
+            <!-- ⚠️ **B4：有新版就在这一行直接更新**（2026-10-03 补回归）。
+                 0.9.5（`app.js:966-979`）对有 `update_available` 的组件渲染一个
+                 「更新到 vX」按钮 → `startAppUpdateFromDep()`（切依赖页 + 进度条）。
+                 换代后组件行只有名称/版本/Badge ⇒ 用户看到"有新版"却点不了。 -->
+            <Btn v-if="d.update_available" size="sm" variant="primary"
+                 @click="updateComponent(d)">更新到 {{ d.latest || "最新" }}</Btn>
+            <Badge :tone="tone(d)">{{ d.status || "未知" }}</Badge>
+          </div>
         </div>
       </div>
     </Card>

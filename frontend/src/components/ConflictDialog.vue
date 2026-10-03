@@ -6,6 +6,13 @@
 import { ref, watch } from "vue";
 
 const props = defineProps({ groups: { type: Array, default: () => [] } });
+
+// 结论时间（后端 `conflict_groups` 里带的 checked_at）
+const checkedAt = computed(() => {
+  const g = groups.value || [];
+  for (const x of g) { if (x && x.checked_at) return String(x.checked_at); }
+  return props.checkedAt ? String(props.checkedAt) : "";
+});
 const emit = defineEmits(["resolve", "cancel"]);
 // 组序号 -> 要保留的 mod id。
 // ⚠️ 必须把每组显式初始化成 ""：留 undefined 时 <select> 不匹配任何 <option>，
@@ -55,6 +62,13 @@ watch(
     <div class="card w-[min(640px,92vw)] shadow-lg">
       <div class="card-head">发现 Mod 资源冲突</div>
       <div class="card-body space-y-3 overflow-auto" style="max-height: 56vh; padding-bottom: 8px">
+        <!-- ⚠️ **C14：标明"这份结论是什么时候算的"**（2026-10-03 补回归）。
+             后端 `_conflict_state_report()` 一直带 `checked_at`，0.9.5 的启动前弹窗会讲，
+             换代后没显示 —— 而用户拿到的可能是**上一次点「生成控制器」时的旧结论**，
+             不写时间的话会以为是刚算出来的。 -->
+        <div v-if="checkedAt" class="text-xs" style="color: var(--text-muted)">
+          这份结论算于 {{ checkedAt }}（点「生成控制器」可重新检查）
+        </div>
         <p class="text-sm leading-6" style="color: var(--text-muted)">
           下面每组里的 Mod 会互相覆盖同一批资源，同时生效常常让游戏崩。
           每组选一个<b>要保留的</b>，该组其余 Mod 会被取消勾选。

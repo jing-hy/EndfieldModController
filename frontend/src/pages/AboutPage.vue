@@ -35,6 +35,11 @@ const releases = computed(() => store.state.releases_url || REPO + "/releases");
       <ul class="list-disc pl-5 space-y-1.5 text-sm leading-6">
         <li>上游 <a class="text-accent" href="https://github.com/OedoSoldier/Endfield-Poser" target="_blank" rel="noopener">OedoSoldier/Endfield-Poser</a>（AGPL-3.0，二进制不随包分发）。</li>
         <li>它和乳摇（SecondaryMotion）用<b>同一套注入机制</b>：游戏目录里的 <code>d3dcompiler_47</code> proxy 会把 <code>plugin\*.dll</code> 全部加载进游戏进程，所以两个插件能共存；卸载其中一方时，只要另一方还在就保留 proxy。</li>
+        <!-- ⚠️ **C15：这两条 0.9.5 的说明页里有，换代时丢了**（2026-10-03 补回归）——
+             ① 用之前要在游戏内确认上游的用户协议（法律/礼貌上都该说）；
+             ② 明确告诉用户**入口在哪**（启动页有「打开摆姿页」按钮）。 -->
+        <li>使用前请在游戏内确认它的《用户协议》。</li>
+        <li>要打开摆姿页，用<b>启动页</b>的「打开摆姿页（Poser）」按钮（游戏要在运行中）。</li>
         <li>游戏内快捷键：<kbd class="kbd">L</kbd> 显示/隐藏面板、<kbd class="kbd">P</kbd> 冻结/解冻、按住 <kbd class="kbd">Alt</kbd> 呼出光标、<kbd class="kbd">Ctrl</kbd>+<kbd class="kbd">F5</kbd>/<kbd class="kbd">F6</kbd>/<kbd class="kbd">F7</kbd>/<kbd class="kbd">F8</kbd> 播放/暂停/停止/回首帧；它还有一个独立摆姿页 <code>http://127.0.0.1:18923</code>。</li>
         <li>开关含义：关掉只把 <code>plugin\poser.dll</code> 改名（可逆、不动 proxy、不动其它插件）；要真正移除文件请点设置页的卸载（走它自己的卸载向导）。</li>
       </ul>

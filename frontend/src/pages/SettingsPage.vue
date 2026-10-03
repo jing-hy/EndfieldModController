@@ -349,11 +349,18 @@ async function exportDiagnostics() {
     title: "诊断包已导出",
     message:
       `已生成：\n${path}\n\n` +
-      "把它发到 GitHub Issues 或 QQ 群（1045239747，验证答案 jing_hy）就能帮你定位问题。\n\n" +
+      "**怎么用**：\n" +
+      "· 去 GitHub 提 issue 时把它拖进附件（仓库 jing-hy/EndfieldModController）\n" +
+      "· 或发到 QQ 群 1045239747（加群验证答案：jing_hy）\n\n" +
       "包里含运行日志、配置、注入快照与游戏侧日志，**不含你的 Mod 内容**。",
     okText: "打开所在文件夹", cancelText: "知道了",
+    // ⚠️ **C11：把"去提 issue"也做成一个按钮**（0.9.5 的反馈弹窗里有这些入口）。
+    extraButtons: [{ text: "去提 issue", value: "issue" }],
   });
-  if (open) {
+  if (open === "issue") {
+    try { await call("open_external", "https://github.com/jing-hy/EndfieldModController/issues/new"); }
+    catch (e) { showToast("打不开浏览器，手动访问仓库 Issues 页即可", "info"); }
+  } else if (open) {
     try { await call("open_path_in_explorer", path); } catch (e) { /* 打不开就算了 */ }
   }
 }
@@ -429,6 +436,43 @@ async function chooseModBackupDir() {
     backupDirNote.value = String((e && e.message) || "选择失败");
   }
   await refreshState();
+}
+
+// ⚠️ **B14：全局回滚**（见模板里的说明）。动作对齐 0.9.5：
+// 删掉 `EndfieldModControllerManaged` staging + 恢复可用的 `d3dx_user.ini` / XXMI 配置备份。
+// 破坏性动作按用户准则：确认框写清后果、按钮文字自解释、默认聚焦安全项。
+async function globalRollback() {
+  const ok = await showModalDialog({
+    title: "回滚控制器产物",
+    message: [
+      "会做两件事：",
+      "① 删除 staging（`EndfieldModControllerManaged`，即控制器生成的那份产物）",
+      "② 恢复可用的 `d3dx_user.ini` / XXMI 配置备份",
+      "",
+      "**你的 Mod 库、游戏本体、已装组件都不受影响。**",
+      "回滚后要重新用「一键启动」或「生成控制器」再铺一次。",
+    ].join("\n"),
+    okText: "回滚", cancelText: "取消", focusCancel: true,
+  });
+  if (!ok) return;
+  showProgressToast("global-rollback", "正在回滚控制器产物…");
+  try {
+    const r = await call("rollback");
+    if (r && r.ok === false) {
+      showToast(String(r.message || "回滚失败"), "danger");
+    } else {
+      await showModalDialog({
+        title: "已回滚",
+        message: formatResult("rollback", r),
+        okText: "知道了", showCancel: false,
+      });
+    }
+  } catch (e) {
+    showToast(String((e && e.message) || "回滚失败"), "danger");
+  } finally {
+    hideProgressToast("global-rollback");
+    await refreshState();
+  }
 }
 
 // ⚠️ **C9：「还原游戏本体」= 净化（不是"从备份还原"）**（见模板里的说明）。
@@ -566,6 +610,12 @@ useLogAutoScroll(probeBox, () => probeText);
            而新手引导第 4 步指着这个按钮、期望的正是"净化"语义。 -->
         <Btn id="game-restore-btn" @click="restoreGameToVanilla">还原游戏本体</Btn>
         <Btn variant="danger" @click="resetDependencies">依赖清空并重新下载</Btn>
+        <!-- ⚠️ **B14：全局「回滚/清理」**（2026-10-03 补回归）。
+             0.9.5 的 `#rollback-btn` → `call('rollback')`：**删掉 staging（控制器产物）
+             并恢复 d3dx_user.ini / XXMI 配置备份**。换代后这个按钮整个没了
+             （现前端 grep `call('rollback')` **0 命中**，只剩 Mod 级的 `rollback_mod`），
+             而后端 `rollback` 一直在 —— 用户遇到"控制器产物把游戏搞乱了"时没有退路。 -->
+        <Btn @click="globalRollback">回滚控制器产物</Btn>
       </div>
       <div class="text-xs mt-2" style="color: var(--text-muted)">
         「还原游戏本体」只从备份区把非原版文件搬回去，不动你的 Mod 库；
