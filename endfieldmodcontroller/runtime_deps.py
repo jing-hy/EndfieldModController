@@ -151,6 +151,7 @@ def _download_extract(
     total: int = 1,
     key: str = "builtin",
     expected_sha256: str = "",
+    log: Callable[[str], None] | None = None,     # ⚠️ 原来函数体里用了 `log=log` 却没有这个形参
 ) -> None:
     target.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="mc-builtin-") as tmp:
@@ -201,7 +202,8 @@ def _note(config: AppConfig | None, message: str) -> None:
         pass
 
 
-def ensure_xxmi(config: AppConfig, progress: Progress = None, byte_progress: ByteProgress = None) -> BuiltinResult:
+def ensure_xxmi(config: AppConfig, progress: Progress = None, byte_progress: ByteProgress = None,
+                log: Callable[[str], None] | None = None) -> BuiltinResult:
     root = config.builtin_runtime_path / "XXMI"
     existing = _find_xxmi_exe(root)
     marker = _read_marker(root)
@@ -232,7 +234,8 @@ def ensure_xxmi(config: AppConfig, progress: Progress = None, byte_progress: Byt
     return BuiltinResult("XXMI", "installed", "installed", version, str(exe))
 
 
-def ensure_xxmi_libs(config: AppConfig, progress: Progress = None, byte_progress: ByteProgress = None) -> BuiltinResult:
+def ensure_xxmi_libs(config: AppConfig, progress: Progress = None, byte_progress: ByteProgress = None,
+                     log: Callable[[str], None] | None = None) -> BuiltinResult:
     root = config.builtin_runtime_path / "XXMI"
     target = root / "Resources" / "Packages" / "XXMI"
     d3d11 = target / "d3d11.dll"
@@ -252,7 +255,8 @@ def ensure_xxmi_libs(config: AppConfig, progress: Progress = None, byte_progress
     archive_url = _asset_url(release, zip_name)
     target.mkdir(parents=True, exist_ok=True)
     _download_extract(archive_url, zip_name, target, byte_progress, 2, 3, "XXMI-Libs",
-                      expected_sha256=str((assets.get(zip_name) or {}).get("digest") or ""))
+                      expected_sha256=str((assets.get(zip_name) or {}).get("digest") or ""),
+                      log=log)
     manifest_url = _asset_url(release, "Manifest.json")
     manifest_data = dependencies._http_get(
         manifest_url,
@@ -266,7 +270,8 @@ def ensure_xxmi_libs(config: AppConfig, progress: Progress = None, byte_progress
     return BuiltinResult("XXMI-Libs", "installed", "installed", version, str(target))
 
 
-def ensure_efmi(config: AppConfig, progress: Progress = None, byte_progress: ByteProgress = None) -> BuiltinResult:
+def ensure_efmi(config: AppConfig, progress: Progress = None, byte_progress: ByteProgress = None,
+                log: Callable[[str], None] | None = None) -> BuiltinResult:
     xxmi_root = config.builtin_runtime_path / "XXMI"
     xxmi_exe = _find_xxmi_exe(xxmi_root)
     if xxmi_exe is None:
@@ -281,7 +286,7 @@ def ensure_efmi(config: AppConfig, progress: Progress = None, byte_progress: Byt
         if progress:
             progress(3, 3, "EFMI", "up_to_date")
         return BuiltinResult("EFMI", "up_to_date", "already current", version, str(target))
-    _download_extract(url, asset_name, target, byte_progress, 3, 3, "EFMI", expected_sha256=digest)
+    _download_extract(url, asset_name, target, byte_progress, 3, 3, "EFMI", expected_sha256=digest, log=log)
     _write_marker(target, {"version": version, "asset": asset_name, "source": EFMI_REPO})
     # 同理：用户把 staging 指到别处（例如他自己那份 XXMI 的 `EFMI\Mods`）时不覆盖 ——
     # 否则他的 Mod 会被送进内置那份，外部 XXMI 永远读不到（issue #4 的另一半）。
@@ -297,6 +302,7 @@ def ensure_poser(
     config: AppConfig,
     progress: Progress = None,
     byte_progress: ByteProgress = None,
+    log: Callable[[str], None] | None = None,
     *,
     force: bool = False,
 ) -> BuiltinResult:
@@ -326,7 +332,7 @@ def ensure_poser(
     present = (root / "plugin" / "poser.dll").is_file() or (root / "poser.dll").is_file()
     if not force and present and marker.get("version") == version:
         return BuiltinResult("Poser", "up_to_date", "already current", version, str(root))
-    _download_extract(url, asset_name, root, byte_progress, 1, 1, "Poser", expected_sha256=digest)
+    _download_extract(url, asset_name, root, byte_progress, 1, 1, "Poser", expected_sha256=digest, log=log)
     if not ((root / "plugin" / "poser.dll").is_file() or (root / "poser.dll").is_file()):
         raise RuntimeError("解压后没找到 plugin\\poser.dll —— 上游安装包结构可能变了，请到上游 Release 页手动下载")
     _write_marker(root, {
@@ -336,7 +342,8 @@ def ensure_poser(
     return BuiltinResult("Poser", "installed", "installed", version, str(root))
 
 
-def ensure_all(config: AppConfig, progress: Progress = None, byte_progress: ByteProgress = None) -> list[BuiltinResult]:
+def ensure_all(config: AppConfig, progress: Progress = None, byte_progress: ByteProgress = None,
+    log: Callable[[str], None] | None = None,) -> list[BuiltinResult]:
     """安装四个内置组件（XXMI / XXMI-Libs / EFMI / Endfield Poser）。
 
     **单项失败不中断其它项，跑完后再对失败项重试（最多 3 次）。**
@@ -358,7 +365,11 @@ def ensure_all(config: AppConfig, progress: Progress = None, byte_progress: Byte
         key, function, index = step
         if progress:
             progress(index, total, key, "start" if attempt == 0 else f"重试第 {attempt} 次")
-        result = function(config, progress, byte_progress)
+        # ⚠️ **必须把 log 传下去**（2026-10-03）：下面这几个 `ensure_*` 会去
+        # `_download_extract`，而那里的 `log=log` 是用来把「尝试直连 / 换线路 X /
+        # 重试」写进日志的 —— 不传的话那些行全都消失，用户看到的就是
+        # "卡了十几分钟、日志停在 checking"。
+        result = function(config, progress, byte_progress, log=log)
         if not isinstance(result, BuiltinResult):
             raise RuntimeError(f"{key}: 安装没有返回结果")
         if str(result.status) not in ok_status:

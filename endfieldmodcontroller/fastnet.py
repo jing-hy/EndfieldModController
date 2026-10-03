@@ -388,7 +388,7 @@ def _download_sequential(
                     try:
                         _sock = getattr(getattr(getattr(response, "fp", None), "raw", None), "_sock", None)
                         if _sock is not None:
-                            _sock.settimeout(CHUNK_GAP_SECONDS)
+                            _sock.settimeout(STALL_SECONDS)
                     except Exception:  # noqa: BLE001 - 拿不到底层 socket 就保持原样
                         pass
                     chunk = response.read(READ_CHUNK)
@@ -410,7 +410,7 @@ def _download_sequential(
         if isinstance(exc, TimeoutError):
             # 一个字节都没收到就超时 ⇒ 同样算"线路不通"，交上层换线路。
             # 别 `raise` 出去把整次下载打成失败（那样用户只看到一句报错、也没有重试）。
-            return 0, True, f"连接建立后 {CHUNK_GAP_SECONDS}s 内没有收到任何数据（线路不通）"
+            return 0, True, f"连接建立后 {STALL_SECONDS}s 内没有收到任何数据（线路不通）"
         raise
     return written, False, ""
 
@@ -495,7 +495,13 @@ def _download_parallel(
                   key=lambda sp: sp[1] - sp[0], reverse=True)
 
     lock = threading.Lock()
-    state = {"n": sum(b - a + 1 for a, b in done_spans), "retries": 0}
+    state = {
+        "n": sum(b - a + 1 for a, b in done_spans),      # **已完成**（断点续传判定用）
+        # ⚠️ `live` = **已接收但还没落盘的字节**，只用于进度上报（2026-10-03）。
+        # 不分这两个量的话，"边下边报"会把同一份字节算两次（读到时加一次、落盘时又加一次）。
+        "live": 0,
+        "retries": 0,
+    }
     if not dest.exists():
         dest.touch()
     _save_parts(dest, size, done_spans)
@@ -517,13 +523,13 @@ def _download_parallel(
                     # ⚠️⚠️ **必须分块读 + 单块间隔超时**（2026-10-03 修「下载到一半一直不动」）。
                     # 原来是 `data = response.read()` **一次性读整块** —— 那个调用只在
                     # `timeout` 到点或数据读完时才返回，**中途一个字节都不给就无限期挂着**，
-                    # 单连接那条路的 `CHUNK_GAP_SECONDS` 保护在这里完全不生效。
+                    # 单连接那条路的 `STALL_SECONDS` 保护在这里完全不生效。
                     # 实测现场：912 MB 的包切了 20 个并发连接，**全部挂起**，
                     # sidecar 里 `done: []`（一个块都没完成），文件停在 768 KB 不动，
                     # 日志里连一条重试都没有（因为失败路径不记日志）。
                     # 现在跟单连接一个规格：每读一小块就重设"多久没数据算卡死"。
                     try:
-                        response.fp.raw._sock.settimeout(CHUNK_GAP_SECONDS)  # type: ignore[attr-defined]
+                        response.fp.raw._sock.settimeout(STALL_SECONDS)  # type: ignore[attr-defined]
                     except (AttributeError, OSError):
                         pass
                     buf = bytearray()
@@ -532,6 +538,15 @@ def _download_parallel(
                         if not chunk:
                             break
                         buf.extend(chunk)
+                        # ⚠️⚠️ **边下边报字节**（2026-10-03 修「进度条不动、速度横杠」）。
+                        # 原来只在**整块下完**才 `progress()` 一次，而 912 MB 的包一块是
+                        # 11.4 MB ⇒ 在 0.01 MB/s 的线路上要 **19 分钟**才报一次，
+                        # 界面看起来就是完全卡住。现在每读一小块（256 KB）就报一次。
+                        with lock:
+                            state["live"] += len(chunk)
+                            if progress:
+                                # 取"已完成 + 已接收"里的较大值，保证**单调不回退**
+                                progress(min(max(state["n"], state["n"] - 0) + state["live"], size), size)
                     data = bytes(buf)
                 if len(data) != end - begin + 1:
                     raise OSError(f"分块长度不符：{len(data)} != {end - begin + 1}")
@@ -542,15 +557,20 @@ def _download_parallel(
                 with lock:
                     done_spans.add(span)
                     state["n"] += len(data)
+                    # 这块的"已接收"已经并入 `n`，从 live 里扣掉（否则同一份字节算两次）
+                    state["live"] = max(0, state["live"] - len(data))
                     _save_parts(dest, size, done_spans)   # 每块都落盘，断电也不白下
                     if progress:
-                        progress(min(state["n"], size), size)
+                        progress(min(state["n"] + state["live"], size), size)
                 return
             except (urllib.error.URLError, OSError, TimeoutError) as exc:
                 last_error = exc
                 with lock:
                     state["retries"] += 1
                     retry_no = state["retries"]
+                    # ⚠️ 这一块读到的字节**没有落盘**（重试会重头读），必须从 live 里扣掉，
+                    # 否则失败几次之后进度会虚高、还会回退得莫名其妙。
+                    state["live"] = 0
                 # ⚠️ **失败必须可见**（原来这条路径一声不响：20 个连接全挂、日志里什么都没有，
                 # 用户只能看到"下载中但进度条不动"）。前几次记一条，避免刷屏。
                 if retry_no <= 6:
@@ -1049,7 +1069,7 @@ def _attempt_line(
                 max_seconds=BOOST_TRIAL_SECONDS, cancel=cancel)          # 试用窗口：到点不再提交新块
             done_now = sum(b - a + 1 for a, b in _load_parts(work, size))
             if size and done_now < size and done_now > written:
-                boost_mbps = _mbps(done_now - written, max(time.time() - trial_start, 1e-6))
+                boost_mbps = _mbps(done_now - written, max(time.time() - trial_started, 1e-6))
                 if boost_mbps < report.probe_mbps * BOOST_KEEP_RATIO:
                     # **并发没变快 → 切回单连接**（threads=1 仍走块机制，已下的块不重下）
                     _log(log, f"并发只有 {boost_mbps:.3f} MB/s（单连接探测 {report.probe_mbps:.3f}）"

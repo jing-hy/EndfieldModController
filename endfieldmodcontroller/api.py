@@ -1511,7 +1511,8 @@ class EndfieldModControllerApi:
                 if include_builtin:
                     self._dep_task["total"] = 3          # 只有 XXMI / XXMI-Libs / EFMI
                     self._dep_task["current"] = 0
-                    results = runtime_deps.ensure_all(self.config, progress)
+                    results = runtime_deps.ensure_all(self.config, progress,
+                                                          log=lambda m: launcher._append_log(self.config, m))
                     self._dep_task["results"] = [result.__dict__ for result in results]
                     self._dep_task["current"] = len(results)
                     self._dep_task["percent"] = 100.0
@@ -1753,7 +1754,8 @@ class EndfieldModControllerApi:
                         # BuiltinResult 的 status 是英文（installed/up_to_date/error…），
                         # 前端按"失败"两个字统计失败项，直接塞进去会**漏报**；这里统一成中文
                         # （2026-10-01 修：用户看到"完成，但有 1 项失败"却不知道是哪一项）。
-                        for item in runtime_deps.ensure_all(self.config, progress, byte_progress):
+                        for item in runtime_deps.ensure_all(self.config, progress, byte_progress,
+                                        log=lambda m: launcher._append_log(self.config, m)):
                             results.append(_NS(
                                 key=item.key,
                                 status={

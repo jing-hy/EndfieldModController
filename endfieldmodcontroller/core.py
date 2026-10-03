@@ -27,7 +27,7 @@ import tempfile
 import uuid
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
-from typing import Any, Iterator, Sequence
+from typing import Any, Iterator, Sequence, Callable
 
 from . import fsutil
 from . import hotkey_hints

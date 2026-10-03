@@ -3,3 +3,6 @@ Pillow>=10.0
 cryptography>=42.0
 
 pytest-xdist>=3.0   # 静态检查并行（构建脚本自动用 -n auto；没装则降级单线程）
+
+# 静态体检：抓「引用了不存在的名字」这类运行时必炸的 bug（tests/test_undefined_names.py）
+pyflakes>=3.2
