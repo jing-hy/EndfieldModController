@@ -171,7 +171,13 @@ def run_tests(attempts: int = 3) -> None:
     # 没装 `pytest-xdist` 时**优雅降级**回单线程，绝不因为缺插件而让构建失败。
     try:
         import xdist  # noqa: F401
-        parallel_args = ["-n", "auto"]
+
+        # ⚠️ **用固定的 4 个 worker，不用 `-n auto`**（2026-10-03 实测）：
+        # `auto` 会按逻辑核数开满（本机 8 核 → 8 个），而这套测试有大量文件 IO
+        #（复制/解压/扫描真实目录），worker 一多就互相拖 —— 实测同样 523 个用例，
+        # `-n auto` 偶尔要 **114 秒**、`-n 4` 稳定在 **17~40 秒**，
+        # 并且并行度越高越容易出现互相干扰导致的偶发失败（构建脚本因此白跑重试）。
+        parallel_args = ["-n", "4"]
     except ImportError:
         parallel_args = []
     for attempt in range(1, attempts + 1):
