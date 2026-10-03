@@ -13,7 +13,7 @@
   <a href="LICENSE"><img alt="MIT 许可" src="https://img.shields.io/github/license/jing-hy/EndfieldModController?label=License&amp;color=3DA639"></a>
 </p>
 
-<p>Windows 桌面程序（Python + Pywebview，界面为 Vue 3 + Vite + Tailwind），单文件 exe。当前版本 <b>1.0.1</b> —— <a href="https://github.com/jing-hy/EndfieldModController/releases">下载最新版</a></p>
+<p>Windows 桌面程序（Python + Pywebview，界面为 Vue 3 + Vite + Tailwind），单文件 exe。当前版本 <b>1.0.2</b> —— <a href="https://github.com/jing-hy/EndfieldModController/releases">下载最新版</a></p>
 
 <p>📖 安装细节、目录结构、逐项故障排查、开发与发布流程 → <b><a href="docs/README.detailed.md">详细文档</a></b></p>
 
