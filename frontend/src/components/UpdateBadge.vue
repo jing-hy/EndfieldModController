@@ -6,9 +6,9 @@
 //   ① 普通       —— 显示当前版本，点了主动检查一次
 //   ② 有新版     —— `v当前 → v新版` + 高亮，点了下载并更新
 //   ③ 已下载待装 —— 「重启以完成更新」，点了立刻应用（用户选过"稍后"会停在这）
-import { ref, onMounted } from "vue";
+import { ref, watch } from "vue";
 import { call } from "../lib/bridge.js";
-import { store } from "../store.js";
+import { store, onStateRefreshed } from "../store.js";
 import { showAlert, showModalDialog, showToast } from "../lib/dialog.js";
 import { Download, RefreshCw, CheckCircle2 } from "lucide-vue-next";
 
@@ -28,12 +28,40 @@ async function load() {
   try {
     const info = await call("get_app_info");
     if (info && info.version) current.value = String(info.version);
-  } catch (e) { /* 拿不到就留空 */ }
+  } catch (e) { /* 拿不到就等下一次 */ }
   try {
     const p = await call("pending_update");
     pending.value = !!(p && p.pending);
   } catch (e) { /* 忽略 */ }
 }
+
+// ⚠️ 这里**不能只靠 onMounted**：Vue 里**子组件的 onMounted 先于父组件执行**，
+// 而这个组件的父级（App.vue）要先 `waitForBridge()` 把前后端桥接好才轮到它 boot()。
+// 于是 `call("get_app_info")` 在桥就绪前就发出去了、直接失败 ⇒ **当前版本号永远显示不出来**
+// （用户 2026-10-03 截图反馈：左下角是 `v → v1.0.0`，前面那个版本号是空的）。
+// 改成挂在 `store.ready` 上：桥一通就加载，之后每次状态刷新也顺手刷新一次。
+let loaded = false;
+async function loadOnce() {
+  if (loaded) return;
+  loaded = true;
+  await load();
+  await autoCheck();
+}
+
+// 启动时**自动检测一次**（用户 2026-10-03：「要启动时自动检测程序更新」）。
+// use_cache=True ⇒ 有缓存就不重复打网络，离线时静默。
+async function autoCheck() {
+  try {
+    const r = await call("check_app_update", true);
+    if (r && r.update_available) {
+      latest.value = String(r.latest || "");
+      note.value = `发现新版本 v${r.latest}`;
+    }
+  } catch (e) { /* 离线/失败都保持安静 */ }
+}
+
+watch(() => store.ready, (ready) => { if (ready) loadOnce(); }, { immediate: true });
+onStateRefreshed(() => { if (store.ready) loadOnce(); });
 
 async function checkNow() {
   busy.value = true;
@@ -86,17 +114,6 @@ function onClick() {
   else checkNow();
 }
 
-onMounted(async () => {
-  await load();
-  // 静默检查一次（有缓存，不会每次都打网络）—— 与旧版行为一致
-  try {
-    const r = await call("check_app_update", true);
-    if (r && r.update_available) {
-      latest.value = String(r.latest || "");
-      note.value = `发现新版本 v${r.latest}`;
-    }
-  } catch (e) { /* 离线时保持安静 */ }
-});
 </script>
 
 <template>
