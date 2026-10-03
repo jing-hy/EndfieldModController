@@ -411,7 +411,8 @@ def _sync_enhancer_section(source: Path, target: Path,
                 shutil.copy2(target, backup)
             except OSError:
                 pass
-        target.write_text("\r\n".join(out) + "\r\n", encoding="utf-8")
+        target.write_text("\r\n".join(ln.replace("\r", "") for ln in out) + "\r\n",
+                          encoding="utf-8", newline="")
     return changed
 
 
@@ -471,7 +472,8 @@ def _sync_style_section(source: Path, target: Path,
                 shutil.copy2(target, backup)
             except OSError:
                 pass
-        target.write_text("\r\n".join(out) + "\r\n", encoding="utf-8")
+        target.write_text("\r\n".join(ln.replace("\r", "") for ln in out) + "\r\n",
+                          encoding="utf-8", newline="")
     return changed
 
 
@@ -585,7 +587,19 @@ def prepare_reshade_runtime(config: AppConfig, controller_dir: Path) -> dict[str
         pass
     if ini_path.is_file():
         try:
-            existing = ini_path.read_text(encoding="utf-8", errors="replace").splitlines()
+            # ⚠️⚠️ **必须先把换行规范化**（2026-10-03 定案的真正根因）。
+            # 症状：这份 ini 会**指数级膨胀**（6 → 11 → 20 → 40 → … 约 30 次到 3 GB），
+            # 而读它时把内存吃到 23 GB、CPU 打满、界面未响应且关不掉
+            #（faulthandler 抓到的栈正是卡在这一行的 read_text）。
+            #
+            # 机制：文件里出现过 `\r\r\n`。`splitlines()` 会把它当成**两个**行分隔 ——
+            # 第一行是空的、第二行才是真内容 —— 于是凭空多出一个**空行**；
+            # 那个空行被原样写回去，下次读到更多 `\r\r\n`，空行再翻倍。
+            # ❗ 光对结果行做 `rstrip("\r")` **没用**：那个 `\r` 早被 splitlines 消耗掉了。
+            # 正解是**在拆行之前**把 `\r\r\n`（以及裸 `\r`）规范成 `\n`。
+            raw = ini_path.read_text(encoding="utf-8", errors="replace")
+            raw = raw.replace("\r\n", "\n").replace("\r", "\n")
+            existing = raw.splitlines()
         except OSError:
             existing = []
 
@@ -627,7 +641,19 @@ def prepare_reshade_runtime(config: AppConfig, controller_dir: Path) -> dict[str
                        f"PresetPath={wanted_keys['PresetPath']}"]
 
     try:
-        ini_path.write_text("\r\n".join(merged) + "\r\n", encoding="utf-8")
+        # ⚠️⚠️ **必须显式给 newline=""**（2026-10-03 定案的真正根因，就这一步）。
+        # `write_text` 默认 `newline=None` ⇒ 文本模式会把 `\n` **再转一次**成 `\r\n`；
+        # 而这里拼串用的是 `"\r\n".join(...)` ⇒ 两个 `\r` 叠加成 **`\r\r\n`**。
+        # 后果：`splitlines()` 把 `\r\r\n` 当两个换行 ⇒ 凭空多一个空行 ⇒ 写回又多一个
+        # ⇒ **空行指数级翻倍**（6 → 11 → 20 → 40 → … 约 30 次就是 3 GB），
+        # 而读它时把内存吃到 23 GB、CPU 打满、界面未响应且关不掉。
+        # `newline=""` 表示"不做任何换行转换"，这样拼出去的是什么就写什么。
+        # 每行再剥掉裸 `\r` 作为双保险。
+        ini_path.write_text(
+            "\r\n".join(ln.replace("\r", "") for ln in merged) + "\r\n",
+            encoding="utf-8",
+            newline="",
+        )
     except OSError as exc:
         _append_log(config, f"写入 runtime\\reshade\\ReShade.ini 失败（忽略）: {exc}")
 
