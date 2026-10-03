@@ -142,7 +142,25 @@ async function resetDependencies() {
   store.autoStartDeps = true;
   store.tab = "dependencies";
 }
-async function openPath(kind) { await run("open_path_in_explorer", kind); }
+// ⚠️ **不能把 kind 当路径传**（2026-10-03 修）。
+// 后端 `open_path_in_explorer(target)` / `open_path(target)` 期望的是**真实路径**，
+// 而模板传进来的是 `"controller"` / `"reshade"` / `"staging"` 这类**标签** ⇒
+// `Path("controller")` 解析到当前工作目录下、必然"路径不存在" ⇒ 三个按钮全废。
+// 对照组：0.9.5 也是先 `call('log')` 拿到 `info.dirs` 再打开。
+// `log()` 正好返回 {library, staging, runtime, controller, reshade} 的真实路径。
+async function openPath(kind) {
+  let path = "";
+  try {
+    const dirs = await call("log");
+    path = String((dirs && dirs[kind]) || "");
+  } catch (e) { /* 拿不到就走下面的报错 */ }
+  if (!path) {
+    showToast(`拿不到「${kind}」的路径`, "danger");
+    return;
+  }
+  const r = await run("open_path_in_explorer", path);
+  if (r && r.ok === false) showToast(String(r.message || "打不开这个目录"), "danger");
+}
 
 // 诊断详情那块日志自动滚到底（不抢鼠标、没新内容不动）
 // ⚠️ 2026-10-03 **删掉了这里的两行残留**：

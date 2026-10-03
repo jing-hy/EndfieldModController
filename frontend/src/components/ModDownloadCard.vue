@@ -38,7 +38,10 @@ async function startDownload() {
 }
 
 async function openDir() {
-  try { await call("open_path_in_explorer", "downloads"); } catch (e) { /* 忽略 */ }
+  // ⚠️ 下载目录有**专用接口** `open_download_dir`（0.9.5 用的就是它）——
+    // 传 "downloads" 这个标签给 `open_path_in_explorer` 会被当成路径、必然失败（2026-10-03 修）。
+    const r = await call("open_download_dir");
+    if (r && r.ok === false) showToast(String(r.message || "打不开下载目录"), "danger");
 }
 </script>
 

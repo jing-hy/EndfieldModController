@@ -138,7 +138,17 @@ async function menuAct(act) {
 }
 
 async function rescan() { try { await call("scan"); } catch (e) { /* call 已弹窗 */ } }
-async function openLib() { try { await call("open_path_in_explorer", "library"); } catch (e) {} }
+// ⚠️ 同 SettingsPage：`open_path_in_explorer` 要**真实路径**，不是 "library" 这个标签
+//（2026-10-03 修：原先传标签 ⇒ 后台报"路径不存在"、界面什么都不发生）。
+async function openLib() {
+  try {
+    const dirs = await call("log");
+    const path = String((dirs && dirs.library) || "");
+    if (!path) { showToast("拿不到 Mod 库路径", "danger"); return; }
+    const r = await call("open_path_in_explorer", path);
+    if (r && r.ok === false) showToast(String(r.message || "打不开 Mod 库"), "danger");
+  } catch (e) { /* call 已提示 */ }
+}
 </script>
 
 <template>
