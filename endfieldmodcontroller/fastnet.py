@@ -67,6 +67,9 @@ STALL_SECONDS = 20
 # 自适应窗口的上下限（秒）：够慢的线路等得起，真断流也别无限期挂着。
 STALL_WINDOW_MIN = 20
 STALL_WINDOW_MAX = 180
+# **轮询粒度**：读循环把 socket 超时设成它，于是每秒都能检查一次
+# 「用户是不是点了暂停/终止」—— 否则要等整个无数据窗口走完才响应（实测要 3 分钟）。
+POLL_SECONDS = 1.0
 # 探测连接的超时（要短，坏线路要快速跳过；实测直连会直接超时 15s，白等太久）
 PROBE_TIMEOUT = 8
 # 探测阶段的时间上限：慢线路不能把探测拖成几十秒
@@ -386,6 +389,12 @@ def _download_sequential(
     try:
         with _open(url, headers=headers, timeout=timeout) as response:
             with open(dest, mode) as fh:
+                # ⚠️ **必须在循环外初始化**（2026-10-03）：放循环里会被每轮重置，
+                # 于是"无数据等待"永远累计不到窗口 ⇒ 超时后无限空转。
+                # 真正"多久算断流"由它累计判断；socket 超时只用作**轮询粒度**，
+                # 这样每秒都能检查一次 `cancel()` ⇒ 点「暂停/终止」立刻生效。
+                _seq_waited = 0.0
+                _seq_window = float(STALL_SECONDS)
                 while True:
                     if cancel and cancel():
                         raise Cancelled("用户终止")
@@ -404,10 +413,27 @@ def _download_sequential(
                             # 这里按"已读速度"估窗口；没有速度就用下限兜底。
                             _elapsed = max(time.time() - started, 1e-6)
                             _mbps = (written / 1048576) / _elapsed if written else 0.0
-                            _sock.settimeout(_stall_window(READ_CHUNK, _mbps))
+                            _seq_window = _stall_window(READ_CHUNK, _mbps)
+                            # ⚠️ socket 超时用**轮询粒度**（不是整个窗口）：每秒都能检查一次 `cancel()`
+                            # ⇒ 点「暂停/终止」立刻生效（原来要等整个窗口走完，实测 3 分钟）。
+                            # 真正"多久算断流"由 `_seq_waited` 累计判断。
+                            _sock.settimeout(POLL_SECONDS)
                     except Exception:  # noqa: BLE001 - 拿不到底层 socket 就保持原样
                         pass
-                    chunk = response.read(READ_CHUNK)
+                    # ⚠️ **短超时轮询**（同并行）：每秒检查一次 cancel，
+                    # 累计无数据超过自适应窗口才判线路不通。
+                    # ⚠️ `_seq_waited` 必须**在循环外**初始化 —— 放循环里会被每轮重置，
+                    # 于是永远累计不到窗口、超时后无限空转。
+                    try:
+                        chunk = response.read(READ_CHUNK)
+                    except (TimeoutError, OSError) as _exc:
+                        if not isinstance(_exc, TimeoutError) and "timed out" not in str(_exc).lower():
+                            raise
+                        _seq_waited += POLL_SECONDS
+                        if _seq_waited >= _seq_window:
+                            return 0, True, (f"连接建立后 {int(_seq_waited)}s 内没有收到任何数据（线路不通）")
+                        continue
+                    _seq_waited = 0.0
                     if not chunk:
                         break
                     fh.write(chunk)
@@ -556,14 +582,30 @@ def _download_parallel(
                     _window = _stall_window(max(1, end - begin + 1),
                                             _live_mbps or float(expected_mbps or 0.0))
                     try:
-                        response.fp.raw._sock.settimeout(_window)  # type: ignore[attr-defined]
+                        response.fp.raw._sock.settimeout(POLL_SECONDS)  # type: ignore[attr-defined]
                     except (AttributeError, OSError):
                         pass
                     buf = bytearray()
+                    # ⚠️⚠️ **短超时轮询**（2026-10-03 修「暂停按钮没实际暂停」）：
+                    # 原来读循环用的是"整个无数据窗口"（最长 180 秒）作为 socket 超时，
+                    # 期间**没有任何地方检查 cancel()** ⇒ 点暂停后要等 3 分钟才生效。
+                    # 现在每秒一轮：每轮先看 cancel，再尝试读一小块，超时只累加等待量。
+                    _waited = 0.0
                     while True:
-                        chunk = response.read(READ_CHUNK)
+                        if cancel and cancel():
+                            raise Cancelled("用户暂停/终止")
+                        try:
+                            chunk = response.read(READ_CHUNK)
+                        except (TimeoutError, OSError) as _exc:
+                            if not isinstance(_exc, TimeoutError) and "timed out" not in str(_exc).lower():
+                                raise
+                            _waited += POLL_SECONDS
+                            if _waited >= _window:
+                                raise
+                            continue
                         if not chunk:
                             break
+                        _waited = 0.0
                         buf.extend(chunk)
                         # ⚠️⚠️ **边下边报字节**（2026-10-03 修「进度条不动、速度横杠」）。
                         # 原来只在**整块下完**才 `progress()` 一次，而 912 MB 的包一块是
