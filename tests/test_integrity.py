@@ -89,14 +89,27 @@ class IntegrityTests(unittest.TestCase):
         self.assertTrue(report["ok"], report)
         self.assertFalse(any(item["key"] == "efmi_dll" for item in report["failures"]))
 
-    def test_efmi_dll_injected_from_package_dir(self) -> None:
-        """同一场景下，注入库内容必须包含那个回退路径（否则皮肤 Mod 加载不了）。"""
+    def test_efmi_dll_is_not_listed_in_extra_libraries(self) -> None:
+        """⚠️ 行为已改（2026-10-03 实测）：**EFMI 的 d3d11.dll 不能出现在 extra_libraries 里**。
+
+        原断言是"必须包含它"，前提是"XXMI 不会自己注入"。实测证明**它会**：
+        XXMI 日志里的注入请求是
+
+            Inject(library_name='d3d11.dll, d3d12.dll, d3d11.dll')
+
+        —— 第一个 `d3d11.dll` 就是 XXMI 自带的 EFMI 注入。我们再在 extra_libraries 里列一遍
+        （内容相同、路径不同），第二次注入必然失败，用户看到
+        「注入额外库 …\Packages\XXMI\d3d11.dll 失败：DLL 注入失败！」并且**启动直接中断**。
+
+        EFMI 的注入本身**没有丢**：XXMI 那条照旧执行（用户实测「efmi 关了直接终末地拉不起来」，
+        说明它确实是必需品 —— 但归 XXMI 管）。
+        """
         (self.xxmi_root / "EFMI" / "d3d11.dll").unlink()
         from endfieldmodcontroller import launcher
 
         targets = launcher.dlss5_injection_targets(self.config)
-        expected = self.xxmi_root / "Resources" / "Packages" / "XXMI" / "d3d11.dll"
-        self.assertTrue(any(os.path.samefile(item, expected) for item in targets), targets)
+        self.assertFalse(any("d3d11.dll" in t for t in targets),
+                         f"extra_libraries 里又混进了 d3d11.dll（会与 XXMI 自带注入重复）: {targets}")
 
     def test_repair_reuses_the_launch_chain(self) -> None:
         """「修复」必须和一键启动一样能自愈（2026-10-01 issue #6 的回归测试）。

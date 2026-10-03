@@ -49,14 +49,23 @@ def test_effective_selection_follows_the_master_switch(env):
     assert env.config.effective_selected_mods == [], "关掉皮肤总开关就该一个都不 stage"
 
 
-def test_efmi_dll_is_injected_even_when_the_skin_switch_is_off(env):
-    """核心：关皮肤**不能**停掉 EFMI 注入 —— 用户实测那样终末地直接拉不起来。"""
+def test_extra_libraries_never_contains_efmi_dll(env):
+    """核心：**extra_libraries 里永远不许有 EFMI 的 d3d11.dll**（2026-10-03 实测改）。
+
+    历史：这里原来断言"必须包含它"，理由是"否则皮肤 Mod 加载不了 / 终末地拉不起来"。
+    那个**需求**没错，但**实现方式错了** —— XXMI 自己就会注入 EFMI 的 d3d11.dll
+    （日志：`Inject(library_name='d3d11.dll, d3d12.dll, d3d11.dll')`，第一个就是它），
+    我们再列一遍会让同一个 DLL 被注入两次 ⇒ 第二次失败 ⇒ 启动中断。
+
+    所以：**注入照旧发生，但不归我们列**。本测试同时保证"皮肤开关不影响注入库内容"
+    （开关只控制往 staging 放不放 Mod）。
+    """
     env.config.efmi_injection = True
     on = launcher.dlss5_injection_targets(env.config)
     env.config.efmi_injection = False
     off = launcher.dlss5_injection_targets(env.config)
-    assert any("d3d11.dll" in t for t in on), on
-    assert any("d3d11.dll" in t for t in off), f"关掉皮肤后 EFMI 的 dll 被移出注入库了: {off}"
+    assert not any("d3d11.dll" in t for t in on), f"extra_libraries 混进了 d3d11.dll: {on}"
+    assert not any("d3d11.dll" in t for t in off), f"extra_libraries 混进了 d3d11.dll: {off}"
     assert on == off, "皮肤开关不该影响注入库内容"
 
 

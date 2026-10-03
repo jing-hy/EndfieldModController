@@ -979,13 +979,17 @@ def dlss5_injection_targets(config: AppConfig) -> list[str]:
                     or getattr(config, "firstperson_addon_enabled", True))
     if want_base:
         targets.append(str(dll))
-    # ⚠️ EFMI 的 `d3d11.dll` **永远注入**（2026-10-02 用户实测：「**efmi 关了直接终末地
-    #    拉不起来**」）—— 它不是"皮肤开关"，而是 XXMI 认游戏、加载 Mods 的基础设施。
-    #    真正的「皮肤 Mod」总开关现在只控制**往 staging 里放不放 Mod**
-    #    （`Config.effective_selected_mods`），**不再动注入库**。
-    efmi = config.efmi_dll_path
-    if efmi is not None and efmi.is_file():
-        targets.append(str(efmi))
+    # ❌ **绝不要把 EFMI 的 `d3d11.dll` 列进 `extra_libraries`**（2026-10-03 实测定位）。
+    #    原因：**XXMI 自己就会注入它** —— 它的日志里那条注入请求长这样：
+    #        Inject(library_name='d3d11.dll, d3d12.dll, d3d11.dll')
+    #    即「自带 EFMI d3d11.dll ＋ 我们的 d3d12.dll ＋ **我们额外列的那个 d3d11.dll**」。
+    #    同一个 DLL（内容相同、路径不同）注入第二次必然失败 ⇒ 用户看到
+    #    「注入额外库 …\Packages\XXMI\d3d11.dll 失败：DLL 注入失败！」并且**整个启动中断**。
+    #    （这正是记忆里那条「XXMI 可能仍自动注入默认 EFMI d3d11.dll，若再列就会重复加载」。）
+    #
+    #    而 EFMI 的注入**不会因此丢**：XXMI 那条自带注入照旧执行
+    #    （2026-10-02 用户实测「efmi 关了直接终末地拉不起来」⇒ 它确实是必需品，
+    #     但由 XXMI 负责，不归我们管）。
     # 乳摇：可选用「注入 sbm.dll」的方式（config.secondary_motion_dll 指向短路径下的
     # sbm.dll）。这样游戏目录不用替换 d3dcompiler_47.dll / vulkan-1.dll，
     # 避免和 ReShade/EFMI 抢 D3D 调用链（proxy 方式实测 65 秒崩）。

@@ -19,14 +19,20 @@ watch(() => uiState.dialog, async (dialog) => {
 <template>
   <div v-if="uiState.dialog" class="fixed inset-0 z-50 flex items-center justify-center"
        style="background: rgba(0,0,0,.45)">
-    <div class="card w-[min(560px,92vw)] shadow-lg" style="background: var(--surface)">
+    <!-- ⚠️ `min-w-0` + `overflow-hidden` 是关键：卡片是 flex 子项，而 flex 子项默认
+         `min-width: auto` —— 里面的超长路径会把整张卡片**顶宽**，光给 <pre> 加折行还不够。 -->
+    <div class="card w-[min(560px,92vw)] min-w-0 overflow-hidden shadow-lg" style="background: var(--surface)">
       <div class="card-head">{{ uiState.dialog.title }}</div>
-      <div class="card-body">
-        <!-- ⚠️ 必须限高 + 可滚动：报错原文（例如 Python 的 copytree 异常）动辄好几行、
-             还带很长的绝对路径，不限高会**直接撑出弹窗外面**（用户 2026-10-03：
-             「而且这个内容都到弹窗外面了，这也要处理」）。 -->
-        <pre class="whitespace-pre-wrap break-words m-0 text-sm leading-6"
-             style="max-height: 46vh; overflow-y: auto">{{ uiState.dialog.message }}</pre>
+      <div class="card-body min-w-0">
+        <!-- ⚠️ 长路径必须在**斜杠处自然折行**（用户 2026-10-03：「不是限高的问题，应该是限宽的问题，
+             好像一个路径必须要一行显示完，实际可以在 / 处换行」）。
+             `break-words`（overflow-wrap: break-word）**不够** —— 它只在"整个单词放不下"时才断，
+             而 Windows 路径没有空格、会被当成**一个超长单词**，于是一行撑出弹窗外。
+             `overflow-wrap: anywhere` 允许在任意字符处断行（含 `/`），再配 `max-width: 100%`
+             把宽度约束在弹窗内；限高 + 滚动是额外保险（超长堆栈仍然要能看全）。 -->
+        <pre class="whitespace-pre-wrap m-0 text-sm leading-6"
+             style="max-width: 100%; overflow-wrap: anywhere; word-break: break-word;
+                    max-height: 46vh; overflow-y: auto">{{ uiState.dialog.message }}</pre>
         <a v-if="uiState.dialog.link && uiState.dialog.link.url" :href="uiState.dialog.link.url"
            class="text-accent text-xs mt-2 inline-block" @click.prevent="$emit('open-link', uiState.dialog.link.url)">
           {{ uiState.dialog.link.text || uiState.dialog.link.url }}
