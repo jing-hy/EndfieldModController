@@ -90,6 +90,11 @@ async function openPath(kind) { await run("open_path_in_explorer", kind); }
       </div>
     </div>
 
+    <!-- 两列（GPT-6 Astra 评审：五个大区连续纵向排列要滚很久，右侧又大片空白）：
+         左 = 各设置分组（要改的）；右 = 运行状态与详细状态（要看的，滚动时吸顶）。 -->
+    <div class="grid gap-4" style="grid-template-columns: minmax(0, 1fr) minmax(300px, 380px)">
+      <div class="space-y-4 min-w-0">
+
     <Card title="维护操作（会改动文件，请确认后再点）">
       <div class="flex flex-wrap gap-2">
         <Btn @click="run('game_clean_restore')">还原游戏本体</Btn>
@@ -185,45 +190,6 @@ async function openPath(kind) { await run("open_path_in_explorer", kind); }
       </div>
     </Card>
 
-    <Card title="运行状态">
-      <div class="space-y-1.5 text-sm">
-        <div class="flex items-center gap-2">
-          <span class="w-32 shrink-0" style="color: var(--text-muted)">控制器</span>
-          <Badge :tone="store.state.controller_ready ? 'success' : 'warn'">
-            {{ store.state.controller_ready ? "已生成 controller.ini" : "还没生成（点启动页「生成控制器」）" }}
-          </Badge>
-        </div>
-        <div class="flex items-center gap-2">
-          <span class="w-32 shrink-0" style="color: var(--text-muted)">渲染 API</span>
-          <Badge tone="muted">{{ store.state.render_api || "unknown" }}</Badge>
-        </div>
-        <div class="flex items-center gap-2">
-          <span class="w-32 shrink-0" style="color: var(--text-muted)">ReShade 面板</span>
-          <Badge :tone="store.state.reshade_addon_ready ? 'success' : 'warn'">
-            {{ store.state.reshade_addon_ready ? "已就位" : "未就位" }}
-          </Badge>
-        </div>
-        <div class="flex items-center gap-2">
-          <span class="w-32 shrink-0" style="color: var(--text-muted)">统一快捷键面板</span>
-          <span class="text-xs" style="color: var(--text-muted)">{{ (store.state.hotkey_panel || {}).message || "—" }}</span>
-        </div>
-        <div class="flex items-center gap-2">
-          <span class="w-32 shrink-0" style="color: var(--text-muted)">Mod 备份仓</span>
-          <span class="text-xs" style="color: var(--text-muted)">
-            {{ (store.state.mod_backup || {}).count || 0 }} 个 · {{ (store.state.mod_backup || {}).size_text || "0 B" }}
-          </span>
-        </div>
-        <div v-if="store.state.warming" class="text-xs" style="color: var(--text-muted)">后台预热中…（预热完会自动刷新）</div>
-      </div>
-    </Card>
-
-    <Card title="详细状态">
-      <div class="flex flex-wrap gap-2">
-        <Btn v-for="p in PROBES" :key="p.m" :disabled="probeBusy" @click="probe(p.m)">{{ p.label }}</Btn>
-      </div>
-      <div class="log-box h-56 mt-3">{{ probeText }}</div>
-    </Card>
-
     <Card title="运行目录">
       <div class="space-y-1.5 text-sm">
         <div v-for="row in [
@@ -242,5 +208,50 @@ async function openPath(kind) { await run("open_path_in_explorer", kind); }
         </div>
       </div>
     </Card>
+      </div>
+
+
+      <!-- 右栏：状态（滚动时吸顶） -->
+      <div class="space-y-4 min-w-0" style="align-self: start; position: sticky; top: 12px">
+        <Card title="运行状态">
+          <div class="space-y-1.5 text-sm">
+            <div class="flex items-center gap-2">
+              <span class="w-32 shrink-0" style="color: var(--text-muted)">控制器</span>
+              <Badge :tone="store.state.controller_ready ? 'success' : 'warn'">
+                {{ store.state.controller_ready ? "已生成 controller.ini" : "还没生成（点启动页「生成控制器」）" }}
+              </Badge>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="w-32 shrink-0" style="color: var(--text-muted)">渲染 API</span>
+              <Badge tone="muted">{{ store.state.render_api || "unknown" }}</Badge>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="w-32 shrink-0" style="color: var(--text-muted)">ReShade 面板</span>
+              <Badge :tone="store.state.reshade_addon_ready ? 'success' : 'warn'">
+                {{ store.state.reshade_addon_ready ? "已就位" : "未就位" }}
+              </Badge>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="w-32 shrink-0" style="color: var(--text-muted)">统一快捷键面板</span>
+              <span class="text-xs" style="color: var(--text-muted)">{{ (store.state.hotkey_panel || {}).message || "—" }}</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="w-32 shrink-0" style="color: var(--text-muted)">Mod 备份仓</span>
+              <span class="text-xs" style="color: var(--text-muted)">
+                {{ (store.state.mod_backup || {}).count || 0 }} 个 · {{ (store.state.mod_backup || {}).size_text || "0 B" }}
+              </span>
+            </div>
+            <div v-if="store.state.warming" class="text-xs" style="color: var(--text-muted)">后台预热中…（预热完会自动刷新）</div>
+          </div>
+        </Card>
+
+        <Card title="详细状态">
+          <div class="flex flex-wrap gap-2">
+            <Btn v-for="p in PROBES" :key="p.m" :disabled="probeBusy" @click="probe(p.m)">{{ p.label }}</Btn>
+          </div>
+          <div class="log-box h-56 mt-3">{{ probeText }}</div>
+        </Card>
+      </div>
+    </div>
   </div>
 </template>

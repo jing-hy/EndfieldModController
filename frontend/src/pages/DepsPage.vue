@@ -79,6 +79,11 @@ onUnmounted(() => { if (timer) clearInterval(timer); });
       <Btn variant="primary" @click="start">安装缺失依赖</Btn>
     </div>
 
+    <!-- 两列（GPT-6 Astra 评审：摘要/进度/日志全占首屏，真正要看的组件列表起点太低）：
+         左 = 摘要 + 进度 + 组件列表（要看的）；右 = 安装日志（要盯的，滚动时吸顶）。 -->
+    <div class="grid gap-4" style="grid-template-columns: minmax(0, 1fr) minmax(280px, 360px)">
+      <div class="space-y-4 min-w-0">
+
     <!-- 状态摘要：把"现在到底什么情况"用三个数字说清楚（评审：原来只有 0/0 和一行日志） -->
     <div class="grid gap-3" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr))">
       <div class="card"><div class="card-body">
@@ -102,19 +107,6 @@ onUnmounted(() => { if (timer) clearInterval(timer); });
       <div class="text-xs mt-1.5" style="color: var(--text-muted)">{{ progressText || "尚未开始" }}</div>
     </div>
 
-    <div class="log-card">
-      <div class="log-card-head">
-        <span>安装日志</span>
-        <span class="text-xs" style="color: var(--text-muted); font-weight: 400">
-          {{ logLines.length > 1 ? logLines.length + " 行" : "尚无日志" }}
-        </span>
-      </div>
-      <div v-if="logLines.length" class="log-box" style="max-height: 260px; border-radius: 0">{{ logLines.join("\n") }}</div>
-      <div v-else class="log-empty" style="min-height: 52px; text-align: center">
-        尚未开始。点「安装缺失依赖」后，这里会显示下载线路与安装过程。
-      </div>
-    </div>
-
     <Card v-if="deps.length" title="组件状态">
       <div class="divide-y" style="border-color: var(--border)">
         <div v-for="d in deps" :key="d.key" class="py-2.5 flex items-center justify-between gap-4">
@@ -132,5 +124,23 @@ onUnmounted(() => { if (timer) clearInterval(timer); });
         <Badge v-for="r in required" :key="r" tone="muted">{{ r }}</Badge>
       </div>
     </Card>
+      </div>
+
+      <!-- 右栏：安装日志（滚动时吸顶） -->
+      <div class="min-w-0" style="align-self: start; position: sticky; top: 12px">
+        <div class="log-card">
+          <div class="log-card-head">
+            <span>安装日志</span>
+            <span class="text-xs" style="color: var(--text-muted); font-weight: 400">
+              {{ logLines.length > 1 ? logLines.length + " 行" : "尚无日志" }}
+            </span>
+          </div>
+          <div v-if="logLines.length" class="log-box" style="max-height: 420px; border-radius: 0">{{ logLines.join("\n") }}</div>
+          <div v-else class="log-empty" style="min-height: 52px; text-align: center">
+            尚未开始。点「安装缺失依赖」后，这里会显示下载线路与安装过程。
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
