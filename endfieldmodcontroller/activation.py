@@ -232,6 +232,16 @@ def resolve_active_set(
     report = ActivationReport()
     for mod in candidates:
         key = mod.conflict_group or mod.group or mod.id
+        # ⚠️⚠️ **辅助 Mod 里只有「加载页与壁纸」互斥**（2026-10-03 用户明确：
+        #     「那个壁纸是互斥的，但是功能类不是，修一下」）。
+        # 背景：辅助 Mod 按 `group` 分组显示，而互斥原本是**按 group 一刀切**的 ——
+        # 于是四个分组（加载页与壁纸 / 界面功能类 / 工具画质类 / 其它辅助）全变成
+        # "同组只能开一个"，而功能类本来就该能叠加（多个 UI/功能增强一起用是常态）。
+        # 现在：壁纸类保持互斥（同时开多个壁纸会互相抢同一张界面图），
+        # 其它辅助分组改成**各自独立**（用 mod.id 当 key ⇒ 全部保留）。
+        if not allow_same_character and getattr(mod, "kind", "") == "assist":
+            if key != mc_core.WALLPAPER_GROUP:
+                key = mod.id
         if allow_same_character:
             # 不用「角色」当 key，改用 Mod 自己的 id —— 于是同角色多个都进 chosen。
             key = mod.id

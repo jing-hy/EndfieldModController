@@ -155,7 +155,24 @@ const currentName = computed(() => tabs.find((t) => t.id === store.tab)?.name ||
 
 // 切页签要**写回** config.last_tab —— 之前只有启动时读、从不保存，"记住上次页签"实际不成立。
 async function goTab(id) {
+  const changed = store.tab !== id;
   store.tab = id;
+  // ⚠️ **切页要回到顶部**（2026-10-03 用户：「换页不应该保留滑动的位置，应该到最上」）。
+  // 滚动发生在**页面里的滚动容器**上（不是 window），所以两处都要复位：
+  //   ① 主内容区 `#main-scroll`（各页共享的那个滚动容器）；
+  //   ② window / documentElement（兜底，防止某些页自己滚 window）。
+  // 用 `nextTick` 之外的微任务时机：先滚，再渲染新页，避免"先渲染出新页再跳动"。
+  if (changed) {
+    const reset = () => {
+      const el = document.getElementById("main-scroll");
+      if (el) el.scrollTop = 0;
+      try { window.scrollTo({ top: 0, behavior: "auto" }); } catch (e) { window.scrollTo(0, 0); }
+      if (document.documentElement) document.documentElement.scrollTop = 0;
+      if (document.body) document.body.scrollTop = 0;
+    };
+    reset();
+    requestAnimationFrame(reset);      // 新页挂载后可能又设了一次滚动位置，再复位一遍
+  }
   try { await call("save_config", { last_tab: id }); } catch (e) { /* 记不上不影响使用 */ }
 }
 
@@ -374,7 +391,7 @@ window.addEventListener("pagehide", clearAnnounceTimers);
       </div>
     </aside>
 
-    <main class="flex-1 min-w-0 overflow-auto">
+    <main id="main-scroll" class="flex-1 min-w-0 overflow-auto">
       <!-- 公告条 -->
       <div v-if="notices.length" class="px-6 pt-4">
         <div class="card p-3" style="border-color: var(--accent)">

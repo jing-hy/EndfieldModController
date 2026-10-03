@@ -74,7 +74,9 @@ async function refresh() {
   } catch (e) { /* call 已弹窗 */ }
 }
 
-let wasRunning = false;      // 上一轮是否在跑（用来捕捉"刚跑完"这个瞬间）
+let wasRunning = false;
+// Mod 下载的"上一轮是否活跃"——用来捕捉"刚下完"那一刻只弹一次窗
+let wasModDlActive = false;      // 上一轮是否在跑（用来捕捉"刚跑完"这个瞬间）
 
 async function pollProgress() {
   try {
@@ -127,11 +129,64 @@ async function pollProgress() {
         }
       }
       // 联动：进度条与「下载速度」卡片 —— Mod 下载期间用它的数据
-      if (modDlActive.value && md.total_bytes) {
-        percent.value = Math.min(99, Math.round((md.done_bytes / md.total_bytes) * 100));
-        progressText.value = `Mod 下载 ${(md.done_bytes / 1048576).toFixed(1)}/${(md.total_bytes / 1048576).toFixed(1)} MB`;
-        if (md.speed_bps) speedBps.value = Number(md.speed_bps);
+      // ⚠️⚠️ **速度和进度必须分开判断**（2026-10-03 用户报了两次「下载速度和进度条还是没同步」）。
+      // 原实现是 `if (modDlActive && md.total_bytes) { …进度…; …速度… }` ——
+      // 而 `total_bytes` 是"各任务 size 之和"，**服务器没给 Content-Length 时它就是 0**
+      //（香蕉网部分直链如此），于是整块被跳过：进度条不动，**速度也一起不更新**；
+      // 而上面那行已经把 `speedBps` 设成了依赖下载的 0 ⇒ 速度卡片恒显示「—」。
+      if (modDlActive.value) {
+        if (md.total_bytes > 0) {
+          percent.value = Math.min(99, Math.round((md.done_bytes / md.total_bytes) * 100));
+          progressText.value = `Mod 下载 ${(md.done_bytes / 1048576).toFixed(1)}/${(md.total_bytes / 1048576).toFixed(1)} MB`;
+        } else if (items.length) {
+          // 总大小未知：用各任务自身百分比的平均兜底，别让进度条死住
+          const known = items.filter((it) => Number(it.size) > 0);
+          if (known.length) {
+            const avg = known.reduce((s, it) => s + Number(it.received) / Number(it.size), 0) / known.length;
+            percent.value = Math.min(99, Math.round(avg * 100));
+          } else {
+            const doneCount = items.filter((it) => /完成|已入库/.test(String(it.status || ""))).length;
+            percent.value = Math.min(99, Math.round((doneCount / items.length) * 100));
+          }
+          progressText.value = `Mod 下载 ${(md.done_bytes / 1048576).toFixed(1)} MB（总大小未知）`;
+        }
+        // 速度是**独立信号**，不依赖是否知道总大小 —— 无条件接上
+        const spd = Number(md.speed_bps || 0);
+        if (spd > 0) speedBps.value = spd;
+        else if (items.length) {
+          const sum = items.reduce((s, it) => s + Number(it.speed_bps || 0), 0);
+          if (sum > 0) speedBps.value = sum;
+        }
       }
+
+      // ⚠️ **下载完成的弹窗**（2026-10-03 用户：「下载完 mod 应该和拖入 zip 一样有个弹窗」）。
+      // 形态**照抄拖入 zip 那套**（`importMod.js` 用 `showAlert("导入 Mod", …)`），
+      // 文案也保持一致：识别到角色就报角色，没识别出来就提示去「⋯ → 更换归属」。
+      // 判定用**边沿**：上一轮还在下、这一轮 `done` ⇒ 只在"刚下完"那一刻弹一次。
+      if (wasModDlActive && md && md.done && items.length) {
+        // ⚠️ **下载完要重新扫描并刷新界面**（2026-10-03 用户：「下载完 mod 不会自动刷新
+        // mod 列表」）。原先只有"组件安装完"会刷新（下面那段 running→false 的逻辑），
+        // Mod 下载走的是**另一条任务链**，跑完没人通知界面 ⇒ 服装/辅助页看不到新下的 Mod。
+        try {
+          await call("scan");
+          await refreshState();
+        } catch (e) { /* 刷不动不影响弹窗 */ }
+        const okItems = items.filter((it) => !/失败/.test(String(it.status || "")));
+        const badItems = items.filter((it) => /失败/.test(String(it.status || "")));
+        if (okItems.length) {
+          const lines = okItems.map((it) => `· ${it.name || it.url}${it.group ? ` —— 识别为「${it.group}」` : ""}`);
+          await showAlert(
+            "Mod 下载完成",
+            `已下载并入库 ${okItems.length} 个（列表已刷新）：\n${lines.join("\n")}\n\n` +
+            (badItems.length ? `另有 ${badItems.length} 个失败，可在本页重试。\n\n` : "") +
+            "如果某个没识别出角色，去「服装 Mod / 辅助 Mod」页点它的「⋯ → 更换归属」设定。",
+          );
+        } else if (badItems.length) {
+          await showAlert("Mod 下载失败",
+            badItems.map((it) => `· ${it.name || it.url}：${it.message || it.status}`).join("\n"));
+        }
+      }
+      wasModDlActive = modDlActive.value;
     } catch (e) { /* 没有 Mod 下载任务很正常 */ }
     progressText.value = p.total
       ? `第 ${p.current}/${p.total} 项` + (p.computed_bytes ? ` · ${(p.computed_bytes / 1048576).toFixed(1)} MB` : "")
