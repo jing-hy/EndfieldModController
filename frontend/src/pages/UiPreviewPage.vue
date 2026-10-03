@@ -34,7 +34,7 @@ const CONFLICT_GROUPS = [
     { id: "c2", name: "陈千语 长剑替换" },
   ] },
 ];
-const MENU = ["更换归属…", "修复（实验性）", "回滚", "打开所在目录"];
+const MENU = ["更换归属…", "修复", "回滚", "打开所在目录"];
 </script>
 
 <template>

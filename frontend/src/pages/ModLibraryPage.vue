@@ -300,8 +300,7 @@ watch(() => store.demoCovers, (val) => {
       <div class="flex flex-wrap items-center gap-2">
         <Btn variant="primary" @click="prepare" :disabled="busy">生成控制器</Btn>
         <Btn @click="scan" :disabled="busy">重新扫描</Btn>
-        <Btn variant="ghost" @click="fixAll">一键修复所有 Mod</Btn>
-        <Badge tone="warn">实验性</Badge>
+        <Btn @click="fixAll">一键修复所有 Mod</Btn>
         <span class="ml-auto flex items-center gap-2">
           <input v-model="keyword" class="field" style="width: 200px" placeholder="搜索 Mod / 角色…" />
         </span>
@@ -417,7 +416,7 @@ watch(() => store.demoCovers, (val) => {
     <div v-if="menu" class="fixed z-50 card py-1 shadow-lg" style="min-width: 168px"
          :style="{ left: menu.x + 'px', top: menu.y + 'px' }">
       <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('character')">更改所属角色…</button>
-      <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('fix')">修复 Mod 文件（实验性）</button>
+      <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('fix')">修复 Mod 文件</button>
       <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('rollback')">回滚</button>
       <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('open')">打开所在目录</button>
       <div style="height:1px;background:var(--border)" class="my-1"></div>
