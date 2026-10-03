@@ -110,7 +110,11 @@ function openMenu(mod, event) {
   // 上下都要兜底：窗口很矮时 `innerHeight - 190` 会是负数，菜单就跑到窗口上方看不见了
   const y = Math.max(8, Math.min(box.bottom + 4, (window.innerHeight || 800) - 190));
   // ⚠️ 把 `kind` 一起存下来 —— 模板里判断「移到辅助/服装」要用它（模板作用域拿不到 mod）
-  menu.value = { id: String(mod.id), name: mod.name, kind: String(mod.kind || ""), x, y };
+  menu.value = {
+    id: String(mod.id), name: mod.name, kind: String(mod.kind || ""), x, y,
+    // ⚠️ C4：回滚是否可用（后端按"有没有修复备份"算）
+    can_rollback: mod.can_rollback !== false,
+  };
 }
 function closeMenu() { menu.value = null; }
 
@@ -452,6 +456,11 @@ watch(() => store.demoCovers, (val) => {
                       class="badge mt-1 cursor-pointer" style="background: #f0b429; color: #3a2a00"
                       title="看不出这是哪一类 Mod，点此指定角色归属（或设为未分类）"
                       @click.stop="menuAct('assign', m)">类型待确认</span>
+              <!-- ⚠️ **C1：重复副本标记**（2026-10-03 补回归）。0.9.5 有
+                   `⚠ 与「X」内容相同（重复副本）`；后端 `mod.duplicate_of` 一直在算，
+                   而前端 grep 该字段 **0 命中** ⇒ 用户看不出哪些是重复的。 -->
+              <span v-if="m.duplicate_of" class="ml-1" style="color: var(--warn)"
+                    :title="`与「${m.duplicate_of}」内容相同（重复副本），留着会占空间`">⚠ 重复</span>
                 <!-- 显式的启用开关（用户 2026-10-03 三次反馈"mod 开关还是没有"——
                      之前只有一行状态文字 + 点整卡切换，看不出那是个开关）。 -->
                 <span class="mt-auto flex items-center justify-between gap-2">
@@ -488,7 +497,12 @@ watch(() => store.demoCovers, (val) => {
               @click="menuAct('toAssist')">移到「辅助 Mod」</button>
       <button v-else class="w-full text-left px-3 py-1.5 text-sm"
               @click="menuAct('toSkin')">移到「服装 Mod」</button>
-      <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('rollback')">回滚</button>
+      <!-- ⚠️ **C4：回滚要按 `can_rollback` 置灰**（2026-10-03 补回归）：
+             0.9.5 里没备份过就是灰的（点了也没用），现在无论有没有备份都可点。 -->
+      <button class="w-full text-left px-3 py-1.5 text-sm" :disabled="!menu.can_rollback"
+              :style="menu.can_rollback ? '' : 'opacity:.45;cursor:not-allowed'"
+              :title="menu.can_rollback ? '' : '这个 Mod 还没有修复备份，没什么可回滚的'"
+              @click="menuAct('rollback')">回滚</button>
       <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('open')">打开所在目录</button>
       <div style="height:1px;background:var(--border)" class="my-1"></div>
       <button class="w-full text-left px-3 py-1.5 text-sm" style="color: var(--danger)"

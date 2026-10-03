@@ -145,10 +145,18 @@ async function onDrop(event) {
   const files = Array.from((event.dataTransfer && event.dataTransfer.files) || []);
   for (const file of files) {
     await importDroppedFile(file, {
-      onDone: async () => { await refreshState(); loadSettings(); },
+      onDone: async () => {
+        await refreshState();
+        loadSettings();
+      },
+      // ⚠️ **B12**：导入后立刻让「角色归属待确认」那张表刷新一次 ——
+      // 认不出角色的包会**当场弹选择窗**，而不是留一句"你稍后自己去改"。
+      onNeedConfirm: async () => { pickerRef.value?.reload?.(); },
     });
   }
 }
+// 角色归属待确认弹窗的引用（导入 Mod 后要主动刷新它）
+const pickerRef = ref(null);
 const themeOpen = ref(false);
 const currentPage = computed(() => pages[store.tab]);
 const currentName = computed(() => tabs.find((t) => t.id === store.tab)?.name || "");
@@ -462,7 +470,7 @@ window.addEventListener("pagehide", clearAnnounceTimers);
     </div>
 
     <!-- 角色归属待确认：预识别不确定时让用户选（识别错会让同角色互斥失效） -->
-    <CharacterPickerDialog />
+    <CharacterPickerDialog ref="pickerRef" />
 
     <!-- 新手引导：挖孔高亮 + 气泡 -->
     <OnboardingTour v-model="tourVisible" :steps="TOUR_STEPS" @finish="finishTour" />

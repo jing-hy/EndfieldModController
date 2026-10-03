@@ -51,6 +51,7 @@ const modDlHasRecord = ref(false);
 // 已经提示过的「失败 / 太慢」任务（每个只弹一次，避免每秒轮询重复弹）
 // 已经提示过的「失败 / 太慢」任务（每个只弹一次，避免每秒轮询重复弹）
 const modDlWarned = new Set();
+let modDlManualShown = false;   // 「需手动解压」的提示只弹一次
 // 「香蕉网高速下载」的显示状态（2026-10-03）：并发连接数 / 是否在加速 / 当前策略
 const mdThreads = ref(0);
 const mdAccelerating = ref(false);
@@ -229,6 +230,30 @@ async function pollProgress() {
             percent.value = Math.min(99, Math.round((doneCount / items.length) * 100));
           }
           progressText.value = `Mod 下载 ${(md.done_bytes / 1048576).toFixed(1)} MB（总大小未知）`;
+        }
+        // ⚠️ **B5：有「需手动解压」的包时要告诉用户去哪拿**（2026-10-03 补回归）。
+        // 后端把解压不了的包标成「需手动解压」并**保留文件**（不删），
+        // 0.9.5 会列出这些文件 + 给一个「打开下载目录」按钮（`open_download_dir`）。
+        // 换代后前端对这个状态**完全没有处理** ⇒ 包下完了、装不上、也不知道文件在哪。
+        const manual = items.filter((it) => it.status === "需手动解压");
+        if (manual.length && !modDlManualShown) {
+          modDlManualShown = true;
+          const open = await showModalDialog({
+            title: `${manual.length} 个包需要你手动解压`,
+            message: [
+              "这些包程序认不出来（不是 zip/7z/rar，或包本身坏了），所以**原样留在下载目录**：",
+              "",
+              ...manual.slice(0, 8).map((it) => `· ${it.name || it.path || "?"}`),
+              manual.length > 8 ? `…另有 ${manual.length - 8} 个` : "",
+              "",
+              "手动解压后，把里面的 Mod 文件夹放进 Mod 库再点「重新扫描」即可。",
+            ].filter((x) => x !== "").join("\n"),
+            okText: "打开下载目录", cancelText: "知道了",
+          });
+          if (open) {
+            const r = await call("open_download_dir");
+            if (r && r.ok === false) showToast(String(r.message || "打不开下载目录"), "danger");
+          }
         }
         // 速度是**独立信号**，不依赖是否知道总大小 —— 无条件接上
         const spd = Number(md.speed_bps || 0);

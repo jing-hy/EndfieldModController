@@ -86,6 +86,12 @@ function skip() { pending.value = []; }
 // 这是本窗口第三次踩同一个坑（前两次：UpdateBadge 的版本号、demo 快照注入），
 // 统一改成等 `store.ready`。（`onMounted` 也一样不安全，它同样早于父组件。）
 watch(() => store.ready, (ready) => { if (ready && !open.value) load(); }, { immediate: true });
+
+// ⚠️ **B12：导入 Mod 之后要能立刻刷新这张表**（2026-10-03 补回归）。
+// 这个弹窗原本**只在 `store.ready` 变化时加载一次** —— 而 `ready` 启动后就不再变，
+// 所以用户拖进一个"认不出角色"的包之后，选择窗**不会自己出现**（0.9.5 会当场推给用户）。
+// `App.vue` 在导入完成后调这里暴露的 `reload()` 补上这一步。
+defineExpose({ reload: load });
 // 用户回到窗口时再顺手看一眼（导入完 Mod 切回来就会检查）
 window.addEventListener("focus", () => { if (!open.value) load(); });
 </script>
