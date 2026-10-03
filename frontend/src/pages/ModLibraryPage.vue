@@ -20,7 +20,8 @@ import { setStatus } from "../lib/status.js";
 const urls = ref("");
 const dl = ref({ items: [], counts: {}, done: true, total_bytes: 0, done_bytes: 0, speed_bps: 0 });
 const dlStatus = ref("");
-const covers = ref({});
+// 封面缓存在 store 里（跨页面存活）—— 见 store.js 的注释
+const covers = computed(() => store.covers);
 const busy = ref(false);
 // 「⋯ 更多」：就地弹出的小菜单（用户准则：⋯ 要就地弹小菜单，不要弹窗）
 const menu = ref(null);          // { id, name, x, y }
@@ -204,18 +205,45 @@ function speedText() {
     + `${Math.round((dl.value.done_bytes / dl.value.total_bytes) * 100)}% · ${humanSize(bps)}/s`;
 }
 
+// 封面**串行**加载：后端每张都要 PIL 打开+缩放+JPEG 编码（CPU 密集），
+// 一次性并发十几张会把界面拖卡、用户感觉"图片加载很慢"（2026-10-03 反馈）。
+// 这里一张一张来，并且让出一帧，界面先出来、封面随后补上。
+let coverQueue = [];
+let coverRunning = false;
+
+async function pumpCovers() {
+  if (coverRunning) return;
+  coverRunning = true;
+  try {
+    while (coverQueue.length) {
+      const id = coverQueue.shift();
+      if (!store.covers[id]) await loadCover(id);
+      await new Promise((r) => setTimeout(r, 0));   // 让出主线程，界面不被卡住
+    }
+  } finally {
+    coverRunning = false;
+  }
+}
+
+function queueCovers(mods) {
+  const ids = (mods || []).map((m) => m.id).filter((id) => id && !store.covers[id]);
+  if (!ids.length) return;
+  coverQueue = ids;
+  pumpCovers();
+}
+
 onMounted(async () => {
   await refreshState().catch(() => {});
-  (store.state.mods || []).forEach((m) => loadCover(m.id));
+  queueCovers(store.state.mods);
 });
-onUnmounted(() => { if (timer) clearInterval(timer); if (dlTimer) clearInterval(dlTimer); });
+onUnmounted(() => { if (timer) clearInterval(timer); if (dlTimer) clearInterval(dlTimer); coverQueue = []; });
 
 // ⚠️ Vue 里**子组件的 onMounted 先于父组件执行**，而 demo 模式的封面是父组件（App.vue）
 // 在自己的 onMounted 里才灌进 store 的 —— 那时封面还没到，一开始全是占位图。
 // 这里监听它，数据到位后把封面补齐。
 watch(() => store.demoCovers, (val) => {
   if (!val) return;
-  (store.state.mods || []).forEach((m) => loadCover(m.id));
+  queueCovers(store.state.mods);
 }, { immediate: true });
 </script>
 
@@ -309,12 +337,15 @@ watch(() => store.demoCovers, (val) => {
               <span class="min-w-0 flex-1 flex flex-col">
                 <span class="text-sm leading-5" style="display: -webkit-box; -webkit-line-clamp: 2;
                       -webkit-box-orient: vertical; overflow: hidden" :title="m.name">{{ m.name }}</span>
-                <span class="mt-1.5 flex items-center gap-1.5 text-xs"
+                <span class="mt-1.5 text-xs"
                       :style="{ color: selected.has(String(m.id)) ? 'var(--accent)' : 'var(--text-muted)' }">
-                  <Check v-if="selected.has(String(m.id))" :size="12" :stroke-width="3" />
                   {{ selected.has(String(m.id)) ? "已启用" : "未启用" }}{{ m.kind === "unknown" ? " · 类型待确认" : "" }}
                 </span>
-                <span class="mt-auto flex items-center justify-end">
+                <!-- 显式的启用开关（用户 2026-10-03 三次反馈"mod 开关还是没有"——
+                     之前只有一行状态文字 + 点整卡切换，看不出那是个开关）。 -->
+                <span class="mt-auto flex items-center justify-between gap-2">
+                  <Switch :model-value="selected.has(String(m.id))"
+                          @update:model-value="() => toggleMod(m)" />
                   <button class="btn btn-mini shrink-0" title="更多：更改所属角色 / 修复 / 回滚 / 移出库"
                           @click="openMenu(m, $event)">⋯</button>
                 </span>

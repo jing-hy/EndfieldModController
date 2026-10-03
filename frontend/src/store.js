@@ -17,6 +17,11 @@ export const store = reactive({
   // 若干页面共用的派生信息
   mods: [],
   config: {},
+  // **封面缓存放在 store 里**（不是页面组件里）—— 后端每张封面都要 PIL 打开+缩放+JPEG 编码，
+  // 放在组件里的话"切走再切回来 = 组件销毁 = 缓存清空 = 全部重新请求"，
+  // 用户看到的就是"图片加载很慢"（2026-10-03 反馈）。放这里整个会话只取一次。
+  covers: {},
+  demoCovers: null,
 });
 
 export async function refreshState() {
