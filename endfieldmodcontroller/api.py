@@ -1880,6 +1880,19 @@ class EndfieldModControllerApi:
                 self._dep_task["current"] = done_items
                 self._dep_task["total"] = max(done_items, 1)
                 self._dep_task["percent"] = 100.0
+                # ⚠️⚠️ **`byte_percent` 也要一起对齐**（2026-10-03 用户报
+                #     「**动态显示安装完成，但是进度条才走了一半**」）。
+                # 原因：前端进度条**优先用 `byte_percent`**（DepsPage.vue:234），
+                # 而它原先只按"预估总字节"算 —— 预估偏大时就永远走不到 100。
+                # 这里完成即终态，把它和 `expected_bytes` 一并收敛到实际值，
+                # 免得"字节数"那一行也停在半路。
+                self._dep_task["byte_percent"] = 100.0
+                self._dep_task["bytes_received"] = int(
+                    self._dep_task.get("computed_bytes")
+                    or self._dep_task.get("bytes_received") or 0)
+                self._dep_task["expected_bytes"] = int(
+                    self._dep_task.get("computed_bytes")
+                    or self._dep_task.get("expected_bytes") or 0)
                 self._dep_task["message"] = "完成"
                 estimated = int(self._dep_task.get("estimated_total") or 0)
                 if estimated and estimated != done_items:

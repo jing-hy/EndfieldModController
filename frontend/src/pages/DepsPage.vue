@@ -231,7 +231,16 @@ async function pollProgress() {
     // 项数口径下 138 MB 的大包只算 1 项，进度条会长时间停着不动。
     // ⚠️ **一律取整**（用户 2026-10-03：「23.76781745624384% 这是什么百分数」）——
     // 后端给的是浮点，直接显示会是一长串小数。界面上的百分数永远是个整数。
-    if (typeof p.byte_percent === "number" && p.expected_bytes > 0) {
+    // ⚠️⚠️ **任务已经跑完 ⇒ 进度条就该是 100%**（2026-10-03 用户报
+    //     「**动态显示安装完成，但是进度条才走了一半**」）。
+    // 前端优先用 `byte_percent`（字节进度），而它是按"预估总字节"算的 ——
+    // 预估偏大时，文字已经说"完成"、进度条却停在一半。后端现在会在完成时把
+    // `byte_percent` 一起对齐；这里再兜一道底：**终态以"跑完了"为准**，
+    // 不管字节账算成什么样，都不该让用户看到"完成 + 一半"。
+    const finished = p.running === false && !modDlActive.value;
+    if (finished && (p.results || []).length) {
+      percent.value = 100;
+    } else if (typeof p.byte_percent === "number" && p.expected_bytes > 0) {
       percent.value = Math.max(0, Math.min(100, Math.round(p.byte_percent)));
     } else if (typeof p.percent === "number") {
       percent.value = Math.max(0, Math.min(100, Math.round(p.percent)));
