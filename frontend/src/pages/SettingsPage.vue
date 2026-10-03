@@ -10,6 +10,7 @@ import Card from "../components/ui/Card.vue";
 import Btn from "../components/ui/Btn.vue";
 import Badge from "../components/ui/Badge.vue";
 import SettingPath from "../components/ui/SettingPath.vue";
+import SettingPathBrowse from "../components/ui/SettingPathBrowse.vue";
 import SettingSwitch from "../components/ui/SettingSwitch.vue";
 import SettingSelect from "../components/ui/SettingSelect.vue";
 
@@ -71,37 +72,58 @@ async function openPath(kind) { await run("open_path_in_explorer", kind); }
 
 <template>
   <div class="space-y-4">
-    <!-- 顶部动作区（旧版把这三个放最上面） -->
-    <div class="flex flex-wrap gap-2">
-      <Btn variant="danger" @click="run('reset_dependencies_and_redownload')">依赖清空重新下载</Btn>
-      <Btn variant="primary" @click="run('export_diagnostics')">一键导出诊断包</Btn>
-      <Btn variant="primary" @click="run('ensure_initialized')">一键检测全部</Btn>
-      <Btn @click="run('game_clean_restore')">一键还原游戏本体</Btn>
+    <!-- 顶部：状态优先 + 主操作唯一。评审指出原来四个按钮里两个都是实心蓝、破坏性操作混在中间。 -->
+    <div class="card">
+      <div class="card-body">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div class="text-sm font-medium">改完即保存</div>
+            <div class="text-xs mt-0.5" style="color: var(--text-muted)">
+              下面每一项改动<b>立刻生效并写入 config.json</b>，不需要点保存；留空的项按「自动」处理。
+            </div>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <Btn variant="primary" @click="run('ensure_initialized')">一键检测全部</Btn>
+            <Btn @click="run('export_diagnostics')">导出诊断包</Btn>
+          </div>
+        </div>
+      </div>
     </div>
+
+    <Card title="维护操作（会改动文件，请确认后再点）">
+      <div class="flex flex-wrap gap-2">
+        <Btn @click="run('game_clean_restore')">还原游戏本体</Btn>
+        <Btn variant="danger" @click="run('reset_dependencies_and_redownload')">依赖清空并重新下载</Btn>
+      </div>
+      <div class="text-xs mt-2" style="color: var(--text-muted)">
+        「还原游戏本体」只从备份区把非原版文件搬回去，不动你的 Mod 库；
+        「依赖清空并重新下载」会清掉 runtime 与 assets（<b>保留 Mod 库与 exe</b>）后重新拉取。
+      </div>
+    </Card>
 
     <Card title="① 工作区与 Mod 库（相对主路径）">
       <SettingPath k="data_root" label="主路径" readonly placeholder="程序所在目录" hint="程序所在目录，下面这些都相对它" />
       <SettingPath k="runtime_dir" label="runtime 目录" placeholder="runtime" />
-      <SettingPath k="library_dir" label="Mod 库目录" placeholder="library" />
+      <SettingPathBrowse k="library_dir" label="Mod 库目录" placeholder="library" kind="dir" />
       <SettingSwitch k="mod_backup_enabled" label="Mod 备份（默认开，关了就不备份）"
         hint="关掉后不再把 Mod 库里的 Mod 复制进备份仓；已有的备份一个都不会删（只增不减）。" />
       <SettingPath k="mod_backup_dir" label="Mod 备份目录" placeholder="mod-backup" hint="留空 = 主路径下的 mod-backup（只增不减）" />
-      <SettingPath k="staging_mods_dir" label="Staging Mods 目录" placeholder="留空 = 自动：<主路径>/builtin/XXMI/EFMI/Mods" hint="EFMI 实际加载的位置" />
+      <SettingPathBrowse k="staging_mods_dir" label="Staging Mods 目录" placeholder="留空 = 自动：<主路径>/builtin/XXMI/EFMI/Mods" kind="dir" hint="EFMI 实际加载的位置" />
       <SettingPath k="dependency_manifest" label="依赖清单" placeholder="dependencies.json" />
     </Card>
 
     <Card title="② 游戏与启动器（留空即自动搜索）">
-      <SettingPath k="official_launcher" label="官方启动器" placeholder="留空 = 自动搜索 Hypergryph Launcher" />
-      <SettingPath k="game_exe" label="Endfield.exe" placeholder="留空 = 自动搜索游戏目录" />
-      <SettingPath k="xxmi_launcher" label="XXMI Launcher" placeholder="留空 = 自动搜索" />
-      <SettingPath k="migoto_loader" label="3DMigoto Loader（可选）" placeholder="留空 = 用内置 migoto_loader.exe" />
+      <SettingPathBrowse k="official_launcher" label="官方启动器" placeholder="留空 = 自动搜索 Hypergryph Launcher" kind="file" />
+      <SettingPathBrowse k="game_exe" label="Endfield.exe" placeholder="留空 = 自动搜索游戏目录" kind="file" />
+      <SettingPathBrowse k="xxmi_launcher" label="XXMI Launcher" placeholder="留空 = 自动搜索" kind="file" />
+      <SettingPathBrowse k="migoto_loader" label="3DMigoto Loader（可选）" placeholder="留空 = 用内置 migoto_loader.exe" kind="file" />
     </Card>
 
     <Card title="③ 组件与注入（留空 = 按主路径自动推导）">
-      <SettingPath k="dlss5_dir" label="DLSS5 / 第一人称目录" placeholder="留空 = 自动：<主路径>/dlss5" />
-      <SettingPath k="reshade_dll" label="ReShade 底座 d3d12.dll" placeholder="留空 = 自动：<主路径>/dlss5/d3d12.dll" />
-      <SettingPath k="secondary_motion_dir" label="乳摇工具目录" placeholder="留空 = 自动：<主路径>/secondary_motion" hint="装到别处时填这里" />
-      <SettingPath k="poser_dir" label="Endfield Poser 安装包" placeholder="留空 = 自动：<主路径>/poser" />
+      <SettingPathBrowse k="dlss5_dir" label="DLSS5 / 第一人称目录" placeholder="留空 = 自动：<主路径>/dlss5" kind="dir" />
+      <SettingPathBrowse k="reshade_dll" label="ReShade 底座 d3d12.dll" placeholder="留空 = 自动：<主路径>/dlss5/d3d12.dll" kind="file" />
+      <SettingPathBrowse k="secondary_motion_dir" label="乳摇工具目录" placeholder="留空 = 自动：<主路径>/secondary_motion" kind="dir" hint="装到别处时填这里" />
+      <SettingPathBrowse k="poser_dir" label="Endfield Poser 安装包" placeholder="留空 = 自动：<主路径>/poser" kind="dir" />
       <SettingSelect k="reshade_injection" label="ReShade 注入方式" :options="RE_INJECTION" />
     </Card>
 
@@ -121,7 +143,7 @@ async function openPath(kind) { await run("open_path_in_explorer", kind); }
       <SettingSwitch k="auto_update_dependencies" label="启动前自动更新依赖" />
       <SettingSwitch k="require_admin" label="启动时请求管理员权限" />
       <SettingSwitch k="auto_disable_feed_on_native_dlss" label="游戏自带 DLSS 时自动停用喂帧组件"
-        hint="终末地自带 DLSS 时，喂帧组件会与游戏自己的 DLSS 抢同一条 NGX 链路。开启时自检会把它停用（移进 runtime\dlss5\_disabled，可逆）—— 但只有游戏**确实跑在 D3D12** 时才停：被 XXMI/EFMI 强制 -force_d3d11 时游戏建不出自己的 DLSS，喂帧组件是 DLSS5 的必需环节，此时会保持启用。" />
+        hint="终末地自带 DLSS 时，喂帧组件会与游戏自己的 DLSS 抢同一条 NGX 链路。开启时自检会把它停用（移进 runtime\dlss5\_disabled，可逆）—— 但只有游戏确实跑在 D3D12 时才停：被 XXMI/EFMI 强制 -force_d3d11 时游戏建不出自己的 DLSS，喂帧组件是 DLSS5 的必需环节，此时会保持启用。" />
       <SettingSwitch k="inject_reshade_ui" label="注入统一控制面板（自研 ReShade addon）"
         hint="放进 ReShade 真正读取的目录（d3d12.dll 所在处）。关掉后不注入面板；此时「整合 Mod 快捷键」会拒绝锁键。" />
       <SettingSwitch k="prefer_internal_dependencies" label="依赖包优先用控制器维护的那份"

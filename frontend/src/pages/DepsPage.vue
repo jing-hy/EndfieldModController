@@ -10,10 +10,11 @@ import Btn from "../components/ui/Btn.vue";
 import Badge from "../components/ui/Badge.vue";
 
 const items = ref([]);
+const running = ref(false);
 const logLines = ref(["等待开始…（这里会显示下载线路尝试、断点续传、组件安装等详细过程）"]);
 const status = ref("");
 const percent = ref(0);
-const progressText = ref("0/0");
+const progressText = ref("");   // 空 = 尚未开始，由 {{ ... || "尚未开始" }} 兜底
 let timer = null;
 
 // 真实结构：get_state().dependency_report = { required:[], manifest:{key:{display,status,version,install_dir,present,needed}}, unknown:[] }
@@ -22,6 +23,13 @@ const deps = computed(() => {
   return Object.entries(m).map(([key, v]) => ({ key, ...v }));
 });
 const required = computed(() => (store.state.dependency_report || {}).required || []);
+const okCount = computed(() => deps.value.filter((d) => d.status === "已安装").length);
+const missingCount = computed(() => deps.value.filter((d) => d.status === "缺失").length);
+const progressLabel = computed(() => {
+  if (running.value) return "进行中";
+  if (!deps.value.length) return "未检查";
+  return missingCount.value ? "待补齐" : "已就绪";
+});
 
 function tone(state) {
   return state === "ok" ? "success" : state === "missing" ? "danger" : "muted";
@@ -41,6 +49,7 @@ async function pollProgress() {
   try {
     const p = await call("get_dependency_progress");
     if (!p) return;
+    running.value = !!p.running;
     if (typeof p.percent === "number") percent.value = p.percent;
     if (Array.isArray(p.log) && p.log.length) logLines.value = p.log;
     progressText.value = p.total ? `${p.current}/${p.total}` : (p.message || "");
@@ -48,7 +57,8 @@ async function pollProgress() {
 }
 
 async function start() {
-  try { await call("start_full_update"); } catch (e) { return; }
+  running.value = true;
+  try { await call("start_full_update"); } catch (e) { running.value = false; return; }
   status.value = "已开始自动安装/更新…";
   await refresh();
 }
@@ -60,25 +70,39 @@ onUnmounted(() => { if (timer) clearInterval(timer); });
 <template>
   <div class="space-y-4">
     <div class="flex flex-wrap gap-2">
-      <Btn @click="refresh">刷新依赖状态</Btn>
-      <Btn @click="call('ensure_initialized')">检查状态</Btn>
-      <Btn variant="primary" @click="start">自动安装/更新</Btn>
+      <Btn @click="refresh">重新扫描</Btn>
+      <Btn @click="call('ensure_initialized')">检查并补齐</Btn>
+      <Btn variant="primary" @click="start">安装缺失依赖</Btn>
     </div>
 
-    <div v-if="status" class="text-xs" style="color: var(--text-muted)">{{ status }}</div>
+    <!-- 状态摘要：把"现在到底什么情况"用三个数字说清楚（评审：原来只有 0/0 和一行日志） -->
+    <div class="grid gap-3" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr))">
+      <div class="card"><div class="card-body">
+        <div class="text-xl font-semibold">{{ okCount }}</div>
+        <div class="text-xs mt-0.5" style="color: var(--text-muted)">已就位</div>
+      </div></div>
+      <div class="card"><div class="card-body">
+        <div class="text-xl font-semibold">{{ missingCount }}</div>
+        <div class="text-xs mt-0.5" style="color: var(--text-muted)">缺失</div>
+      </div></div>
+      <div class="card"><div class="card-body">
+        <div class="text-xl font-semibold">{{ progressLabel }}</div>
+        <div class="text-xs mt-0.5" style="color: var(--text-muted)">当前状态</div>
+      </div></div>
+    </div>
 
     <div>
       <div class="h-1.5 rounded-full overflow-hidden" style="background: var(--surface-2); border: 1px solid var(--border)">
         <div class="h-full transition-all" :style="{ width: percent + '%', background: 'var(--accent)' }"></div>
       </div>
-      <div class="text-xs mt-1.5" style="color: var(--text-muted)">{{ progressText }}</div>
+      <div class="text-xs mt-1.5" style="color: var(--text-muted)">{{ progressText || "尚未开始" }}</div>
     </div>
 
     <div class="log-card">
       <div class="log-card-head">
         <span>安装日志</span>
         <span class="text-xs" style="color: var(--text-muted); font-weight: 400">
-          {{ logLines.length ? logLines.length + " 行" : "尚无日志" }}
+          {{ logLines.length > 1 ? logLines.length + " 行" : "尚无日志" }}
         </span>
       </div>
       <div v-if="logLines.length" class="log-box" style="max-height: 260px; border-radius: 0">{{ logLines.join("\n") }}</div>

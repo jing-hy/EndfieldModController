@@ -7,10 +7,20 @@ export const uiState = reactive({
 });
 
 let toastSeq = 0;
-export function showToast(text) {
+// 按文案猜语气（评审：状态只靠颜色，看不出成功/警告/失败）。
+// 调用方也可以显式传 tone，覆盖推断。
+function inferTone(text) {
+  const s = String(text);
+  if (/失败|错误|无法|不存在|不能|取消/.test(s)) return "danger";
+  if (/不确定|请选择|注意|需要|缺失/.test(s)) return "warn";
+  if (/^已|完成|成功|就位/.test(s)) return "success";
+  return "info";
+}
+
+export function showToast(text, tone) {
   if (!text) return;
   const id = ++toastSeq;
-  uiState.toasts.push({ id, text });
+  uiState.toasts.push({ id, text, tone: tone || inferTone(text) });
   setTimeout(() => {
     const i = uiState.toasts.findIndex((t) => t.id === id);
     if (i >= 0) uiState.toasts.splice(i, 1);

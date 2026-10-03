@@ -104,9 +104,12 @@ async function menuAct(act) {
     } else if (act === "delete") {
       // 破坏性动作：默认聚焦安全项、按钮文字自解释（用户准则）
       const ok = await showModalDialog({
-        title: `把这个 Mod 移出库？`,
-        message: `${m.name}\n\n它会被移到 runtime\\backups\\mod-trash\\（可找回），原库不再显示。`,
-        okText: "移出库", cancelText: "算了",
+        // 标题直接说动作（评审：原标题"确认"、以及把 runtime\backups\mod-trash 这种内部路径
+        // 摆给用户，都会让人以为要删到系统目录里去）
+        title: "移出 Mod 库？",
+        message: `${m.name}\n\n它会从 Mod 库列表里移出并留一份备份，之后不再加载。`
+          + `\n不会删除你的其它 Mod，也不会动游戏本体。`,
+        okText: "移出并备份", cancelText: "保留在库",
       });
       if (!ok) return;
       const r = await call("delete_mod", m.id);
@@ -196,6 +199,7 @@ onUnmounted(() => { if (timer) clearInterval(timer); if (dlTimer) clearInterval(
 <template>
   <div class="space-y-4">
     <Card title="皮肤 Mod">
+      <template #badge><Badge tone="muted">总开关</Badge></template>
       <div class="divide-y" style="border-color: var(--border)">
         <div class="switch-row" @click="saveSetting('efmi_injection', !settings.efmi_injection)">
           <div class="min-w-0">
@@ -220,9 +224,9 @@ onUnmounted(() => { if (timer) clearInterval(timer); if (dlTimer) clearInterval(
 
     <Card title="下载 Mod">
       <div class="flex items-start justify-between gap-4">
-        <div class="text-xs" style="color: var(--text-muted)">
-          粘贴网址，<b>一行一个</b> → <b>并行下载</b>；能解压的（zip / 7z / rar）自动解压进 Mod 库并识别角色。
-          直接支持<b>香蕉网（GameBanana）页面地址</b>：会自动换成真实文件直链，并带出封面、作者与版本。
+        <div class="text-xs" style="color: var(--text-muted)"
+             title="粘贴网址一行一个 → 并行下载；zip / 7z / rar 会自动解压进 Mod 库并识别角色。直接支持香蕉网（GameBanana）页面地址：会自动换成真实文件直链，并带出封面、作者与版本；打不开时请检查 VPN。">
+          粘贴网址，<b>一行一个</b>。支持香蕉网页面地址（自动取真实直链与封面）。
         </div>
         <Btn variant="primary" @click="startDownload">开始下载</Btn>
       </div>
@@ -261,10 +265,11 @@ onUnmounted(() => { if (timer) clearInterval(timer); if (dlTimer) clearInterval(
 
     <Card title="Mod 列表">
       <div class="flex flex-wrap items-center gap-2">
-        <Btn @click="scan" :disabled="busy">重新扫描</Btn>
         <Btn variant="primary" @click="prepare" :disabled="busy">生成控制器</Btn>
-        <Btn @click="fixAll">一键修复所有 Mod（实验性）</Btn>
-        <span class="text-xs" style="color: var(--text-muted)">同角色自动互斥，选择自动保存。把 .zip / .7z / .rar 拖到页面任意处即可导入。</span>
+        <Btn @click="scan" :disabled="busy">重新扫描</Btn>
+        <Btn variant="ghost" @click="fixAll">一键修复所有 Mod</Btn>
+        <Badge tone="warn">实验性</Badge>
+        <span class="text-xs" style="color: var(--text-muted)">同角色自动互斥，勾选自动保存。</span>
       </div>
       <div v-if="!groups.length" class="empty-state">
         <div class="empty-title">还没有发现 Mod</div>
@@ -311,8 +316,8 @@ onUnmounted(() => { if (timer) clearInterval(timer); if (dlTimer) clearInterval(
     <div v-if="menu" class="fixed inset-0 z-40" @click="closeMenu"></div>
     <div v-if="menu" class="fixed z-50 card py-1 shadow-lg" style="min-width: 168px"
          :style="{ left: menu.x + 'px', top: menu.y + 'px' }">
-      <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('character')">更换归属…</button>
-      <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('fix')">修复（实验性）</button>
+      <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('character')">更改所属角色…</button>
+      <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('fix')">修复 Mod 文件（实验性）</button>
       <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('rollback')">回滚</button>
       <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('open')">打开所在目录</button>
       <div style="height:1px;background:var(--border)" class="my-1"></div>

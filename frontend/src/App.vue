@@ -18,8 +18,10 @@ import AssistPage from "./pages/AssistPage.vue";
 import DepsPage from "./pages/DepsPage.vue";
 import LaunchPage from "./pages/LaunchPage.vue";
 import ModLibraryPage from "./pages/ModLibraryPage.vue";
+import UiPreviewPage from "./pages/UiPreviewPage.vue";
 
 const pages = {
+  preview: UiPreviewPage,
   library: ModLibraryPage, assist: AssistPage, dependencies: DepsPage, launch: LaunchPage, settings: SettingsPage,
   about: AboutPage,
 };
@@ -72,6 +74,11 @@ function pickTheme(name) {
 }
 
 onMounted(async () => {
+  // UI 预览页（#preview?d=xxx）：只截图/回归用，不碰后端
+  if (String(location.hash || "").startsWith("#preview")) {
+    store.tab = "preview";
+    return;
+  }
   // 拖放导入（全局：任何页都能拖）
   window.addEventListener("dragenter", (e) => {
     if (!dragHasFiles(e)) return;
@@ -110,18 +117,23 @@ onMounted(async () => {
       if (!firstRunChecked && fr.first_run && !fr.onboarding_done) {
         firstRunChecked = true;
         const missing = (fr.missing_components || []).join("、");
+        // 评审：一屏塞了三件事、`Poser` 没解释、"跳过"没说后果 ⇒ 步骤化 + 说清是什么。
         const go = await showModalDialog({
-          title: "第一次使用：还没完成初始化",
+          title: "首次使用：需要完成初始化",
           message: [
-            missing ? `当前缺少：${missing}。` : "当前还没生成控制器。",
+            missing ? `还缺少 ${missing}（摆姿 / MMD 播放用的组件）。` : "控制器还没生成。",
             "",
-            "接下来可以做两件事（约 1 分钟）：",
-            "· 在「依赖」页点「自动安装/更新」把组件装齐；",
-            "· 在「Mod 库」页把 .zip / .7z / .rar 拖进来导入 Mod。",
+            "建议先做这一步（约 1 分钟）：",
+            "1. 打开「依赖」页",
+            "2. 点「安装缺失依赖」",
+            "3. 装完回「启动」页点「一键启动」",
             "",
-            "⚠️ 第一次点「一键启动」如果终末地没起来，再点一次通常就好。",
+            "之后在「Mod 库」页把 .zip / .7z / .rar 拖进窗口，就能导入 Mod。",
+            "",
+            "提示：第一次点「一键启动」如果游戏没起来，再点一次通常就好。",
+            "这一条只提示一次，点「暂时跳过」不会再弹。",
           ].join("\n"),
-          okText: "去依赖页", cancelText: "跳过",
+          okText: "去依赖页", cancelText: "暂时跳过",
         });
         if (go) store.tab = "dependencies";
         try { await call("save_config", { onboarding_done: true }); } catch (e) { /* 记不上也不影响本次 */ }
