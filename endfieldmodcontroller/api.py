@@ -22,6 +22,33 @@ IMPORT_SUFFIXES = (".zip", ".7z", ".rar")
 IMPORT_SUFFIX_HINT = " / ".join(IMPORT_SUFFIXES)
 
 
+def _tree_digest(root: Path) -> str:
+    """算一个目录的内容指纹（相对路径 + 每个文件内容的 sha256），用于**判重复**。
+
+    只比"文件名 + 内容"，与大小写/时间戳无关。用户 2026-10-03 反馈「去重没做好，
+    现在莱万汀那里有两个一样的」——那两份 82 个文件的指纹逐一相同。
+    """
+    import hashlib
+
+    digest = hashlib.sha256()
+    files = sorted(p for p in root.rglob("*") if p.is_file())
+    for path in files:
+        digest.update(str(path.relative_to(root)).encode("utf-8", "surrogateescape"))
+        digest.update(b"\0")
+        try:
+            with open(path, "rb") as handle:
+                while True:
+                    block = handle.read(1024 * 1024)
+                    if not block:
+                        break
+                    digest.update(hashlib.sha256(block).digest())
+        except OSError:
+            # 读不到的文件（被占用/权限）不该让判重崩掉，用路径占位并继续
+            digest.update(b"<unreadable>")
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
 class EndfieldModControllerApi:
     def __init__(self, config_path: Path | None = None) -> None:
         self.config = AppConfig.load(config_path)
@@ -2201,6 +2228,28 @@ class EndfieldModControllerApi:
                 inner.rmdir()
         except OSError:
             pass
+
+        # ⚠️ 2026-10-03 去重：`dest` 带 `_2`/`_3` 后缀 ⇒ 说明库里有同名目录。
+        # 旧逻辑"重名就一直加后缀、从不比对内容"，于是同一个包导入两次就在库里躺两份
+        # （用户反馈「去重没做好，现在莱万汀那里有两个一样的」，实测那两份 **82 个文件
+        # sha256 完全相同**）。这里把刚解压的这份与已有那份比指纹，一样就撤掉刚建的，
+        # 按"已经在库里了"返回 —— 只在**同名冲突**时才算指纹，日常导入没有额外开销。
+        if counter > 1:
+            original = self.config.library_path / base
+            try:
+                if original.is_dir() and _tree_digest(dest) == _tree_digest(original):
+                    shutil.rmtree(dest, ignore_errors=True)
+                    launcher._append_log(
+                        self.config,
+                        f"导入: 「{base}」与库里已有内容完全相同，跳过重复入库（未新增文件）",
+                    )
+                    return {
+                        "ok": True, "duplicate": True, "name": base, "group": "",
+                        "dest": str(original),
+                        "message": f"「{base}」已经在 Mod 库里了（内容完全相同），这次没有重复添加。",
+                    }
+            except OSError as exc:
+                launcher._append_log(self.config, f"导入: 重复检查失败（照常入库）: {exc}")
 
         launcher._append_log(self.config, f"导入: 解压完成 → {dest.name}，开始收编与角色识别")
         try:
