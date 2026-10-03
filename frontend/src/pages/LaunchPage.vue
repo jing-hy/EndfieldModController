@@ -76,7 +76,163 @@ function startLogPolling() {
 }
 onUnmounted(() => { if (logTimer) clearInterval(logTimer); });
 
+// 往启动页日志框追加一行（带换行）。启动页日志有两个来源：
+// `read_launch_log()` 轮询到的后端日志，以及前端自己这几句状态说明。
+function appendLog(line) {
+  const cur = consoleLog.value || "";
+  consoleLog.value = (cur ? cur.replace(/\n+$/, "") + "\n" : "") + line;
+}
+
+// ── 启动前三段预警（2026-10-03 补回归）────────────────────────────────────────
+// 返回 false = 用户选择不启动。
+
+/** ① 异常状态预警：critical 必须**每次**弹、按钮要等够 N 秒才可点。 */
+async function alertGate() {
+  let gate = null;
+  try {
+    gate = await call("prelaunch_alerts");
+  } catch (e) {
+    return true;                 // 查不到就放行，不能因为检查本身挡住启动
+  }
+  if (!gate || !gate.blocking) return true;
+  for (const a of (gate.alerts || [])) {
+    // 用户要求"强制停留一定秒数"——秒数来自仓库里的 alerts.json（默认 10），
+    // 作者改了 push 就生效、不用发版。
+    const hold = Math.max(0, Number(a.hold_seconds || gate.hold_seconds || 10));
+    const lines = [a.title || "异常状态", ""];
+    if (a.body) lines.push(a.body, "");
+    if (a.url) lines.push(`详情：${a.url}`, "");
+    lines.push(
+      hold > 0 ? `（请先读完，${hold} 秒后按钮才可点）` : "",
+      "",
+      "「还原配置」= 关掉所有注入开关 + 把游戏目录的第三方文件备份移走（可恢复）",
+      "「保持配置」= 什么都不动，只是这次不启动",
+      "「仍然启动」= 照常启动（配置有问题的话很可能起不来）",
+    );
+    // 三选一（用户 2026-09-30 定的顺序）：
+    //   主按钮（橙色/最右）= **还原配置**（推荐动作，主选项）
+    //   取消（最左）      = 保持配置但不启动
+    //   额外按钮          = 仍然启动
+    const choice = await showModalDialog({
+      title: "检测到异常状态",
+      message: lines.filter((x) => x !== "").join("\n"),
+      okText: "还原配置（推荐）", cancelText: "保持配置，不启动",
+      holdSeconds: hold,                                    // 强制停留（倒计时结束前按钮不可点）
+      extraButtons: [{ text: "仍然启动", value: "launch" }],
+    });
+    const action = choice === "launch" ? "launch" : (choice === true ? "restore" : "hold");
+    try {
+      await call("alert_action", String(a.id || ""), action);
+    } catch (e) { /* 后端会记日志 */ }
+    if (action !== "launch") {
+      appendLog(action === "restore" ? "已按你的选择还原配置，这次不启动。"
+                                     : "已保持配置，这次不启动。");
+      return false;
+    }
+    appendLog("你选择了「仍然启动」，继续。");
+  }
+  return true;
+}
+
+/** ② 启动前风险确认：资源冲突 / 崩溃记忆。 */
+async function riskGate() {
+  let risks = null;
+  try {
+    risks = await call("prelaunch_risks");
+  } catch (e) {
+    return true;
+  }
+  if (!risks || !risks.risky) return true;
+  const conflicts = risks.conflicts || [];
+  const crashed = risks.crashed || [];
+  const lines = [];
+  if (conflicts.length) {
+    lines.push("**资源冲突**（这些 Mod 改的是同一批资源，同时开常常会让游戏崩）：");
+    for (const c of conflicts.slice(0, 6)) {
+      lines.push(`· ${c.label || c.group || "一组 Mod"}`);
+    }
+    lines.push("");
+  }
+  // ⚠️ 用户强调过：**不要把"以前崩过"说成"冲突"**，两者分开如实讲。
+  if (crashed.length) {
+    lines.push("**以前崩过**（这套组合在你这台机器上留下过崩溃记录）：");
+    for (const c of crashed.slice(0, 6)) {
+      lines.push(`· ${c.label || c.group || "一组 Mod"}${c.checked_at ? `（${c.checked_at}）` : ""}`);
+    }
+    lines.push("", "（以前崩过 ≠ 现在一定冲突；后来跑通过的话记录会被自动忽略。）");
+  }
+  const go = await showModalDialog({
+    title: conflicts.length ? "发现 Mod 冲突风险" : "这套组合以前崩过",
+    message: lines.join("\n"),
+    // 用户定过：**推荐动作放最右的橙色主选项**（"先去清理"），"仍然启动"是次要项。
+    okText: "先去清理", cancelText: "仍然启动",
+    focusCancel: false,
+  });
+  if (go) {
+    store.tab = "library";
+    appendLog("已按提示先去清理冲突，这次不启动。");
+    return false;
+  }
+  appendLog("你选择了「仍然启动」，继续。");
+  return true;
+}
+
+/** ③ 文件守护：关键文件被反复删 ⇒ 建议加杀毒白名单。 */
+async function fileWatchdogGate() {
+  try {
+    const st = store.state.file_watchdog;
+    const info = (st && st.flagged) ? st : null;
+    if (!info) return true;
+    if (info.acknowledged) return true;          // 用户已经"不再提醒"
+    const names = (info.files || []).slice(0, 6).map((f) => `· ${f.name || f}`).join("\n");
+    const ok = await showModalDialog({
+      title: "有文件被反复删除",
+      message: [
+        "这些关键文件被删掉过不止一次：",
+        names || "（见日志）",
+        "",
+        "**多半是杀毒软件误删**。建议把下面这个目录加进杀毒软件的白名单：",
+        String(info.watch_dir || store.state.data_root || ""),
+        "",
+        "选「知道了」以后不再提醒；选「继续提醒」则会保留这条提醒。",
+      ].join("\n"),
+      okText: "知道了，不再提醒", cancelText: "继续提醒我",
+    });
+    if (ok) {
+      try { await call("file_watchdog_ack"); } catch (e) { /* 忽略 */ }
+      await refreshState();
+    }
+    return true;                                  // 这条只是提醒，不拦启动
+  } catch (e) {
+    return true;
+  }
+}
+
+/** 三段预警按顺序跑；任一环节用户选择"不启动"就返回 false。 */
+async function preflightGate() {
+  if (!(await alertGate())) return false;
+  if (!(await riskGate())) return false;
+  await fileWatchdogGate();
+  return true;
+}
+
 async function oneClick() {
+  // ─────────────────────────────────────────────────────────────────────────
+  // ⚠️⚠️ **三段启动前预警**（2026-10-03 补回归）。0.9.5 里它们都在"拉起 XXMI 之前"，
+  // 换代到 Vue 时整块丢了 —— 现前端 grep `prelaunch_alerts` / `alert_action` /
+  // `prelaunch_risks` / `file_watchdog_ack` **全部 0 命中**，而后端这些接口一直健在
+  //（`api.py:822/842/621/882/900`），连 `alerts.json` 的 `default_hold_seconds: 10`
+  // 都还在仓库里等着被读。
+  //
+  // ① **异常状态预警**（A3）：用户 2026-09-30 原话 ——「在按一键启动的时候如果是异常状态
+  //    要**每次都弹**弹窗展示情况，强制用户停留一定秒数（可在仓库配置，默认 10s），
+  //    给出**还原配置（主选项）**、保持配置但不启动、仍然启动」。所以：不记已读、没有开关。
+  // ② **启动前风险确认**（A2）：资源冲突 + 崩溃记忆，让用户决定"先去清理 / 仍然启动"。
+  //    用户强调过文案不能把"以前崩过"说成"冲突"。
+  // ③ **文件守护提醒**（A4）：关键文件被反复删 ⇒ 建议把目录加进杀毒白名单。
+  // ─────────────────────────────────────────────────────────────────────────
+  if (!(await preflightGate())) return;
+
   // ⚠️ **先检查运行环境是否齐备，缺就拒绝启动**（用户 2026-10-03 明确要求：
   // 「不存在应该拒绝启动弹出弹窗，然后跳转依赖开始下载」）。
   //
@@ -120,10 +276,107 @@ async function oneClick() {
     //（与依赖页那个日志框同源）。先立刻拉一次，再开轮询持续跟。
     await pullLaunchLog();
     startLogPolling();
+    // ⚠️⚠️ **一键启动的下半段**（2026-10-03 补回归）。
+    // 0.9.5 是：`waitXxmiClosed()` 等 XXMI 退出 → `watchGameAfterXxmi()` 看终末地到底
+    // 起没起来 → 没起来/刚起来就闪退 ⇒ 弹「再启动一次」。换代到 Vue 之后**整段丢了**
+    // （现前端 grep `xxmi_running` / `game_running` / `first_run_state` **全 0 命中**），
+    // 于是启动失败时用户只看到日志停了、没有任何提示 —— 而用户 2026-09-30 明确要求过
+    // 「在 xxmi 退出后检测终末地状态，如果在拉起后 10s 内退出就弹弹窗」。
+    // 这里用 `finally` 之外的独立流程跑，**不阻塞按钮的"正在启动…"状态**（可能要等十几分钟）。
+    void watchLaunchOutcome();
   } catch (e) {
     consoleLog.value = (consoleLog.value || "") + "\n启动失败：" + (e && e.message ? e.message : String(e));
   } finally {
     running.value = false;
+  }
+}
+
+// 等 XXMI Launcher 退出（最多 10 分钟）。
+// 查询失败**当作它还在运行**继续等 —— 不因为一次查询失败就误判"已经退出了"。
+async function waitXxmiClosed(timeoutMs = 10 * 60 * 1000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 2000));
+    try {
+      const state = await call("xxmi_running");
+      if (!state || !state.running) return true;
+    } catch (e) { /* 查询失败不拦路，继续等 */ }
+  }
+  return false;
+}
+
+// XXMI 退出之后，看终末地到底起没起来 —— 这才是"这一把成不成"的判据。
+//   ① 等 Endfield.exe 出现（最多 30 秒，XXMI 退出到游戏进程出现之间有段空档）；
+//   ② 出现后再盯 10 秒 —— 这 10 秒内就退出 = "启动失败"那种闪退；
+//   ③ 没出现 / 10 秒内退出 ⇒ ok=false。
+async function watchGameAfterXxmi(appearMs = 30000, aliveMs = 10000) {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const appearDeadline = Date.now() + appearMs;
+  let sawGame = false;
+  while (Date.now() < appearDeadline) {
+    await sleep(1000);
+    try {
+      const g = await call("game_running");
+      if (g && g.running) { sawGame = true; break; }
+    } catch (e) { /* 查询失败继续等 */ }
+  }
+  if (!sawGame) return { ok: false, reason: "等了 30 秒没看到终末地进程 —— 游戏没有启动" };
+  const aliveDeadline = Date.now() + aliveMs;
+  while (Date.now() < aliveDeadline) {
+    await sleep(1000);
+    try {
+      const g = await call("game_running");
+      // 查询失败**当作还在跑**（不能因为一次查询失败就说人家崩了）
+      if (g && !g.running) {
+        return { ok: false, reason: "终末地启动后 10 秒内就退出了（启动失败）" };
+      }
+    } catch (e) { /* 当作还在跑 */ }
+  }
+  return { ok: true, reason: "" };
+}
+
+// 一键启动的收尾判定：等 XXMI 退出 → 看游戏起没起来 → 该提示就提示。
+async function watchLaunchOutcome() {
+  const xxmiClosed = await waitXxmiClosed();
+  if (!xxmiClosed) {
+    // 等了 10 分钟 XXMI 还开着：可能用户自己在里面点、或者卡住了。
+    // **不弹窗打扰**（0.9.5 也是这样），只在日志里留一句。
+    appendLog("等了 10 分钟 XXMI Launcher 还开着，就不再往下判定了（它可能还在正常工作）。");
+    return;
+  }
+  // 「这一次算不算第一次启动」——**不能用 `first_run`**：它的判据是"三个内置组件里
+  // 还有没装的"，只要有一个没装就为 true，与"这一把是不是第一次拉起 XXMI"无关。
+  // 用户 2026-10-01 原话：「我说的第一次启动是在**拉起 xxmi 之后再谈**，
+  // 选项应该是**再次启动**和**先不启动**」。
+  let needSecondStart = false;
+  try {
+    const fr = await call("first_run_state");
+    needSecondStart = !!(fr && (fr.first_run || fr.needs_second_start || fr.uninitialized));
+  } catch (e) { /* 拿不到就不按"第一次"提示 */ }
+
+  const game = await watchGameAfterXxmi();
+  if (game.ok && !needSecondStart) return;      // 起来了、也不是第一次 → 静默成功
+
+  const again = await showModalDialog({
+    title: game.ok ? "第一次启动：请再点一次" : "终末地没有起来",
+    message: game.ok
+      ? [
+          "看起来是第一次启动（内置组件刚装好 / 配置刚生成）。",
+          "",
+          "**终末地已经起来了**，但第一次常常会起不来或很快退出。",
+          "如果它没进游戏，再点一次「一键启动」就好。",
+        ].join("\n")
+      : [
+          game.reason,
+          "",
+          "**第一次启动有概率起不来**，再点一次通常就好了。",
+          "如果连续几次都不行，去「依赖」页看运行日志和自检结果。",
+        ].join("\n"),
+    okText: "再次启动", cancelText: "先不启动",
+  });
+  if (again) {
+    appendLog("按提示再来一次一键启动…");
+    await oneClick();
   }
 }
 // ⚠️⚠️ **同 SettingsPage：`run()` 不能静默**（2026-10-03 统一修）。

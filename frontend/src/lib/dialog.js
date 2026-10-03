@@ -55,17 +55,25 @@ export function showToast(text, tone) {
 }
 
 // 旧版签名：showModalDialog({ title, message, okText, cancelText, showCancel, link, extraButtons })
-// 返回 Promise<boolean>（点主按钮 = true）。正文用 textContent 渲染（**不允许写 markdown**）。
+// 返回 Promise（点主按钮 = true，取消 = false，额外按钮 = 它的 `value`）。
+// 正文用 textContent 渲染（**不允许写 markdown**）。
 //
 // `focusCancel`（2026-10-03 加）：**破坏性动作默认把焦点放在安全项（取消）上** —— 用户定的
 // 交互准则之一（「破坏性动作写清后果、默认聚焦安全项」）。不传则维持旧行为（聚焦主按钮）。
+//
+// `holdSeconds`（2026-10-03 加）：**强制停留 N 秒**，倒计时结束前所有按钮都不可点。
+// 用户 2026-09-30 要求：「在按一键启动的时候如果是异常状态要每次弹弹窗展示情况，
+// **强制用户停留一定秒数**（可在仓库配置，默认 10s）」。用于异常状态预警这种
+// "必须让人看见"的提示 —— 秒数来自仓库里的 alerts.json，作者改了 push 即生效。
 export function showModalDialog({
   title, message, okText = "确定", cancelText = "取消",
   showCancel = true, link = null, extraButtons = [], focusCancel = false,
+  holdSeconds = 0,
 }) {
   return new Promise((resolve) => {
     uiState.dialog = {
       title, message, okText, cancelText, showCancel, link, extraButtons, focusCancel,
+      holdSeconds: Math.max(0, Number(holdSeconds) || 0),
       _resolve: resolve,
     };
   });

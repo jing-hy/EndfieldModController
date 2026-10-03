@@ -1,7 +1,7 @@
 <script setup>
 // 全局弹窗宿主：渲染 uiState.dialog，语义与旧 app.js 的 showModalDialog 完全一致
 // （正文用 textContent 等价方式渲染 → 这里直接用插值，**不解析 markdown**）。
-import { ref, watch, nextTick } from "vue";
+import { ref, watch, nextTick, onUnmounted } from "vue";
 import { uiState, resolveDialog } from "../lib/dialog.js";
 import Btn from "./ui/Btn.vue";
 
@@ -9,12 +9,35 @@ import Btn from "./ui/Btn.vue";
 // 用户定的交互准则：「破坏性动作写清后果、默认聚焦安全项」。
 const cancelBtn = ref(null);
 const okBtn = ref(null);
+
+// ⚠️ **强制停留倒计时**（2026-10-03 加）。用户 2026-09-30 要求：异常状态预警必须
+// "强制用户停留一定秒数（可在仓库配置，默认 10s）" —— 倒计时结束前所有按钮不可点。
+// 这是"必须让人看见"类提示的硬要求，不是装饰。
+const holdLeft = ref(0);
+let holdTimer = null;
+
+function stopHold() {
+  if (holdTimer) { clearInterval(holdTimer); holdTimer = null; }
+  holdLeft.value = 0;
+}
+
 watch(() => uiState.dialog, async (dialog) => {
+  stopHold();
   if (!dialog) return;
   await nextTick();
   const target = dialog.focusCancel ? cancelBtn.value : okBtn.value;
   if (target && target.focus) target.focus();
+  const hold = Number(dialog.holdSeconds || 0);
+  if (hold > 0) {
+    holdLeft.value = hold;
+    holdTimer = setInterval(() => {
+      holdLeft.value -= 1;
+      if (holdLeft.value <= 0) stopHold();
+    }, 1000);
+  }
 }, { immediate: true });
+
+onUnmounted(stopHold);
 </script>
 <template>
   <div v-if="uiState.dialog" class="fixed inset-0 z-50 flex items-center justify-center"
@@ -38,14 +61,20 @@ watch(() => uiState.dialog, async (dialog) => {
           {{ uiState.dialog.link.text || uiState.dialog.link.url }}
         </a>
       </div>
-      <div class="px-4 py-3 flex justify-end gap-2 border-t" style="border-color: var(--border)">
+      <div class="px-4 py-3 flex justify-end gap-2 border-t items-center" style="border-color: var(--border)">
+        <!-- 强制停留：倒计时没走完时所有按钮都不可点（用户要求"强制用户停留一定秒数"） -->
+        <span v-if="holdLeft > 0" class="text-xs mr-auto" style="color: var(--text-muted)">
+          请先读完（{{ holdLeft }} 秒后可操作）
+        </span>
         <Btn v-if="uiState.dialog.showCancel" ref="cancelBtn" variant="secondary"
-             @click="resolveDialog(false)">
+             :disabled="holdLeft > 0" @click="resolveDialog(false)">
           {{ uiState.dialog.cancelText }}
         </Btn>
         <Btn v-for="b in uiState.dialog.extraButtons" :key="b.text" variant="secondary"
+             :disabled="holdLeft > 0"
              @click="resolveDialog(b.value === undefined ? true : b.value)">{{ b.text }}</Btn>
-        <Btn ref="okBtn" variant="primary" @click="resolveDialog(true)">{{ uiState.dialog.okText }}</Btn>
+        <Btn ref="okBtn" variant="primary" :disabled="holdLeft > 0"
+             @click="resolveDialog(true)">{{ uiState.dialog.okText }}</Btn>
       </div>
     </div>
   </div>
