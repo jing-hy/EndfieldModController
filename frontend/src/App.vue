@@ -45,8 +45,45 @@ const dragging = ref(false);
 // 公告条（用户每次启动都会看到；点关闭就告诉后端"已读"）
 const notices = ref([]);
 let firstRunChecked = false;
-const tourVisible = ref(false);   // 新手引导浮层（挖孔高亮 + 箭头指向目标）
+const tourVisible = ref(false);   // 新手引导浮层（挖孔高亮 + 气泡）
 let dragDepth = 0;
+
+// ── 终末地异常退出的**弹窗**（用户 2026-10-03：「我需要崩溃的弹窗」）──────────
+// 后端早就有现成的：`crash_bundle_status()` 返回 `{watch, fresh, latest}`，
+// 其中 `fresh` 是 `crashwatch.take_bundle()` 的**"取走"语义** —— 一次调用就消费掉，
+// 天然不会重复弹。但**前端从来没调用过它**，于是用户看到的是
+// 「管理器好像捕捉不到终末地崩溃」：日志里明明写了
+// `[crash] 已生成诊断包 reason=process_disappeared`、包也生成了，只是没人告诉他。
+let crashTimer = null;
+let crashPolling = false;
+async function pollCrash() {
+  if (crashPolling) return;
+  crashPolling = true;
+  try {
+    const r = await call("crash_bundle_status");
+    const fresh = r && r.fresh;
+    if (fresh) {
+      const path = String(fresh.path || fresh.bundle || "");
+      const reason = String(fresh.reason || "process_disappeared");
+      const mods = Array.isArray(fresh.mods) ? fresh.mods : [];
+      const ok = await showModalDialog({
+        title: "终末地异常退出",
+        message:
+          `游戏进程在启动后异常结束了（${reason}）。\n\n` +
+          `管理器已经把现场收集成一个诊断包：\n${path || "（路径读取失败）"}\n\n` +
+          (mods.length ? `当时启用的 Mod：\n· ${mods.join("\n· ")}\n\n` : "") +
+          "把这个 zip 发到 Issues 或 QQ 群，就能定位原因。",
+        okText: "打开诊断包", cancelText: "稍后",
+      });
+      if (ok && path) {
+        try { await call("open_path_in_explorer", path); } catch (e) { /* 忽略 */ }
+      }
+    }
+  } catch (e) { /* 忽略轮询错误 */ } finally {
+    crashPolling = false;
+  }
+}
+
 // 公告消费（**幂等**）：后端公告由后台线程拉取，且要等首屏就绪（最多 15 秒）才请求，
 // 所以"启动那一刻读一次"必然读到空 —— 这正是 2026-09-30 记录、2026-10-03 仍然存在的 bug
 // （用户：「公告好像没出来」）。定式：做成幂等函数、挂在数据刷新点上，再留启动后定时兜底。
@@ -267,6 +304,11 @@ async function finishTour() {
 // 挂在"每次状态刷新之后"（切页、改设置、下载进度刷新……都会触发），
 // 这样公告一到就能补上；再留几个延迟兜底，覆盖"后台线程 15 秒内才拉到"的情况。
 onStateRefreshed(() => { maybeShowAnnouncements(); });
+
+// 崩溃轮询：常驻但很轻（一次 get_state 级别的小调用）。游戏异常退出后
+// 后端会自动收集现场并放进 `fresh`，这里取到就弹窗。
+crashTimer = setInterval(pollCrash, 3000);
+[4000, 10000].forEach((d) => setTimeout(pollCrash, d));
 // 启动后的一段时间里**每 5 秒轮询一次**：公告是后端后台线程稍后才填进去的
 // （实测启动后约 4 秒到），具体到几点不确定，所以用轮询兜住，而不是猜几个时刻。
 // 60 秒后自然停下，不做常驻轮询。消费一旦成功，`shownNoticeKeys` 会去重，不会重复弹。
@@ -287,6 +329,7 @@ announceTimers.push(setInterval(() => {
 
 // 关窗/刷新时一律清干净，绝不拖住退出流程
 function clearAnnounceTimers() {
+  if (crashTimer) { clearInterval(crashTimer); crashTimer = null; }
   announceTimers.forEach((t) => { clearInterval(t); clearTimeout(t); });
   announceTimers.length = 0;
 }
