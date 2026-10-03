@@ -68,7 +68,44 @@ async function probe(method) {
 }
 
 async function changeTheme(v) { await saveSetting("theme", v); applyTheme(v); }
-async function run(method, ...args) { try { return await call(method, ...args); } catch (e) { return null; } }
+// ⚠️⚠️ **`run()` 绝不能静默**（2026-10-03 用户：「**现在导出诊断包的弹窗也没了**」）。
+// 原实现是 `try { return await call(...) } catch { return null }` ——
+// 异常被无声吞掉、返回的 `{ok:false}` 也没人检查，于是**本页 18 个按钮**（见模板）
+// 全都变成"点了什么反应都没有"：用户既不知道成没成、也不知道为什么没成。
+// 现在统一兜底：**失败一定给一条 danger toast**（成功则由各按钮自己给更具体的反馈）。
+async function run(method, ...args) {
+  try {
+    const result = await call(method, ...args);
+    if (result && result.ok === false) {
+      showToast(String(result.message || result.reason || "操作失败"), "danger");
+    }
+    return result;
+  } catch (e) {
+    showToast(String((e && e.message) || e || "操作失败"), "danger");
+    return null;
+  }
+}
+
+// 「导出诊断包」—— **必须告诉用户包在哪**（用户 2026-10-03：「导出诊断包的弹窗也没了」）。
+// 后端 `export_diagnostics()` 返回 `{ok, path}`；这里拿到路径后弹窗 + 一键打开所在文件夹。
+async function exportDiagnostics() {
+  const result = await run("export_diagnostics");
+  if (!result || result.ok === false || !result.path) {
+    return;   // 失败的 toast 已由 run() 给过
+  }
+  const path = String(result.path);
+  const open = await showModalDialog({
+    title: "诊断包已导出",
+    message:
+      `已生成：\n${path}\n\n` +
+      "把它发到 GitHub Issues 或 QQ 群（1045239747，验证答案 jing_hy）就能帮你定位问题。\n\n" +
+      "包里含运行日志、配置、注入快照与游戏侧日志，**不含你的 Mod 内容**。",
+    okText: "打开所在文件夹", cancelText: "知道了",
+  });
+  if (open) {
+    try { await call("open_path_in_explorer", path); } catch (e) { /* 打不开就算了 */ }
+  }
+}
 
 // 「依赖清空并重新下载」——用户 2026-10-03 要求：
 //   ① 出弹窗确认；② 清空完弹个提示；③ 跳转到依赖页走正常下载流程（含日志）。
@@ -107,10 +144,14 @@ async function resetDependencies() {
 }
 async function openPath(kind) { await run("open_path_in_explorer", kind); }
 
-// 日志框自动滚到底（不抢鼠标、没新内容不动）
-const logBox = ref(null);
-useLogAutoScroll(logBox, () => logLines.value);
-// 诊断详情那块日志也自动滚到底
+// 诊断详情那块日志自动滚到底（不抢鼠标、没新内容不动）
+// ⚠️ 2026-10-03 **删掉了这里的两行残留**：
+//     const logBox = ref(null);
+//     useLogAutoScroll(logBox, () => logLines.value);
+// 本页模板里**根本没有** `logBox` 对应的日志框（只有下面这个 `probeBox`），
+// 而 `logLines` 也从没在本页定义过（那个名字属于依赖页，2026-10-03 已统一挪进 store）。
+// 于是每次进设置页都会抛 `ReferenceError: logLines is not defined`
+// —— 用 headless 抓控制台抓到的（页面还能显示，但脚本在那一步就断了）。
 const probeBox = ref(null);
 useLogAutoScroll(probeBox, () => probeText);
 </script>
@@ -129,7 +170,7 @@ useLogAutoScroll(probeBox, () => probeText);
           </div>
           <div class="flex flex-wrap gap-2">
             <Btn variant="primary" @click="run('ensure_initialized')">一键检测全部</Btn>
-            <Btn @click="run('export_diagnostics')">导出诊断包</Btn>
+            <Btn @click="exportDiagnostics">导出诊断包</Btn>
           </div>
         </div>
       </div>
@@ -215,7 +256,7 @@ useLogAutoScroll(probeBox, () => probeText);
       <div class="flex flex-wrap gap-2">
         <Btn variant="primary" @click="run('launch_official_gui')">启动官方 XXMI / EFMI 界面</Btn>
         <Btn @click="run('read_launch_log')">查看启动日志</Btn>
-        <Btn @click="run('export_diagnostics')">导出诊断包</Btn>
+        <Btn @click="exportDiagnostics">导出诊断包</Btn>
         <Btn @click="run('poser_log_tail')">打开 Poser 日志</Btn>
         <Btn @click="run('force_close_game')">强制结束残留游戏</Btn>
       </div>

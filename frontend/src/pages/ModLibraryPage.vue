@@ -144,7 +144,9 @@ async function menuAct(act) {
     } else if (act === "character") {
       if (!chars.value.length) {
         const r = await call("known_characters");
-        chars.value = (r && (r.characters || r.items)) || [];
+        // ⚠️ 后端 `known_characters()` 返回的是**纯数组 list[str]**（不是 {characters:[...]}），
+        // 原先按对象读 ⇒ 永远拿到空数组 ⇒「更改所属角色」的下拉里一个角色都没有（2026-10-03 修）。
+        chars.value = Array.isArray(r) ? r : ((r && (r.characters || r.items)) || []);
       }
       // ⚠️ 以前这里用 showModalDialog —— 它**只返回 true/false、没有输入控件**，
       // 于是文案写着"输入角色名（留空 = 保持未分类）"却没法输入，

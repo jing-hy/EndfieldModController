@@ -123,7 +123,21 @@ async function oneClick() {
     running.value = false;
   }
 }
-async function run(method, ...args) { try { return await call(method, ...args); } catch (e) { return null; } }
+// ⚠️⚠️ **同 SettingsPage：`run()` 不能静默**（2026-10-03 统一修）。
+// 原来 `catch { return null }` 把异常吞掉、也不看返回值 ⇒ 本页多个按钮"点了没反应"
+//（「启动插件界面」「打开摆姿页」「生成控制器」「检查/修复完整性」…）。
+async function run(method, ...args) {
+  try {
+    const result = await call(method, ...args);
+    if (result && result.ok === false) {
+      await showAlert("操作未完成", String(result.message || result.reason || "未知原因"));
+    }
+    return result;
+  } catch (e) {
+    await showAlert("操作失败", String((e && e.message) || e || "未知原因"));
+    return null;
+  }
+}
 
 // 日志框自动滚到底（不抢鼠标、没新内容不动）
 const logBox = ref(null);

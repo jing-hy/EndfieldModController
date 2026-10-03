@@ -997,9 +997,15 @@ def _attempt_line(
         # 不划算就切回单连接（那套逻辑本来就在，比一个静态阈值可靠得多）。
         # 只把线程数按探测速度收敛一点：极慢时别一上来就 20 条连接。
         if 0 < report.probe_mbps < BOOST_FLOOR_MBPS:
-            threads = max(4, min(threads, 8))
-            _log(log, f"线路很慢（探测 {report.probe_mbps:.3f} MB/s）→ 仍用 {threads} 连接试一下"
-                      f"（实测最慢的线路上并发收益最大），试用窗口后按实测速度决定去留")
+            # ⚠️ **别把线程数压太低**（2026-10-03 两组实测的教训）：
+            #   * 无 VPN：单连接 0.008 → 4 连接 0.034 → **16 连接 0.104**（13 倍）
+            #   * 开 VPN：单连接 0.129 → 4 连接 0.090（**反而慢**）→ **16 连接 0.641**（5 倍）
+            # 两次都是"4 条不够、16 条才吃满"。所以慢线路也直接给足 12 条起步
+            #（MAX_THREADS=20 是上限，块大小会按线程数自适应，不会切碎）。
+            threads = max(12, min(threads, MAX_THREADS))
+            _log(log, f"线路很慢（探测 {report.probe_mbps:.3f} MB/s）→ 仍用 {threads} 连接试"
+                      f"（实测慢线路上并发收益最大，且 4 条不够、要十几条才吃满），"
+                      f"试用窗口后按实测速度决定去留")
         need_boost = policy == "always" or slow or stalled
 
         if not need_boost:

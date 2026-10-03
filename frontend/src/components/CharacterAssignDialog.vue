@@ -33,7 +33,9 @@ async function openFor(mod) {
   picked.value = kind.value === "assist" ? (ASSIST_GROUPS.includes(g) ? g : "其它辅助") : g;
   try {
     const r = await call("known_characters");
-    chars.value = (r && (r.characters || r.items)) || [];
+    // ⚠️ 后端 `known_characters()` 返回的是**纯数组 list[str]**（不是 {characters:[...]}），
+        // 原先按对象读 ⇒ 永远拿到空数组 ⇒「更改所属角色」的下拉里一个角色都没有（2026-10-03 修）。
+        chars.value = Array.isArray(r) ? r : ((r && (r.characters || r.items)) || []);
   } catch (e) { chars.value = []; }
 }
 
