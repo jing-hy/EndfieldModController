@@ -2,6 +2,7 @@
 // 启动页（旧 #tab-launch）：一键启动 + 六个注入开关（**与设置页共享同一份 settings 状态**）。
 import { ref } from "vue";
 import { call } from "../lib/bridge.js";
+import { showAlert } from "../lib/dialog.js";
 import { settings, saveSetting } from "../lib/settings.js";
 import { store } from "../store.js";
 import Card from "../components/ui/Card.vue";
@@ -13,13 +14,37 @@ const renderApi = ref("");
 const running = ref(false);
 
 const SWITCHES = [
-  { k: "dlss5_addon", name: "DLSS5 神经渲染", desc: "把游戏自身的 DLSS 输出替换成 DLSS5 神经渲染" },
-  { k: "firstperson_addon", name: "第一人称视角", desc: "进游戏按 F1 切换第一人称" },
+  { k: "dlss5_addon_enabled", name: "DLSS5 神经渲染", desc: "把游戏自身的 DLSS 输出替换成 DLSS5 神经渲染",
+    apply: (v) => call("set_component_addon", "dlss5", v) },
+  { k: "firstperson_addon_enabled", name: "第一人称视角", desc: "进游戏按 F1 切换第一人称",
+    apply: (v) => call("set_component_addon", "firstperson", v) },
   { k: "efmi_injection", name: "皮肤 Mod", desc: "EFMI 服装 Mod 注入（关掉后不加载任何皮肤）" },
   { k: "secondary_motion_injection", name: "ShakingBreastManager", desc: "乳摇物理效果" },
-  { k: "poser_injection", name: "Endfield Poser", desc: "摆姿 / MMD 播放" },
-  { k: "unified-hotkeys", name: "Mod 快捷键锁定", desc: "把 Mod 自带快捷键锁成内部键，避免 Mod 之间抢键" },
+  { k: "poser_injection", name: "Endfield Poser", desc: "摆姿 / MMD 播放",
+    apply: (v) => call("set_poser_enabled", v) },
+  { k: "hotkey_takeover", name: "Mod 快捷键锁定", desc: "把 Mod 自带快捷键锁成内部键，避免 Mod 之间抢键",
+    apply: (v) => call("set_hotkey_takeover", v) },
 ];
+
+// 切换一个开关：有专用接口的走专用接口（它们还要动文件/注入库），其余只写配置。
+async function toggleSwitch(sw) {
+  const next = !settings[sw.k];
+  settings[sw.k] = next;                       // 先动界面，避免点了没反应
+  try {
+    if (sw.apply) {
+      const r = await sw.apply(next);
+      if (r && r.ok === false) {
+        settings[sw.k] = !next;                // 后端拒绝（例如非 50 系开 DLSS5）→ 回滚
+        await showAlert("没能改这个开关", r.message || "未知原因");
+        return;
+      }
+    } else {
+      await saveSetting(sw.k, next);
+    }
+    await refreshState();
+    loadSettings();
+  } catch (e) { /* call() 已经弹过窗 */ }
+}
 
 async function oneClick() {
   running.value = true;
@@ -49,15 +74,14 @@ async function run(method, ...args) { try { return await call(method, ...args); 
 
     <Card title="注入开关">
       <div class="divide-y" style="border-color: var(--border)">
-        <div v-for="s in SWITCHES" :key="s.k" class="switch-row"
-             @click="saveSetting(s.k, !settings[s.k])">
+        <div v-for="sw in SWITCHES" :key="sw.k" class="switch-row" @click="toggleSwitch(sw)">
           <div class="min-w-0">
-            <div class="font-medium">{{ s.name }}</div>
-            <div class="text-xs mt-0.5" style="color: var(--text-muted)">{{ s.desc }}</div>
+            <div class="font-medium">{{ sw.name }}</div>
+            <div class="text-xs mt-0.5" style="color: var(--text-muted)">{{ sw.desc }}</div>
           </div>
           <div class="flex items-center gap-2 shrink-0">
-            <span class="switch-state">{{ settings[s.k] ? "已开启" : "已关闭" }}</span>
-            <Switch :model-value="!!settings[s.k]" @update:model-value="(v) => saveSetting(s.k, v)" />
+            <span class="switch-state">{{ settings[sw.k] ? "已开启" : "已关闭" }}</span>
+            <Switch :model-value="!!settings[sw.k]" @update:model-value="() => toggleSwitch(sw)" />
           </div>
         </div>
       </div>
