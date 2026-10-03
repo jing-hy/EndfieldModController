@@ -27,9 +27,14 @@ async function toggleMod(mod) {
   else ids.add(id);
   // 辅助 Mod 不绑角色，所以**不做同角色互斥**（那是角色 Mod 的规则）
   try {
-    await call("save_config", { selected_mods: Array.from(ids) });
-    await refreshState();
-    loadSettings();
+    // 同「Mod 库」页：**不调 refreshState()**（全量重拉 get_state 会重新扫描整个库，
+    // 点一下要等很久）；直接写回派生来源，界面立刻响应。
+    const result = await call("save_config", { selected_mods: Array.from(ids) });
+    const applied = (result && result.config && result.config.selected_mods) || Array.from(ids);
+    if (store.state) {
+      if (!store.state.config || typeof store.state.config !== "object") store.state.config = {};
+      store.state.config.selected_mods = applied;
+    }
   } catch (e) { /* call 已弹窗 */ }
 }
 

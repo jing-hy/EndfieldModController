@@ -703,3 +703,10 @@
 | 342 ★★★ | 同上，看 `runtime\dlss5\dlss5-feed.log` | 不再出现 `DLSS5_Feed.fx is not loaded (technique/textures missing)`；`technique` / `ColorInput` / `DLSS5_MV` / `DLSS5_Depth` 都能解析到 |
 | 343 ★★ | 第一人称面板（F1） | 中文能正常显示、不再报 `Chinese font missing`（生效那份 ini 的 `[STYLE] Font` 原来是空的，现已补上中文字体） |
 | 344 ★★ | 检查 `runtime\reshade\ReShade.ini` | `AddonPath` / `EffectSearchPaths` / `TextureSearchPaths` / `PresetPath` 全部是**相对路径**（`..\dlss5\...`），**不含任何盘符** |
+
+## RR. 2026-10-03 追加：**Mod 开关不再卡顿**
+
+| 编号 | 操作 | 预期结果 |
+| --- | --- | --- |
+| 345 ★★★ | 「Mod 库」页连续点几个 Mod 的开关 | **点一下立刻变化**（不再等一秒多）—— 原来每点一次都全量重拉 `get_state()`（重新扫描整个 Mod 库），现在改成只把新值写回派生来源 |
+| 346 ★★ | 「辅助 Mod」页点开关 | 同样立刻响应；组头「已启用 N」跟着即时更新 |

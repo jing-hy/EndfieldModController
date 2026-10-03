@@ -88,9 +88,16 @@ async function toggleMod(mod) {
     }
   }
   try {
-    await call("save_config", { selected_mods: Array.from(ids) });
-    await refreshState();
-    loadSettings();
+    // ⚠️ 这里**不要**调 `refreshState()`：那会全量重拉 `get_state()`（重新扫描整个 Mod 库），
+    //    每次点开关都要等它跑完 —— 用户 2026-10-03 反馈「mod 的按钮反应怎么这么慢，
+    //    其他开关都没这个问题」（设置页/启动页的开关只发一个键，所以快）。
+    //    `selected` 是从 `store.state.config.selected_mods` 派生的，把新值写回去界面就立刻响应。
+    const result = await call("save_config", { selected_mods: Array.from(ids) });
+    const applied = (result && result.config && result.config.selected_mods) || Array.from(ids);
+    if (store.state) {
+      if (!store.state.config || typeof store.state.config !== "object") store.state.config = {};
+      store.state.config.selected_mods = applied;
+    }
   } catch (e) { /* call 已弹窗 */ }
 }
 
