@@ -686,3 +686,20 @@
 | 335 ★★★ | 看「Mod 库」页每张 Mod 卡片 | 左下角有**独立的启用开关**（右侧是 ⋯）。点它当场切换启用状态；点卡片其它地方也仍然可切换 |
 | 336 ★★★ | 切到别的页再切回「Mod 库」 | 封面**立刻就在**，不会重新加载一遍（封面缓存已从页面组件提升到 store，整个会话只取一次） |
 | 337 ★★ | 首次进入「Mod 库」页 | 界面先出来、封面随后**一张一张**补上（不再十几张同时请求把界面卡住） |
+
+## PP. 2026-10-03 追加：**开关终于真的能用了（选中状态读错了键）**
+
+| 编号 | 操作 | 预期结果 |
+| --- | --- | --- |
+| 338 ★★★ | 「Mod 库」页点任意 Mod 卡片上的开关 | **当场变化**：开关变蓝、卡片主色边框、状态字变「已启用」、组头「已启用 N」跟着加一（原来保存是成功的、但界面读错了键，所以看起来"按了没反应"） |
+| 339 ★★★ | 「辅助 Mod」页 | 每条辅助 Mod 右侧也有**启用开关**（+「已启用/未启用」文字），点它当场切换；辅助 Mod 不绑角色、所以不做同角色互斥 |
+| 340 ★★ | 重启程序后回到「Mod 库」页 | 上次启用的 Mod 仍然显示为「已启用」（选中状态存在 `config.selected_mods`，重启不丢） |
+
+## QQ. 2026-10-03 追加：**DLSS5 不出帧的两个真因（addon/shader 全找不到 + 游戏走 D3D11）**
+
+| 编号 | 操作 | 预期结果 |
+| --- | --- | --- |
+| 341 ★★★ | 点一次一键启动（或重启游戏），看 `runtime\reshade\ReShade.log` | 不再出现 `Failed to iterate all files in '...\reshade\Addons' error code 3`；五个 addon 全部 `Registered` |
+| 342 ★★★ | 同上，看 `runtime\dlss5\dlss5-feed.log` | 不再出现 `DLSS5_Feed.fx is not loaded (technique/textures missing)`；`technique` / `ColorInput` / `DLSS5_MV` / `DLSS5_Depth` 都能解析到 |
+| 343 ★★ | 第一人称面板（F1） | 中文能正常显示、不再报 `Chinese font missing`（生效那份 ini 的 `[STYLE] Font` 原来是空的，现已补上中文字体） |
+| 344 ★★ | 检查 `runtime\reshade\ReShade.ini` | `AddonPath` / `EffectSearchPaths` / `TextureSearchPaths` / `PresetPath` 全部是**相对路径**（`..\dlss5\...`），**不含任何盘符** |

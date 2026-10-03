@@ -403,6 +403,59 @@ def _sync_enhancer_section(source: Path, target: Path,
     return changed
 
 
+def _sync_style_section(source: Path, target: Path,
+                        keys: tuple[str, ...] = ("Font", "FontSize", "EditorFont", "EditorFontSize")) -> int:
+    """把源 ini 里 `[STYLE]` 段的字体相关项同步进目标 ini，返回改了几项。
+
+    为什么需要：见调用处注释 —— 生效那份 `[STYLE] Font=` 为空时，第一人称的中文
+    会因缺少中文字体而显示不出来（addon 自己会在日志里报 "Chinese font missing"）。
+    只动字体相关键，不碰用户自己调过的配色/圆角那些。
+    """
+    if not source.is_file() or not target.is_file():
+        return 0
+    good: dict[str, str] = {}
+    inside = False
+    for line in source.read_text(encoding="utf-8", errors="replace").splitlines():
+        text = line.strip()
+        if text.startswith("["):
+            inside = text == "[STYLE]"
+            continue
+        if inside and "=" in text:
+            key, _, value = text.partition("=")
+            good[key.strip()] = value.strip()
+    if not good:
+        return 0
+
+    lines = target.read_text(encoding="utf-8", errors="replace").splitlines()
+    out: list[str] = []
+    inside = False
+    changed = 0
+    for line in lines:
+        text = line.strip()
+        if text.startswith("["):
+            inside = text == "[STYLE]"
+            out.append(line)
+            continue
+        if inside and "=" in text:
+            key = text.partition("=")[0].strip()
+            value = text.partition("=")[2].strip()
+            # ⚠️ 只在**目标为空**时才补（不要覆盖用户在 ReShade 里自己挑过的字体）
+            if key in keys and key in good and not value and good[key]:
+                out.append(f"{key}={good[key]}")
+                changed += 1
+                continue
+        out.append(line)
+    if changed:
+        backup = target.with_name(target.name + ".bak-before-style-sync")
+        if not backup.exists():
+            try:
+                shutil.copy2(target, backup)
+            except OSError:
+                pass
+        target.write_text("\r\n".join(out) + "\r\n", encoding="utf-8")
+    return changed
+
+
 def prepare_reshade_runtime(config: AppConfig, controller_dir: Path) -> dict[str, Any]:
     """Prepare the ReShade base directory without writing anything into the game dir.
 
@@ -463,19 +516,46 @@ def prepare_reshade_runtime(config: AppConfig, controller_dir: Path) -> dict[str
     # 这里把 dlss5 那份的关键项同步过来（缺这份文件时跳过，交给 initialize 重建）。
     try:
         _sync_enhancer_section(config.dlss5_path / "ReShade.ini", reshade_dir / "ReShade.ini")
+        # ⚠️ 2026-10-03 第四个同源问题：**中文字体**。
+        # `dlss5\ReShade.ini` 的 `[STYLE] Font=C:\WINDOWS\Fonts\msyh.ttc`，而生效那份是空值
+        # ⇒ 第一人称（Endfield Enhancer）自己会报
+        #     Chinese font missing: in ReShade Settings, select Chinese as the overlay language
+        #   or choose a Chinese-capable font
+        # 于是 `Language=1`（中文）配上去了也**显示不出来** —— 用户看到的就是
+        # 「第一人称还是不会自动改中文」。字体与字号一并同步。
+        _sync_style_section(config.dlss5_path / "ReShade.ini", reshade_dir / "ReShade.ini")
     except OSError as exc:
-        _append_log(config, f"同步 [endfield-enhancer] 到 runtime\\reshade 失败（忽略）: {exc}")
+        _append_log(config, f"同步 [endfield-enhancer] / [STYLE] 到 runtime\\reshade 失败（忽略）: {exc}")
 
     # `initialize._rebuild_ini` 会把这份当"[endfield-enhancer] 段的历史来源"之一，
     # 所以照旧写一份，保持既有行为。
+    #
+    # ⚠️ 2026-10-03 实测第三个同源问题：**search path 原先写成相对基准目录的路径**。
+    # 这份 ini 由 `RESHADE_BASE_PATH_OVERRIDE`（launcher 启动时设成 `runtime\reshade`）指成
+    # 基准目录后被真正读取，而 `AddonPath=Addons` / `EffectSearchPaths=reshade-shaders\...`
+    # 都**相对这个基准**解析 ⇒ 找的是 `runtime\reshade\` 下的东西，可 ReShade 本体
+    # （`d3d12.dll`）、addon、shader **全都在 `dlss5\`**。ReShade 日志的原话：
+    #     Failed to iterate all files in '...\runtime\reshade\Addons' with error code 3
+    #     DLSS5_Feed.fx is not loaded (technique/textures missing)
+    # ⇒ 一个 addon 都加载不到、feed shader 也找不到，DLSS5 一帧都出不来。
+    #
+    # 修法：一律用**相对路径**（用户 2026-10-03 明确要求「不要用绝对路径」——
+    # 数据根可能整体搬走，写死盘符会失效）。相对谁？相对这个基准目录本身，
+    # 所以用 `os.path.relpath` 动态算（`dlss5_dir` 是可配置的，不能写死 `..\dlss5`）。
+    try:
+        rel = os.path.relpath(base, reshade_dir)
+    except ValueError:            # 跨盘符时 relpath 会抛 ValueError，退回用目录名
+        rel = base.name
+    shaders_rel = os.path.join(rel, "reshade-shaders", "Shaders")
+    textures_rel = os.path.join(rel, "reshade-shaders", "Textures")
     ini_text = "\n".join([
         "[ADDON]",
-        f"AddonPath={base}",          # ★ 绝对路径：指向真正放 addon 的地方
+        f"AddonPath={rel}",
         "",
         "[GENERAL]",
-        "EffectSearchPaths=reshade-shaders\\Shaders\\**",
-        "TextureSearchPaths=reshade-shaders\\Textures\\**",
-        "PresetPath=ReShadePreset.ini",
+        f"EffectSearchPaths={shaders_rel}\\**",
+        f"TextureSearchPaths={textures_rel}\\**",
+        f"PresetPath={os.path.join(rel, 'ReShadePreset.ini')}",
         "",
     ])
     try:

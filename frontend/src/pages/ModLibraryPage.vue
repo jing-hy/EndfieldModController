@@ -31,7 +31,12 @@ const keyword = ref("");          // 搜索（评审：Mod 一多，没搜索只
 const conflicts = ref(null);
 let timer = null, dlTimer = null;
 
-const selected = computed(() => new Set((store.state.selected || []).map(String)));
+// ⚠️ 选中状态的真源是 **`config.selected_mods`**（后端 `get_state()` 顶层**没有**
+// `selected` 这个键）。这里原来读的是 `store.state.selected` ⇒ 永远是空集合，
+// 于是"点开关保存成功、界面却纹丝不动"（用户 2026-10-03 反馈「mod 的开关按了没反应」）。
+const selected = computed(
+  () => new Set((((store.state.config || {}).selected_mods) || []).map(String)),
+);
 const groups = computed(() => {
   const g = {};
   const kw = keyword.value.trim().toLowerCase();
