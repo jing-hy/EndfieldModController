@@ -342,6 +342,67 @@ def resolve_hotkey_takeover(
     return True
 
 
+def _sync_enhancer_section(source: Path, target: Path,
+                           keys: tuple[str, ...] = (
+                               "CameraEFMICompatibility",
+                               "CameraFirstPersonDialogue",
+                               "CameraFirstPersonMovement",
+                               "CameraMeshHeadHiding",
+                               "CameraSmoothPerspectiveTransition",
+                               "ShortcutFirstPerson",
+                               "Language",
+                           )) -> int:
+    """把源 ini 里 `[endfield-enhancer]` 段的关键项同步进目标 ini，返回改了几项。
+
+    为什么需要它：`core.py` 给游戏进程设了 `RESHADE_BASE_PATH_OVERRIDE` = `runtime\\reshade`，
+    **ReShade 读的是那一份** `ReShade.ini`；而初始化只维护 `dlss5\\ReShade.ini`。
+    两份内容会分叉 —— addon 首次运行会把**出厂值（全 0）**写进它读的那份，于是
+    「与 EFMI 共存必需的 `CameraEFMICompatibility`」「F1 快捷键 `ShortcutFirstPerson`」等
+    在生效的那份里全是 0，用户看到的就是"第一人称不会自动配置"（2026-10-03 反馈）。
+    """
+    if not source.is_file() or not target.is_file():
+        return 0
+    good: dict[str, str] = {}
+    inside = False
+    for line in source.read_text(encoding="utf-8", errors="replace").splitlines():
+        text = line.strip()
+        if text.startswith("["):
+            inside = text == "[endfield-enhancer]"
+            continue
+        if inside and "=" in text:
+            key, _, value = text.partition("=")
+            good[key.strip()] = value.strip()
+    if not good:
+        return 0
+
+    lines = target.read_text(encoding="utf-8", errors="replace").splitlines()
+    out: list[str] = []
+    inside = False
+    changed = 0
+    for line in lines:
+        text = line.strip()
+        if text.startswith("["):
+            inside = text == "[endfield-enhancer]"
+            out.append(line)
+            continue
+        if inside and "=" in text:
+            key = text.partition("=")[0].strip()
+            if key in keys and key in good and good[key] != text.partition("=")[2].strip():
+                out.append(f"{key}={good[key]}")
+                changed += 1
+                continue
+        out.append(line)
+    if changed:
+        backup = target.with_name(target.name + ".bak-before-enhancer-sync")
+        if not backup.exists():
+            try:
+                shutil.copy2(target, backup)
+            except OSError:
+                pass
+        target.write_text("\r\n".join(out) + "\r\n", encoding="utf-8")
+    return changed
+
+
 def prepare_reshade_runtime(config: AppConfig, controller_dir: Path) -> dict[str, Any]:
     """Prepare the ReShade base directory without writing anything into the game dir.
 
@@ -393,6 +454,17 @@ def prepare_reshade_runtime(config: AppConfig, controller_dir: Path) -> dict[str
                 shutil.copy2(src, addons_dir / name)
     except OSError as exc:
         _append_log(config, f"往 runtime\\reshade\\Addons 放面板失败（忽略）: {exc}")
+
+    # ⚠️ 2026-10-03 实测第二个同源问题：**第一人称的配置也得同步到这份 ini**。
+    # ReShade 以基准目录（= runtime\reshade）为准，所以它读的 `[endfield-enhancer]` 段
+    # 是**这份**；而初始化只维护 `dlss5\ReShade.ini`，于是那份里的正确值（尤其
+    # `CameraEFMICompatibility=1`、`ShortcutFirstPerson=112`）在生效的这份里全是 0 ——
+    # 用户看到的正是「第一人称视角不会自动配置」（面板里点按钮也没反应）。
+    # 这里把 dlss5 那份的关键项同步过来（缺这份文件时跳过，交给 initialize 重建）。
+    try:
+        _sync_enhancer_section(config.dlss5_path / "ReShade.ini", reshade_dir / "ReShade.ini")
+    except OSError as exc:
+        _append_log(config, f"同步 [endfield-enhancer] 到 runtime\\reshade 失败（忽略）: {exc}")
 
     # `initialize._rebuild_ini` 会把这份当"[endfield-enhancer] 段的历史来源"之一，
     # 所以照旧写一份，保持既有行为。
