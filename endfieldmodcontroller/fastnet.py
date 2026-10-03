@@ -379,6 +379,18 @@ def _download_sequential(
                 while True:
                     if cancel and cancel():
                         raise Cancelled("用户终止")
+                    # ⚠️ 把 socket 超时压到"块间停顿"这个尺度（2026-10-03）：
+                    # 只影响"等下一块"的等待，不会误杀慢速但活着的连接（慢线路只是块间隔长，
+                    # 仍在持续给数据）。超时会抛 `TimeoutError`，由下面 except 统一转成
+                    # `stalled=True` ⇒ 上层自动换镜像线路。
+                    # 不这么做的话，遇到"服务器建了连接却吊着不发数据"，`read()` 会一直阻塞：
+                    # 没有进度、没有换线路、日志停在"开始下载 X（138.0 MB）"—— 用户实测就是这样。
+                    try:
+                        _sock = getattr(getattr(getattr(response, "fp", None), "raw", None), "_sock", None)
+                        if _sock is not None:
+                            _sock.settimeout(CHUNK_GAP_SECONDS)
+                    except Exception:  # noqa: BLE001 - 拿不到底层 socket 就保持原样
+                        pass
                     chunk = response.read(READ_CHUNK)
                     if not chunk:
                         break
@@ -393,7 +405,12 @@ def _download_sequential(
                             f"探测超时（{deadline_seconds:.0f}s 内只下到 {written / 1048576:.1f} MB）")
     except (TimeoutError, urllib.error.URLError, OSError) as exc:
         if written:
+            # `stalled=True` ⇒ 上层会判定这条线路不行并**自动换镜像线路**（这正是我们要的）
             return written, True, f"读取中断（已下 {written / 1048576:.1f} MB）: {exc}"
+        if isinstance(exc, TimeoutError):
+            # 一个字节都没收到就超时 ⇒ 同样算"线路不通"，交上层换线路。
+            # 别 `raise` 出去把整次下载打成失败（那样用户只看到一句报错、也没有重试）。
+            return 0, True, f"连接建立后 {CHUNK_GAP_SECONDS}s 内没有收到任何数据（线路不通）"
         raise
     return written, False, ""
 
