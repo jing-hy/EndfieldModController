@@ -815,6 +815,13 @@ def infer_kind_and_group(
             kind = "dependency"
         elif any(k in lowered for k in ("tool", "tools", "utility")):
             kind = "tool"
+        # ⚠️ 「加载页 / 壁纸」要排在 looks_like_assist **之前**判断：
+        # 后者看的是"有没有换装资源"，而壁纸包整个都是 .dds 贴图 ⇒ 会被误判成皮肤。
+        # 这类 Mod 不属于任何角色，**共用一个 group** ⇒ 同组互斥 = 同时只能开一个
+        #（用户 2026-10-03：「这个算辅助性 mod，而且不能同时开多个」）。
+        elif looks_like_wallpaper(path, rel_parts):
+            kind = "assist"
+            group = WALLPAPER_GROUP
         elif path is not None and looks_like_assist(path, rel_parts, meta, matched):
             kind = "assist"
         else:
@@ -832,6 +839,41 @@ ASSIST_HINTS = (
 ASSIST_RESOURCE_DIRS = ("meshes", "textures", "texture", "mesh", "materials", "res")
 ASSIST_RESOURCE_EXTS = {".buf", ".dds", ".mesh", ".ib", ".vb", ".fmt", ".obj", ".fbx"}
 ASSIST_SKIP_RE = re.compile(r"^\s*handling\s*=\s*skip\b", re.IGNORECASE)
+
+# ── 「加载页 / 壁纸」类（2026-10-03 用户要求）─────────────────────────────────
+# 用户原话：「现在库里那个就是加载壁纸 mod，你看看结构，**这个算辅助性 mod，而且不能同时开多个**」。
+#
+# 它为什么会被判成 character：`looks_like_assist()` 的判据是"**有没有换装资源**"，
+# 而换装资源的扩展名里含 `.dds` —— 壁纸包**整个就是一堆 .dds 贴图**
+# （`Loadingscreens/ Startscreens/ DarkMode/ OperatorCVWall/ ProfileThemes/ …`），
+# 于是被判成"有资源 ⇒ 皮肤 mod ⇒ 要角色归属"。可它根本不换任何角色的衣服。
+#
+# 判据：**目录名里出现已知的"界面/背景"类目录名，且不含角色换装目录**（Meshes/Textures）。
+# 这一类**共用一个 group**，于是「同角色互斥」天然把它们变成"同时只能开一个"。
+WALLPAPER_DIR_HINTS = (
+    "loadingscreen", "loading_screen", "loadingscreens",
+    "startscreen", "startscreens", "darkmode", "dark_mode",
+    "wallpaper", "background", "backgrounds", "title", "titlescreen",
+    "operatorcvwall", "operatoroverview", "profiletheme", "profilethemes",
+    "monthlypass", "monthlypassbackground", "combo", "ef02slideprojector",
+)
+# 出现这些说明它确实是"角色换装"，那就不能算壁纸类
+WALLPAPER_NEGATIVE_HINTS = ("meshes", "textures", "texture", "materials")
+
+WALLPAPER_GROUP = "加载页 / 壁纸"
+
+
+def looks_like_wallpaper(path: Path | None, rel_parts: Sequence[str]) -> bool:
+    """是不是「加载页 / 壁纸」类（整包只换界面背景、不换角色衣服）。
+
+    判据 = 命中已知的界面类目录名，且**不含**角色换装目录（Meshes/Textures）。
+    """
+    lowered = "/".join(str(p) for p in rel_parts).lower()
+    if not any(hint in lowered for hint in WALLPAPER_DIR_HINTS):
+        return False
+    if any(neg in lowered for neg in WALLPAPER_NEGATIVE_HINTS):
+        return False
+    return True
 
 
 def has_mod_resources(path: Path) -> bool:

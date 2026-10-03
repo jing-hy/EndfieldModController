@@ -61,13 +61,13 @@ async function loadCover(id) {
   if (covers.value[id]) return;
   // demo 模式：封面来自快照（file:// 下前端读不到本地图片，快照里已内联成 data URI）
   const preset = (store.demoCovers || {})[id];
-  if (preset) { covers.value[id] = preset; return; }
+  if (preset) { store.covers[id] = preset; return; }
   try {
     const r = await call("get_mod_cover", id);
     // ⚠️ 后端的字段名是 **data_uri**（其余几个是历史写法，留着兜底）——
     // 迁移时我写成了 `r.data`，导致封面一直取不到、列表里全是"无封面"占位。
     const uri = r && (r.data_uri || r.data || r.uri || r.image || r.base64);
-    if (r && r.ok && uri) covers.value[id] = uri;
+    if (r && r.ok && uri) store.covers[id] = uri;
   } catch (e) { /* 没有封面很正常 */ }
 }
 
@@ -328,8 +328,20 @@ watch(() => store.demoCovers, (val) => {
                       -webkit-box-orient: vertical; overflow: hidden" :title="m.name">{{ m.name }}</span>
                 <span class="mt-1.5 text-xs"
                       :style="{ color: selected.has(String(m.id)) ? 'var(--accent)' : 'var(--text-muted)' }">
-                  {{ selected.has(String(m.id)) ? "已启用" : "未启用" }}{{ m.kind === "unknown" ? " · 类型待确认" : "" }}
+                  {{ selected.has(String(m.id)) ? "已启用" : "未启用" }}
                 </span>
+                <!-- ⚠️ 用户 2026-10-03：「现在没有之前那种**黄色的未识别的标记，可以点一下就切换的**」
+                     —— 旧版在角色识别不确定（low/none）时会在卡片上打一个黄色标记，点它直接进选角色。
+                     点击要 .stop，否则会先触发整卡的启用/停用。 -->
+                <span v-if="!m.group || m.confidence === 'none' || m.confidence === 'low'"
+                      class="badge mt-1 cursor-pointer" style="background: #f0b429; color: #3a2a00"
+                      title="角色归属没认出来 —— 点这里选一个（识别错了会让同角色互斥失效，容易崩）"
+                      @click.stop="menuAct('assign', m)">未识别 · 点此选角色</span>
+                <!-- 类型待确认（例如把壁纸/加载页包当成了角色皮肤）也放这里，点一下改归属 -->
+                <span v-else-if="m.kind === 'unknown'"
+                      class="badge mt-1 cursor-pointer" style="background: #f0b429; color: #3a2a00"
+                      title="看不出这是哪一类 Mod，点此指定角色归属（或设为未分类）"
+                      @click.stop="menuAct('assign', m)">类型待确认</span>
                 <!-- 显式的启用开关（用户 2026-10-03 三次反馈"mod 开关还是没有"——
                      之前只有一行状态文字 + 点整卡切换，看不出那是个开关）。 -->
                 <span class="mt-auto flex items-center justify-between gap-2">

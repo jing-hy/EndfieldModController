@@ -47,11 +47,11 @@ const covers = computed(() => store.covers);
 async function loadCover(id) {
   if (!id || covers.value[id]) return;
   const preset = (store.demoCovers || {})[id];
-  if (preset) { covers.value[id] = preset; return; }
+  if (preset) { store.covers[id] = preset; return; }
   try {
     const r = await call("get_mod_cover", id);
     const uri = r && (r.data_uri || r.data || r.uri || r.image || r.base64);
-    if (r && r.ok && uri) covers.value[id] = uri;
+    if (r && r.ok && uri) store.covers[id] = uri;
   } catch (e) { /* 没有封面很正常 */ }
 }
 function queueCovers(list) {
