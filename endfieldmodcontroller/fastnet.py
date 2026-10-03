@@ -424,16 +424,16 @@ def _download_sequential(
                     # 累计无数据超过自适应窗口才判线路不通。
                     # ⚠️ `_seq_waited` 必须**在循环外**初始化 —— 放循环里会被每轮重置，
                     # 于是永远累计不到窗口、超时后无限空转。
-                    try:
-                        chunk = response.read(READ_CHUNK)
-                    except (TimeoutError, OSError) as _exc:
-                        if not isinstance(_exc, TimeoutError) and "timed out" not in str(_exc).lower():
-                            raise
+                    # ⚠️ **用 `select()` 探测可读，绝不"重试 read()"**（2026-10-03）：
+                    # `http.client` 的响应对象一旦超时就不能再读
+                    #（`cannot read from timed out object`）。
+                    if not _readable(response, POLL_SECONDS):
                         _seq_waited += POLL_SECONDS
                         if _seq_waited >= _seq_window:
                             return 0, True, (f"连接建立后 {int(_seq_waited)}s 内没有收到任何数据（线路不通）")
                         continue
                     _seq_waited = 0.0
+                    chunk = response.read(READ_CHUNK)
                     if not chunk:
                         break
                     fh.write(chunk)
@@ -543,6 +543,9 @@ def _download_parallel(
         # ⚠️ `live` = **已接收但还没落盘的字节**，只用于进度上报（2026-10-03）。
         # 不分这两个量的话，"边下边报"会把同一份字节算两次（读到时加一次、落盘时又加一次）。
         "live": 0,
+        # ⚠️ **上报用的高水位**（2026-10-03 修「进度条老是往回跳」）：
+        # 进度只能增不能减 —— 重试会把 `live` 清零，直接拿 `n + live` 上报就会往回跳。
+        "reported": 0,
         "retries": 0,
     }
     if not dest.exists():
@@ -586,23 +589,23 @@ def _download_parallel(
                     except (AttributeError, OSError):
                         pass
                     buf = bytearray()
-                    # ⚠️⚠️ **短超时轮询**（2026-10-03 修「暂停按钮没实际暂停」）：
-                    # 原来读循环用的是"整个无数据窗口"（最长 180 秒）作为 socket 超时，
-                    # 期间**没有任何地方检查 cancel()** ⇒ 点暂停后要等 3 分钟才生效。
-                    # 现在每秒一轮：每轮先看 cancel，再尝试读一小块，超时只累加等待量。
+                    # ⚠️⚠️ **轮询用 `select()` 探测，绝不"重试 read()"**（2026-10-03）：
+                    # 上一版我在超时后又调了一次 `response.read()` —— 而 `http.client` 的
+                    # 响应对象**一旦超时就不能再读**（`cannot read from timed out object`），
+                    # 于是每轮"轮询"都变成一次失败、白触发重试，还让进度往回跳。
+                    # `select.select([sock], [], [], POLL_SECONDS)` 只是"看一眼有没有数据"，
+                    # **不改变 socket 状态**，超时了可以继续等。
                     _waited = 0.0
                     while True:
                         if cancel and cancel():
                             raise Cancelled("用户暂停/终止")
-                        try:
-                            chunk = response.read(READ_CHUNK)
-                        except (TimeoutError, OSError) as _exc:
-                            if not isinstance(_exc, TimeoutError) and "timed out" not in str(_exc).lower():
-                                raise
+                        if not _readable(response, POLL_SECONDS):
                             _waited += POLL_SECONDS
                             if _waited >= _window:
-                                raise
+                                raise TimeoutError(
+                                    f"连接建立后 {int(_waited)}s 内没有收到任何数据（线路不通）")
                             continue
+                        chunk = response.read(READ_CHUNK)
                         if not chunk:
                             break
                         _waited = 0.0
@@ -614,8 +617,12 @@ def _download_parallel(
                         with lock:
                             state["live"] += len(chunk)
                             if progress:
-                                # 取"已完成 + 已接收"里的较大值，保证**单调不回退**
-                                progress(min(max(state["n"], state["n"] - 0) + state["live"], size), size)
+                                # ⚠️ **单调不减**（高水位）：重试会把 live 清零，
+                                # 直接上报 `n + live` 就会往回跳（用户实测报过）。
+                                _cur = min(state["n"] + state["live"], size)
+                                if _cur > state["reported"]:
+                                    state["reported"] = _cur
+                                progress(state["reported"], size)
                     data = bytes(buf)
                 if len(data) != end - begin + 1:
                     raise OSError(f"分块长度不符：{len(data)} != {end - begin + 1}")
@@ -630,16 +637,19 @@ def _download_parallel(
                     state["live"] = max(0, state["live"] - len(data))
                     _save_parts(dest, size, done_spans)   # 每块都落盘，断电也不白下
                     if progress:
-                        progress(min(state["n"] + state["live"], size), size)
+                        _cur = min(state["n"] + state["live"], size)
+                        if _cur > state["reported"]:
+                            state["reported"] = _cur
+                        progress(state["reported"], size)
                 return
             except (urllib.error.URLError, OSError, TimeoutError) as exc:
                 last_error = exc
                 with lock:
                     state["retries"] += 1
                     retry_no = state["retries"]
-                    # ⚠️ 这一块读到的字节**没有落盘**（重试会重头读），必须从 live 里扣掉，
-                    # 否则失败几次之后进度会虚高、还会回退得莫名其妙。
-                    state["live"] = 0
+                    # ⚠️ **不要把 live 清零**：`live` 是"已接收"的累计，清零会让上报回跳。
+                    # 进度由 `state["reported"]` 高水位保证单调；重试会重读同一段，
+                    # 那部分字节本来就已经算进 live 了，重复累加也不影响（有 size 上限）。
                 # ⚠️ **失败必须可见**（原来这条路径一声不响：20 个连接全挂、日志里什么都没有，
                 # 用户只能看到"下载中但进度条不动"）。前几次记一条，避免刷屏。
                 if retry_no <= 6:
@@ -661,6 +671,29 @@ def _download_parallel(
     if len(done_spans) >= len(spans):
         _clear_parts(dest)      # 块齐了才算下完
     return state["retries"]
+
+
+def _readable(response: Any, wait_seconds: float) -> bool:
+    """`response` 底层 socket 在 `wait_seconds` 内**有没有数据可读**。
+
+    ⚠️ **不要用"设短超时 + 超时后重试 read()"来实现轮询**（2026-10-03 实测）：
+    `http.client` 的响应对象**一旦超时就不能再读**，会抛
+    `cannot read from timed out object`。`select()` 只是"看一眼有没有数据"，
+    **不改变 socket 状态**，超时了可以继续等下去。
+
+    拿不到底层 socket 时**保守地返回 True**（让调用方直接去 `read()`，
+    退化成原来"靠 socket 超时"的行为，不会因为探测失败而卡住）。
+    """
+    import select
+
+    sock = getattr(getattr(getattr(response, "fp", None), "raw", None), "_sock", None)
+    if sock is None:
+        return True
+    try:
+        ready, _, _ = select.select([sock], [], [], wait_seconds)
+        return bool(ready)
+    except (OSError, ValueError):
+        return True          # 探测本身出问题就别拦着读
 
 
 def _stall_window(piece_bytes: int, mbps: float) -> float:
