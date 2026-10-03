@@ -216,9 +216,15 @@ onUnmounted(() => { if (timer) clearInterval(timer); if (dlTimer) clearInterval(
       </div>
       <div v-if="!groups.length" class="empty-state">
         <Library :size="30" class="empty-icon" />
-        <div class="empty-title">还没有发现 Mod</div>
-        <div>把 .zip / .7z / .rar 拖到窗口任意处即可导入；也可以在上面粘贴网址下载。</div>
-        <div>如果你已经把 Mod 放进 Mod 库目录了，点「重新扫描」。</div>
+        <!-- 两种情况必须说清楚：库里真的没有 vs 搜索没匹配上（文案混用会让人以为 Mod 丢了） -->
+        <div class="empty-title">{{ keyword ? "没有匹配的 Mod" : "还没有发现 Mod" }}</div>
+        <template v-if="keyword">
+          <div>当前搜索「{{ keyword }}」没有结果。换个关键字，或者清空搜索框看全部。</div>
+        </template>
+        <template v-else>
+          <div>把 .zip / .7z / .rar 拖到窗口任意处即可导入；也可以在上面粘贴网址下载。</div>
+          <div>如果你已经把 Mod 放进 Mod 库目录了，点「重新扫描」。</div>
+        </template>
       </div>
       <div v-else class="mt-3 space-y-4">
         <div v-for="g in groups" :key="g.name" class="rounded-lg border p-3" style="border-color: var(--border)">

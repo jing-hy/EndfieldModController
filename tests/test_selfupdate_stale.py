@@ -17,7 +17,22 @@ from pathlib import Path
 from unittest import mock
 
 from endfieldmodcontroller import selfupdate
+from endfieldmodcontroller import version as version_mod
 from endfieldmodcontroller.config import AppConfig
+
+
+def _newer_than_current() -> str:
+    """比**当前版本**大一号的版本号。
+
+    这个测试原先写死 `latest="0.9.9"`，假设"当前版本 < 0.9.9"——2026-10-03 版本号跳到
+    1.0.0 之后这个前提就失效了（"发现新版"变成"没有新版"），三个用例一起挂。
+    以后一律按当前版本动态推导，升版本号不会再坏。
+    """
+    parts = [int(x) for x in str(version_mod.__version__).split(".") if x.isdigit()]
+    while len(parts) < 3:
+        parts.append(0)
+    parts[-1] += 1
+    return ".".join(str(p) for p in parts)
 
 
 class SelfUpdateStaleTests(unittest.TestCase):
@@ -34,7 +49,7 @@ class SelfUpdateStaleTests(unittest.TestCase):
         self.update_dir.mkdir(parents=True, exist_ok=True)
         self.payload = self.update_dir / "EndfieldModController.exe"
         self.payload.write_bytes(b"MZ" + b"x" * 4094)          # 4096 字节的假"exe"
-        self._write_check(latest="0.9.9", size=123456, digest="sha256:" + "a" * 64)
+        self._write_check(latest=_newer_than_current(), size=123456, digest="sha256:" + "a" * 64)
 
     def tearDown(self) -> None:
         self.tmp.cleanup()
@@ -61,7 +76,7 @@ class SelfUpdateStaleTests(unittest.TestCase):
     def test_size_match_but_hash_mismatch_blocks_apply(self) -> None:
         data = b"MZ" + b"y" * (123456 - 2)
         self.payload.write_bytes(data)
-        self._write_check(latest="0.9.9", size=len(data), digest="sha256:" + "b" * 64)
+        self._write_check(latest=_newer_than_current(), size=len(data), digest="sha256:" + "b" * 64)
         info = selfupdate.pending_payload(self.config)
         self.assertTrue(info["pending"])                   # 只看大小会放行（设计如此）
         current = self.update_dir / "current.exe"
@@ -77,7 +92,7 @@ class SelfUpdateStaleTests(unittest.TestCase):
     def test_matching_payload_is_pending(self) -> None:
         data = b"MZ" + b"z" * (123456 - 2)
         self.payload.write_bytes(data)
-        self._write_check(latest="0.9.9", size=len(data),
+        self._write_check(latest=_newer_than_current(), size=len(data),
                           digest="sha256:" + selfupdate._sha256(self.payload))
         info = selfupdate.pending_payload(self.config)
         self.assertTrue(info["pending"])

@@ -6,14 +6,16 @@
 **版本号只跟"最新 Release"比 —— 本地保持在「最新 Release + 1」；
 GitHub 上只推了源码（main 更新）但没发 Release 时，版本号不用改。**
 
-即：最新 Release 是 v0.9.5 时，本地不管累积多少改动、main 上又推了多少次源码，都保持 0.9.6；
-**只有发过 Release 之后**才轮到 0.9.6。可执行的核对见 `scripts/release_version.py`
+即：最新 Release 是 v0.9.5 时，本地不管累积多少改动、main 上又推了多少次源码，都保持同一个号；
+**2026-10-03 用户明确指定跳到 1.0.0**（界面换代 + DLSS5 判据修复 + 下载引擎对齐 PCL 之后的大版本），
+今后再按「最新 Release + 1」往下走。
+**只有发过 Release 之后**才轮到下一个号。可执行的核对见 `scripts/release_version.py`
 （`build_release.py` / `prepare_release.py` 各跑一遍，改号前后都能看到结论）。
 """
 from __future__ import annotations
 
 APP_NAME = "EndfieldModController"
-__version__ = "0.9.6"
+__version__ = "1.0.0"
 
 # 自我更新与"检查更新"指向的仓库
 REPO = "jing-hy/EndfieldModController"

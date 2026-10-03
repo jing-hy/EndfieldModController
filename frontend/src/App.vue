@@ -37,11 +37,7 @@ const tabs = [
 const THEME_LABELS = { light: "浅色", dark: "深色", amber: "琥珀", cyan: "青蓝", violet: "紫罗兰", emerald: "翡翠" };
 const theme = ref(currentTheme());
 const themeLabel = computed(() => THEME_LABELS[theme.value] || theme.value);
-// 版本号只在拿得到时才显示（拿不到时不要留一个 "v..."）
-const versionText = computed(() => {
-  const v = store.state.version;
-  return v ? (String(v).startsWith("v") ? String(v) : "v" + v) : "";
-});
+// 版本号与更新入口统一在左侧栏的 UpdateBadge 里（顶栏不再显示，这里也就没有 versionText 了）
 // 拖放导入：提示层**松开鼠标就消失**（用户要求「应该是释放就消失」），拖拽计数避免子元素抖动
 const dragging = ref(false);
 // 公告条（用户每次启动都会看到；点关闭就告诉后端"已读"）
