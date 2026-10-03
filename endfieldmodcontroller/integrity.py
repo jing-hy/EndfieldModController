@@ -61,7 +61,14 @@ def check_integrity(config: AppConfig) -> dict:
         efmi_root = root / "EFMI"
         add("efmi_main", efmi_root / "Core" / "EFMI" / "main.ini", (efmi_root / "Core" / "EFMI" / "main.ini").is_file(), "EFMI Core / main.ini")
         add("efmi_d3dx", efmi_root / "d3dx.ini", (efmi_root / "d3dx.ini").is_file(), "EFMI d3dx.ini")
-        add("efmi_mods", efmi_root / "Mods", (efmi_root / "Mods").is_dir(), "EFMI Mods directory")
+        # ⚠️⚠️ **这一项要认「实际会 stage 到哪」，而不是「内置那份装没装」**
+        #（2026-10-03 反馈：`use_builtin_runtime=true` 但 `staging_mods_dir` 指向外部 XXMI
+        #  ⇒ 检查内置路径永远 missing ⇒ `launch failed: 完整性检查失败: EFMI Mods directory`
+        #  ⇒ **启动被彻底拦死**。而就算把内置目录建出来，Mod 也进不了游戏 ——
+        #  游戏读的是外部那份）。
+        # `staging_mods_path` 是 `activation`/`launcher` 真正使用的同一个值，以它为准。
+        staging_mods = config.staging_mods_path
+        add("efmi_mods", staging_mods, staging_mods.is_dir(), "EFMI Mods directory")
 
     existing_reshade = reshade_integration.detect_existing_reshade(config)
     if existing_reshade is not None:
@@ -132,6 +139,22 @@ def repair_integrity(config: AppConfig, log: Callable[[str], None] | None = None
             note(f"{result.key}: {result.status} {result.message}")
     else:
         note("当前使用外部 XXMI，缺失的 XXMI Libraries/EFMI 需要重新安装或切换为内置运行环境")
+
+    # ⚠️⚠️ **Mod 暂存目录要在这里确保存在**（2026-10-03 反馈的诊断包暴露）：
+    # 组件全都"up_to_date"时 `ensure_all` 整个跳过，**没有任何人去建 `Mods` 目录**，
+    # 于是下一次 `check_integrity` 依旧报 `efmi_mods` missing ⇒
+    # 「点多少次修复都不会好」，一键启动被**彻底拦死**。
+    #
+    # 按用户准则「能自动做掉的就别用提示交付」——这是个能安全自建的空目录，直接建掉。
+    # 用的是 `staging_mods_path`（`activation`/`launcher` 真正使用的同一个值），
+    # 所以即使配置里是"用内置开关 + 外部 staging 目录"这种混合形态，也会建在对的地方。
+    try:
+        staging_mods = config.staging_mods_path
+        if not staging_mods.is_dir():
+            staging_mods.mkdir(parents=True, exist_ok=True)
+            note(f"已创建 Mod 暂存目录：{staging_mods}")
+    except OSError as exc:                       # noqa: BLE001
+        note(f"创建 Mod 暂存目录失败：{exc}")
 
     from . import launcher as launcher_mod
 

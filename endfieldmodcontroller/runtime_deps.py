@@ -212,7 +212,8 @@ def _auto_update_enabled(config: AppConfig) -> bool:
 
 
 def ensure_xxmi(config: AppConfig, progress: Progress = None, byte_progress: ByteProgress = None,
-                log: Callable[[str], None] | None = None) -> BuiltinResult:
+                log: Callable[[str], None] | None = None, *,
+                force: bool = False) -> BuiltinResult:
     root = config.builtin_runtime_path / "XXMI"
     existing = _find_xxmi_exe(root)
     marker = _read_marker(root)
@@ -229,7 +230,12 @@ def ensure_xxmi(config: AppConfig, progress: Progress = None, byte_progress: Byt
     # 界面只显示 `builtin XXMI: checking` ⇒ 他的感受是「xxmi 又拉不起来」。
     # 现在：有本地版本但版本旧 → 回 `update_available`（前端会弹窗引导去依赖页），
     # 完全没有本地版本时才必须下载（否则没法用）。
-    if existing and not _auto_update_enabled(config):
+    # force=True 时绕过这个开关（2026-10-03 修「告诉我更新完了，但是一键启动又说没有」）：
+    # 那个开关的语义是「启动时要不要自动更新」（用户原话：「自动更新应该弹窗跳转到
+    # 依赖页下载」= 不自动下载、引导到依赖页）；而用户在依赖页亲手点「一键更新全部
+    # 组件」是显式指令，必须真的更新，否则这个按钮就是个摆设。
+    # 实测：关着开关时点「一键更新」报"更新完成"，而 XXMI 仍是 v2.2.1。
+    if existing and not _auto_update_enabled(config) and not force:
         _note(config, f"XXMI：本地 {marker.get('version') or '未知'}，远端 {version}"
                       f"（未开启自动更新 ⇒ 只提示，不下载）")
         if progress:
@@ -257,7 +263,8 @@ def ensure_xxmi(config: AppConfig, progress: Progress = None, byte_progress: Byt
 
 
 def ensure_xxmi_libs(config: AppConfig, progress: Progress = None, byte_progress: ByteProgress = None,
-                     log: Callable[[str], None] | None = None) -> BuiltinResult:
+                     log: Callable[[str], None] | None = None, *,
+                     force: bool = False) -> BuiltinResult:
     root = config.builtin_runtime_path / "XXMI"
     target = root / "Resources" / "Packages" / "XXMI"
     d3d11 = target / "d3d11.dll"
@@ -293,7 +300,8 @@ def ensure_xxmi_libs(config: AppConfig, progress: Progress = None, byte_progress
 
 
 def ensure_efmi(config: AppConfig, progress: Progress = None, byte_progress: ByteProgress = None,
-                log: Callable[[str], None] | None = None) -> BuiltinResult:
+                log: Callable[[str], None] | None = None, *,
+                force: bool = False) -> BuiltinResult:
     xxmi_root = config.builtin_runtime_path / "XXMI"
     xxmi_exe = _find_xxmi_exe(xxmi_root)
     if xxmi_exe is None:
@@ -365,7 +373,7 @@ def ensure_poser(
 
 
 def ensure_all(config: AppConfig, progress: Progress = None, byte_progress: ByteProgress = None,
-    log: Callable[[str], None] | None = None,) -> list[BuiltinResult]:
+    log: Callable[[str], None] | None = None, *, force: bool = False,) -> list[BuiltinResult]:
     """安装四个内置组件（XXMI / XXMI-Libs / EFMI / Endfield Poser）。
 
     **单项失败不中断其它项，跑完后再对失败项重试（最多 3 次）。**
@@ -393,7 +401,9 @@ def ensure_all(config: AppConfig, progress: Progress = None, byte_progress: Byte
         # `_download_extract`，而那里的 `log=log` 是用来把「尝试直连 / 换线路 X /
         # 重试」写进日志的 —— 不传的话那些行全都消失，用户看到的就是
         # "卡了十几分钟、日志停在 checking"。
-        result = function(config, progress, byte_progress, log=log)
+        # force=True（用户显式点「一键更新全部组件」）时让每个组件都不受
+        # 「启动时自动更新」开关限制 —— 那是"启动时"的语义，不是"永远不许更新"。
+        result = function(config, progress, byte_progress, log=log, force=force)
         if not isinstance(result, BuiltinResult):
             raise RuntimeError(f"{key}: 安装没有返回结果")
         if str(result.status) not in ok_status:

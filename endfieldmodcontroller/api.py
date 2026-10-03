@@ -1499,7 +1499,8 @@ class EndfieldModControllerApi:
                 if include_builtin:
                     self._dep_task["total"] = 3          # 只有 XXMI / XXMI-Libs / EFMI
                     self._dep_task["current"] = 0
-                    results = runtime_deps.ensure_all(self.config, progress,
+                    # 同上：显式点「安装内置组件」也要真的装（force=True）
+                    results = runtime_deps.ensure_all(self.config, progress, force=True,
                                                           log=lambda m: launcher._append_log(self.config, m))
                     self._dep_task["results"] = [result.__dict__ for result in results]
                     self._dep_task["current"] = len(results)
@@ -1745,8 +1746,13 @@ class EndfieldModControllerApi:
                         # BuiltinResult 的 status 是英文（installed/up_to_date/error…），
                         # 前端按"失败"两个字统计失败项，直接塞进去会**漏报**；这里统一成中文
                         # （2026-10-01 修：用户看到"完成，但有 1 项失败"却不知道是哪一项）。
+                        # force=True：用户在依赖页**亲手点**的「一键更新全部组件」是显式指令，
+                        # 不受「启动时自动更新」开关限制（2026-10-03 修「告诉我更新完了，
+                        # 但是一键启动又说没有」—— 这条没传 force 时，关着那个开关的用户点了
+                        # 更新也只会"检查不下载"，界面报完成、组件还是旧的）。
                         for item in runtime_deps.ensure_all(self.config, progress, byte_progress,
-                                        log=lambda m: launcher._append_log(self.config, m)):
+                                        log=lambda m: launcher._append_log(self.config, m),
+                                        force=True):
                             results.append(_NS(
                                 key=item.key,
                                 status={
