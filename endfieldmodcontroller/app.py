@@ -45,17 +45,74 @@ def _index_html() -> Path:
 
 
 def _already_running() -> bool:
-    """Windows 命名互斥体：判断是否已经有控制器在跑。"""
-    if os.name != "nt":
-        return False
-    try:
-        import ctypes
+    """判断是否已经有控制器在跑。
 
-        handle = ctypes.windll.kernel32.CreateMutexW(
-            None, False, "Global\\EndfieldModController.SingleInstance")
-        # ERROR_ALREADY_EXISTS = 183
-        return bool(handle) and ctypes.windll.kernel32.GetLastError() == 183
-    except Exception:  # noqa: BLE001
+    ⚠️ 2026-10-03 改成**锁文件 + PID 存活检查**。原先用命名互斥体
+    （`CreateMutexW` + `GetLastError()==183`），实测**怎么都判不出来**：
+    ctypes 的 `get_last_error()` 在这条调用链上取不到可靠值（哪怕用了
+    `use_last_error=True` 并声明了 restype/argtypes），连续调用永远返回 False
+    ⇒ 用户能开出两个实例、互相踩 `config.json`（他实测就是这个现象：
+    `set_component_addon failed ... config.json.tmp-10116`，同时两个管理器在跑）。
+
+    锁文件方案不依赖 ctypes 语义：用 `O_CREAT|O_EXCL` 抢占 `<数据根>/runtime/.mc.lock`，
+    里面写自己的 PID；若文件已存在则读出来看那个 PID **是否还活着**
+    （进程名也对得上才算），活着就是"已有实例"，否则视为陈旧锁并接管。
+    """
+    try:
+        from .config import AppConfig
+
+        root = Path(AppConfig.load().runtime_path)
+        lock = root / ".mc.lock"
+        root.mkdir(parents=True, exist_ok=True)
+        if lock.is_file():
+            try:
+                pid = int(lock.read_text(encoding="utf-8").strip())
+                if pid == os.getpid():
+                    return False          # 锁就是本进程写的 ⇒ 本进程是持有者
+                if _pid_alive(pid):
+                    return True           # 别的活着的实例在持有
+            except (OSError, ValueError):
+                pass
+            # 走到这里 = 陈旧锁（进程早没了 / 内容坏了）⇒ 删掉后重新抢
+            try:
+                lock.unlink()
+            except OSError:
+                pass
+        try:
+            fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(str(os.getpid()))
+            return False
+        except FileExistsError:
+            # 竞态：刚好被别人抢到了
+            return True
+    except Exception:  # noqa: BLE001 - 判断失败一律当作"没有别的实例"，绝不因此起不来
+        return False
+
+
+def _pid_alive(pid: int) -> bool:
+    """这个 PID 是不是还活着（并且确实是本程序）。"""
+    if os.name == "nt":
+        try:
+            import ctypes
+
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            # 声明类型：不声明的话 64 位下句柄会被截断（这个坑刚踩过）
+            kernel32.OpenProcess.restype = ctypes.c_void_p
+            kernel32.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_bool, ctypes.c_uint32]
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+            if not handle:
+                return False
+            kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+            kernel32.CloseHandle(handle)
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
         return False
 
 
