@@ -350,7 +350,6 @@ def _sync_enhancer_section(source: Path, target: Path,
                                "CameraMeshHeadHiding",
                                "CameraSmoothPerspectiveTransition",
                                "ShortcutFirstPerson",
-                               "Language",
                            )) -> int:
     """把源 ini 里 `[endfield-enhancer]` 段的关键项同步进目标 ini，返回改了几项。
 
@@ -359,6 +358,12 @@ def _sync_enhancer_section(source: Path, target: Path,
     两份内容会分叉 —— addon 首次运行会把**出厂值（全 0）**写进它读的那份，于是
     「与 EFMI 共存必需的 `CameraEFMICompatibility`」「F1 快捷键 `ShortcutFirstPerson`」等
     在生效的那份里全是 0，用户看到的就是"第一人称不会自动配置"（2026-10-03 反馈）。
+
+    ⚠️ **`Language` 故意不在同步列表里**（2026-10-03 踩到）：它是**用户偏好**，
+    用户在 addon 面板里随时可以改。我第一版把它也放进来了，结果每次一键启动都拿
+    `dlss5` 那份的旧值把用户刚改的中文**覆盖回去** —— 用户的原话正是
+    「第一人称还是进去英文，**我又手改成了中文**」（暗示下次还得再改一遍）。
+    只同步"不一致就会不工作"的项，用户的个人偏好一律不碰。
     """
     if not source.is_file() or not target.is_file():
         return 0
