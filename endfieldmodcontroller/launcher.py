@@ -365,6 +365,13 @@ def _sync_enhancer_section(source: Path, target: Path,
     「第一人称还是进去英文，**我又手改成了中文**」（暗示下次还得再改一遍）。
     只同步"不一致就会不工作"的项，用户的个人偏好一律不碰。
     """
+    # ⚠️ 同 prepare_reshade_runtime 的硬闸：超过 1 MB 的 ini 一律当损坏，别去读它
+    # （3 GB 的版本一读就把内存吃爆 —— 2026-10-03 事故）
+    try:
+        if target.is_file() and target.stat().st_size > 1_048_576:
+            return 0
+    except OSError:
+        return 0
     if not source.is_file() or not target.is_file():
         return 0
     good: dict[str, str] = {}
@@ -416,6 +423,13 @@ def _sync_style_section(source: Path, target: Path,
     会因缺少中文字体而显示不出来（addon 自己会在日志里报 "Chinese font missing"）。
     只动字体相关键，不碰用户自己调过的配色/圆角那些。
     """
+    # ⚠️ 同 prepare_reshade_runtime 的硬闸：超过 1 MB 的 ini 一律当损坏，别去读它
+    # （3 GB 的版本一读就把内存吃爆 —— 2026-10-03 事故）
+    try:
+        if target.is_file() and target.stat().st_size > 1_048_576:
+            return 0
+    except OSError:
+        return 0
     if not source.is_file() or not target.is_file():
         return 0
     good: dict[str, str] = {}
@@ -550,6 +564,25 @@ def prepare_reshade_runtime(config: AppConfig, controller_dir: Path) -> dict[str
     # 现在只更新上面这 4 个键，其它段和键一律原样保留。
     ini_path = reshade_dir / "ReShade.ini"
     existing: list[str] = []
+    # ⚠️ **读之前先检查大小**（2026-10-03 事故）：这份 ini 正常情况下 **几 KB**，
+    # 而实测出现过 **3 GB 全是空行**的版本 —— 一读就把内存吃到 23 GB、CPU 打满、
+    # 界面未响应且关不掉（用户原话「现在mod管理器未响应，关不掉」）。
+    # faulthandler 抓到的栈正是卡在 `ini_path.read_text(...)` 这一行。
+    # 这里加一道硬闸：超过 1 MB 一律**当作损坏**、丢弃并重建，绝不去读它。
+    # （重建内容就是下面 `if not existing:` 那套标准段，功能不受影响。）
+    try:
+        if ini_path.is_file() and ini_path.stat().st_size > 1_048_576:
+            _append_log(
+                config,
+                f"WARN runtime\\reshade\\ReShade.ini 异常膨胀到 "
+                f"{ini_path.stat().st_size / 1048576:.1f} MB，判定为损坏 → 丢弃重建",
+            )
+            try:
+                ini_path.unlink()
+            except OSError:
+                pass
+    except OSError:
+        pass
     if ini_path.is_file():
         try:
             existing = ini_path.read_text(encoding="utf-8", errors="replace").splitlines()
