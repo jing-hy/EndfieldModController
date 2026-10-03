@@ -107,9 +107,17 @@ class IntegrityTests(unittest.TestCase):
         (self.xxmi_root / "EFMI" / "d3d11.dll").unlink()
         from endfieldmodcontroller import launcher
 
+        # ⚠️ 行为**跟随开关**（2026-10-03 二次修订）：`extra_libraries_include_efmi_dll`
+        # 默认 True = 改动前的两条写法（用户当时能跑）；那次"崩溃"的归因尚未定案，
+        # 所以两种写法都保留、由开关决定，测试也跟着开关走，不写死。
+        self.config.extra_libraries_include_efmi_dll = False
         targets = launcher.dlss5_injection_targets(self.config)
         self.assertFalse(any("d3d11.dll" in t for t in targets),
-                         f"extra_libraries 里又混进了 d3d11.dll（会与 XXMI 自带注入重复）: {targets}")
+                         f"开关关掉时不该列 d3d11.dll: {targets}")
+        self.config.extra_libraries_include_efmi_dll = True
+        targets2 = launcher.dlss5_injection_targets(self.config)
+        self.assertTrue(any("d3d11.dll" in t for t in targets2),
+                        f"开关打开时应列 d3d11.dll（改动前的写法）: {targets2}")
 
     def test_repair_reuses_the_launch_chain(self) -> None:
         """「修复」必须和一键启动一样能自愈（2026-10-01 issue #6 的回归测试）。

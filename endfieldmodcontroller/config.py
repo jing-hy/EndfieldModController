@@ -426,6 +426,13 @@ class AppConfig:
     auto_disable_feed_on_native_dlss: bool = True
     dependency_manifest: str = "dependencies.json"
     launch_extra_args: list[str] = field(default_factory=list)
+    # ⚠️ 2026-10-03 回滚开关：写 `runtime\reshade\ReShade.ini` 时用**绝对路径**
+    # （= 我改动之前的写法）。用户实测"开 DLSS5 或第一人称就崩"，需要一次判定
+    # 是不是"我把绝对路径改成相对路径"造成的；默认 True = 回到改动前。
+    reshade_use_absolute_paths: bool = True
+    # ⚠️ 2026-10-03 回滚开关：`extra_libraries` 里**是否也列 EFMI 的 d3d11.dll**。
+    # 默认 True = 我改动之前的两条写法（用户当时能跑）。
+    extra_libraries_include_efmi_dll: bool = True
     selected_mods: list[str] = field(default_factory=list)
     auto_update_dependencies: bool = False
     # 默认为 True：XXMI Launcher 的 exe 要求管理员权限（非管理员启动会直接报

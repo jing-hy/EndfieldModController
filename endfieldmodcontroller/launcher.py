@@ -544,10 +544,21 @@ def prepare_reshade_runtime(config: AppConfig, controller_dir: Path) -> dict[str
     # 修法：一律用**相对路径**（用户 2026-10-03 明确要求「不要用绝对路径」——
     # 数据根可能整体搬走，写死盘符会失效）。相对谁？相对这个基准目录本身，
     # 所以用 `os.path.relpath` 动态算（`dlss5_dir` 是可配置的，不能写死 `..\dlss5`）。
-    try:
-        rel = os.path.relpath(base, reshade_dir)
-    except ValueError:            # 跨盘符时 relpath 会抛 ValueError，退回用目录名
-        rel = base.name
+    # ⚠️⚠️ **2026-10-03 回滚开关**：用户实测「开 DLSS5 或第一人称就崩、两个都关就能启动」，
+    # 而这两项唯一共同点是**注入 d3d12.dll**（`want_base = dlss5 or firstperson`）。
+    # 记忆里已定案"终末地只有 Vulkan/DX11、靠 D3D11on12 桥接"⇒ **不是 D3D11/D3D12 的固有冲突**，
+    # 于是最大嫌疑落在我这轮改过的两处（这份 ini 的路径、extra_libraries 条数）。
+    # 改动前用的是**绝对路径**（`AddonPath={base}`），我为了满足"不要绝对路径"改成了
+    # `..\dlss5` —— 理论上等价，但实测就是崩，所以不再靠推理：
+    # `reshade_use_absolute_paths = True` 时**完全回到改动前的写法**，用来一次判定是不是我改坏的。
+    use_abs = bool(getattr(config, "reshade_use_absolute_paths", True))
+    if use_abs:
+        rel = str(base)                       # 改动前：绝对路径，不论基准目录是谁都找得到
+    else:
+        try:
+            rel = os.path.relpath(base, reshade_dir)
+        except ValueError:            # 跨盘符时 relpath 会抛 ValueError，退回用目录名
+            rel = base.name
     shaders_rel = os.path.join(rel, "reshade-shaders", "Shaders")
     textures_rel = os.path.join(rel, "reshade-shaders", "Textures")
     wanted_keys = {
@@ -1049,6 +1060,15 @@ def dlss5_injection_targets(config: AppConfig) -> list[str]:
     #    而 EFMI 的注入**不会因此丢**：XXMI 那条自带注入照旧执行
     #    （2026-10-02 用户实测「efmi 关了直接终末地拉不起来」⇒ 它确实是必需品，
     #     但由 XXMI 负责，不归我们管）。
+    #
+    # ⚠️⚠️ **2026-10-03 回滚开关**：`extra_libraries_include_efmi_dll = True` 时
+    # **加回 EFMI 的 `d3d11.dll`**（= 我改动之前的写法，用户当时是能跑的）。
+    # 用户实测「开 DLSS5 或第一人称就崩、两个都关就能启动」，需要一次判定
+    # "去掉这第二条" 是不是崩因之一。默认 True = 回到改动前。
+    if bool(getattr(config, "extra_libraries_include_efmi_dll", True)):
+        _efmi = config.efmi_dll_path
+        if _efmi is not None and _efmi.is_file():
+            targets.append(str(_efmi))
     # 乳摇：可选用「注入 sbm.dll」的方式（config.secondary_motion_dll 指向短路径下的
     # sbm.dll）。这样游戏目录不用替换 d3dcompiler_47.dll / vulkan-1.dll，
     # 避免和 ReShade/EFMI 抢 D3D 调用链（proxy 方式实测 65 秒崩）。

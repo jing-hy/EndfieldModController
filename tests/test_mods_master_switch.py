@@ -60,12 +60,15 @@ def test_extra_libraries_never_contains_efmi_dll(env):
     所以：**注入照旧发生，但不归我们列**。本测试同时保证"皮肤开关不影响注入库内容"
     （开关只控制往 staging 放不放 Mod）。
     """
+    # 行为跟随 `extra_libraries_include_efmi_dll`（默认 True = 改动前的两条写法）。
+    # 关掉这个开关时，无论皮肤开关如何，都不该再列 d3d11.dll。
+    env.config.extra_libraries_include_efmi_dll = False
     env.config.efmi_injection = True
     on = launcher.dlss5_injection_targets(env.config)
     env.config.efmi_injection = False
     off = launcher.dlss5_injection_targets(env.config)
-    assert not any("d3d11.dll" in t for t in on), f"extra_libraries 混进了 d3d11.dll: {on}"
-    assert not any("d3d11.dll" in t for t in off), f"extra_libraries 混进了 d3d11.dll: {off}"
+    assert not any("d3d11.dll" in t for t in on), f"开关关掉时仍列了 d3d11.dll: {on}"
+    assert not any("d3d11.dll" in t for t in off), f"开关关掉时仍列了 d3d11.dll: {off}"
     assert on == off, "皮肤开关不该影响注入库内容"
 
 
