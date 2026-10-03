@@ -13,7 +13,12 @@ import Badge from "../components/ui/Badge.vue";
 const items = ref([]);
 const running = ref(false);
 const checked = ref(false);   // 是否至少查过一次（区分"未检查"和"已就绪"）
-const logLines = ref(["等待开始…（这里会显示下载线路尝试、断点续传、组件安装等详细过程）"]);
+// ⚠️ 日志内容放 **store**（切页不丢）—— 见 store.js 里的说明
+const logLines = computed({
+  get: () => (store.depLogLines.length ? store.depLogLines
+    : ["等待开始…（这里会显示下载线路尝试、断点续传、组件安装等详细过程）"]),
+  set: (v) => { store.depLogLines = v; },
+});
 const status = ref("");
 const percent = ref(0);
 const progressText = ref("");   // 空 = 尚未开始，由 {{ ... || "尚未开始" }} 兜底

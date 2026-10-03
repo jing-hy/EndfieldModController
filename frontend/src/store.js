@@ -5,6 +5,13 @@ import { call } from "./lib/bridge.js";
 export const PAGE_IDS = ["library", "assist", "dependencies", "launch", "settings", "about"];
 
 export const store = reactive({
+  // ⚠️ 依赖页的日志框内容放**全局**（2026-10-03 用户实测：「下载的时候切到其他页面，
+  // 再切回依赖，就会清空日志」）。原先是 `DepsPage.vue` 里的局部 `ref` ——
+  // 组件一销毁内容就没了；而后端的任务状态其实还在跑，回来却看到空白。
+  // 放 store 里，组件重建时直接接着显示。
+  depLogLines: [],
+  depSpeedBps: 0,
+  depModDlActive: false,
   ready: false,
   state: {},            // get_state() 原样存
   // 初始页支持深链（`index.html#settings`）—— 截图 / 排查时能直接落到某一页

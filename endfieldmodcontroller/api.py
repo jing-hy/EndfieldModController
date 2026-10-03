@@ -3008,9 +3008,75 @@ class EndfieldModControllerApi:
             return {"ok": False, "message": f"写入失败: {exc}"}
         return {"ok": True, "kind": want, "name": target.name}
 
+    def set_mod_group(self, mod_id: str, group: str) -> dict[str, Any]:
+        """把辅助 Mod 归到某个**分组**（加载页与壁纸 / 界面功能类 / 工具画质类 / 其它辅助）。
+
+        为什么单开一个接口（2026-10-03 用户实测）：
+        「我选了加载页与壁纸，他直接被归类到了角色 mod，而且新建了一个角色叫这个」——
+        原先只有一个「归属」下拉，辅助的分组名被塞进了角色接口，
+        `set_mod_character` 里那句 `payload["group"] = character` 就把它同时写成了角色。
+        用户随后给了正确的设计：「那个下拉可以拆成两个，上面一个选择是服装还是辅助，
+        下面那个选择细分」⇒ 类型走 `set_mod_kind`，细分里的"分组"走本方法。
+
+        语义：只改 `group` / `kind`，**不动 `character`**（辅助 Mod 本来就不属于任何角色）。
+        """
+        from . import launcher
+        from .core import ASSIST_GROUP_HIDE, ASSIST_GROUP_OTHER, ASSIST_GROUP_TOOL, WALLPAPER_GROUP
+
+        allowed = [WALLPAPER_GROUP, ASSIST_GROUP_HIDE, ASSIST_GROUP_TOOL, ASSIST_GROUP_OTHER]
+        group = (group or "").strip() or ASSIST_GROUP_OTHER
+        if group not in allowed:
+            return {"ok": False, "message": f"「{group}」不是有效的辅助分组（可选：{' / '.join(allowed)}）"}
+        target = next((m for m in self._mods() if m.id == mod_id), None)
+        if target is None:
+            return {"ok": False, "message": f"找不到 Mod: {mod_id}"}
+        meta_path = target.path / "mod.meta.json"
+        payload: dict[str, Any] = {}
+        if meta_path.is_file():
+            try:
+                loaded = json.loads(meta_path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    payload = loaded
+            except (OSError, json.JSONDecodeError):
+                payload = {}
+        payload["kind"] = "assist"
+        payload["group"] = group
+        # 辅助 Mod 不属于任何角色 —— 顺手把误写进去的角色清掉（那是老 bug 的残留）
+        payload["character"] = ""
+        payload.setdefault("id", target.id)
+        payload.setdefault("name", target.name)
+        try:
+            meta_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError as exc:
+            return {"ok": False, "message": f"写入失败: {exc}"}
+        self._invalidate_mods()
+        launcher._append_log(self.config, f"辅助分组已设定: {target.name} -> {group}")
+        return {"ok": True, "group": group}
+
     def set_mod_character(self, mod_id: str, character: str) -> dict[str, Any]:
         """把用户选定的角色写进该 Mod 的 `mod.meta.json`，此后扫描即为高置信。"""
         character = (character or "").strip()
+        # ⚠️⚠️ **分组名不许当角色写**（2026-10-03 用户实测）：
+        #   「我选了加载页与壁纸，他直接被归类到了角色 mod，而且新建了一个角色叫这个」
+        # 根因是本方法下面那句 `payload["group"] = character` —— 它把传进来的字符串
+        # **同时**当成角色和分组写下去；而辅助页那个分类下拉传的是**分组名**
+        #（`加载页与壁纸` / `界面功能类` / `工具画质类` / `其它辅助`），
+        # 于是角色表里凭空多出一个叫"加载页与壁纸"的角色。
+        # 这里直接挡掉：分组名走 `set_mod_group`，这个接口只收**角色名**（或空 = 未分类）。
+        try:
+            from .core import ASSIST_GROUP_HIDE, ASSIST_GROUP_OTHER, ASSIST_GROUP_TOOL, WALLPAPER_GROUP
+
+            reserved = {WALLPAPER_GROUP, ASSIST_GROUP_HIDE, ASSIST_GROUP_TOOL, ASSIST_GROUP_OTHER}
+        except Exception:  # noqa: BLE001
+            reserved = {"加载页与壁纸", "界面功能类", "工具画质类", "其它辅助"}
+        if character in reserved:
+            return {
+                "ok": False,
+                "message": (
+                    f"「{character}」是**分组名**，不是角色名 —— 请用「分类」来改它，"
+                    "不要用「更改归属」"
+                ),
+            }
         # ⚠️ **允许留空 = 未分类**。原来这里写死"角色名不能为空"，而前端文案一直写着
         # "留空 = 保持未分类"，两边直接打架（用户 2026-10-03：「说了留空 = 保持未分类，
         # 设定又说不能留空」）。语义上"未分类"是合法状态：壁纸/加载页这类 Mod 本就不属于

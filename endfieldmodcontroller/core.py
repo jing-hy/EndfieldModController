@@ -875,6 +875,12 @@ WALLPAPER_DIR_HINTS = (
     "wallpaper", "background", "backgrounds", "title", "titlescreen",
     "operatorcvwall", "operatoroverview", "profiletheme", "profilethemes",
     "monthlypass", "monthlypassbackground", "combo", "ef02slideprojector",
+    # ⚠️ 2026-10-03 用户实测补入：「新下的壁纸没自动识别上」——
+    # 那个包叫 **CharacterChange 1.3.1**（GameBanana），每个角色一份 ini，
+    # 段名是 `[TextureOverride-<角色>BGProfile/-UI/-Battle/-Result/-Exhibit]`，
+    # 改的是**角色界面背景 / UI / 战斗结算 / 展示图** ⇒ 属于加载页与壁纸类。
+    # 目录名 `characterchange_131` 原先不在词表里，于是被漏判成换装。
+    "characterchange", "character_change", "charchange",
 )
 # 出现这些说明它确实是"角色换装"，那就不能算壁纸类
 WALLPAPER_NEGATIVE_HINTS = ("meshes", "textures", "texture", "materials")
