@@ -64,7 +64,45 @@ class LineFailureAccountingTests(unittest.TestCase):
         fastnet._remember_line("ghproxy.net", False, 0.0, cert_error=True)
         rows = {row["line"]: row for row in fastnet.line_status()}
         self.assertTrue(rows["ghproxy.net"]["blocked"])
-        self.assertFalse(rows["gh.xmly.dev"]["blocked"])
+        self.assertFalse(rows["gh.nxnow.top"]["blocked"])
+
+    def test_dead_mirror_is_not_in_default_lines(self) -> None:
+        """★ `gh.xmly.dev` 的域名 2026-10-04 实测**已经不存在**了。
+
+        它原本排在镜像第一位 —— 而 DNS 失败又命中"不计入失败"的豁免，于是
+        **永远不进冷却、永远排第一、每次下载都白试**。用户现场日志：一秒刷十几遍
+        「线路 gh.xmly.dev 失败：getaddrinfo failed」。
+        """
+        names = {line.name for line in fastnet.DEFAULT_LINES}
+        self.assertNotIn("gh.xmly.dev", names, "域名已死的镜像不该留在默认线路表里")
+        self.assertNotIn("hub.gitmirror.com", names, "同上（域名不存在）")
+        # 实测能跑的三条必须在（2026-10-04 真实 Release 资产并发实测）
+        self.assertIn("gh.nxnow.top", names)
+        self.assertIn("ghproxy.net", names)
+        self.assertIn("gh-proxy.com", names)
+
+    def test_dns_failure_puts_line_on_short_cooldown(self) -> None:
+        """★ DNS 解析失败 → 临时跳过这条线路（否则死域名会被无限白试）。"""
+        fastnet._DNS_DEAD.clear()
+        self.addCleanup(fastnet._DNS_DEAD.clear)
+        with mock.patch.object(fastnet, "_attempt_line") as attempt:
+            attempt.return_value = fastnet.DownloadReport(
+                ok=False, message="<urlopen error [Errno 11001] getaddrinfo failed>")
+            with mock.patch.object(fastnet, "_load_lines_cache", lambda: {}), \
+                 mock.patch.object(fastnet, "_line_blocked", lambda name, cache: False), \
+                 mock.patch.object(fastnet, "_log", lambda *a, **k: None):
+                fastnet.download("https://github.com/o/r/releases/download/v1/f.zip",
+                                 Path("_unused.zip"), line_mode="mirror")
+        skipped = [name for name in ("gh.nxnow.top", "ghproxy.net", "gh-proxy.com")
+                   if fastnet._DNS_DEAD.get(name, 0) > 0]
+        self.assertTrue(skipped, "DNS 失败的线路必须被记进短冷却")
+
+        # 冷却期内它不该再出现在候选里
+        with mock.patch.object(fastnet, "_load_lines_cache", lambda: {}):
+            lines = [line.name for line in fastnet.resolve_lines(
+                "https://github.com/o/r/releases/download/v1/f.zip", "mirror")]
+        for name in skipped:
+            self.assertNotIn(name, lines, "冷却期内的死线路不该再被白试")
 
 
 if __name__ == "__main__":

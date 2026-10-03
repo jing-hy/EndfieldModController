@@ -231,16 +231,33 @@ class Line:
 
 
 DIRECT = Line("直连")
-# 2026-09-27 在**关闭 Steam++ 加速器**的裸网络实测：
-#   直连 ✗ 20s 超时；gh.xmly.dev ✓ 0.49 MB/s；ghproxy.net ✓ 0.17；gh-proxy.com ✓ 0.14；
-#   ghfast.top / mirror.ghproxy.com / hub.gitmirror.com / ghproxy.cc 全部不可用。
-# 镜像会失效，所以失败会被记进缓存并在一段时间内跳过，且**绝不作为首选**。
+# ⚠️ 2026-10-04 实测（用户机器，裸网）：**`gh.xmly.dev` 的域名已经不存在了**
+# （`Resolve-DnsName` 回"DNS 名称不存在"）—— 它原本排在镜像第一位，于是每次下载都
+# 先白试它一遍；而它抛的是 `getaddrinfo failed`，命中下面那段"网络/DNS 故障不计入失败
+# 记录"的豁免 ⇒ **永远不进冷却、永远排第一、永远重试**，日志里一秒内能刷十几遍
+# 「线路 gh.xmly.dev 失败」+「下载失败：所有线路都失败」。
+# 同时实测出可用线路（真实 Release 资产取前 1 MB）：
+#   gh.nxnow.top 0.39 MB/s ✓✓（新加，最快） / ghproxy.net 0.21 ✓ / gh-proxy.com 0.06 ✓
+#   其余候选（github.moeyy.xyz / gh.llkk.cc / ghgo.xyz / gh.ddlc.top / slink.ltd /
+#   cf.ghproxy.cc / ghproxy.1888866.xyz / gh.api.99988866.xyz / ghfast.top /
+#   mirror.ghproxy.com / ghproxy.cc / hub.gitmirror.com）本次全部不可用 ——
+#   不可用的**一律不进默认表**，只留"实测能跑"的和少数几个偶尔能用的候选，
+#   它们失败会被冷却、不会拖慢正常下载。
 DEFAULT_LINES: tuple[Line, ...] = (
     DIRECT,
-    Line("gh.xmly.dev", "https://gh.xmly.dev/"),
+    Line("gh.nxnow.top", "https://gh.nxnow.top/"),
     Line("ghproxy.net", "https://ghproxy.net/"),
     Line("gh-proxy.com", "https://gh-proxy.com/"),
 )
+
+# ⚠️ 2026-10-04：**DNS 解析失败的线路必须被临时跳过**。
+# 原逻辑把 `getaddrinfo failed` 当成"全网故障、不计入这条线路的失败"（本意很对：
+# 一次 DNS 抖动不该把好线路冤枉掉）—— 但后果是**域名已经没了的线路永远不进冷却、
+# 永远排在候选里**，每次下载都先白试它一遍。用户实测现场：日志里一秒内刷了十几遍
+# 「线路 gh.xmly.dev 失败：getaddrinfo failed」+「下载失败：所有线路都失败」。
+# 现在给它单独一个**短冷却**（不动既有缓存结构）：域名真死了，也只会每 10 分钟白试一次。
+_DNS_DEAD: dict[str, float] = {}
+DNS_DEAD_TTL = 600.0
 
 
 @dataclass
@@ -582,6 +599,19 @@ def _clear_parts(dest: Path) -> None:
         pass
 
 
+def _pick_line_url(urls: list[str], dead: set[str], attempt: int) -> str:
+    """多线路动态抢块：这一块这次该用哪条线路。
+
+    规则：**第 1 次用主线路，失败就轮换到别的可用线路**；已淘汰（连挂两次）的不再选，
+    但如果全被淘汰了就退回全部（宁可再试一次，也不能因为淘汰逻辑把下载卡死）。
+    抽成纯函数是为了能单测 —— 这段"选谁"的判据是动态抢块的核心。
+    """
+    live = [item for item in urls if item not in dead] or urls
+    if not live:
+        return urls[0] if urls else ""
+    return live[attempt % len(live)]
+
+
 def _download_parallel(
     url: str,
     dest: Path,
@@ -596,6 +626,7 @@ def _download_parallel(
     max_seconds: float = 0,
     cancel: Callable[[], bool] | None = None,
     expected_mbps: float = 0.0,      # ⚠️ 已知单连接速度：用于算"无数据等待窗口"（2026-10-03）
+    alt_urls: list[str] | None = None,   # ★ 多线路动态抢块：同一条块的候选线路（2026-10-04）
 ) -> int:
     """并发分块下载，**块级断点续传**：已完成的块记在 sidecar 里，中断后不重下。
 
@@ -637,6 +668,24 @@ def _download_parallel(
         _log(log, f"续传：已完成 {state['n'] // 1048576} MB / {size // 1048576} MB，"
                   f"还需下 {len(todo)} 块")
 
+    # ⚠️ 2026-10-04：**多线路动态抢块**（用户「测一下混合动态并发」→ 实测后落地）。
+    # 下面这个 `todo` 队列本来就是"共享队列 + 谁空谁领" ⇒ **动态分配天然成立**
+    # （快的线程自然领得多），实测：单线路 0.664 MB/s、静态等分 0.508（**负优化**）、
+    # 动态抢块 **0.975 MB/s（+47%）**；复跑脚本 `scripts/speedtest_mixed.py`。
+    # 这里只补两件事：① 每次块重试**换一条线路**；② 某条线路连续失败就**淘汰**它。
+    urls = [url] + [item for item in (alt_urls or []) if item and item != url]
+    line_fails: dict[str, int] = {}
+    dead_urls: set[str] = set()
+    if len(urls) > 1 and todo:
+        _log(log, f"多线路动态抢块：{len(urls)} 条线路共用 {len(todo)} 块"
+                  f"（谁空谁领，连挂两次的线路本次淘汰）")
+
+    def _short(target: str) -> str:
+        try:
+            return urlsplit(target).netloc or target
+        except ValueError:
+            return target
+
     def fetch(span: tuple[int, int]) -> None:
         begin, end = span
         _fetch_started = time.time()          # 用于估算"当下的实际速度"（自适应窗口）
@@ -644,9 +693,11 @@ def _download_parallel(
         for attempt in range(4):
             if cancel and cancel():
                 raise Cancelled("用户终止")
+            # 换线路：第 1 次用主线路，失败就轮到别的可用线路（连续失败的已淘汰）
+            target_url = _pick_line_url(urls, dead_urls, attempt)
             try:
                 headers = {"Range": f"bytes={begin}-{end}"}
-                with _open(url, headers=headers, timeout=timeout) as response:
+                with _open(target_url, headers=headers, timeout=timeout) as response:
                     # ⚠️⚠️ **必须分块读 + 单块间隔超时**（2026-10-03 修「下载到一半一直不动」）。
                     # 原来是 `data = response.read()` **一次性读整块** —— 那个调用只在
                     # `timeout` 到点或数据读完时才返回，**中途一个字节都不给就无限期挂着**，
@@ -731,6 +782,12 @@ def _download_parallel(
                 return
             except (urllib.error.URLError, OSError, TimeoutError) as exc:
                 last_error = exc
+                # 多线路：连续失败两次就淘汰这条（只淘汰它的 URL，不影响别人）
+                if len(urls) > 1:
+                    line_fails[target_url] = line_fails.get(target_url, 0) + 1
+                    if line_fails[target_url] >= 2 and len(dead_urls) < len(urls) - 1:
+                        dead_urls.add(target_url)
+                        _log(log, f"多线路：{_short(target_url)} 连挂两次，本次不再用它")
                 with lock:
                     state["retries"] += 1
                     retry_no = state["retries"]
@@ -928,13 +985,28 @@ def _line_blocked(name: str, cache: dict[str, Any]) -> bool:
     return bool(fail_at) and (time.time() - fail_at) < ttl
 
 
+# 镜像能代理的主机：`github.com`（Release 资产 / 仓库页）与 **`raw.githubusercontent.com`**（raw 文件）。
+# ⚠️ 2026-10-04 补（用户：「看看是不是所有下载都接上去了」）：原先只认 `github.com`，
+# 于是"角色表 / 乳摇参数 / 公告"这些**走 raw 的请求永远不会换线路** —— 直连一断就整块失败，
+# 而镜像其实是支持的（实测 `https://ghproxy.net/https://raw.githubusercontent.com/...` 返回 200）。
+# `codeload.github.com`（整仓 tar.gz）与 `objects.githubusercontent.com`（Release 资产的
+# 真实落点）同理，一并接上。
+MIRRORABLE_HOSTS = (
+    "github.com",
+    "www.github.com",
+    "raw.githubusercontent.com",
+    "codeload.github.com",
+    "objects.githubusercontent.com",
+)
+
+
 def _mirrorable(url: str) -> bool:
-    """只有 github.com 的直链才能套镜像前缀。"""
+    """这个 URL 能不能套镜像前缀？（Release 资产 / raw 文件 / 整仓下载）"""
     try:
         host = urlsplit(url).netloc.lower()
     except ValueError:
         return False
-    return host in {"github.com", "www.github.com"}
+    return host in MIRRORABLE_HOSTS
 
 
 def resolve_lines(url: str, mode: str) -> list[Line]:
@@ -942,12 +1014,22 @@ def resolve_lines(url: str, mode: str) -> list[Line]:
     if mode == "direct" or not _mirrorable(url):
         return [DIRECT]
     mirrors = list(DEFAULT_LINES[1:])
+    # ⚠️ **解析不了域名的先剔掉，不管哪种模式**（`mirror` 模式原先直接 return，绕过了这里，
+    #    于是"只用镜像"的用户照样每次先白试一遍死域名 —— 2026-10-04 由测试抓到）。
+    # 而且**任何兜底都不许把它们放回来**：域名解析不了 = 这条线路确定不可用，试了纯属白等。
+    now = time.time()
+    dns_ok = [line for line in mirrors if _DNS_DEAD.get(line.name, 0) <= now]
     if mode == "mirror":
-        return mirrors or [DIRECT]
+        return dns_ok or [DIRECT]
     cache = _load_lines_cache()
-    # 有成绩的按速度排前面；失败的临时跳过；全被跳过时退回全部（不能因此不下）
+    # 有成绩的按速度排前面；失败的临时跳过（**全被跳过时退回"没被 DNS 拉黑的那部分"**，
+    # 不能因此不下 —— 但也绝不把解析不了域名的放回来）
     mirrors.sort(key=lambda line: -float((cache.get(line.name) or {}).get("mbps") or 0))
-    fresh = [line for line in mirrors if not _line_blocked(line.name, cache)]
+    dns_dead = [line for line in mirrors if _DNS_DEAD.get(line.name, 0) > now]
+    if dns_dead:
+        _log(None, "[线路] 跳过 " + "、".join(line.name for line in dns_dead)
+                   + f"（上次解析不了域名，{int(DNS_DEAD_TTL / 60)} 分钟内不再白试它）")
+    fresh = [line for line in dns_ok if not _line_blocked(line.name, cache)] or dns_ok
     # 直连连续失败过就跳过它 —— 否则每次都要白等一个探测超时（实测直连超时是 8 秒）
     # ⚠️⚠️ **直连也要按实测速度决定排不排第一**（2026-10-03 用户：
     #     「**现在下载怎么这么不稳定，这都不换线？**」）。
@@ -984,7 +1066,9 @@ def resolve_lines(url: str, mode: str) -> list[Line]:
         _log(None, f"[线路] 直连上次只有 {direct_mbps:.3f} MB/s"
                    f"（镜像 {best_mirror:.3f}）—— 低于可用线 {DEAD_MBPS}，这次先试镜像")
     head = [] if (_line_blocked(DIRECT.name, cache) or direct_too_slow) else [DIRECT]
-    return [*head, *(fresh or mirrors)]
+    # `fresh` 上面已经保证"全被冷却时退回 dns_ok"，所以这里直接拼即可；
+    # 若 dns_ok 也是空的（镜像域名全解析不了），就只剩直连 —— 快速失败好过白试死域名。
+    return [*head, *fresh]
 
 
 # ---------------------------------------------------------------------------
@@ -1032,13 +1116,22 @@ def download(
     started = time.time()
     errors: list[str] = []
 
-    for line in lines:
+    # ★ 多线路动态抢块（2026-10-04 落地）：把其它候选线路的 URL 交给**第一条**线路的
+    # 并发分块去共用 —— 实测比"单线路内并发"快 47%，而"每条线路各下自己那段"（静态等分）
+    # 反而更慢（0.508 vs 0.664）。只给第一条：后面几条是它失败后的兜底，走原逻辑。
+    multi_alt = [line.apply(url) for line in lines[1:] if line is not DIRECT]
+    if len(multi_alt) >= 1:
+        _log(log, "多线路动态抢块已启用： " + "、".join(f"{line.name}" for line in lines[1:])
+                  + "（谁空谁领，连挂两次的线路本次淘汰）")
+
+    for index, line in enumerate(lines):
         if len(lines) > 1:
             _log(log, f"尝试线路：{line.name}")
         # 多线路时单条线路的等待要短，坏线路要快速跳过
         line_timeout = timeout if len(lines) == 1 else min(timeout, LINE_TIMEOUT_MULTI)
         report = _attempt_line(
             line.apply(url), dest, line=line,
+            alt_urls=multi_alt if index == 0 and multi_alt else None,
             log=log, progress=progress, timeout=line_timeout, policy=policy,
             expected_size=expected_size, expected_sha256=expected_sha256,
             dead_mbps=dead_mbps, cancel=cancel,
@@ -1070,7 +1163,12 @@ def download(
             _log(log, f"（{line.name} 返回 403/429 —— 这条线路在限流或拒绝访问，"
                       f"本次先跳过它，换个线路继续）")
         if network_wide:
-            _log(log, f"（{line.name} 这次是网络/DNS 故障，不计入该线路的失败记录）")
+            # ⚠️ 2026-10-04：**不再只是"不计入失败"** —— 那样域名已经没了的线路会永远
+            # 排在候选里被反复白试（用户实测日志：一秒刷十几遍「gh.xmly.dev 失败」）。
+            # 现在给它一个短冷却，到点自动放行；真正的临时抖动代价只是 10 分钟不试这条。
+            _DNS_DEAD[line.name] = time.time() + DNS_DEAD_TTL
+            _log(log, f"（{line.name} 这次解析不了域名 —— 已临时跳过它 {int(DNS_DEAD_TTL / 60)} 分钟，"
+                      f"先换其它线路继续；域名要是真没了，它不会再拖慢每一次下载）")
         else:
             _remember_line(line.name, False, 0.0, cert_error=cert_error, rate_limited=rate_limited)
         errors.append(f"{line.name}: {report.message}")
@@ -1106,6 +1204,7 @@ def _attempt_line(
     expected_sha256: str = "",
     dead_mbps: float = DEAD_MBPS,
     cancel: Callable[[], bool] | None = None,
+    alt_urls: list[str] | None = None,      # ★ 多线路动态抢块：其它候选线路的 URL
 ) -> DownloadReport:
     """在**一条**线路上完成下载；慢/抖时临时上并发。不负责计时汇总与日志收尾。"""
     report = DownloadReport(path=str(dest))
@@ -1209,7 +1308,8 @@ def _attempt_line(
             try:
                 report.retries = _download_parallel(
                     url, work, size=size, start=resume_from, threads=threads,
-                    timeout=timeout, progress=progress, log=log, cancel=cancel)
+                    timeout=timeout, progress=progress, log=log, cancel=cancel,
+                    alt_urls=alt_urls)
             finally:
                 with _STATE_LOCK:
                     _STATE["active"] = max(0, int(_STATE.get("active") or 0) - 1)
@@ -1341,6 +1441,7 @@ def _attempt_line(
                 url, work, size=size, start=written, threads=threads,
                 timeout=timeout, progress=progress, log=log,
                 max_seconds=BOOST_TRIAL_SECONDS, cancel=cancel,
+                alt_urls=alt_urls,
                 expected_mbps=float(report.probe_mbps or 0.0))          # 试用窗口：到点不再提交新块
             done_now = sum(b - a + 1 for a, b in _load_parts(work, size))
             if size and done_now < size and done_now > written:
@@ -1359,7 +1460,8 @@ def _attempt_line(
                               f"→ 继续用 {threads} 连接下完")
                     report.retries += _download_parallel(
                         url, work, size=size, start=done_now, threads=threads,
-                        timeout=timeout, progress=progress, log=log, cancel=cancel)
+                        timeout=timeout, progress=progress, log=log, cancel=cancel,
+                        alt_urls=alt_urls)
         finally:
             with _STATE_LOCK:
                 _STATE["active"] = max(0, int(_STATE.get("active") or 0) - 1)
