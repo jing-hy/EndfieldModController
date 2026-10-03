@@ -50,6 +50,17 @@ let dragDepth = 0;
 // 所以"启动那一刻读一次"必然读到空 —— 这正是 2026-09-30 记录、2026-10-03 仍然存在的 bug
 // （用户：「公告好像没出来」）。定式：做成幂等函数、挂在数据刷新点上，再留启动后定时兜底。
 const shownNoticeKeys = new Set();
+// ⚠️ 关键：**先重新拉一次 state 再消费**。`store.state` 只是"上一次 get_state 的快照"，
+// 而公告是后端**后台线程**稍后才填进去的（实测：启动 13:50:28 拉 state 时还是空的，
+// 13:50:32 后端才拿到 1 条）—— 只重读本地快照的话，永远读的是那份空数据。
+// 用户 2026-10-03 连续两轮反馈「还是没弹」，根因就在这里。
+function refreshThenShowAnnouncements() {
+  // **不要 await**：刷新失败或悬挂时，消费必须照常跑（用当前快照试一次）。
+  // 反过来也一样 —— 消费（可能弹窗）绝不阻塞状态刷新。
+  refreshState().catch(() => {}).finally(() => { maybeShowAnnouncements(); });
+  maybeShowAnnouncements();       // 先用现有快照试一次，立即执行
+}
+
 async function maybeShowAnnouncements() {
   const list = normalizeAnnouncements(store.state && store.state.announcements);
   const fresh = list.filter((n) => !shownNoticeKeys.has(n.key));
@@ -123,8 +134,19 @@ onMounted(async () => {
       // demo 模式也要能看引导：快照里把 first_run.onboarding_done 置 false 即可复现首启
       const demoFr = store.state.first_run || {};
       if (demoFr.first_run && !demoFr.onboarding_done) tourVisible.value = true;
-      // demo 模式也要走一遍公告消费（否则快照里给了公告也看不到，等于没法验证这条链路）
+      // demo 模式走一遍公告消费（否则快照里给了公告也看不到，等于没法验证这条链路）
       await maybeShowAnnouncements();
+      // 调试用：模拟"公告迟到" —— 后端后台线程稍后才填进去，看兜底定时器能不能补上。
+      // 只在 `?demo=late` 时启用，正式包不含这段（整个 VITE_UI_DEMO 分支都会被摇掉）。
+      if (new URLSearchParams(location.search).get("demo") === "late") {
+        setTimeout(() => {
+          store.state.announcements = [{
+            id: "late-arrival", level: "info",
+            title: "迟到公告：兜底轮询把它补上了",
+            body: "这条是在界面起来之后才塞进 state 的，用来验证兜底是否有效。",
+          }];
+        }, 3000);
+      }
       return;
     }
   }
@@ -221,8 +243,18 @@ async function finishTour() {
 // 挂在"每次状态刷新之后"（切页、改设置、下载进度刷新……都会触发），
 // 这样公告一到就能补上；再留几个延迟兜底，覆盖"后台线程 15 秒内才拉到"的情况。
 onStateRefreshed(() => { maybeShowAnnouncements(); });
-[3000, 8000, 16000, 25000].forEach((delay) => {
-  setTimeout(() => { maybeShowAnnouncements(); }, delay);
+// 启动后的一段时间里**每 5 秒轮询一次**：公告是后端后台线程稍后才填进去的
+// （实测启动后约 4 秒到），具体到几点不确定，所以用轮询兜住，而不是猜几个时刻。
+// 60 秒后自然停下，不做常驻轮询。消费一旦成功，`shownNoticeKeys` 会去重，不会重复弹。
+let announceTicks = 0;
+const announceTimer = setInterval(() => {
+  announceTicks += 1;
+  refreshThenShowAnnouncements();
+  if (announceTicks >= 12) clearInterval(announceTimer);
+}, 5000);
+// 另外仍留几个更早的兜底点，覆盖"公告来得特别快"的情况
+[1500, 3500].forEach((delay) => {
+  setTimeout(() => { refreshThenShowAnnouncements(); }, delay);
 });
 </script>
 

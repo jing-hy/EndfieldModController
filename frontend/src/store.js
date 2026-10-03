@@ -37,8 +37,18 @@ export function onStateRefreshed(hook) {
   if (typeof hook === "function" && !afterRefresh.includes(hook)) afterRefresh.push(hook);
 }
 
+// 给 get_state 加超时：没有桥、或后端卡住时 `call()` 可能**既不 resolve 也不 reject**，
+// 直接把 await 它的调用方（例如公告消费）永久挂住。超时后按"这次没拿到"处理。
+function withTimeout(promise, ms, fallback) {
+  return Promise.race([
+    promise,
+    new Promise((resolve) => setTimeout(() => resolve(fallback), ms)),
+  ]);
+}
+
 export async function refreshState() {
-  const data = await call("get_state");
+  const data = await withTimeout(call("get_state"), 8000, null);
+  if (!data) return null;      // 没拿到就保持原样，别把 store 清空
   store.state = data || {};
   store.mods = (data && data.mods) || [];
   store.config = (data && data.config) || {};
