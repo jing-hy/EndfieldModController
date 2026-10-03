@@ -17,6 +17,8 @@
 
 <p>📖 安装细节、目录结构、逐项故障排查、开发与发布流程 → <b><a href="docs/README.detailed.md">详细文档</a></b></p>
 
+<p>🛠 想改代码 / 提 PR → <b><a href="CONTRIBUTING.md">维护者指南</a></b>（改动边界、提交前必做检查、该一并更新的产出一览）</p>
+
 </div>
 
 ---
