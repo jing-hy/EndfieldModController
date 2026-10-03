@@ -414,6 +414,11 @@ def _download_sequential(
                             _elapsed = max(time.time() - started, 1e-6)
                             _mbps = (written / 1048576) / _elapsed if written else 0.0
                             _seq_window = _stall_window(READ_CHUNK, _mbps)
+                        # ⚠️ **探测期间别拿 180 秒的窗口去等 12 秒的探测**：
+                        # 有 deadline 时，单轮最多等到 deadline 剩余时间就够了。
+                        if deadline_seconds:
+                            _left = deadline_seconds - (time.time() - started)
+                            _seq_window = max(1.0, min(_seq_window, _left))
                             # ⚠️ socket 超时用**轮询粒度**（不是整个窗口）：每秒都能检查一次 `cancel()`
                             # ⇒ 点「暂停/终止」立刻生效（原来要等整个窗口走完，实测 3 分钟）。
                             # 真正"多久算断流"由 `_seq_waited` 累计判断。
@@ -429,6 +434,15 @@ def _download_sequential(
                     #（`cannot read from timed out object`）。
                     if not _readable(response, POLL_SECONDS):
                         _seq_waited += POLL_SECONDS
+                        # ⚠️⚠️ **没数据时也要检查 deadline**（2026-10-03 修「死等 180 秒才换线路」）：
+                        # 探测的 `PROBE_SECONDS`(12s) 上限原来只在"成功读到一块之后"检查，
+                        # 而完全没数据的线路上流程一直走这条 `continue` 分支
+                        # ⇒ 那个上限形同虚设 ⇒ 只能等满 `_seq_window`（初始速度未知时是 180 秒）。
+                        # 用户实测：点下载后 3 分钟无任何反应、一个字节都没进来。
+                        if deadline_seconds and (time.time() - started) > deadline_seconds:
+                            return written, False, (
+                                f"探测超时（{deadline_seconds:.0f}s 内只下到 "
+                                f"{written / 1048576:.1f} MB）")
                         if _seq_waited >= _seq_window:
                             return 0, True, (f"连接建立后 {int(_seq_waited)}s 内没有收到任何数据（线路不通）")
                         continue
