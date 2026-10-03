@@ -1577,7 +1577,10 @@ class EndfieldModControllerApi:
             task["percent"] = min(99.0, (done + min(max(inner, 0.0), 1.0)) / total_items * 100.0)
             exp_all = int(task.get("expected_bytes", 0))
             if exp_all > 0:
-                task["byte_percent"] = min(99.0, task["computed_bytes"] / exp_all * 100.0)
+                # ⚠️ **取一位小数**（2026-10-03 用户报「23.76781745624384% 这是什么百分数」）——
+                # 原来这里直出浮点，前端模板 `{{ percent }}%` 原样显示一长串小数。
+                # 后端保留一位（内部排序/比较够用），**显示一律由前端取整**。
+                task["byte_percent"] = round(min(99.0, task["computed_bytes"] / exp_all * 100.0), 1)
             if expected:
                 task["message"] = f"{key}: {received / 1048576:.1f}/{expected / 1048576:.1f} MB"
             else:

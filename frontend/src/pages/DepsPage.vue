@@ -229,8 +229,13 @@ async function pollProgress() {
     // 优先用**字节口径**的进度（跟着实际大小走）；拿不到才退回项数口径。
     // 用户 2026-10-03：「进度条不要一卡一卡的，应该跟着实际大小走」——
     // 项数口径下 138 MB 的大包只算 1 项，进度条会长时间停着不动。
-    if (typeof p.byte_percent === "number" && p.expected_bytes > 0) percent.value = p.byte_percent;
-    else if (typeof p.percent === "number") percent.value = p.percent;
+    // ⚠️ **一律取整**（用户 2026-10-03：「23.76781745624384% 这是什么百分数」）——
+    // 后端给的是浮点，直接显示会是一长串小数。界面上的百分数永远是个整数。
+    if (typeof p.byte_percent === "number" && p.expected_bytes > 0) {
+      percent.value = Math.max(0, Math.min(100, Math.round(p.byte_percent)));
+    } else if (typeof p.percent === "number") {
+      percent.value = Math.max(0, Math.min(100, Math.round(p.percent)));
+    }
     // ⚠️ 不能无脑 `logLines.value = p.log`：Mod 下载那些行是**追加**进同一个日志框的，
     // 整份替换会把它们冲掉（用户要的是"向下滚"）。这里只在**组件安装日志真的变了**
     // 或者**之前没有过组件日志**时替换，并把已有的 Mod 下载行接在后面。
@@ -513,6 +518,18 @@ onMounted(() => {
     logLines.value = ["已清空 runtime 与 assets，开始重新下载依赖…"];
     start();
   }
+  // ⚠️⚠️ **`autoStartModDownload` 的消费端**（2026-10-03 补，用户报「点了下载还是没跳转」）。
+  // `ModDownloadCard.startDownload()` 会置这个标志并跳到本页，但**以前全项目没有任何地方读它**
+  // —— 标志只写不读 ⇒ 跳过来之后**什么都不发生**，用户看到的就是"点了没反应"。
+  // 这里补上：Mod 下载任务已经在后端跑着（`start_mod_download` 那一步就起来了），
+  // 所以只要**把轮询和日志接上**，用户就能立刻看到进度。
+  if (store.autoStartModDownload) {
+    store.autoStartModDownload = false;
+    modDlActive.value = true;          // 立刻让下载相关控件出现，不等下一轮轮询
+    logLines.value = [...(logLines.value || []),
+      "已跳到依赖页 —— 下载进度、速度和连接数都在上方卡片，日志会持续追加。"];
+    pollProgress();                    // 不等 1.2 秒，马上拉一次，避免"跳过来是空的"
+  }
 });
 onUnmounted(() => { if (timer) clearInterval(timer); });
 
@@ -583,7 +600,8 @@ useLogAutoScroll(logBox, () => logLines.value);
            用现有 CSS 变量与尺寸，不新造样式。 -->
       <div class="flex items-center justify-between text-xs mb-1.5" style="color: var(--text-muted)">
         <span>{{ progressText || "尚未开始" }}</span>
-        <span style="color: var(--accent); font-weight: 600">{{ percent }}%</span>
+        <!-- 再兜一道 Math.round：百分数在界面上永远是整数 -->
+        <span style="color: var(--accent); font-weight: 600">{{ Math.round(percent) }}%</span>
       </div>
       <div class="h-1.5 rounded-full overflow-hidden" style="background: var(--surface-2); border: 1px solid var(--border)">
         <div class="h-full transition-all" :style="{ width: percent + '%', background: 'var(--accent)' }"></div>
