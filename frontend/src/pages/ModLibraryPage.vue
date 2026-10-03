@@ -13,7 +13,7 @@ import { Library } from "lucide-vue-next";
 import Btn from "../components/ui/Btn.vue";
 import Switch from "../components/ui/Switch.vue";
 import ConflictDialog from "../components/ConflictDialog.vue";
-import { Check } from "lucide-vue-next";
+import { Check, ImageOff } from "lucide-vue-next";
 import { showAlert, showModalDialog, showToast } from "../lib/dialog.js";
 import { setStatus } from "../lib/status.js";
 
@@ -25,6 +25,7 @@ const busy = ref(false);
 // 「⋯ 更多」：就地弹出的小菜单（用户准则：⋯ 要就地弹小菜单，不要弹窗）
 const menu = ref(null);          // { id, name, x, y }
 const chars = ref([]);           // 已知角色（用于"更换归属"）
+const keyword = ref("");          // 搜索（评审：Mod 一多，没搜索只能靠翻）
 // 冲突处理：生成控制器之后检查一次，有冲突就弹「每组一个下拉框」的窗
 const conflicts = ref(null);
 let timer = null, dlTimer = null;
@@ -32,7 +33,10 @@ let timer = null, dlTimer = null;
 const selected = computed(() => new Set((store.state.selected || []).map(String)));
 const groups = computed(() => {
   const g = {};
+  const kw = keyword.value.trim().toLowerCase();
   for (const mod of store.state.mods || []) {
+    if (kw && !String(mod.name || "").toLowerCase().includes(kw)
+        && !String(mod.conflict_group || mod.group || "").toLowerCase().includes(kw)) continue;
     const key = String(mod.conflict_group || mod.group || "");
     if (key === "_deps" || mod.kind === "dependency" || mod.kind === "tool") continue;
     if (mod.kind === "assist") continue;
@@ -200,26 +204,56 @@ onUnmounted(() => { if (timer) clearInterval(timer); if (dlTimer) clearInterval(
 
 <template>
   <div class="space-y-4">
-    <Card title="皮肤 Mod">
-      <template #badge><Badge tone="muted">总开关</Badge></template>
-      <div class="divide-y" style="border-color: var(--border)">
-        <div class="switch-row" @click="saveSetting('efmi_injection', !settings.efmi_injection)">
-          <div class="min-w-0">
-            <div class="font-medium">开启皮肤 Mod</div>
-            <div class="text-xs mt-0.5" style="color: var(--text-muted)">
-              总开关：关闭后一个皮肤都不加载（Mods 目录会被清空，随时可开回来）。⚠️ 注意这不是停掉 EFMI 注入 —— 实测那样终末地会直接拉不起来。
+    <Card title="Mod 列表">
+      <div class="flex flex-wrap items-center gap-2">
+        <Btn variant="primary" @click="prepare" :disabled="busy">生成控制器</Btn>
+        <Btn @click="scan" :disabled="busy">重新扫描</Btn>
+        <Btn variant="ghost" @click="fixAll">一键修复所有 Mod</Btn>
+        <Badge tone="warn">实验性</Badge>
+        <span class="ml-auto flex items-center gap-2">
+          <input v-model="keyword" class="field" style="width: 200px" placeholder="搜索 Mod / 角色…" />
+        </span>
+      </div>
+      <div v-if="!groups.length" class="empty-state">
+        <Library :size="30" class="empty-icon" />
+        <div class="empty-title">还没有发现 Mod</div>
+        <div>把 .zip / .7z / .rar 拖到窗口任意处即可导入；也可以在上面粘贴网址下载。</div>
+        <div>如果你已经把 Mod 放进 Mod 库目录了，点「重新扫描」。</div>
+      </div>
+      <div v-else class="mt-3 space-y-4">
+        <div v-for="g in groups" :key="g.name" class="rounded-lg border p-3" style="border-color: var(--border)">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="font-semibold">{{ g.name }}</h3>
+            <span class="text-xs" style="color: var(--text-muted)">{{ g.mods.length }} 个 Mod · 已启用 {{ g.enabled }}</span>
+          </div>
+          <!-- 紧凑横向列表（用真实库数据验证后改的）：
+               原来是「通栏组框 + 内部固定 168px 大卡片」—— 每个角色往往只有 1 个 Mod，
+               于是右侧 4/5 全空、卡片还很高，一屏只看得下 4 个。
+               改成一行一个 Mod：缩略图 + 名字 + 状态 + ⋯，一屏能看十几个。 -->
+          <div class="divide-y" style="border-color: var(--border)">
+            <div v-for="m in g.mods" :key="m.id"
+                 class="flex items-center gap-3 py-2 cursor-pointer rounded"
+                 @click="toggleMod(m)">
+              <span class="shrink-0 flex items-center justify-center rounded overflow-hidden"
+                    style="width: 40px; height: 40px; background: var(--surface-2)">
+                <img v-if="covers[m.id]" :src="covers[m.id]" class="w-full h-full object-cover" alt="" />
+                <ImageOff v-else :size="15" class="empty-icon" />
+              </span>
+              <span v-if="selected.has(String(m.id))"
+                    class="shrink-0 flex items-center justify-center rounded-full"
+                    style="width: 18px; height: 18px; background: var(--accent); color: #fff">
+                <Check :size="12" :stroke-width="3" />
+              </span>
+              <span class="min-w-0 flex-1">
+                <span class="block truncate text-sm" :title="m.name">{{ m.name }}</span>
+                <span class="block text-xs" style="color: var(--text-muted)">
+                  {{ selected.has(String(m.id)) ? "已启用" : "未启用" }}{{ m.kind === "unknown" ? " · 类型待确认" : "" }}
+                </span>
+              </span>
+              <button class="btn btn-mini shrink-0" title="更多：更改所属角色 / 修复 / 回滚 / 移出库"
+                      @click="openMenu(m, $event)">⋯</button>
             </div>
           </div>
-          <Switch :model-value="!!settings.efmi_injection" @update:model-value="(v) => saveSetting('efmi_injection', v)" />
-        </div>
-        <div class="switch-row" @click="saveSetting('allow_same_character_mods', !settings.allow_same_character_mods)">
-          <div class="min-w-0">
-            <div class="font-medium">强行关闭角色 Mod 互斥</div>
-            <div class="text-xs mt-0.5" style="color: var(--text-muted)">
-              开启后勾选一个 Mod 不会再把同角色的其它 Mod 自动取消。<b>默认关闭</b> —— 同角色两个 Mod 同时生效常常会让游戏崩。
-            </div>
-          </div>
-          <Switch :model-value="!!settings.allow_same_character_mods" @update:model-value="(v) => saveSetting('allow_same_character_mods', v)" />
         </div>
       </div>
     </Card>
@@ -265,56 +299,26 @@ onUnmounted(() => { if (timer) clearInterval(timer); if (dlTimer) clearInterval(
       </div>
     </Card>
 
-    <Card title="Mod 列表">
-      <div class="flex flex-wrap items-center gap-2">
-        <Btn variant="primary" @click="prepare" :disabled="busy">生成控制器</Btn>
-        <Btn @click="scan" :disabled="busy">重新扫描</Btn>
-        <Btn variant="ghost" @click="fixAll">一键修复所有 Mod</Btn>
-        <Badge tone="warn">实验性</Badge>
-        <span class="text-xs" style="color: var(--text-muted)">同角色自动互斥，勾选自动保存。</span>
-      </div>
-      <div v-if="!groups.length" class="empty-state">
-        <Library :size="30" class="empty-icon" />
-        <div class="empty-title">还没有发现 Mod</div>
-        <div>把 .zip / .7z / .rar 拖到窗口任意处即可导入；也可以在上面粘贴网址下载。</div>
-        <div>如果你已经把 Mod 放进 Mod 库目录了，点「重新扫描」。</div>
-      </div>
-      <div v-else class="mt-3 space-y-4">
-        <div v-for="g in groups" :key="g.name" class="rounded-lg border p-3" style="border-color: var(--border)">
-          <div class="flex items-center justify-between mb-3">
-            <h3 class="font-semibold">{{ g.name }}</h3>
-            <span class="text-xs" style="color: var(--text-muted)">{{ g.mods.length }} 个 Mod · 已启用 {{ g.enabled }}</span>
-          </div>
-          <div class="grid gap-3" style="grid-template-columns: repeat(auto-fill, minmax(200px, 1fr))">
-            <div v-for="m in g.mods" :key="m.id"
-                 class="relative rounded-lg border p-2.5 cursor-pointer transition-colors"
-                 :style="{ borderColor: selected.has(String(m.id)) ? 'var(--accent)' : 'var(--border)',
-                           background: selected.has(String(m.id)) ? 'var(--accent-soft)' : 'var(--surface)' }"
-                 @click="toggleMod(m)">
-              <!-- 勾选标识：光靠底部一行小字，扫一屏根本看不出启用了哪些（评审） -->
-              <span v-if="selected.has(String(m.id))"
-                    class="absolute z-10 flex items-center justify-center rounded-full"
-                    style="top: 8px; left: 8px; width: 20px; height: 20px;
-                           background: var(--accent); color: #fff; box-shadow: var(--sh-sm)">
-                <Check :size="13" :stroke-width="3" />
-              </span>
-              <div class="h-24 rounded mb-2 overflow-hidden flex items-center justify-center"
-                   style="background: var(--surface-2)">
-                <img v-if="covers[m.id]" :src="covers[m.id]" class="w-full h-full object-cover" alt="" />
-                <span v-else class="text-xs" style="color: var(--text-muted)">无预览图</span>
-              </div>
-              <div class="flex items-start justify-between gap-2">
-                <div class="min-w-0">
-                  <div class="font-medium truncate text-sm">{{ m.name }}</div>
-                  <div class="text-xs mt-0.5" style="color: var(--text-muted)">
-                    {{ selected.has(String(m.id)) ? "已勾选" : "未勾选" }}
-                  </div>
-                </div>
-                <button class="btn btn-mini shrink-0" title="更多：更换归属 / 修复 / 回滚 / 移出库"
-                        @click="openMenu(m, $event)">⋯</button>
-              </div>
+    <Card title="皮肤 Mod">
+      <template #badge><Badge tone="muted">总开关</Badge></template>
+      <div class="divide-y" style="border-color: var(--border)">
+        <div class="switch-row" @click="saveSetting('efmi_injection', !settings.efmi_injection)">
+          <div class="min-w-0">
+            <div class="font-medium">开启皮肤 Mod</div>
+            <div class="text-xs mt-0.5" style="color: var(--text-muted)">
+              总开关：关闭后一个皮肤都不加载（Mods 目录会被清空，随时可开回来）。⚠️ 注意这不是停掉 EFMI 注入 —— 实测那样终末地会直接拉不起来。
             </div>
           </div>
+          <Switch :model-value="!!settings.efmi_injection" @update:model-value="(v) => saveSetting('efmi_injection', v)" />
+        </div>
+        <div class="switch-row" @click="saveSetting('allow_same_character_mods', !settings.allow_same_character_mods)">
+          <div class="min-w-0">
+            <div class="font-medium">强行关闭角色 Mod 互斥</div>
+            <div class="text-xs mt-0.5" style="color: var(--text-muted)">
+              开启后勾选一个 Mod 不会再把同角色的其它 Mod 自动取消。<b>默认关闭</b> —— 同角色两个 Mod 同时生效常常会让游戏崩。
+            </div>
+          </div>
+          <Switch :model-value="!!settings.allow_same_character_mods" @update:model-value="(v) => saveSetting('allow_same_character_mods', v)" />
         </div>
       </div>
     </Card>

@@ -45,6 +45,14 @@ PROBE_BYTES = 1 << 20
 MIN_PARALLEL_BYTES = 4 << 20
 # 每块大小 / 最大线程数
 CHUNK_BYTES = 2 << 20
+# ── 照 PCL（ModNet.vb `TryBeginThread`）的分片策略（2026-10-03）──────────────
+# PCL 不预先切死：它每次要开新线程时去找**当前最大的未完成碎片**，从它的
+# `DownloadEnd - DownloadUndone * 0.4` 处切开，并且用 `FilePieceLimit` 兜底。
+# 我们这边线程数在开始时就定了，所以把那套意图落成两条等价规则：
+#   * **每线程至少 PIECES_PER_THREAD 块** —— 收尾时不会有"最后一个巨块"拖后腿；
+#   * **块数不超过 MAX_PIECES** —— 大文件别切成上千个碎块（请求开销反而更大）。
+PIECES_PER_THREAD = 4
+MAX_PIECES = 256
 MAX_THREADS = 20
 READ_CHUNK = 262144
 # 单次读多久没数据算"抖动/卡死"，切并发续传
@@ -452,11 +460,19 @@ def _download_parallel(
     max_seconds > 0：**试用窗口** —— 到点就不再提交新块（在跑的让它跑完），
     用于"先试试并发到底有没有用，没用就切回单连接"（见 `_attempt_line` 的②段）。
     """
-    spans = [(pos, min(pos + chunk - 1, size - 1)) for pos in range(0, size, chunk)]
+    # 块大小跟着线程数与文件大小走（PCL 的分片意图见上面的常量注释）。
+    # 原来固定 2 MB：大文件会切成上千块（每块一次 Range 请求），
+    # 而且线程数一多，尾部总有几个块在单独跑、其它线程空转。
+    piece_chunk = max(CHUNK_BYTES, -(-size // max(1, threads * PIECES_PER_THREAD)))
+    piece_chunk = max(piece_chunk, -(-size // MAX_PIECES))
+    spans = [(pos, min(pos + piece_chunk - 1, size - 1)) for pos in range(0, size, piece_chunk)]
     done_spans = _load_parts(dest, size)
     if not done_spans and start > 0:
         done_spans = {(a, b) for a, b in spans if b < start}
-    todo = [span for span in spans if span not in done_spans]
+    # **长块优先**：对应 PCL 的"寻找最大碎片"——先让大块开跑，
+    # 避免收尾时剩一个大块、其它线程都在空转（那是最典型的"最后 5% 特别慢"）。
+    todo = sorted((s for s in spans if s not in done_spans),
+                  key=lambda sp: sp[1] - sp[0], reverse=True)
 
     lock = threading.Lock()
     state = {"n": sum(b - a + 1 for a, b in done_spans), "retries": 0}

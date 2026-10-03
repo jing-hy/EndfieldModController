@@ -11,6 +11,7 @@ import Badge from "../components/ui/Badge.vue";
 
 const items = ref([]);
 const running = ref(false);
+const checked = ref(false);   // 是否至少查过一次（区分"未检查"和"已就绪"）
 const logLines = ref(["等待开始…（这里会显示下载线路尝试、断点续传、组件安装等详细过程）"]);
 const status = ref("");
 const percent = ref(0);
@@ -26,9 +27,12 @@ const required = computed(() => (store.state.dependency_report || {}).required |
 const okCount = computed(() => deps.value.filter((d) => d.status === "已安装").length);
 const missingCount = computed(() => deps.value.filter((d) => d.status === "缺失").length);
 const progressLabel = computed(() => {
+  // 评审指出：摘要写「已就绪」、进度写「尚未开始」，两个状态互相打架 ——
+  // 这里统一成**一次流程**的状态，并且明确"还没检查过"这一档。
   if (running.value) return "进行中";
-  if (!deps.value.length) return "未检查";
-  return missingCount.value ? "待补齐" : "已就绪";
+  if (!checked.value) return "未检查";
+  if (missingCount.value) return "待补齐";
+  return "全部就位";
 });
 
 function tone(state) {
@@ -79,11 +83,11 @@ onUnmounted(() => { if (timer) clearInterval(timer); });
     <div class="grid gap-3" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr))">
       <div class="card"><div class="card-body">
         <div class="text-xl font-semibold">{{ okCount }}</div>
-        <div class="text-xs mt-0.5" style="color: var(--text-muted)">已就位</div>
+        <div class="text-xs mt-0.5" style="color: var(--text-muted)">已就位组件</div>
       </div></div>
       <div class="card"><div class="card-body">
         <div class="text-xl font-semibold">{{ missingCount }}</div>
-        <div class="text-xs mt-0.5" style="color: var(--text-muted)">缺失</div>
+        <div class="text-xs mt-0.5" style="color: var(--text-muted)">缺失组件</div>
       </div></div>
       <div class="card"><div class="card-body">
         <div class="text-xl font-semibold">{{ progressLabel }}</div>
@@ -106,7 +110,9 @@ onUnmounted(() => { if (timer) clearInterval(timer); });
         </span>
       </div>
       <div v-if="logLines.length" class="log-box" style="max-height: 260px; border-radius: 0">{{ logLines.join("\n") }}</div>
-      <div v-else class="log-empty">尚未开始。点「自动安装/更新」后，下载线路尝试、断点续传与组件安装过程会显示在这里。</div>
+      <div v-else class="log-empty" style="min-height: 52px; text-align: center">
+        尚未开始。点「安装缺失依赖」后，这里会显示下载线路与安装过程。
+      </div>
     </div>
 
     <Card v-if="deps.length" title="组件状态">

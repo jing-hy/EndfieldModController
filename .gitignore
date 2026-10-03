@@ -79,3 +79,7 @@ frontend/node_modules/
 frontend/.vite/
 # 运行时产物：Mod 备份仓（内容随用户库变化，不该进版本库）
 mod-backup/
+
+# UI 截图用的真实库快照（不进仓库、不进 exe）
+web/dist/demo-state.js
+frontend/src/demo-state.json

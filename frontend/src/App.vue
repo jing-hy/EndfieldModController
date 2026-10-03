@@ -8,6 +8,7 @@ import { waitForBridge, reportFrontendError } from "./lib/bridge.js";
 import { loadSettings } from "./lib/settings.js";
 import { dragHasFiles, importDroppedFile } from "./lib/importMod.js";
 import { normalizeAnnouncements } from "./lib/announce.js";
+import UpdateBadge from "./components/UpdateBadge.vue";
 import { showModalDialog, showToast } from "./lib/dialog.js";
 import { call } from "./lib/bridge.js";
 import DialogHost from "./components/DialogHost.vue";
@@ -78,6 +79,25 @@ onMounted(async () => {
   if (String(location.hash || "").startsWith("#preview")) {
     store.tab = "preview";
     return;
+  }
+  // `?demo=1`：用真实库快照渲染（**只给截图/评审用**，文件不随正式包分发）。
+  // 用 <script> 注入而不是 fetch —— file:// 下 fetch 本地 json 会被 CORS 拦掉。
+  if (new URLSearchParams(location.search).get("demo") === "1") {
+    await new Promise((resolve) => {
+      const el = document.createElement("script");
+      el.src = "./demo-state.js";
+      el.onload = resolve;
+      el.onerror = resolve;
+      document.head.appendChild(el);
+    });
+    if (window.__DEMO_STATE__) {
+      store.state = window.__DEMO_STATE__;
+      store.mods = store.state.mods || [];
+      store.config = store.state.config || {};
+      store.ready = true;
+      loadSettings();
+      return;
+    }
   }
   // 拖放导入（全局：任何页都能拖）
   window.addEventListener("dragenter", (e) => {
@@ -159,6 +179,10 @@ onMounted(async () => {
           <span class="text-sm">{{ t.name }}</span>
         </button>
       </nav>
+      <!-- 自更新入口（用户要求：左侧导航下面、主题色上面） -->
+      <div class="p-1.5 border-t" style="border-color: var(--border)">
+        <UpdateBadge />
+      </div>
       <div class="p-2 border-t relative" style="border-color: var(--border)">
         <button @click="themeOpen = !themeOpen"
           class="w-full flex items-center gap-2.5 px-3 py-2 rounded text-sm"
@@ -197,8 +221,7 @@ onMounted(async () => {
         <div>
           <h1 class="page-title">{{ currentName }}</h1>
         </div>
-        <!-- 版本号：拿不到就**整个不显示**（评审：原来显示成 `v...`，像加载失败） -->
-        <span v-if="versionText" class="text-xs" style="color: var(--text-muted)">{{ versionText }}</span>
+        <!-- 版本号与更新入口统一放在左侧栏底部（顶栏不再重复显示） -->
       </header>
       <div class="px-6 py-5">
         <div class="page-inner">
