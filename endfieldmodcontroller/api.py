@@ -2860,15 +2860,31 @@ class EndfieldModControllerApi:
     def confirm_exit(self) -> dict[str, Any]:
         """用户在"正在下载，仍要退出吗"的框里点了"仍然退出"。
 
-        直接干净收尾并退出，而不是"只设标志等窗口自己关"：`closing` 那条路是阻塞的、
-        前端弹窗是异步的，只设标志还得用户再点一次关闭。
+        ⚠️⚠️ **必须保证"一定退得掉"**（2026-10-03 用户：「**还有退出弹窗也卡死**」）。
+        原先这里是「`self.shutdown()` → `os._exit(0)`」串行执行：
+        `shutdown()` 要停下载线程、收尾文件，**它一旦卡住（等锁 / 等线程 / 等网络），
+        后面的 `os._exit` 就永远执行不到**，而前端还在 `await` 这个调用的返回 ——
+        表现就是"点了仍然退出，然后整个程序卡死"。
+        现在：**标记 + 日志立刻做，收尾丢到后台线程且硬限时，主线程直接退出**。
         """
         self.exit_confirmed = True
-        launcher._append_log(self.config, "用户确认在下载中退出程序")
         try:
-            self.shutdown()
+            launcher._append_log(self.config, "用户确认在下载中退出程序")
         except Exception:  # noqa: BLE001
             pass
+
+        def _cleanup() -> None:
+            try:
+                self.shutdown()
+            except Exception:  # noqa: BLE001
+                pass
+            os._exit(0)
+
+        threading.Thread(target=_cleanup, daemon=True).start()
+        # 给收尾最多 2 秒；到点无论如何都退（daemon 线程会随进程一起结束）
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            time.sleep(0.05)
         os._exit(0)
 
     def cancel_mod_downloads(self) -> dict[str, Any]:

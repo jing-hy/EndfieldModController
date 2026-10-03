@@ -170,8 +170,10 @@ window.mcAskExit = async function () {
       okText: "仍然退出", cancelText: "继续下载",
     });
     if (!ok) return;
-    try { await call("confirm_exit"); } catch (e) { /* 忽略：下面照样再关一次 */ }
-    try { window.pywebview && window.pywebview.api && window.close(); } catch (e) { /* 忽略 */ }
+    // ⚠️ 这里**只调后端**，不要再调 JS 的 `window.close()` ——
+    // 那个 `window` 是浏览器的 window，关不掉 pywebview 的窗口（还会让人以为"关过了"）。
+    // 后端 `confirm_exit` 会自己收尾并 `os._exit`，这条调用不返回是正常的。
+    try { await call("confirm_exit"); } catch (e) { /* 后端已经在退出了，忽略即可 */ }
   } catch (e) { /* 弹窗都失败了就别再挡着，交给后端超时放行 */ }
 };
 

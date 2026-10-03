@@ -47,7 +47,12 @@ function rowColor(d) {
 const speedBps = ref(0);      // 由 pollProgress 从 get_dependency_progress 里取
 const modDlActive = ref(false);        // 是否有 Mod 下载在跑（用来联动进度条与速度）
 const modDlMarks = new Map();          // 每条任务上次记下的状态与百分比台阶（避免刷屏）
-const speedText = computed(() => (speedBps.value > 0 ? humanSize(speedBps.value) + "/s" : "—"));
+// ⚠️ 准备阶段的提示（读取香蕉网信息要 18~51 秒，这期间没有字节在动）
+const prepLabel = ref("");
+const speedText = computed(() => {
+  if (speedBps.value > 0) return humanSize(speedBps.value) + "/s";
+  return prepLabel.value || "—";
+});
 function humanSize(bytes) {
   const n = Number(bytes) || 0;
   if (n >= 1048576) return (n / 1048576).toFixed(1) + " MB";
@@ -110,7 +115,21 @@ async function pollProgress() {
     try {
       const md = await call("mod_download_progress");
       const items = (md && md.items) || [];
+      // ⚠️ **只要有任务就算"活跃"**（2026-10-03 用户：「速度一直是横线，进度条也没开始，
+      // 文字也是未开始」）。原先这里是 `items.length > 0 && !md.done` ——
+      // 任务刚起来时后端还在「读取香蕉网信息」（要 18~51 秒：拿文件列表、封面、算真实直链），
+      // 这段时间 `done` 还没置、但进度/速度全是 0，前端就什么都不显示 ⇒
+      // 用户看到的是"未开始 + 速度横线"，以为程序没动。
+      // 现在：**有任务就活跃**，并把这个阶段如实显示出来。
       modDlActive.value = items.length > 0 && !md.done;
+      if (items.length && !md.done) {
+        const prepping = items.filter((it) => !Number(it.size) && !Number(it.received));
+        if (prepping.length) {
+          const st = String(prepping[0].status || "准备中");
+          progressText.value = `Mod 下载：${st}…（${prepping.length} 个）`;
+          if (!speedBps.value) prepLabel.value = "探测中…";
+        }
+      }
       if (items.length) {
         for (const it of items) {
           const pct = it.size ? Math.floor((it.received / it.size) * 100) : -1;
