@@ -24,10 +24,10 @@ const releases = computed(() => store.state.releases_url || REPO + "/releases");
 
     <Card title="进游戏后">
       <ul class="list-disc pl-5 space-y-1.5 text-sm leading-6">
-        <li>按 <code>Home</code> 打开 ReShade：插件页应同时有 <b>RenoDX-DLSS5</b> 与 <b>Endfield Enhancer</b>。</li>
+        <li>按 <kbd class="kbd">Home</kbd> 打开 ReShade：插件页应同时有 <b>RenoDX-DLSS5</b> 与 <b>Endfield Enhancer</b>。</li>
         <li>DLSS5 页勾「启用 DLSS 神经渲染」+「启用超分」；风格选电影，总体/结构强度拉满，角色皮肤结构 ≥ 0。</li>
         <li>Enhancer 的 Camera 页：先开 Camera Controls → First Person = On → Third Person During Combat = <b>Off</b>（打 boss 才不会被踢出第一人称）→ EFMI/XXMI Compatibility = On。</li>
-        <li>快捷键：<code>F6</code> 神经渲染开关、<code>F11</code> Mod 显示、<code>,</code> 第一人称、<code>F12</code> EFMI 帮助。</li>
+        <li>快捷键：<kbd class="kbd">F6</kbd> 神经渲染开关、<kbd class="kbd">F11</kbd> Mod 显示、<kbd class="kbd">,</kbd> 第一人称、<kbd class="kbd">F12</kbd> EFMI 帮助。</li>
       </ul>
     </Card>
 
@@ -35,14 +35,18 @@ const releases = computed(() => store.state.releases_url || REPO + "/releases");
       <ul class="list-disc pl-5 space-y-1.5 text-sm leading-6">
         <li>上游 <a class="text-accent" href="https://github.com/OedoSoldier/Endfield-Poser" target="_blank" rel="noopener">OedoSoldier/Endfield-Poser</a>（AGPL-3.0，二进制不随包分发）。</li>
         <li>它和乳摇（SecondaryMotion）用<b>同一套注入机制</b>：游戏目录里的 <code>d3dcompiler_47</code> proxy 会把 <code>plugin\*.dll</code> 全部加载进游戏进程，所以两个插件能共存；卸载其中一方时，只要另一方还在就保留 proxy。</li>
-        <li>游戏内快捷键：<code>L</code> 显示/隐藏面板、<code>P</code> 冻结/解冻、按住 <code>Alt</code> 呼出光标、<code>Ctrl+F5/F6/F7/F8</code> 播放/暂停/停止/回首帧；它还有一个独立摆姿页 <code>http://127.0.0.1:18923</code>。</li>
+        <li>游戏内快捷键：<kbd class="kbd">L</kbd> 显示/隐藏面板、<kbd class="kbd">P</kbd> 冻结/解冻、按住 <kbd class="kbd">Alt</kbd> 呼出光标、<kbd class="kbd">Ctrl</kbd>+<kbd class="kbd">F5</kbd>/<kbd class="kbd">F6</kbd>/<kbd class="kbd">F7</kbd>/<kbd class="kbd">F8</kbd> 播放/暂停/停止/回首帧；它还有一个独立摆姿页 <code>http://127.0.0.1:18923</code>。</li>
         <li>开关含义：关掉只把 <code>plugin\poser.dll</code> 改名（可逆、不动 proxy、不动其它插件）；要真正移除文件请点设置页的卸载（走它自己的卸载向导）。</li>
       </ul>
     </Card>
 
     <Card title="注意">
+      <div class="rounded-lg p-3 mb-3"
+           style="background: color-mix(in srgb, var(--warn) 10%, transparent); border-left: 3px solid var(--warn)">
+        <div class="text-sm font-medium" style="color: var(--warn)">Mod 有 ToS / 账号风险</div>
+        <div class="text-sm mt-1 leading-6">显卡压力也比单开大（UP 主建议 40 系以上）。请自行判断是否使用。</div>
+      </div>
       <ul class="list-disc pl-5 space-y-1.5 text-sm leading-6">
-        <li>Mod 有 ToS / 账号风险；显卡压力也比单开大（UP 主建议 40 系以上）。</li>
         <li>游戏目录里的第三方 proxy（<code>d3dcompiler_47.dll</code> / <code>vulkan-1.dll</code>）属于别的工具（如 SecondaryMotion 摇乳管理器），与本方案无关，但会出现在「检查游戏目录注入」列表里。</li>
       </ul>
     </Card>

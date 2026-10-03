@@ -1,4 +1,5 @@
 <script setup>
+// 设置项开关：**整行可点**（评审：只有右侧 40x22 能点到，容易点空）+ 显示状态文字。
 import { settings, saveSetting } from "../../lib/settings.js";
 import Switch from "./Switch.vue";
 const props = defineProps({
@@ -8,8 +9,11 @@ const props = defineProps({
 });
 </script>
 <template>
-  <div class="flex items-center justify-between gap-4 py-2">
-    <span class="text-sm min-w-0" :title="hint">{{ label }}</span>
-    <Switch :model-value="!!settings[props.k]" @update:model-value="(v) => saveSetting(props.k, v)" />
+  <div class="switch-row" :title="hint" @click="saveSetting(props.k, !settings[props.k])">
+    <span class="text-sm min-w-0">{{ label }}</span>
+    <span class="flex items-center gap-2 shrink-0">
+      <span class="switch-state">{{ settings[props.k] ? "已开启" : "已关闭" }}</span>
+      <Switch :model-value="!!settings[props.k]" @update:model-value="(v) => saveSetting(props.k, v)" />
+    </span>
   </div>
 </template>

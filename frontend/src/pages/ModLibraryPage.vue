@@ -9,9 +9,11 @@ import { loadSettings } from "../lib/settings.js";
 import { settings, saveSetting } from "../lib/settings.js";
 import { humanSize } from "../lib/util.js";
 import Card from "../components/ui/Card.vue";
+import { Library } from "lucide-vue-next";
 import Btn from "../components/ui/Btn.vue";
 import Switch from "../components/ui/Switch.vue";
 import ConflictDialog from "../components/ConflictDialog.vue";
+import { Check } from "lucide-vue-next";
 import { showAlert, showModalDialog, showToast } from "../lib/dialog.js";
 import { setStatus } from "../lib/status.js";
 
@@ -272,6 +274,7 @@ onUnmounted(() => { if (timer) clearInterval(timer); if (dlTimer) clearInterval(
         <span class="text-xs" style="color: var(--text-muted)">同角色自动互斥，勾选自动保存。</span>
       </div>
       <div v-if="!groups.length" class="empty-state">
+        <Library :size="30" class="empty-icon" />
         <div class="empty-title">还没有发现 Mod</div>
         <div>把 .zip / .7z / .rar 拖到窗口任意处即可导入；也可以在上面粘贴网址下载。</div>
         <div>如果你已经把 Mod 放进 Mod 库目录了，点「重新扫描」。</div>
@@ -284,10 +287,17 @@ onUnmounted(() => { if (timer) clearInterval(timer); if (dlTimer) clearInterval(
           </div>
           <div class="grid gap-3" style="grid-template-columns: repeat(auto-fill, minmax(200px, 1fr))">
             <div v-for="m in g.mods" :key="m.id"
-                 class="rounded-lg border p-2.5 cursor-pointer transition-colors"
+                 class="relative rounded-lg border p-2.5 cursor-pointer transition-colors"
                  :style="{ borderColor: selected.has(String(m.id)) ? 'var(--accent)' : 'var(--border)',
                            background: selected.has(String(m.id)) ? 'var(--accent-soft)' : 'var(--surface)' }"
                  @click="toggleMod(m)">
+              <!-- 勾选标识：光靠底部一行小字，扫一屏根本看不出启用了哪些（评审） -->
+              <span v-if="selected.has(String(m.id))"
+                    class="absolute z-10 flex items-center justify-center rounded-full"
+                    style="top: 8px; left: 8px; width: 20px; height: 20px;
+                           background: var(--accent); color: #fff; box-shadow: var(--sh-sm)">
+                <Check :size="13" :stroke-width="3" />
+              </span>
               <div class="h-24 rounded mb-2 overflow-hidden flex items-center justify-center"
                    style="background: var(--surface-2)">
                 <img v-if="covers[m.id]" :src="covers[m.id]" class="w-full h-full object-cover" alt="" />
