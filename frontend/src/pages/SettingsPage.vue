@@ -624,6 +624,19 @@ useLogAutoScroll(probeBox, () => probeText);
     </Card>
 
     <Card title="① 工作区与 Mod 库（相对主路径）">
+      <!-- ⚠️ **C10：主路径有两个来源，要都说清**（2026-10-03 补回归）。
+           0.9.5 显示的是 `state.dataRoot`（= `config.base_dir`，**程序所在目录**）；
+           新版这块绑的是 `config.data_root`（= "上次运行的路径"记录）。两者通常相同，
+           但**程序刚搬到别处**时可能不一致 —— 那时用户会以为是设置错了。
+           这里把"程序现在在哪"与"上次运行记录的路径"都列出来，不一致就提醒。 -->
+      <div class="text-xs pb-1.5 space-y-0.5" style="color: var(--text-muted)">
+        <div>程序所在目录：<code>{{ store.state.data_root || "（未知）" }}</code></div>
+        <div v-if="store.state.config && store.state.config.data_root && store.state.config.data_root !== store.state.data_root"
+             style="color: var(--warn)">
+          上次运行记录的是：<code>{{ store.state.config.data_root }}</code>
+          —— 与当前程序位置不同（程序搬过家？保存一次设置就会以当前位置为准）
+        </div>
+      </div>
       <SettingPath k="data_root" label="主路径" readonly placeholder="程序所在目录" hint="程序所在目录，下面这些都相对它" />
       <SettingPath k="runtime_dir" label="runtime 目录" placeholder="runtime" />
       <SettingPathBrowse k="library_dir" label="Mod 库目录" placeholder="library" kind="dir" />
