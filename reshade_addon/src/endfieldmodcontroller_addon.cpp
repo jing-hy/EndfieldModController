@@ -762,10 +762,145 @@ static void draw_injection_status()
     }
 }
 
+// ---------------------------------------------------------------------------
+// 界面大小（用户 2026-10-03 要求：「reshade 的 mod 控制页能不能加一个调整 UI 大小」）
+//
+//   用 ImGui 的 `FontGlobalScale` 缩放文字，同时按比例放大控件尺寸（`ScaleAllSizes`，
+//   只在数值变化时调一次，否则每帧累积会越缩越小）。
+//   值存在 addon 目录的 `ui_scale.txt` 里，下次进游戏仍然生效。
+//
+// 另附「重置面板布局」：ReShade 把面板窗口的尺寸/位置写进 `ReShade.ini` 的
+//   `[OVERLAY] Window=...`（形如 `[Window][###addons],Pos=8,,8,Size=895,,1584,...`）。
+//   那个尺寸一旦被拖得比屏幕还高，标签栏就会被挤出可视区、看起来"标签全没了"——
+//   清掉这个键，ReShade 下次启动就用回默认布局。
+// ---------------------------------------------------------------------------
+static float g_ui_scale = 1.0f;
+static bool g_layout_reset_done = false;   // 本次会话是否刚点过"重置面板布局"
+static float g_ui_scale_applied = 0.0f;
+
+static fs::path ui_scale_path()
+{
+    return g_base_path / L"ui_scale.txt";
+}
+
+static void load_ui_scale()
+{
+    std::ifstream file(ui_scale_path());
+    if (!file.is_open())
+        return;
+    std::string text;
+    std::getline(file, text);
+    try
+    {
+        const float value = std::stof(text);
+        if (value >= 0.5f && value <= 3.0f)
+            g_ui_scale = value;
+    }
+    catch (...)
+    {
+        // 文件坏了就用默认值，不影响面板
+    }
+}
+
+static void save_ui_scale()
+{
+    std::ofstream file(ui_scale_path(), std::ios::trunc);
+    if (!file.is_open())
+        return;
+    file << g_ui_scale;
+    addon_log("ui_scale saved: " + std::to_string(g_ui_scale));
+}
+
+// 自己缩样式：addon 不链接 ImGui（它由 ReShade 提供），而 ReShade 并没有导出
+// `ImGuiStyle::ScaleAllSizes` —— 用它会链接失败（undefined reference）。所以这里手写一份，
+// 只动最影响观感的字段，并按**基准值**重算，避免每次缩放累积误差。
+static void scale_style(float scale)
+{
+    ImGuiStyle &style = ImGui::GetStyle();
+    style.WindowPadding     = ImVec2(8.0f * scale, 8.0f * scale);
+    style.FramePadding      = ImVec2(4.0f * scale, 3.0f * scale);
+    style.CellPadding       = ImVec2(4.0f * scale, 2.0f * scale);
+    style.ItemSpacing       = ImVec2(8.0f * scale, 4.0f * scale);
+    style.ItemInnerSpacing  = ImVec2(4.0f * scale, 4.0f * scale);
+    style.IndentSpacing     = 21.0f * scale;
+    style.ScrollbarSize     = 14.0f * scale;
+    style.GrabMinSize       = 10.0f * scale;
+    style.FrameBorderSize   = 1.0f * scale;
+    style.WindowBorderSize  = 1.0f * scale;
+    style.ChildBorderSize   = 1.0f * scale;
+    style.PopupBorderSize   = 1.0f * scale;
+    style.WindowRounding    = 0.0f;
+    style.FrameRounding     = 3.0f * scale;
+    style.GrabRounding      = 3.0f * scale;
+    style.ScrollbarRounding = 3.0f * scale;
+    style.WindowMinSize     = ImVec2(32.0f * scale, 32.0f * scale);
+}
+
+// 每帧开头调一次；数值没变时什么都不做。
+static void apply_ui_scale()
+{
+    if (g_ui_scale_applied == g_ui_scale)
+        return;
+    ImGui::GetIO().FontGlobalScale = g_ui_scale;   // 文字大小
+    scale_style(g_ui_scale);                        // 控件尺寸（间距/内边距/滚动条等）
+    g_ui_scale_applied = g_ui_scale;
+    addon_log("ui_scale applied: " + std::to_string(g_ui_scale));
+}
+
+// 把 `ReShade.ini` 的 `[OVERLAY]` 段里那行 `Window=...` 清掉，让 ReShade 用回默认布局。
+static bool reset_overlay_layout()
+{
+    const fs::path ini = g_base_path / L"ReShade.ini";
+    std::ifstream in(ini);
+    if (!in.is_open())
+    {
+        addon_log("reset_overlay_layout: 打不开 " + ini.string());
+        return false;
+    }
+    std::vector<std::string> lines;
+    std::string line;
+    bool in_overlay = false;
+    bool cleared = false;
+    while (std::getline(in, line))
+    {
+        if (!line.empty() && line[0] == '[')
+        {
+            in_overlay = (line.rfind("[OVERLAY]", 0) == 0);
+            lines.push_back(line);
+            continue;
+        }
+        // Window= 这行是 ReShade 存窗口布局用的；清成空值即可恢复默认
+        if (in_overlay && line.rfind("Window=", 0) == 0)
+        {
+            lines.push_back("Window=");
+            cleared = true;
+            continue;
+        }
+        lines.push_back(line);
+    }
+    in.close();
+    if (!cleared)
+    {
+        addon_log("reset_overlay_layout: 没找到 [OVERLAY] Window= 行");
+        return false;
+    }
+    std::ofstream out(ini, std::ios::trunc | std::ios::binary);
+    if (!out.is_open())
+    {
+        addon_log("reset_overlay_layout: 写不回 " + ini.string());
+        return false;
+    }
+    for (const auto &item : lines)
+        out << item << "\r\n";
+    addon_log("reset_overlay_layout: 已清空 [OVERLAY] Window=（重启游戏后生效）");
+    return true;
+}
+
 static void draw_overlay(reshade::api::effect_runtime *runtime)
 {
     runtime->block_input_next_frame();
     check_cjk_font();
+    apply_ui_scale();          // 界面大小（用户可在面板里调）
 
     // hook 没装上就每 2 秒重试一次：正常时序里 EFMI 的 d3d11.dll 先加载、面板后加载，
     // 但"用户中途换过注入方式 / 面板先起来"的情况下，靠重试能自愈。
@@ -793,6 +928,30 @@ static void draw_overlay(reshade::api::effect_runtime *runtime)
     {
         load_paths();
         load_actions();
+    }
+    // ── 界面设置（默认折叠，不占地方）────────────────────────────────────
+    if (ImGui::CollapsingHeader(T("界面设置", "UI settings")))
+    {
+        ImGui::SetNextItemWidth(220.0f);
+        if (ImGui::SliderFloat(T("界面大小", "UI scale"), &g_ui_scale, 0.75f, 2.0f, "%.2fx"))
+            save_ui_scale();
+        ImGui::SameLine();
+        if (ImGui::SmallButton(T("改回 1.00x", "Reset to 1.00x")))
+        {
+            g_ui_scale = 1.0f;
+            save_ui_scale();
+        }
+        ImGui::TextDisabled("%s", T("调整面板文字与控件的大小，改完立刻生效、下次进游戏也记得。",
+                                    "Scales the panel text and controls; applied immediately and remembered."));
+
+        ImGui::Spacing();
+        if (ImGui::Button(T("重置面板布局", "Reset panel layout")))
+            g_layout_reset_done = reset_overlay_layout();
+        ImGui::TextDisabled("%s", T("面板标签栏被挤出屏幕 / 看不见时点它（改完要重启游戏生效）。",
+                                    "Use when the panel tabs are pushed off-screen (takes effect after restarting the game)."));
+        if (g_layout_reset_done)
+            ImGui::TextColored(ImVec4(0.45f, 0.85f, 0.45f, 1.0f), "%s",
+                               T("已重置 —— 重启游戏后标签栏就回来了。", "Reset done - restart the game to see the tabs again."));
     }
     draw_injection_status();
 
@@ -888,6 +1047,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
         load_actions();
         addon_log("actions loaded: " + std::to_string(g_actions.size()));
         load_paths();
+        load_ui_scale();      // 界面大小（用户上次调的）
         // 接上 EFMI 的读键路径（失败也不影响面板显示；draw_overlay 会每 2 秒重试）
         vkey::install();
         if (!reshade::register_addon(hModule))

@@ -1,7 +1,7 @@
 // 拖放导入 Mod：**照抄旧 web/app.js 的实现**（分块上传是关键 —— 一次性把整包 base64
 // 丢给 pywebview 会先卡住再闪退，2026-10-01 实测过）。
 import { call } from "./bridge.js";
-import { showAlert, showModalDialog } from "./dialog.js";
+import { showAlert, showModalDialog, showProgressToast, hideProgressToast } from "./dialog.js";
 import { setStatus } from "./status.js";
 
 const CHUNK = 1024 * 1024;
@@ -31,6 +31,7 @@ export async function importDroppedFile(file, { onDone } = {}) {
     return;
   }
   try {
+    showProgressToast("import", `准备导入 ${file.name} …`);
     const begin = await call("import_mod_begin", file.name);
     if (!begin || !begin.ok) {
       await showAlert("导入 Mod", (begin && begin.message) || "导入失败");
@@ -45,14 +46,20 @@ export async function importDroppedFile(file, { onDone } = {}) {
         return;
       }
       sent = end;
-      setStatus(`正在上传 ${file.name}：${Math.floor((sent * 100) / Math.max(file.size, 1))}%（${(sent / 1048576).toFixed(1)} MB）`);
+      // 用**一条会自我更新**的进度提示：原来这里是 setStatus，而 setStatus 带 toast，
+      // 于是每 1MB 弹一条、大包连弹上百条（用户反馈的"弹出来一堆动态"）。
+      const pct = Math.floor((sent * 100) / Math.max(file.size, 1));
+      showProgressToast("import", `正在上传 ${file.name}：${pct}%（${(sent / 1048576).toFixed(1)} MB）`);
+      setStatus(`正在上传 ${file.name}：${pct}%`);
     }
+    showProgressToast("import", `正在解压并识别角色：${file.name} …`);
     setStatus(`正在解压并识别角色：${file.name} …`);
     const result = await call("import_mod_finish", begin.token);
     if (!result || !result.ok) {
       await showAlert("导入 Mod", (result && result.message) || "导入失败");
       return;
     }
+    hideProgressToast("import");   // 收尾：把进度提示撤掉
     if (onDone) await onDone(result);
     if (result.need_confirm && result.mod_id) {
       // 识别不出角色就直接把确认窗弹出来（旧版用户反馈过"拖进去不弹窗"）

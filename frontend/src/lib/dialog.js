@@ -17,6 +17,33 @@ function inferTone(text) {
   return "info";
 }
 
+// 进度提示：同一个 key 只占一条 toast，后续更新文本而不是再弹一条 ——
+// 用于"上传中 12%…13%…"这类高频更新（否则会刷屏）。
+const progressToasts = new Map();
+
+export function showProgressToast(key, text) {
+  if (!key) return;
+  const existing = progressToasts.get(key);
+  if (existing) {
+    const found = uiState.toasts.find((t) => t.id === existing);
+    if (found) {
+      found.text = text;
+      return;
+    }
+  }
+  const id = ++toastSeq;
+  progressToasts.set(key, id);
+  uiState.toasts.push({ id, text, tone: "info", sticky: true });
+}
+
+export function hideProgressToast(key) {
+  const id = progressToasts.get(key);
+  if (!id) return;
+  progressToasts.delete(key);
+  const i = uiState.toasts.findIndex((t) => t.id === id);
+  if (i >= 0) uiState.toasts.splice(i, 1);
+}
+
 export function showToast(text, tone) {
   if (!text) return;
   const id = ++toastSeq;

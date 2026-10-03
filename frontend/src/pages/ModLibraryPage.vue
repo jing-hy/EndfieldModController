@@ -108,11 +108,11 @@ async function menuAct(act) {
     if (act === "fix") {
       const r = await call("fix_mod", m.id);
       if (r && r.ok === false) await showAlert("修复失败", r.message || "未知原因");
-      else setStatus(`已修复 ${m.name}`);
+      else showToast(`已修复 ${m.name}`, "success");
     } else if (act === "rollback") {
       const r = await call("rollback_mod", m.id);
       if (r && r.ok === false) await showAlert("回滚失败", r.message || "未知原因");
-      else setStatus(`已回滚 ${m.name}`);
+      else showToast(`已回滚 ${m.name}`, "success");
     } else if (act === "delete") {
       // 破坏性动作：默认聚焦安全项、按钮文字自解释（用户准则）
       const ok = await showModalDialog({
@@ -126,7 +126,7 @@ async function menuAct(act) {
       if (!ok) return;
       const r = await call("delete_mod", m.id);
       if (r && r.ok === false) await showAlert("移出失败", r.message || "未知原因");
-      else setStatus(r && r.moved_to ? `已移出库：${r.moved_to}` : "已移出 Mod 库");
+      else showToast(r && r.moved_to ? `已移出库：${r.moved_to}` : "已移出 Mod 库", "success");
     } else if (act === "character") {
       if (!chars.value.length) {
         const r = await call("known_characters");
@@ -159,7 +159,7 @@ async function prepare() {
     const info = await call("conflict_groups");
     const groups = (info && info.groups) || [];
     if (groups.length) conflicts.value = groups;
-    else setStatus("生成完毕，没有发现资源冲突。");
+    else showToast("生成完毕，没有发现资源冲突。", "success");
   } catch (e) { /* call 已弹窗 */ } finally { busy.value = false; }
 }
 
@@ -168,7 +168,7 @@ async function resolveConflicts(keep) {
   try {
     const r = await call("resolve_mod_conflicts", keep);
     if (r && r.ok === false) await showAlert("处理失败", r.message || "未知原因");
-    else setStatus((r && r.message) || "已处理冲突");
+    else showToast((r && r.message) || "已处理冲突", "success");
     await refreshState();
     loadSettings();
   } catch (e) { /* call 已弹窗 */ }
