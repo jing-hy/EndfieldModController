@@ -42,6 +42,24 @@ async function toggleMod(mod) {
 
 const covers = computed(() => store.covers);
 
+// 页内按**子类**分组（用户 2026-10-03：「辅助 Mod 是标签，实际页面卡片中需要在卡片细分
+// 加载页和功能类之类的」）—— 「辅助 Mod」只是标签页，同一页里还要按子类分开列，
+// 否则壁纸包和"隐藏 UI"混在一起看不出区别。顺序固定：加载页/壁纸 → 界面功能 → 工具 → 其它。
+const GROUP_ORDER = ["加载页 / 壁纸", "界面 / 功能类", "工具 / 画质类", "其它辅助"];
+function groupsOf(list) {
+  const picked = Array.isArray(list) ? list : [];
+  const buckets = new Map();
+  for (const m of picked) {
+    const key = String(m.group || "其它辅助");
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(m);
+  }
+  const known = GROUP_ORDER.filter((g) => buckets.has(g));
+  const rest = [...buckets.keys()].filter((g) => !GROUP_ORDER.includes(g)).sort();
+  return [...known, ...rest].map((name) => ({ name, mods: buckets.get(name) }));
+}
+const assistGroups = computed(() => groupsOf(list.value));
+
 // 辅助 Mod 也要有预览图（用户 2026-10-03：「辅助性mod也要留预览」）——
 // 与「Mod 库」页共用 store.covers 缓存，同一次会话只取一次。
 async function loadCover(id) {
@@ -83,11 +101,19 @@ async function openLib() { try { await call("open_path_in_explorer", "library");
          数量挪到标题右侧的副标题位，并在卡片里说清"辅助 Mod"到底指什么。 -->
     <Card v-else title="辅助 Mod" :sub="`${list.length} 个`">
       <p class="text-xs mb-2" style="color: var(--text-muted)">
-        这里放的是<b>不绑角色</b>的工具类 Mod —— 公共前置资源（例如湿润效果修复、RabbitFX
-        这类别人依赖的东西）。它们不参与换装，所以不占「Mod 库」里的角色分组。
+        这里放的是<b>不绑角色</b>的 Mod —— 加载页/壁纸、隐藏 UI、去水印、公共前置资源
+        （例如湿润效果修复、RabbitFX 这类别人依赖的东西）。它们不参与换装，所以不占「Mod 库」里的角色分组。
       </p>
-      <div class="divide-y" style="border-color: var(--border)">
-        <div v-for="m in list" :key="m.id"
+      <!-- 按**子类**分组列出（用户 2026-10-03：「辅助 Mod 是标签，实际页面卡片中需要在卡片细分
+           加载页和功能类之类的」）—— 壁纸包和"隐藏 UI"混在一起看不出区别。
+           同一子类共用 group ⇒ 「同角色互斥」把「加载页 / 壁纸」变成"同时只能开一个"。 -->
+      <div v-for="grp in assistGroups" :key="grp.name" class="mb-3 last:mb-0">
+        <div class="flex items-center justify-between mb-1">
+          <h4 class="text-xs font-semibold" style="color: var(--text-muted)">{{ grp.name }}</h4>
+          <span class="text-xs" style="color: var(--text-muted)">{{ grp.mods.length }} 个</span>
+        </div>
+        <div class="divide-y" style="border-color: var(--border)">
+        <div v-for="m in grp.mods" :key="m.id"
              class="py-2.5 flex items-center justify-between gap-4 cursor-pointer"
              @click="toggleMod(m)">
           <span class="shrink-0 rounded overflow-hidden flex items-center justify-center"
@@ -97,16 +123,15 @@ async function openLib() { try { await call("open_path_in_explorer", "library");
           </span>
           <div class="min-w-0 flex-1">
             <div class="font-medium truncate">{{ m.name }}</div>
-            <!-- 组名常常就是它自己的名字（公共前置资源没有角色归属），一样就不要重复显示 -->
-            <div v-if="m.group && m.group !== m.name" class="text-xs mt-0.5" style="color: var(--text-muted)">
-              {{ m.group }}
-            </div>
+            <!-- 组名常常就是它自己的名字（公共前置资源没有角色归属），一样就不要重复显示；
+                 现在分组标题已经写了子类，明细行里就不再重复 -->
           </div>
           <span class="flex items-center gap-2 shrink-0">
             <span class="switch-state">{{ selected.has(String(m.id)) ? "已启用" : "未启用" }}</span>
             <Switch :model-value="selected.has(String(m.id))"
                     @update:model-value="() => toggleMod(m)" />
           </span>
+        </div>
         </div>
       </div>
     </Card>

@@ -159,6 +159,10 @@ def _download_extract(
             Path(tmp) / asset_name,
             chunk_callback=(lambda received, expected: byte_progress(index, total, key, received, expected)) if byte_progress else None,
             expected_sha256=expected_sha256,
+            # ⚠️ 把日志接到 fastnet 上：直连被掐时它会**自动换镜像线路**，
+            # 那些"尝试直连 / 换线路 X"的行如果不写出来，用户看到的就是**界面一动不动**。
+            #（2026-10-03 实测：XXMI 下载卡了十几分钟、日志停在"checking"，看不出任何原因。）
+            log=log,
         )
         assert isinstance(archive, Path)
         # 2026-10-01 修（⑧）：原先直接解压进 target（copytree 合并语义）—— 更新时
@@ -180,6 +184,23 @@ def _download_extract(
             fsutil.write_bytes_atomic(destination, item.read_bytes())
 
 
+def _note(config: AppConfig | None, message: str) -> None:
+    """把关键节点写进 `runtime/logs/launch.log`（依赖页的日志框读的就是它）。
+
+    用户定过：「接后台任务 ≠ 界面看得到」—— 开始 / 进行中 / 成功 / 失败四种状态都要有痕迹。
+    ⚠️ 用 `logging` 不够：项目统一走 `launcher._append_log` 写那个文件，
+    光 `logging.info` 在 noconsole 的打包版里等于丢进黑洞。
+    """
+    if config is None:
+        return
+    try:
+        from . import launcher
+
+        launcher._append_log(config, f"[组件] {message}")
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def ensure_xxmi(config: AppConfig, progress: Progress = None, byte_progress: ByteProgress = None) -> BuiltinResult:
     root = config.builtin_runtime_path / "XXMI"
     existing = _find_xxmi_exe(root)
@@ -187,11 +208,14 @@ def ensure_xxmi(config: AppConfig, progress: Progress = None, byte_progress: Byt
     if progress:
         progress(0, 3, "XXMI", "checking")
     url, version, asset_name, digest = _latest_release_asset(XXMI_REPO, XXMI_ASSET_PATTERN)
+    _note(config, f"XXMI：最新版 {version}，准备下载 {asset_name}")
     if existing and marker.get("version") == version:
         if progress:
             progress(1, 3, "XXMI", "up_to_date")
         return BuiltinResult("XXMI", "up_to_date", "already current", version, str(existing))
-    _download_extract(url, asset_name, root, byte_progress, 1, 3, "XXMI", expected_sha256=digest)
+    _download_extract(url, asset_name, root, byte_progress, 1, 3, "XXMI",
+                              expected_sha256=digest,
+                              log=lambda m: _note(config, m))
     exe = _find_xxmi_exe(root)
     if exe is None:
         raise RuntimeError("XXMI Launcher.exe was not found after extraction")

@@ -53,8 +53,10 @@ class RuntimeDepsTests(unittest.TestCase):
                 return self.poser_zip.as_uri(), "v-test", "poser.zip", ""
             return self.efmi_zip.as_uri(), "v-test", "efmi.zip", ""
 
+        # ⚠️ 用 `**kwargs` 接住新参数：`_download_extract` 之后又加了 `log`（把 fastnet
+        # 的换线路信息写进日志，2026-10-03），写死形参会让"只改产品不改测试"直接 TypeError。
         def fake_extract(url, asset_name, target, byte_progress=None, index=1, total=1,
-                         key="builtin", expected_sha256=""):
+                         key="builtin", expected_sha256="", **kwargs):
             mapping = {
                 "xxmi.zip": self.xxmi_zip,
                 "XXMI-PACKAGE-v-test.zip": self.xxmi_libs_zip,

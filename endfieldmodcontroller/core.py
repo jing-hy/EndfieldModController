@@ -824,8 +824,19 @@ def infer_kind_and_group(
             group = WALLPAPER_GROUP
         elif path is not None and looks_like_assist(path, rel_parts, meta, matched):
             kind = "assist"
+            # 页内再细分组（用户要求）
+            if group in ("", "未分类") or not matched:
+                group = assist_group_of(rel_parts, meta)
         else:
             kind = "character"
+    else:
+        # ⚠️ `kind` 是用户显式指定过的（`mod.meta.json` 里有值）⇒ 上面的自动判据整块跳过。
+        # 但**分组仍要算**：否则用户一旦手动移过"辅助 Mod"，它的 group 就永远停在目录名上，
+        # 页面里的子类分组（加载页/壁纸、界面功能类…）全部失效。
+        #（2026-10-03 实测：壁纸包被手动设过 kind 后，`looks_like_wallpaper` 明明返回 True，
+        #  group 却还是 `female_images_dark_mode_a12a6` —— 就是这里漏了。）
+        if kind == "assist" and (not group or group == rel_parts[0] if rel_parts else not group):
+            group = assist_group_of(rel_parts, meta)
     return kind, group or "未分类"
 
 
@@ -861,6 +872,32 @@ WALLPAPER_DIR_HINTS = (
 WALLPAPER_NEGATIVE_HINTS = ("meshes", "textures", "texture", "materials")
 
 WALLPAPER_GROUP = "加载页 / 壁纸"
+
+# 辅助 Mod 的**子类**（用户 2026-10-03：「辅助 Mod 是标签，实际页面卡片中需要在卡片细分
+# 加载页和功能类之类的」）—— 「辅助 Mod」只是标签页，页内卡片还要按子类分组显示。
+ASSIST_GROUP_HIDE = "界面 / 功能类"
+ASSIST_GROUP_TOOL = "工具 / 画质类"
+ASSIST_GROUP_OTHER = "其它辅助"
+# 命中这些词判成"界面/功能类"（隐藏 UI、去水印、改 HUD 这类）
+ASSIST_FUNC_HINTS = (
+    "隐藏", "去ui", "去界面", "水印", "hud", "uid", "hide", "watermark",
+    "overlay", "nohud", "no-ui", "uifix", "界面", "菜单",
+)
+
+
+def assist_group_of(rel_parts: Sequence[str], meta: dict[str, Any]) -> str:
+    """辅助 Mod 的**子类**（用于页内分组）。
+
+    顺序有意义：**加载页/壁纸**优先（壁纸包也常含 ui 字样，但它是背景资源而不是改界面行为）。
+    """
+    lowered = "/".join(str(x) for x in rel_parts).lower() + " " + str(meta.get("name", "")).lower()
+    if any(hint in lowered for hint in WALLPAPER_DIR_HINTS):
+        return WALLPAPER_GROUP
+    if any(k in lowered for k in ASSIST_FUNC_HINTS):
+        return ASSIST_GROUP_HIDE
+    if any(k in lowered for k in ("tool", "tools", "utility", "工具", "画质", "reshade", "postfx")):
+        return ASSIST_GROUP_TOOL
+    return ASSIST_GROUP_OTHER
 
 
 def looks_like_wallpaper(path: Path | None, rel_parts: Sequence[str]) -> bool:

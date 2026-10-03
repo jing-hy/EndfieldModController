@@ -48,6 +48,38 @@ async function toggleSwitch(sw) {
 }
 
 async function oneClick() {
+  // ⚠️ **先检查运行环境是否齐备，缺就拒绝启动**（用户 2026-10-03 明确要求：
+  // 「不存在应该拒绝启动弹出弹窗，然后跳转依赖开始下载」）。
+  //
+  // 背景：XXMI 本体缺失时，原来的流程会一头扎进 `ensure_xxmi()` 去联网下载 ——
+  // 而下载是后台线程、`byte_progress` 按设计**只更新百分比不写日志**，直连被掐的网络下
+  // 连接阶段会一直等（实测卡了十几分钟，日志停在 `builtin XXMI: checking`），
+  // 界面上看起来就是"拉不起 XXMI"、也没有任何原因。这种"静默卡死"最难排查。
+  try {
+    const st = await call("get_state");
+    const report = (st && st.dependency_report && st.dependency_report.manifest) || {};
+    const missing = Object.entries(report)
+      .filter(([, v]) => v && v.required !== false && v.present === false)
+      .map(([key, v]) => ({ key, name: v.display || key }));
+    if (missing.length) {
+      const names = missing.map((m) => `· ${m.name}`).join("\n");
+      const go = await showModalDialog({
+        title: "运行环境还没装好，先不启动",
+        message:
+          `缺这些组件：\n${names}\n\n` +
+          "现在启动会直接失败（或者卡在下载上）。建议先去「依赖」页把它们装好 —— " +
+          "点下面的「去安装」会跳过去并自动开始下载。",
+        okText: "去安装", cancelText: "取消",
+      });
+      if (go) {
+        store.autoStartDeps = true;
+        store.tab = "dependencies";
+      }
+      consoleLog.value = "缺少组件，已拦下启动：\n" + names;
+      return;
+    }
+  } catch (e) { /* 查不到就按原样往下走，别因为检查本身挡住用户 */ }
+
   running.value = true;
   try {
     const result = await call("launch");
