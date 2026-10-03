@@ -190,6 +190,11 @@ async function startUpdate() {
       await call("apply_app_update");
     } else {
       await call("start_app_update");
+      // ⚠️ **跳到「依赖」页**（2026-10-03 用户：「按更新的时候是要跳转到依赖页，
+      //    但是**不锁在依赖页**」）—— 那里有进度卡片、速度、日志框，
+      // 与 Mod 下载一致。**不锁页**：不做任何拦截，用户随时可以自己切走，
+      // 下载与下面的轮询都在后台继续（徽章上也一直显示进度）。
+      store.tab = "dependencies";
       // 下载是后台线程 —— 起一个 1 秒轮询，把百分比和速度显示出来，别让用户干等
       dlPercent.value = 0;
       dlSpeed.value = 0;

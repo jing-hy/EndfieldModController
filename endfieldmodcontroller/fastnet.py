@@ -88,10 +88,17 @@ BOOST_TRIAL_SECONDS = 12
 BOOST_KEEP_RATIO = 1.1
 # 多线路时单条线路的等待上限
 LINE_TIMEOUT_MULTI = 15
+# 「直连实测速度慢于最快镜像的多少倍，就让它排到镜像后面」（2026-10-03）。
+# 用倍数而不是绝对值，避免一次抖动就把直连永久降权（实测 0.009 vs 0.648 = 72 倍）。
+DIRECT_SLOW_RATIO = 2.0
 # 某条线路失败后多久再试
 # （别设太长：一次偶发失败——比如网络抖动导致 DNS 解析失败——就把最快的线路
 #   封掉半小时，反而会让用户只能退到慢线路，这正是"感觉还是很慢"的原因之一）
 LINE_FAIL_TTL = 5 * 60
+# ⚠️ **直连单独用更长的冷却**（2026-10-03 实测）：5 分钟就解封 ⇒
+# 「慢→拉黑→用镜像→解封→又试直连」无限循环，用户感受就是"不稳定"。
+# 直连慢/不通通常是**这台机器到 GitHub 的稳定事实**而非抖动。
+DIRECT_FAIL_TTL = 60 * 60
 # 连续失败几次才把线路临时封掉
 LINE_FAIL_THRESHOLD = 2
 # **HTTPS 证书不匹配**的线路要封得久一点：它不是"网络抖动"，而是这个网络端对这条线路
@@ -859,7 +866,9 @@ def _line_blocked(name: str, cache: dict[str, Any]) -> bool:
     if int(entry.get("fails") or 0) < threshold:
         return False
     fail_at = int(entry.get("fail_at") or 0)
-    ttl = LINE_CERT_FAIL_TTL if cert else LINE_FAIL_TTL
+    ttl = (LINE_CERT_FAIL_TTL if cert
+           else DIRECT_FAIL_TTL if name == DIRECT.name
+           else LINE_FAIL_TTL)
     return bool(fail_at) and (time.time() - fail_at) < ttl
 
 
@@ -884,7 +893,41 @@ def resolve_lines(url: str, mode: str) -> list[Line]:
     mirrors.sort(key=lambda line: -float((cache.get(line.name) or {}).get("mbps") or 0))
     fresh = [line for line in mirrors if not _line_blocked(line.name, cache)]
     # 直连连续失败过就跳过它 —— 否则每次都要白等一个探测超时（实测直连超时是 8 秒）
-    head = [] if _line_blocked(DIRECT.name, cache) else [DIRECT]
+    # ⚠️⚠️ **直连也要按实测速度决定排不排第一**（2026-10-03 用户：
+    #     「**现在下载怎么这么不稳定，这都不换线？**」）。
+    #
+    # 原逻辑是「直连只要没被拉黑就永远第一位」。实测到的两种情况都会坑：
+    #   ① 「成功但极慢」的直连（ok=true, mbps=0.009，28 MB 要 52 分钟）
+    #      **永远不会被拉黑**（fails=0）⇒ 每次下载都先陪它耗到底；
+    #   ② 拉黑只有 5 分钟 TTL（LINE_FAIL_TTL=300）⇒ 解封后又优先试它，
+    #      于是「慢 → 拉黑 → 用镜像 → 解封 → 又试直连」无限循环 —— 这就是不稳定。
+    #
+    # 现在：直连**实测过**且**明显慢于**最快镜像（DIRECT_SLOW_RATIO 倍）时排到后面。
+    # 用**倍数**避免一次抖动就误判；直连没测过（首次）或速度正常时仍保持直连优先。
+    direct_mbps = float((cache.get(DIRECT.name) or {}).get("mbps") or 0)
+    best_mirror = max(
+        (float((cache.get(line.name) or {}).get("mbps") or 0) for line in fresh),
+        default=0.0,
+    )
+    # ⚠️⚠️ **判据不能依赖「镜像有没有速度记录」**（2026-10-03 实测踩到）：
+    # 第一版写的是 `best_mirror > direct_mbps * DIRECT_SLOW_RATIO`，而实测那份缓存里
+    # **只有直连一条记录、镜像的 mbps 是空的** ⇒ `best_mirror = 0` ⇒ 条件永不成立
+    # ⇒ 直连照样排第一（用户报的就是「这都不换线」）。所以判据必须**自足**。
+    #
+    # 现在两条任一成立就让位：
+    #   ① 直连实测速度**低于「可用线」阈值**（DEAD_MBPS）—— 这正是我们判别人家
+    #      "死线"用的同一把尺子；它自己都达不到，当然该先试镜像；
+    #   ② 或者镜像实测过、且**明显更快**（保留倍数判据，镜像有数据时更精准）。
+    direct_too_slow = bool(
+        direct_mbps > 0 and (
+            direct_mbps < DEAD_MBPS
+            or (best_mirror > 0 and best_mirror > direct_mbps * DIRECT_SLOW_RATIO)
+        )
+    )
+    if direct_too_slow:
+        _log(None, f"[线路] 直连上次只有 {direct_mbps:.3f} MB/s"
+                   f"（镜像 {best_mirror:.3f}）—— 低于可用线 {DEAD_MBPS}，这次先试镜像")
+    head = [] if (_line_blocked(DIRECT.name, cache) or direct_too_slow) else [DIRECT]
     return [*head, *(fresh or mirrors)]
 
 
