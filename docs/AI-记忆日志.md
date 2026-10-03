@@ -4,7 +4,7 @@
 > 目的：让「当时为什么这么改、踩过什么坑」跟着源码一起留在仓库里。
 > 想改内容 → 改记忆库（用记忆工具），再跑一次本脚本；不要直接编辑本文件。
 
-- 生成时间：2026-10-03 23:54:13
+- 生成时间：2026-10-04 00:01:08
 - 来源：`.dsh-meow/memory.db`
 - 条目：489 条（已跳过 archived / 其它项目的条目）
 
@@ -517,16 +517,15 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 `关键词：["v1.0.3","长路径导入","issue 12 已关闭","贴图替换类","ASSIST_GROUP_TEXTURE","--modtest-both","伪旧版","自更新缓存","last_check.json","github_cache.json","删不掉是因为在用"]`
 
 ### **modecontroller 当前状态 · 唯一真源…
-*2026-10-03 23:36*
+*2026-10-03 23:56*
 
 **modecontroller 当前状态 · 唯一真源**（有变动请**更新本条**，别再另开新条目）
-**发布**：GitHub Latest = **v1.0.3**（2026-10-03 21:44Z，issue #12 已回并关闭，打开 issue = 0）；**v1.0.4 只推了源码、没发 Release**（远端 main = `45e4d6d`），本地版本号保持 **1.0.4**。
-**2026-10-03 深夜这一轮修的七件事**：① 启动页**乳摇 / Poser 开关关不掉**（`api._persist_injection_switch` 统一落配置）② **关闭后再打开「弹完 UAC 就没反应」**（单实例锁 PID 复用误判 → 改 PID+进程指纹+窗口存在性）③ **「更改角色归属」点了没反应**（真因：`<CharacterAssignDialog>` **没 import** ⇒ Vue 当未知元素 ⇒ ref 拿到 DOM 元素；同页 `<Badge>` 也漏）④ **Poser 关了开不回来**（三层：开关守卫拦显式指令 → force 变成每次重下 → **最终**：包在位就不下载；**「缺 loader」由我们自己的 `poser.ensure_loader()` 补**（备份系统原版 + 放包里的 proxy），**不再跑会拒绝干活的上游向导** —— 向导原文「文件已被其他程序替换，无法确认为本插件」exit 1）⑤ **「关乳摇」不再拆掉 Poser 的底座**（`secondary_motion._other_plugin_dlls` 现在认 `.disabled` 停用副本）⑥ 归类弹窗两个入口打通（`menuAct(act, mod)`）⑦ 新增五条静态/回归测试（components / menu-actions / single-instance / injection-switches / poser 的 loader 自补）。
-**测试**：`tests` **625 passed / 49 subtests**。**结构树**：162 模块 / 144 叶子 / 369 API / 79 依赖 / validate 0 error。
-**最新 exe（两份都是最新代码）**：`EndfieldModController.exe` **29,845,944 B / `FFB8F8C0214F2BE6063F9E9DDFD6B89912B87D9BAB7A35E1F8DFE5DB8BC462B6`**；伪旧版 `-0.1.9-from-1.0.4.exe` **29,845,219 B / `695D78AD049908DF488E2FFB2DCEB4A21F14F0549646478A51AD79D211C0F92B`** —— 都在 `dist\` 与 `D:\zmdmod\modtest\`。⚠️ 用户在跑时绝不覆盖。
-**用户现场的遗留状态**（2026-10-03 23:29）：游戏目录里 `plugin\poser.dll` 已恢复在位，但 `d3dcompiler_47.dll`/`vulkan-1.dll` 仍是**系统原版**（底座缺失）⇒ 他装上新版后**点一次 Poser 开关**即可补上（`config.poser_injection` 目前是 false）。
-**发版流程**：改代码 → `pytest` → **自己 `git commit`**（⚠️ `push.py` / `build_release.py` **都不 commit**）→ `python scripts\build_release.py`（第 0 步校验 version.py 与 README/详细文档一致）→ `prepare_release.py` → `push.py`（先快照，失败就不推）→ `gh release create`（⚠️ 不带附件）→ `upload_release_assets.py`。附件只推**不带版本号**的 exe + `assets-bundle.zip`；快照落 `D:\zmdmod\_snapshot_<标签>-<时间戳>\`。
-**待用户确认**：376–398 号测试项要他实测点头；**推 main 与发 Release 都要他明说**。
+**发布**：GitHub **Latest = v1.0.5**（2026-10-03T15:54Z 发布，用户明确说「改完直接release」后才发的）—— https://github.com/jing-hy/EndfieldModController/releases/tag/v1.0.5 ；v1.0.4 是当天 14:49Z 发的（**注意：v1.0.4 早就发过 Release，别再以为"只推了源码"**）。
+**v1.0.5 的附件（与本地逐字节一致）**：`EndfieldModController.exe` **29,848,022 B / sha256 `953BABFC9785AB0DD4D043F3C43E19CBBC6B50920C0C6813DBE6AA1B29F7D90D`**；`assets-bundle.zip` **144,696,905 B / `910CF2E6AED50484FB7F2D90575E763FB102E02D3B72DBE8D660062A330BBFB1`**。本地 `dist\` 另有带版本号副本；**伪旧版 `-0.1.9-from-1.0.5.exe`** 也构建了放进 modtest（测自更新用）。
+**v1.0.5 修的东西**（全部由用户实测/外部反馈驱动）：① 启动页**乳摇 / Poser 开关关不掉**（`api._persist_injection_switch` 把开关落进配置）② **关闭后再打开「弹完 UAC 没反应」**（单实例锁只看 PID 被 Windows 复用坑死 → 改成 PID+进程指纹（exe 路径+创建时间）+窗口存在性，真占用时把窗口拉到最前面）③ **「更改角色归属」点了没反应**（真因：`<CharacterAssignDialog>` **从来没 import** ⇒ Vue 当未知元素 ⇒ ref 拿到 DOM 元素 ⇒ `openFor is not a function` 被空 catch 吞；同页 `<Badge>` 也漏；用 WebView2 CDP 远程调试抓到的）④ **Poser 关了开不回来**（三层：开关守卫拦显式指令 → force 变成每次重下 → 最终：**本地包在位就不下载**；**缺 loader 由 `poser.ensure_loader()` 自己补 proxy**，不再跑会拒绝干活的上游向导）⑤ **「关乳摇」不再拆掉 Poser 的底座**（`_other_plugin_dlls` 认 `.disabled` 停用副本）⑥ **一键启动 62 秒 → 秒级**（关着「自动更新依赖」+本地已就位 ⇒ **一个请求都不发**；此前 Libs/EFMI/Poser 三个都没尊重那个开关，Poser 一步静默下载 54 秒）⑦ 归类弹窗两个入口打通。
+**仓库新东西**：`docs/AI-记忆日志.md`（记忆库导出的可读日志，489 条）与 `docs/structure/`（normify 结构树整份镜像，187 文件 / 1.4 MB）—— **`push.py` 每次推送前自动刷新并单独提交这两样**（用户：「每次传源码记忆都一起」「结构树也一起上传」）；脚本 `scripts/memory_log.py`、`scripts/sync_structure.py`。
+**测试**：`tests` **630 passed / 49 subtests**。**结构树**：163 模块 / 145 叶子 / 369 API / validate 0 error（源目录 `~/.dsh/profiles/desktop/normify-modecontroller`，镜像在仓库 `docs/structure/`）。
+**发版流程（本次实走）**：改代码 → `pytest` → **自己 `git commit`**（⚠️ `push.py`/`build_release.py` 都不 commit）→ `python scripts\build_release.py`（第 0 步卡 version.py 与两份 README 一致）→ `prepare_release.py` → `push.py`（先快照，失败就不推；顺带刷记忆日志+结构树）→ `gh release create <tag> --title … --notes-file RELEASE_NOTES.md --latest`（⚠️ 建出来不带附件）→ `python scripts\upload_release_assets.py --tag <tag>`（DoH 查真实 IP + curl --resolve 直连，144 MB 约 28 秒）。附件只推**不带版本号**的 exe + `assets-bundle.zip`；快照落 `D:\zmdmod\_snapshot_<标签>-<时间戳>\`。
 
 `关键词：["当前状态唯一真源","Latest v0.9.4","0.9.5未发Release","远端main","版本号只跟Release比","发版流程","必须自己commit","build_release第0步校验版本号","推送前自动快照","只推不带版本号exe","modtest只放最新exe"]`
 
