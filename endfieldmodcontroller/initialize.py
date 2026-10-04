@@ -2038,6 +2038,76 @@ def _check_secondary_motion(config: AppConfig, report: Report, log: Callable[[st
     )
 
 
+def _check_proxy_backups(config: AppConfig, report: Report, log: Callable[[str], None] | None) -> None:
+    """loader proxy 的**原版备份**在不在 —— 缺了就从 System32 自动补齐。
+
+    为什么必须查（2026-10-04，反馈者机器上就是这种状态）：
+    游戏目录里 `d3dcompiler_47.dll` / `vulkan-1.dll` 已经是第三方 loader proxy
+    （Poser / 乳摇那一套），而 **`.bak` 原版备份一个都没有**。
+    这种"半吊子"状态危险在于：**还原 / 停用会把 proxy 删掉却放不回原版**
+    ⇒ 游戏目录永久缺这两个系统模块 ⇒ 游戏起不来（历史事故，见 `game_clean` 注释）。
+    而自检以前只看 `injected / plugin_exists / data_ready`（`backup_ok` 没算进去），
+    于是这种状态 **31/31 全绿**，用户完全看不出来 —— 与"能自动检测处理"的要求相反。
+
+    处理原则（用户定的「能自动补齐的就别让他手动」）：**能从 System32 补的就补掉**
+    （记成 `fixed=True`）；确实补不到才提示，并且**明确写出"不要点还原"**。
+    """
+    from . import reshade_integration, secondary_motion
+
+    try:
+        game = reshade_integration.detect_game_dir(config)
+    except Exception as exc:  # noqa: BLE001
+        report.add("game_dir:proxy_backup", False, f"定位游戏目录失败: {exc}", manual=True)
+        return
+    if game is None:
+        return
+    proxies: list[str] = []
+    for name in secondary_motion.PROXY_NAMES:
+        path = Path(game) / name
+        try:
+            if path.is_file() and reshade_integration.looks_like_loader_proxy(path):
+                proxies.append(name)
+        except OSError:
+            continue
+    if not proxies:
+        return                       # 游戏目录里没有 loader proxy，这一项不适用
+
+    fixed: list[str] = []
+    pending: list[str] = []
+    for name in proxies:
+        backup = Path(game) / f"{name}.bak"
+        try:
+            if backup.is_file() and backup.stat().st_size >= secondary_motion.PROXY_MAX_SIZE:
+                continue
+        except OSError:
+            pass
+        try:
+            ensured = secondary_motion.ensure_proxy_backup(Path(game), name, log)
+        except Exception as exc:  # noqa: BLE001
+            report.add("game_dir:proxy_backup", False, f"补齐 {name}.bak 失败: {exc}", manual=True)
+            return
+        (fixed if ensured is not None else pending).append(name)
+
+    if fixed:
+        report.add(
+            "game_dir:proxy_backup", True,
+            f"已补齐 {len(fixed)} 个 loader proxy 的原版备份（{'、'.join(fixed)}）—— "
+            f"「还原游戏本体 / 停用注入」现在能安全执行",
+            fixed=True,
+        )
+    if pending:
+        report.add(
+            "game_dir:proxy_backup", False,
+            f"{'、'.join(pending)} 没有原版备份、系统里也找不到同名原版 —— "
+            f"**先别点「还原游戏本体」或「停用注入」**（proxy 删掉就放不回原版，游戏会起不来）；"
+            f"确需还原请先手动复制一份该文件留着",
+            manual=True,
+        )
+    if not fixed and not pending:
+        report.add("game_dir:proxy_backup", True,
+                   f"{len(proxies)} 个 loader proxy 都有原版备份，可安全还原")
+
+
 def _check_controller(config: AppConfig, report: Report, log: Callable[[str], None] | None) -> None:
     controller_ini = config.controller_dir / "controller.ini"
     actions_tsv = config.controller_dir / "actions.tsv"
@@ -2272,6 +2342,9 @@ def ensure_all(config: AppConfig, log: Callable[[str], None] | None = None) -> d
     # 用 Poser 那份更省事，它还带身份标记可自证）。
     _check_poser(config, report, log)
     _check_secondary_motion(config, report, log)
+    # 两个 loader 都在位之后再查"原版备份在不在"（proxy 是它们铺的）：
+    # 缺 .bak 时**自动从 System32 补**，补不到就明确告诉用户"先别点还原"。
+    _check_proxy_backups(config, report, log)
 
     payload = report.to_dict()
     for action in payload["actions"]:

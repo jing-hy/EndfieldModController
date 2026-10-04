@@ -52,6 +52,49 @@ def _is_proxy(path: Path) -> bool:
         return False
 
 
+def _system_module(name: str) -> Path | None:
+    """系统原版模块（`System32` 下的同名文件）。
+
+    判据是 `_is_proxy` 的另一端：**明显大于 proxy**（proxy 只有十几~几十 KB，
+    真正的系统模块都是几 MB）。
+    """
+    root = os.environ.get("SystemRoot") or r"C:\Windows"
+    candidate = Path(root) / "System32" / name
+    try:
+        if candidate.is_file() and candidate.stat().st_size >= PROXY_MAX_SIZE:
+            return candidate
+    except OSError:
+        return None
+    return None
+
+
+def ensure_proxy_backup(game: Path, name: str, log: Callable[[str], None] | None = None) -> Path | None:
+    """确保 `<game>\\<name>.bak` 有一份**系统原版**（缺了就补上），返回它；补不到返回 None。
+
+    ⚠️ 为什么要有（2026-10-04，真实反馈者机器上的状态）：游戏目录里常见
+    "**proxy 在位、`.bak` 不在**" —— 那种状态**无法安全还原**：删掉 proxy 之后
+    没有原版可以放回去，游戏目录会**永久缺 `d3dcompiler_47.dll`**（历史事故，
+    见 `game_clean` 里的注释）。而原版其实就在 `System32`，所以"补齐备份"是
+    **能自动做掉**的一步 —— 用户定的判据是"能自动补齐的就别让他手动"。
+    """
+    backup = game / f"{name}.bak"
+    try:
+        if backup.is_file() and backup.stat().st_size >= PROXY_MAX_SIZE:
+            return backup
+    except OSError:
+        pass
+    source = _system_module(name)
+    if source is None:
+        return None
+    try:
+        shutil.copy2(source, backup)
+    except OSError as exc:
+        _log(log, f"⚠ 补齐 {name}.bak 失败: {exc}")
+        return None
+    _log(log, f"已补齐原版备份 {name}.bak（来自 {source}，{backup.stat().st_size:,} B）")
+    return backup
+
+
 def _other_plugin_dlls(game: Path) -> list[str]:
     """`plugin\\` 下除 sbm.dll 之外的插件（**含被开关停用的那几份**）。
 
@@ -445,15 +488,28 @@ def remove_injection(config: AppConfig, log: Callable[[str], None] | None = None
         # 2026-10-01 修（⑥）：**先恢复、后删除**，且两步各自独立 try —— 原先挤在
         # 同一个 try 里，`copy2` 失败就会留下"proxy 已删、原版未回"的半状态：
         # 游戏目录缺 d3dcompiler_47/vulkan-1，游戏直接起不来。
-        if backup.is_file():
-            try:
-                from . import fsutil
-
-                fsutil.write_bytes_atomic(target, backup.read_bytes())
-                actions.append(f"还原原版 {name}")
-            except OSError as exc:
-                warnings.append(f"还原 {name} 失败（这次不删注入，保持游戏可用）: {exc}")
+        # ⚠️ **缺原版备份时不许删 proxy**（2026-10-04 修；"失败保留原状"是红线）。
+        # 原来的写法：`if backup.is_file(): 还原` —— 没有 `.bak` 就跳过还原，
+        # 但紧接着的 `if _is_proxy(target): target.unlink()` **照样把 proxy 删了**，
+        # 于是游戏目录"proxy 没了、原版也没回来" ⇒ 游戏直接起不来（历史事故）。
+        # 现在：先把 `.bak` 补齐（System32 里就有现成的原版），补不到就
+        # **保留注入不动**并如实报出来。
+        if not backup.is_file():
+            if ensure_proxy_backup(game, name, log) is None:
+                warnings.append(
+                    f"{name}: 没有原版备份（{backup.name}）且在系统里找不到同名原版 —— "
+                    f"**保留注入不动**（删了就没法还原、游戏可能起不来；"
+                    f"确实要还原请先手动留一份该文件的副本）"
+                )
                 continue
+        try:
+            from . import fsutil
+
+            fsutil.write_bytes_atomic(target, backup.read_bytes())
+            actions.append(f"还原原版 {name}")
+        except OSError as exc:
+            warnings.append(f"还原 {name} 失败（这次不删注入，保持游戏可用）: {exc}")
+            continue
         try:
             if _is_proxy(target):
                 target.unlink()

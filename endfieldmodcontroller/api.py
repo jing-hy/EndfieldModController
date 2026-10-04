@@ -4505,6 +4505,57 @@ class EndfieldModControllerApi:
             launcher._append_log(self.config, f"audit game injections failed: {exc}")
             return {"ok": False, "message": str(exc), "suspicious": [], "disabled": []}
 
+    def clear_all_game_injections(self) -> dict[str, Any]:
+        """**清除游戏目录里所有第三方注入**（先备份，可一键还原）—— 手动触发版。
+
+        用户 2026-10-04 原话：「一键还原终末地清除所有第三方注入，**默认开**，
+        开了之后**不管是不是管理器注入的，都要去掉（要备份）**」。
+
+        与「启动前自动清除」开关**共用同一条实现**（`game_clean.backup_and_clean`），
+        覆盖面最广：proxy DLL、`plugin\\*.dll`、3DMigoto 的 `d3dx.ini` / `ShaderFixes\\` /
+        `loader_debug.log`、OptiScaler、ReShade 残留、DLSS5 专属运行库、被替换的 nvngx…
+        **判定依据是"原版会不会有这个文件"**，所以不管是谁铺的都会被移走；
+        移走前先整体备份到 `runtime\\game_backup\\<时间戳>\\`，随时可还原。
+        """
+        launcher._append_log(self.config, "clear all game injections requested from UI")
+        from . import game_clean
+
+        try:
+            result = game_clean.backup_and_clean(
+                self.config, log=lambda message: launcher._append_log(self.config, message))
+        except Exception as exc:  # noqa: BLE001
+            launcher._append_log(self.config, f"clear all game injections failed: {exc}")
+            raise
+        moved = result.get("moved") or []
+        if moved:
+            result["message"] = (
+                f"已清除 {len(moved)} 项第三方注入；备份在 {result.get('backup_dir')}"
+                "（同页「撤销清除」可原样放回）"
+            )
+        return result
+
+    def restore_all_game_injections(self) -> dict[str, Any]:
+        """把上一次「清除所有第三方注入」搬走的东西**原样放回**（按备份清单）。"""
+        launcher._append_log(self.config, "restore all game injections requested from UI")
+        from . import game_clean
+
+        try:
+            result = game_clean.restore(
+                self.config, log=lambda message: launcher._append_log(self.config, message))
+        except Exception as exc:  # noqa: BLE001
+            launcher._append_log(self.config, f"restore all game injections failed: {exc}")
+            raise
+        return result
+
+    def game_backups(self) -> dict[str, Any]:
+        """列出游戏目录备份（给"撤销清除"挑用；也用于排查"备份在哪"）。"""
+        from . import game_clean
+
+        try:
+            return {"ok": True, "backups": game_clean.list_backups(self.config)}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "message": str(exc), "backups": []}
+
     def clean_game_injections(self) -> dict[str, Any]:
         """Park loader proxies next to the game and restore the original module."""
         launcher._append_log(self.config, "clean game dir injections requested from UI")

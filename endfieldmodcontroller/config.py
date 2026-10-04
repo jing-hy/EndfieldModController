@@ -438,6 +438,17 @@ class AppConfig:
     # ⚠️ 2026-10-03 回滚开关：`extra_libraries` 里**是否也列 EFMI 的 d3d11.dll**。
     # 默认 True = 我改动之前的两条写法（用户当时能跑）。
     extra_libraries_include_efmi_dll: bool = True
+    # ⚠️ **一键启动前自动净化游戏目录**（2026-10-04 用户要求，**默认开**）。
+    #
+    # 原话：「在设置做个开关，一键还原终末地清除所有第三方注入，**默认开**，
+    # 开了之后**不管是不是管理器注入的，都要去掉（要备份）**」。
+    #
+    # 语义：只要游戏目录里出现**原版不会有的**注入痕迹（proxy DLL、`plugin\*.dll`、
+    # 别的工具留下的 `d3dx.ini` / `ShaderFixes\` / OptiScaler / ReShade 残留…），
+    # 一律**先备份再移走**、并把系统原版补回去；随后自检按**当前开关**把我们自己
+    # 要用的那一份重新铺好 —— 于是"清干净"与"功能还在"不再互斥。
+    # 备份落在 `runtime\game_backup\<时间戳>\`，随时可一键还原。默认 True。
+    clear_game_injections_on_launch: bool = True
     selected_mods: list[str] = field(default_factory=list)
     auto_update_dependencies: bool = False
     # 默认为 True：XXMI Launcher 的 exe 要求管理员权限（非管理员启动会直接报

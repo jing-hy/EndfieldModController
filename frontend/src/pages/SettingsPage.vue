@@ -733,6 +733,8 @@ useLogAutoScroll(probeBox, () => probeText);
       <SettingSwitch k="use_builtin_runtime" label="使用内置 XXMI/EFMI" />
       <SettingSwitch k="auto_update_dependencies" label="启动前自动更新依赖" />
       <SettingSwitch k="require_admin" label="启动时请求管理员权限" />
+      <SettingSwitch k="clear_game_injections_on_launch" label="启动前清除游戏目录里的所有第三方注入（先备份）"
+        hint="默认开。每次点「一键启动」时，先把游戏目录里原版不会有的注入痕迹全部移走 —— 不管是不是本程序装的（各种 proxy DLL、plugin 下的插件、3DMigoto 的 d3dx.ini / ShaderFixes、OptiScaler、ReShade 残留、被替换的 nvngx…），再把系统原版补回去；随后自检按你现在的开关把本程序要用的那一份重新铺好，所以功能不会因此失效。移走的东西整体备份在 runtime\\game_backup\\，随时可用「撤销清除」原样放回。游戏正在运行时自动跳过。" />
       <SettingSwitch k="auto_disable_feed_on_native_dlss" label="游戏自带 DLSS 时自动停用喂帧组件"
         hint="终末地自带 DLSS 时，喂帧组件会与游戏自己的 DLSS 抢同一条 NGX 链路。开启时自检会把它停用（移进 runtime\dlss5\_disabled，可逆）—— 但只有游戏确实跑在 D3D12 时才停：被 XXMI/EFMI 强制 -force_d3d11 时游戏建不出自己的 DLSS，喂帧组件是 DLSS5 的必需环节，此时会保持启用。" />
       <SettingSwitch k="inject_reshade_ui" label="注入统一控制面板（自研 ReShade addon）"
@@ -763,8 +765,8 @@ useLogAutoScroll(probeBox, () => probeText);
         <Btn @click="showResult('force_close_game', '强制结束残留游戏')">强制结束残留游戏</Btn>
       </div>
       <div class="flex flex-wrap gap-2 mt-2">
-        <Btn @click="showResult('clean_game_injections', '清理残留注入')">清理残留注入</Btn>
-        <Btn @click="showResult('restore_game_injections', '撤销清理')">撤销清理</Btn>
+        <Btn @click="showResult('clear_all_game_injections', '清除所有第三方注入')">清除所有第三方注入（先备份）</Btn>
+        <Btn @click="showResult('restore_all_game_injections', '撤销清除')">撤销清除（还原备份）</Btn>
         <Btn @click="showResult('check_component_updates', '组件更新检查')">检查组件更新</Btn>
         <Btn variant="primary" @click="startFullUpdate">一键安装/更新全部组件</Btn>
         <Btn @click="showResult('check_app_update', '程序更新检查')">检查程序更新</Btn>

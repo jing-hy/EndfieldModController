@@ -932,6 +932,53 @@ def _environment_text(config: AppConfig) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _collect_extra_evidence(config: AppConfig, bundle_dir: Path) -> None:
+    """崩溃包里那几样"以前总是缺"的判据（2026-10-04 加，用户要求"尽量多塞东西"）。
+
+    * **`ReShade.log` 多候选** —— 它按 `RESHADE_BASE_PATH_OVERRIDE` 落在
+      `runtime\\reshade\\`，原来只从 `dlss5_path` 取 ⇒ 反馈者的包里整份丢失
+      （issue #13 缺陷三）。这是判断"游戏是自己退出还是被外部结束"的一手材料：
+      最后一段是 `Unregistered add-on …` = 走到了正常卸载。
+    * **EFMI / 3DMigoto 两侧的 `d3d11_log.txt`** —— 判断"控制器铺的 Mod 到底进没进游戏"。
+    * **`game-inventory.txt`** —— proxy 归属 / 原版备份在不在 / plugin 清单。
+    * **WER 报告** —— 有记录 = 真崩溃；没有 = 多半是被外部结束（两者归因相反）。
+    """
+    from . import diagnostics
+
+    def _copy(src: Path, arcname: str, *, limit: int = 32 * 1024 * 1024) -> None:
+        try:
+            if not src.is_file() or src.stat().st_size > limit:
+                return
+            dest = bundle_dir / arcname
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dest)
+        except OSError:
+            return
+
+    for label, source in diagnostics.reshade_log_candidates(config, None):
+        _copy(source, f"ReShade-{label}.log")
+    for label, source in diagnostics.efmi_log_candidates(config):
+        if source.is_file():
+            _copy(source, f"loader/{label}-{source.name}")
+    try:
+        (bundle_dir / "game-inventory.txt").write_text(
+            diagnostics.game_dir_inventory_text(config, diagnostics_game_dir(config)), encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        pass
+    for path in diagnostics.wer_report_paths():
+        _copy(path, f"wer/{path.parent.name}-{path.name}", limit=4 * 1024 * 1024)
+
+
+def diagnostics_game_dir(config: AppConfig) -> Path | None:
+    """游戏目录（崩溃包要用；失败返回 None，不抛异常）。"""
+    try:
+        from . import reshade_integration
+
+        return reshade_integration.detect_game_dir(config)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _collect_full_game_logs(config: AppConfig, bundle_dir: Path) -> None:
     """**完整的** `Player.log`（含 `-prev`）—— 不再只取尾部 15 行。
 
@@ -1208,12 +1255,7 @@ def make_bundle(config: AppConfig, evidence: dict[str, Any] | None = None,
     _collect_mods_tree(config, bundle_dir)
     _collect_event_log(config, bundle_dir, evidence.get("_started_at"))
     _collect_xxmi_log(config, bundle_dir)
-    try:
-        reshade_log = Path(config.dlss5_path) / "ReShade.log"
-        if reshade_log.is_file() and reshade_log.stat().st_size <= 16 * 1024 * 1024:
-            shutil.copy2(reshade_log, bundle_dir / "ReShade.log")
-    except OSError:
-        pass
+    _collect_extra_evidence(config, bundle_dir)
 
     # 崩溃记忆：记下"这次崩的时候跑的是哪套 Mod"，一键启动前就能预警（用户 2026-09-30 要求）
     #

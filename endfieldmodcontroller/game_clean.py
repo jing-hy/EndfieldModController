@@ -265,6 +265,32 @@ def audit(config: AppConfig, *, log: Log = None) -> dict[str, Any]:
                 detail="DLSS5 神经渲染专用运行库，游戏原版没有这个文件",
             ))
 
+    # ①.6 第三方加载器/注入器留下的**非 DLL 痕迹**（2026-10-04 加）。
+    #
+    # 用户当天原话：「在设置做个开关，一键还原终末地**清除所有第三方注入**，默认开，
+    # 开了之后**不管是不是管理器注入的，都要去掉（要备份）**」。
+    # 上面 ①/①.5 只覆盖"proxy DLL"与 OptiScaler 的几个文件；3DMigoto / 自造 loader
+    # 在游戏目录里还会留下 `d3dx.ini` / `d3dx_user.ini` / `ShaderFixes\` /
+    # `loader_debug.log` / `inject_order.txt` / `mc_bootstrap.*` —— 那些同样是
+    # "原版不会有"的东西，留着就谈不上"清干净"。只移动不删除，随时可还原。
+    for name in getattr(reshade_integration, "GAME_INJECTION_ARTIFACTS", ()):
+        path = game_dir / name
+        try:
+            if path.is_file():
+                findings.append(Finding(
+                    "injector_data", name, str(path), size=path.stat().st_size,
+                    sha256=_sha256(path),
+                    detail="第三方加载器/注入器留下的配置或日志（原版游戏不会有）",
+                ))
+            elif path.is_dir():
+                total = sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
+                findings.append(Finding(
+                    "injector_data", name, str(path), is_dir=True, size=total,
+                    detail="第三方加载器的 shader 缓存目录（原版游戏不会有）",
+                ))
+        except OSError:
+            continue
+
     # ④ 被替换过的 nvngx（原版大小不同即可疑，另看 .game_original 备份）
     for name, new_size in NEW_NVNGX_SIZES.items():
         path = game_dir / name
@@ -275,6 +301,20 @@ def audit(config: AppConfig, *, log: Log = None) -> dict[str, Any]:
                 detail=(f"是方案里的新版（{new_size:,} B）；游戏原版备份"
                         f"{'在 ' + original.name if original.is_file() else '不存在，需重装或校验文件'}"),
             ))
+
+    # 去重（2026-10-04 加）：同一路径可能被两个分类扫到（例如 `ShaderFixes` 既在
+    # 加载器痕迹清单里、目录里又可能有 ReShade 痕迹）—— 重复条目会让净化把同一份
+    # 东西搬两次，第二次源已不在 ⇒ 报成错误、`ok=False`（"失败保留原状"看起来坏了）。
+    # 按绝对路径去重，先出现的分类优先。
+    unique: list[Finding] = []
+    seen_paths: set[str] = set()
+    for finding in findings:
+        key = finding.absolute.lower()
+        if key in seen_paths:
+            continue
+        seen_paths.add(key)
+        unique.append(finding)
+    findings = unique
 
     return {
         "ok": not findings,
@@ -566,6 +606,46 @@ def backup_and_clean(
         "errors": errors,
         "message": f"已备份并移走 {len(moved)} 项；备份在 {root}",
     }
+
+
+def _game_running(image: str = "Endfield.exe") -> bool:
+    """游戏（或它的启动器进程）是不是正在跑 —— 冲突时才跳过清理，不抛异常。"""
+    from . import diagnostics
+
+    try:
+        return bool(diagnostics._find_process_ids(image))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def auto_clean_before_launch(config: AppConfig, *, log: Log = None) -> dict[str, Any]:
+    """一键启动前的自动净化（设置页开关 `clear_game_injections_on_launch`，**默认开**）。
+
+    用户 2026-10-04 原话：「在设置做个开关，一键还原终末地清除所有第三方注入，
+    **默认开**，开了之后**不管是不是管理器注入的，都要去掉（要备份）**」。
+
+    为什么"清干净"与"功能还在"可以同时成立：清理**只搬走**并写一份可还原的备份
+    （`backup_and_clean` 的既有语义），随后启动流程里的 `ensure_injections()`
+    会按**当前开关**把我们自己要用的注入重新铺好。因此顺序必须是
+    **先净化 → 后补齐**（反了会把刚铺好的当成残留清掉）。
+
+    游戏正在跑时**跳过**：proxy 被游戏进程占用，动它既可能失败，也会毁掉用户
+    正在用的那次会话。
+    """
+    if not getattr(config, "clear_game_injections_on_launch", True):
+        return {"ok": True, "skipped": "switch_off", "moved": [], "backup_dir": "",
+                "message": "设置里关掉了「启动前清除第三方注入」"}
+    if _game_running():
+        _log(log, "游戏正在运行 —— 跳过启动前净化（文件被占用，也不该动你正在用的游戏）")
+        return {"ok": True, "skipped": "game_running", "moved": [], "backup_dir": "",
+                "message": "游戏正在运行，跳过启动前净化"}
+    report = backup_and_clean(config, log=log)
+    moved = report.get("moved") or []
+    if moved:
+        _log(log, f"启动前净化：已备份并移走 {len(moved)} 项第三方注入 → {report.get('backup_dir')}")
+    elif report.get("ok"):
+        _log(log, "启动前净化：游戏目录本来就是干净的（没有第三方注入）")
+    return report
 
 
 def list_backups(config: AppConfig) -> list[dict[str, Any]]:

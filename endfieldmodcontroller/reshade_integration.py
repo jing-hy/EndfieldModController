@@ -1202,6 +1202,38 @@ LOADER_PROXY_MODULES = (
     "d3d9.dll",
     "opengl32.dll",
     "nvngx.dll",
+    # 2026-10-04 补：用户要求「一键还原终末地**清除所有第三方注入**，不管是不是
+    # 管理器注入的，都要去掉（要备份）」—— 上面那份名单只覆盖了我们/XXMI 生态
+    # 与 OptiScaler 常用的名字。下面这批是**注入器同样常用、原版终末地不会有**的
+    # proxy 名（手柄 / 音频 / 主题 / 显示相关），补进来才能真的做到"全部移走"。
+    # 判定仍走 `is_third_party_proxy()`（内容标记 / OptiScaler 特征 / 与 System32
+    # 原版不同三条任一命中），所以**不会**误伤游戏自带的同名文件。
+    "xinput1_3.dll",
+    "xinput1_4.dll",
+    "xinput9_1_0.dll",
+    "dwmapi.dll",
+    "uxtheme.dll",
+    "msacm32.dll",
+    "d3d8.dll",
+    "dsound.dll",
+    "winspool.drv",
+    "cryptbase.dll",
+)
+# 第三方注入器/加载器留在游戏目录里的**非 DLL 痕迹**（原版绝不会有）：
+# 3DMigoto 的 `d3dx.ini` / `d3dx_user.ini` / `ShaderFixes\`、自造 loader 的
+# `loader_debug.log` / `inject_order.txt` / `mc_bootstrap.*`。
+# 用途：`game_clean.audit()` 会把它们一并**备份移走**（用户 2026-10-04：
+# 「不管是不是管理器注入的，都要去掉」）。
+GAME_INJECTION_ARTIFACTS = (
+    "d3dx.ini",
+    "d3dx_user.ini",
+    "d3dx.ini.bak",
+    "d3dx_user.ini.bak",
+    "loader_debug.log",
+    "inject_order.txt",
+    "mc_bootstrap.dll",
+    "mc_bootstrap.log",
+    "ShaderFixes",
 )
 
 LOADER_PROXY_DISABLED_SUFFIX = ".loader.endfieldmodcontroller.disabled"

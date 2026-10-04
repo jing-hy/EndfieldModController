@@ -454,15 +454,688 @@ def _close_handle(handle: int | None) -> None:
         _kernel32().CloseHandle(handle)
 
 
-def _capture_tail(source: Path, target: Path, *, lines: int = 300) -> None:
+# ---------------------------------------------------------------------------
+# 采集留痕（2026-10-04）
+# ---------------------------------------------------------------------------
+# 为什么要有（用户 2026-10-04 原话：「日志包尽量多塞东西，**不要老是判据不够**」，
+# 以及 issue #13 反馈者指出的原话：「采集失败连一条日志都不会留」）：
+#   * 原来的 `_capture_tail` 在源文件不存在时**静默 return** —— 包里那条目直接消失，
+#     看包的人分不清"这份日志不存在"和"这份日志是空的"（2026-10-04 那份包里
+#     `ReShade.log` 就是这样整条不见的，把排查方向带偏了一整轮）。
+#   * 现在每条采集项都记一行结果（ok / missing / error）+ 来源路径 + 大小 + mtime +
+#     **是不是本次游戏运行写过的**（`fresh`）。清单本身作为一个文件进包。
+# 判据（三问）："没有现场"和"没去抓"必须能一眼分开 —— 这就是这份清单的唯一目的。
+
+# 最近一次游戏进程被发现的时间（`_monitor_process` 里记）——用来判断抓到的日志
+# 是"本次现场"还是"上一次的旧文件"。旧日志当现场用比没有更危险（2026-10-04：
+# 那份 `d3d11_log.txt` 12,667,256 字节跨 10:34→11:04 一字未变，却在包里被当成现场）。
+_LAST_GAME_START = 0.0
+
+
+def _new_capture_manifest() -> list[dict[str, Any]]:
+    return []
+
+
+def _manifest_add(
+    manifest: list[dict[str, Any]] | None,
+    *,
+    arcname: str,
+    source: Path | str,
+    status: str,
+    note: str = "",
+    size: int | None = None,
+    mtime: float | None = None,
+    fresh: bool | None = None,
+) -> None:
+    if manifest is None:
+        return
+    manifest.append({
+        "arcname": str(arcname),
+        "source": str(source),
+        "status": status,
+        "note": note,
+        "size": size,
+        "mtime": mtime,
+        "fresh": fresh,
+    })
+
+
+def _is_fresh(mtime: float | None) -> bool | None:
+    """这份文件是不是**本次游戏运行**（进程被发现之后）写过的。"""
+    if mtime is None:
+        return None
+    if not _LAST_GAME_START:
+        return None
+    return mtime >= (_LAST_GAME_START - 5.0)
+
+
+def capture_manifest_text(manifest: list[dict[str, Any]]) -> str:
+    """把人读的采集清单渲染出来（进包的一个纯文本文件）。"""
+    counts: dict[str, int] = {}
+    for item in manifest:
+        counts[item.get("status", "?")] = counts.get(item.get("status", "?"), 0) + 1
+    lines = [
+        "诊断包采集清单（每一行 = 一个「本该有」的条目；missing/error 是采集不到，不是「没有内容」）",
+        "status: ok=收进包了｜missing=源文件/目录不存在｜error=读取失败｜note 里有原因",
+        f"合计 {len(manifest)} 项：" + "，".join(f"{key} {value}" for key, value in sorted(counts.items())),
+        "",
+    ]
+    for item in manifest:
+        extra = []
+        if item.get("size") is not None:
+            extra.append(f"{int(item['size']):,} B")
+        if item.get("mtime"):
+            extra.append("mtime=" + datetime.fromtimestamp(float(item["mtime"])).isoformat(timespec="seconds"))
+        if item.get("fresh") is True:
+            extra.append("**本次运行写过**")
+        elif item.get("fresh") is False:
+            extra.append("⚠ 上次运行留下的旧文件")
+        if item.get("note"):
+            extra.append(str(item["note"]))
+        suffix = ("  " + "  ".join(extra)) if extra else ""
+        lines.append(f"[{item.get('status')}] {item.get('arcname')}{suffix}")
+        lines.append(f"        来源: {item.get('source')}")
+    return "\n".join(lines) + "\n"
+
+
+def _capture_tail(
+    source: Path,
+    target: Path,
+    *,
+    lines: int = 300,
+    manifest: list[dict[str, Any]] | None = None,
+    arcname: str | None = None,
+    required: bool = False,
+) -> bool:
+    """把 `source` 的尾部写进 `target`。**采集不到也要留痕**（见上面那段的说明）。
+
+    `required=True` 表示"这个源本该存在"（比如 EFMI 的 d3dx_user.ini）——
+    仍不会抛异常，但会在包内的占位文件里写成明确的警告，而不是一句 "missing"。
+    """
+    arc = arcname or target.name
     try:
         if not source.is_file():
-            return
+            _manifest_add(manifest, arcname=arc, source=source, status="missing",
+                          note=("本该存在却找不到" if required else "源文件不存在"))
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(
+                    f"[诊断包] 这个条目采集不到：源文件不存在\n源: {source}\n"
+                    f"（{'这条链本该有这个文件 —— 请把这条一并反馈' if required else '按当前配置它不存在，属正常'})\n",
+                    encoding="utf-8",
+                )
+            except OSError:
+                pass
+            return False
         content = source.read_text(encoding="utf-8", errors="replace").splitlines()
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("\n".join(content[-lines:]) + "\n", encoding="utf-8", errors="replace")
+        try:
+            stat = source.stat()
+            size, mtime = stat.st_size, stat.st_mtime
+        except OSError:
+            size, mtime = None, None
+        _manifest_add(manifest, arcname=arc, source=source, status="ok",
+                      note=f"取最后 {lines} 行（原文件 {len(content)} 行）",
+                      size=size, mtime=mtime, fresh=_is_fresh(mtime))
+        return True
+    except OSError as exc:
+        _manifest_add(manifest, arcname=arc, source=source, status="error", note=str(exc))
+        return False
+
+
+# ---------------------------------------------------------------------------
+# 游戏侧现场：日志候选位置 / Player.log / WER / 反作弊 / 游戏目录清单
+# ---------------------------------------------------------------------------
+# 2026-10-04 建立（用户原话：「日志包尽量多塞东西，**不要老是判据不够**」）。
+# 这一组函数回答的是"游戏那一侧到底发生了什么"，全部**只读**、且**永远不抛异常**
+# —— 取证代码自己失败比不取证更糟（issue #13 的教训：`log_efmi_state` 整段包在一个
+# try 里，一处 `iterdir()` 抛错就把后面所有采集全吞了）。
+
+
+def reshade_log_candidates(config: Any, game_dir: Path | None) -> list[tuple[str, Path]]:
+    """ReShade 日志的候选位置（带来源标签，全部返回、由采集层逐个记结果）。
+
+    ⚠️ 为什么不能只看游戏目录（**issue #13 缺陷三**，2026-10-04 实测再次复现）：
+    `launcher.py` 会给游戏进程设 `RESHADE_BASE_PATH_OVERRIDE` = `runtime\\reshade`，
+    **ReShade 就以此为基准目录** —— `ReShade.log` 落在 `runtime\\reshade\\`，
+    游戏目录里一个 ReShade 产物都没有。原代码只抓 `game_dir / "ReShade.log"`，
+    于是那份真实日志整条没进包（`_capture_tail` 又是静默 return，包里连占位都没有）。
+    """
+    items: list[tuple[str, Path]] = []
+    if game_dir is not None:
+        items.append(("game", Path(game_dir) / "ReShade.log"))
+    for label, value in (
+        ("runtime", getattr(config, "reshade_runtime_path", None)),
+        ("dlss5", getattr(config, "dlss5_path", None)),
+    ):
+        if value:
+            items.append((label, Path(value) / "ReShade.log"))
+    dll = getattr(config, "reshade_dll_path", None)
+    if dll:
+        items.append(("reshade-dll", Path(dll).parent / "ReShade.log"))
+    loader = getattr(config, "migoto_loader_path", None)
+    if loader:
+        items.append(("loader", Path(loader).parent / "ReShade.log"))
+    seen: set[str] = set()
+    unique: list[tuple[str, Path]] = []
+    for label, path in items:
+        key = str(path).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append((label, path))
+    return unique
+
+
+def efmi_probe_paths(config: Any) -> dict[str, Any]:
+    """EFMI / 3DMigoto 侧的探测路径：**以 config 解析结果为准，loader 推导只作兜底**。
+
+    ⚠️ **issue #13 缺陷一** + 2026-10-04 实测（反馈者 AST）：
+    原代码把 `migoto_loader` 的父目录当成 EFMI 目录。那位反馈者把 `migoto_loader`
+    指向了 `D:\\d3dxSkinManage\\home\\Arknights Endfield\\work`（**另一套 3DMigoto**），
+    于是日志里报出一串 `…\\work\\Mods\\MC_Probe.ini exists=False`，
+    而真正的 staging 在 `…\\XXMI Launcher\\EFMI\\Mods` —— 同一份日志的「应用配置」行里
+    就明明白白写着。差点把结论带成"控制器铺的 Mod 一个都没进游戏"。
+    现在**两个位置都探**、各自标明来源（不静默切换，也不再把"目录不存在"当异常）。
+    """
+    result: dict[str, Any] = {
+        "staging": [], "user_ini": [], "loader_dir": None, "efmi_dir": None, "notes": [],
+    }
+    staging: list[tuple[str, Path]] = []
+    user_ini: list[tuple[str, Path]] = []
+    try:
+        staging.append(("config", Path(config.staging_mods_path)))
+    except Exception as exc:  # noqa: BLE001
+        result["notes"].append(f"config.staging_mods_path 读不到: {exc}")
+    try:
+        user_ini.append(("config", Path(config.user_ini_path)))
+    except Exception as exc:  # noqa: BLE001
+        result["notes"].append(f"config.user_ini_path 读不到: {exc}")
+    try:
+        efmi_dir = config.efmi_dir
+    except Exception as exc:  # noqa: BLE001
+        efmi_dir = None
+        result["notes"].append(f"config.efmi_dir 读不到: {exc}")
+    if efmi_dir is not None:
+        efmi = Path(efmi_dir)
+        result["efmi_dir"] = efmi
+        staging.append(("efmi", efmi / "Mods"))
+        for name in ("d3dx_user.ini", "Core/d3dx_user.ini"):
+            user_ini.append(("efmi", efmi / name))
+    loader = getattr(config, "migoto_loader_path", None)
+    if loader is not None:
+        loader_dir = Path(loader).parent
+        result["loader_dir"] = loader_dir
+        staging.append(("loader", loader_dir / "Mods"))
+        user_ini.append(("loader", loader_dir / "d3dx_user.ini"))
+
+    def _unique(items: list[tuple[str, Path]]) -> list[tuple[str, Path]]:
+        seen: set[str] = set()
+        out: list[tuple[str, Path]] = []
+        for label, path in items:
+            key = str(path).lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append((label, path))
+        return out
+
+    result["staging"] = _unique(staging)
+    result["user_ini"] = _unique(user_ini)
+    return result
+
+
+def efmi_log_candidates(config: Any) -> list[tuple[str, Path]]:
+    """EFMI / 3DMigoto 侧的运行日志候选（`d3d11_log.txt` / `loader_debug.log` / …）。
+
+    ⚠️ 为什么两个目录都要（2026-10-04 实测）：反馈者机器上 `d3dxSkinManage` 的
+    `work\\d3d11_log.txt`（12.6 MB）**跨半小时一字未变** —— 那是**上一次运行**留下的
+    旧文件，而包里把它当成"本次现场"用了。真正的 EFMI 日志在 `EFMI\\` 目录里、
+    根本没被采集。现在两侧都抓，并在清单里标 `fresh`（是不是本次运行写过的）。
+    """
+    items: list[tuple[str, Path]] = []
+    probes = efmi_probe_paths(config)
+    for label, root in (("efmi", probes.get("efmi_dir")), ("loader", probes.get("loader_dir"))):
+        if not root:
+            continue
+        root = Path(root)
+        for name in ("d3d11_log.txt", "loader_debug.log", "d3dx.ini", "d3dx_user.ini", "ReShade.ini"):
+            items.append((label, root / name))
+    seen: set[str] = set()
+    out: list[tuple[str, Path]] = []
+    for label, path in items:
+        key = str(path).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((label, path))
+    return out
+
+
+def _user_dirs() -> dict[str, Path | None]:
+    profile = os.environ.get("USERPROFILE") or os.path.expanduser("~")
+    local = os.environ.get("LOCALAPPDATA")
+    return {
+        "profile": Path(profile) if profile else None,
+        "local": Path(local) if local else None,
+        "locallow": (Path(profile) / "AppData" / "LocalLow") if profile else None,
+        "programdata": Path(os.environ.get("ProgramData") or r"C:\ProgramData"),
+    }
+
+
+def _find_named_files(root: Path | None, names: tuple[str, ...], *, depth: int = 3,
+                      limit: int = 8, prefer: tuple[str, ...] = ()) -> list[Path]:
+    """在 `root` 下限定深度找指定文件名（只读、失败返回空表）。
+
+    `prefer` 里的关键词命中时会**排前面**（例如 `endfield` / `hypergryph`）——
+    同一台机器上常有别的 Unity 游戏，先给最可能是这个游戏的。
+    """
+    if root is None or not root.is_dir():
+        return []
+    found: list[tuple[int, float, Path]] = []
+    try:
+        stack: list[tuple[Path, int]] = [(root, 0)]
+        while stack:
+            current, level = stack.pop()
+            if level >= depth:
+                continue
+            try:
+                children = list(current.iterdir())
+            except OSError:
+                continue
+            for child in children:
+                try:
+                    if child.is_dir():
+                        stack.append((child, level + 1))
+                        continue
+                except OSError:
+                    continue
+                if child.name.lower() in names:
+                    lowered = str(child).lower()
+                    rank = 0 if any(token in lowered for token in prefer) else 1
+                    try:
+                        mtime = child.stat().st_mtime
+                    except OSError:
+                        mtime = 0.0
+                    found.append((rank, -mtime, child))
+    except Exception:  # noqa: BLE001
+        return []
+    found.sort()
+    return [path for _rank, _mtime, path in found[:limit]]
+
+
+def _prefer_only(found: list[Path], tokens: tuple[str, ...], limit: int) -> list[Path]:
+    """优先只留"名字像这个游戏"的那些；一个都没有时才退回全部（限 `limit` 条）。"""
+    preferred = [path for path in found if any(token in str(path).lower() for token in tokens)]
+    return (preferred or found)[:limit]
+
+
+def player_log_candidates(limit: int = 4) -> list[Path]:
+    """Unity 的 `Player.log` / `Player-prev.log`（终末地在 `%USERPROFILE%\\AppData\\LocalLow\\<厂商>\\Endfield`）。
+
+    ⚠️ 为什么必须收它（2026-10-04）：这是**游戏自己**写的最后几句话 ——
+    "真崩溃" / "被外部结束" / "走到了正常卸载" 三种情况的结尾完全不同。
+    issue #13 的反馈者就是靠它（`Player.log` 停在 `MemoryPool::MMapMemoryBlock count:0`、
+    没有任何 Unity 关闭信息）才判出"不是崩溃，而是被外部结束"。以前包里根本没有这一项。
+
+    ⚠️ 但**别把别的 Unity 游戏的日志也收进来**（2026-10-04 实测：搜索 `LocalLow` 时
+    顺手收了《城市天际线》《Subnautica》的 `Player.log`）：那对排查没用，还会把无关的
+    隐私内容带进一个要往外发的包。所以命中"像终末地"的那些优先、且**只留它们**。
+    """
+    dirs = _user_dirs()
+    tokens = ("endfield", "hypergryph", "gryphline")
+    pool = _find_named_files(
+        dirs.get("locallow"), ("player.log", "player-prev.log"),
+        depth=3, limit=max(limit * 4, 12), prefer=tokens,
+    )
+    return _prefer_only(pool, tokens, limit)
+
+
+def unity_crash_logs(limit: int = 8) -> list[Path]:
+    """Unity / 游戏自己写的崩溃报告（`Crashes\\*.log` / `error.log`），只读文本、不收 dmp。"""
+    dirs = _user_dirs()
+    out: list[Path] = []
+    for key in ("local", "profile"):
+        root = dirs.get(key)
+        if root is None:
+            continue
+        out.extend(_find_named_files(
+            root / "AppData" / "Local" / "Temp" if key == "profile" else root / "Temp",
+            ("error.log", "crash.log", "crashreport.log"),
+            depth=5, limit=limit, prefer=("endfield", "hypergryph", "gryphline", "unity"),
+        ))
+    seen: set[str] = set()
+    unique: list[Path] = []
+    for path in out:
+        key = str(path).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(path)
+    # 与 `player_log_candidates` 同一套取舍：先留"像终末地"的，别把别的程序的崩溃日志
+    # 一并塞进要外发的包（"unity" 这个 token 只是兜底，命中终末地时不会用到）。
+    return _prefer_only(unique, ("endfield", "hypergryph", "gryphline"), limit)
+
+
+def wer_report_paths(limit: int = 8) -> list[Path]:
+    """Windows 错误报告（WER）里与游戏有关的 `Report.wer`。
+
+    为什么要有（issue #13 反馈者也提过这条判据）：**有没有 WER 记录**直接区分
+    "进程自己崩了"和"进程被外部结束了" —— 崩了会有 Application Error 事件 + WER 报告，
+    被 `TerminateProcess` 结束则两者都没有。以前包里完全没有这一项。
+    """
+    dirs = _user_dirs()
+    root = dirs.get("programdata")
+    if root is None:
+        return []
+    out: list[Path] = []
+    for sub in ("Microsoft/Windows/WER/ReportArchive", "Microsoft/Windows/WER/ReportQueue"):
+        base = root / sub
+        if not base.is_dir():
+            continue
+        try:
+            entries = sorted(base.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)
+        except OSError:
+            continue
+        for entry in entries[:120]:
+            if "endfield" not in entry.name.lower():
+                continue
+            report = entry / "Report.wer"
+            if report.is_file():
+                out.append(report)
+            if len(out) >= limit:
+                return out
+    return out
+
+
+def crash_dump_candidates(limit: int = 10) -> list[tuple[Path, int, float]]:
+    """崩溃转储清单（`%LOCALAPPDATA%\\CrashDumps`）—— **只列不塞**（dmp 动辄几百 MB）。"""
+    dirs = _user_dirs()
+    local = dirs.get("local")
+    if local is None:
+        return []
+    base = local / "CrashDumps"
+    if not base.is_dir():
+        return []
+    out: list[tuple[Path, int, float]] = []
+    try:
+        for entry in sorted(base.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+            if not entry.is_file() or entry.suffix.lower() != ".dmp":
+                continue
+            try:
+                stat = entry.stat()
+            except OSError:
+                continue
+            out.append((entry, stat.st_size, stat.st_mtime))
+            if len(out) >= limit:
+                break
     except OSError:
-        return
+        return out
+    return out
+
+
+_ENV_REPORT_CACHE: tuple[float, str] | None = None
+_ENV_REPORT_TTL = 45.0
+
+
+def _powershell(script: str, *, timeout: float = 25.0) -> tuple[str, str]:
+    """跑一段 PowerShell，返回 (stdout, 错误说明)。**永远不抛异常**。
+
+    ⚠️ 命令前必须先把 `[Console]::OutputEncoding` 设成 UTF-8：PowerShell 5.1 默认按
+    系统 ANSI（中文机 = GBK）往管道写字，而我们按 UTF-8 解码 —— 于是
+    `信息: 没有运行的任务匹配指定标准` 变成一串乱码进了日志（2026-10-04 那份包里
+    到处是 `��Ϣ: û�����е�����ƥ��ָ����׼��`）。反过来也一样：这里把编码统一到 UTF-8，
+    中文事件描述、服务名、Mod 名才不会变成问号。
+    """
+    if os.name != "nt":
+        return "", "非 Windows 平台，跳过"
+    prefix = "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;$OutputEncoding=[System.Text.Encoding]::UTF8;"
+    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", prefix + script],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=timeout, creationflags=creationflags,
+        )
+    except subprocess.TimeoutExpired:
+        return "", f"超时（>{timeout:g}s）"
+    except Exception as exc:  # noqa: BLE001
+        return "", f"调用失败: {exc}"
+    text = (result.stdout or "").strip()
+    if not text and (result.stderr or "").strip():
+        return "", f"stderr: {(result.stderr or '').strip()[:300]}"
+    return text, ""
+
+
+def collect_environment_report(config: Any, game_dir: Path | None = None) -> tuple[str, str]:
+    """一次 PowerShell 调用把"游戏之外"的现场抓齐：事件日志 / 反作弊服务 / 转储 / 版本。
+
+    返回 `(文本, 失败原因)`；**失败也会返回一行说明**（"抓不到"本身是判据：
+    比如"没有 WER 记录"能证明进程不是自己崩的，而"采集失败"什么也证明不了）。
+
+    结果按 45 秒缓存 —— 一次崩溃会连着走 `_capture_postmortem` 与
+    `create_diagnostic_bundle` 两条路，不能为此跑两遍 PowerShell（那是几十秒的等待）。
+    """
+    global _ENV_REPORT_CACHE
+    now = time.time()
+    if _ENV_REPORT_CACHE is not None and now - _ENV_REPORT_CACHE[0] < _ENV_REPORT_TTL:
+        return _ENV_REPORT_CACHE[1], ""
+
+    lines: list[str] = []
+    notes: list[str] = []
+    lines.append("-- Windows 事件（Application：错误/挂起/WER，近 60 分钟；含任何提到 Endfield 的事件）--")
+    events, err = _powershell(
+        "Get-WinEvent -FilterHashtable @{LogName='Application';StartTime=(Get-Date).AddMinutes(-60)} "
+        "-ErrorAction SilentlyContinue | "
+        "Where-Object { $_.ProviderName -in @('Application Error','Application Hang','Windows Error Reporting') "
+        "-or $_.Message -match 'Endfield' } | Select-Object -First 12 | "
+        "Format-List TimeCreated,Id,ProviderName,LevelDisplayName,Message"
+    )
+    if err:
+        notes.append(f"事件日志抓取失败：{err}")
+        lines.append(f"（抓取失败：{err}）")
+    elif not events:
+        lines.append("（近 60 分钟内没有任何 Application Error / Hang / WER 事件 —— "
+                     "**进程不是自己崩的**这条判据成立；被 TerminateProcess 结束不会留事件）")
+    else:
+        lines.append(events)
+
+    lines.append("")
+    lines.append("-- 反作弊 / 安全相关服务（判断「是不是被反作弊结束」看这里）--")
+    services, err = _powershell(
+        "Get-Service -ErrorAction SilentlyContinue | "
+        "Where-Object { $_.Name -match 'AntiCheat|ACE|SGuard|SGuard64|TenSafe|Hypergryph|Gryphline|BEDaisy|EasyAntiCheat' } | "
+        "Format-Table -AutoSize Name,DisplayName,Status,StartType"
+    )
+    if err:
+        notes.append(f"服务查询失败：{err}")
+        lines.append(f"（抓取失败：{err}）")
+    else:
+        lines.append(services or "（没有匹配到反作弊/官方服务）")
+
+    lines.append("")
+    lines.append("-- 崩溃转储（%LOCALAPPDATA%\\CrashDumps，只列清单不收本体）--")
+    dumps = crash_dump_candidates()
+    if not dumps:
+        lines.append("（目录不存在或没有 .dmp —— 没有本地转储）")
+    for path, size, mtime in dumps:
+        lines.append(f"{datetime.fromtimestamp(mtime).isoformat(timespec='seconds')}  "
+                     f"{size:>14,} B  {path.name}")
+
+    lines.append("")
+    lines.append("-- 游戏与启动器文件版本 --")
+    targets = []
+    if game_dir is not None:
+        targets.append(Path(game_dir) / "Endfield.exe")
+    exe = getattr(config, "game_exe_path", None)
+    if exe:
+        targets.append(Path(exe))
+    seen: set[str] = set()
+    for target in targets:
+        key = str(target).lower()
+        if key in seen or not target.is_file():
+            continue
+        seen.add(key)
+        info, err = _powershell(
+            f"(Get-Item -LiteralPath '{str(target).replace("'", "''")}').VersionInfo | "
+            "Format-List FileVersion,ProductVersion,FileDescription,CompanyName"
+        )
+        lines.append(f"{target}")
+        lines.append(info if not err else f"（读取失败：{err}）")
+
+    lines.append("")
+    lines.append("-- 相关进程（注入框架 / 插件 / 启动器，判断谁在同时跑）--")
+    procs, err = _powershell(
+        "Get-Process -ErrorAction SilentlyContinue | "
+        "Where-Object { $_.ProcessName -match 'XXMI|loader|migoto|d3dx|Endfield|SecondaryMotion|Poser|webview|EndfieldModController' } | "
+        "Select-Object Id,ProcessName,@{n='StartTime';e={try{$_.StartTime}catch{''}}} | Format-Table -AutoSize"
+    )
+    lines.append(procs if not err else f"（抓取失败：{err}）")
+
+    text = "\n".join(lines) + "\n"
+    reason = "；".join(notes)
+    if not reason:
+        _ENV_REPORT_CACHE = (now, text)
+    return text, reason
+
+
+def game_dir_inventory_text(config: Any, game_dir: Path | None, *, limit: int = 400) -> str:
+    """游戏目录清单 + 注入归属（哪套 proxy、原版备份在不在、plugin 里都有什么）。
+
+    为什么要有（2026-10-04）：那份包里只有一句 `kind=loader_proxy … backup=None`，
+    看不出"这份 proxy 是谁铺的、能不能还原"。而这些正好决定"游戏起不起得来"
+    （game_clean 的注释就写过：proxy 移走却没补回系统原版 ⇒ 游戏直接起不来）。
+    """
+    from . import reshade_integration
+
+    lines = ["-- 游戏目录清单 --"]
+    if game_dir is None or not Path(game_dir).is_dir():
+        lines.append(f"（没有游戏目录：{game_dir}）")
+        return "\n".join(lines) + "\n"
+    game = Path(game_dir)
+    lines.append(f"游戏目录: {game}")
+    lines.append("")
+    lines.append("== 注入 proxy（决定游戏能否加载 plugin\\*.dll）==")
+    for name in reshade_integration.LOADER_PROXY_MODULES:
+        path = game / name
+        parked = path.with_name(name + reshade_integration.LOADER_PROXY_DISABLED_SUFFIX)
+        backup = path.with_name(name + ".bak")
+        if not path.is_file() and not parked.is_file():
+            continue
+        try:
+            is_proxy = reshade_integration.looks_like_loader_proxy(path) if path.is_file() else False
+            kind = reshade_integration.loader_kind(path) if path.is_file() else ""
+        except Exception as exc:  # noqa: BLE001
+            is_proxy, kind = False, f"判定失败: {exc}"
+        size = path.stat().st_size if path.is_file() else 0
+        lines.append(
+            f"{name}: {'**loader proxy**' if is_proxy else '（不是 proxy）'} "
+            f"归属={kind or '未知'} size={size:,} B "
+            f"原版备份={backup.name + '（在）' if backup.is_file() else '**缺失（无法安全还原）**'}"
+            + (f" 另有停用副本 {parked.name}" if parked.is_file() else "")
+        )
+    lines.append("")
+    lines.append("== plugin 目录（会被 proxy 全部加载）==")
+    plugin = game / reshade_integration.PLUGIN_DIR_NAME
+    if plugin.is_dir():
+        try:
+            entries = sorted(plugin.iterdir(), key=lambda p: p.name.lower())
+        except OSError:
+            entries = []
+        for entry in entries[:80]:
+            try:
+                size = entry.stat().st_size if entry.is_file() else 0
+            except OSError:
+                size = 0
+            lines.append(f"    {size:>12,} B  {entry.name}")
+    else:
+        lines.append("    （没有 plugin 目录）")
+    lines.append("")
+    lines.append("== 游戏目录文件（顶层，按修改时间倒序；只列关键后缀）==")
+    interesting = (".dll", ".exe", ".ini", ".log", ".addon64", ".json", ".txt", ".bak", ".disabled")
+    try:
+        files = [p for p in game.iterdir() if p.is_file() and p.suffix.lower() in interesting]
+        files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    except OSError:
+        files = []
+    for path in files[:limit]:
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        lines.append(
+            f"    {stat.st_size:>12,} B  {datetime.fromtimestamp(stat.st_mtime).isoformat(timespec='seconds')}  {path.name}"
+        )
+    if len(files) > limit:
+        lines.append(f"    …（还有 {len(files) - limit} 个未列出）")
+    lines.append("")
+    lines.append("== 游戏目录子目录（一层）==")
+    try:
+        for child in sorted(game.iterdir(), key=lambda p: p.name.lower()):
+            if child.is_dir():
+                try:
+                    count = sum(1 for _ in child.iterdir())
+                except OSError:
+                    count = -1
+                lines.append(f"    {child.name}\\  （{count} 项）")
+    except OSError:
+        pass
+    return "\n".join(lines) + "\n"
+
+
+def sanitized_xxmi_config(config: Any) -> tuple[str, str]:
+    """XXMI 的 `Config.json` **脱敏副本**（签名值只留长度）。
+
+    为什么要塞整份：`_xxmi_summary` 只给几个字段，而"注入库到底列了什么、顺序如何、
+    有没有多出别的库"全在原文里。签名字段是用户自己的 ECDSA 签名（私钥不在其中），
+    但**没必要把它带走** —— 一律替换成 `<已省略，长度 N>`。
+    """
+    from . import reshade_integration
+
+    launcher = config.xxmi_launcher_path
+    if launcher is None:
+        return "", "没有定位到 XXMI Launcher"
+    path = reshade_integration.xxmi_config_path(launcher)
+    if not path or not Path(path).is_file():
+        return "", f"XXMI 配置不存在: {path}"
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return "", f"读取 XXMI 配置失败: {exc}"
+
+    def _walk(node: Any) -> Any:
+        if isinstance(node, dict):
+            out = {}
+            for key, value in node.items():
+                if isinstance(value, str) and ("signature" in key.lower() or "private" in key.lower()):
+                    out[key] = f"<已省略，长度 {len(value)}>"
+                else:
+                    out[key] = _walk(value)
+            return out
+        if isinstance(node, list):
+            return [_walk(item) for item in node]
+        return node
+
+    try:
+        return json.dumps(_walk(data), ensure_ascii=False, indent=2), ""
+    except (TypeError, ValueError) as exc:
+        return "", f"序列化失败: {exc}"
+
+
+def _try_capture(config: Any, what: str, func: Any, *args: Any, **kwargs: Any) -> Any:
+    """跑一段采集；**失败只记一条日志，绝不让它中断其余采集**。
+
+    issue #13 的核心教训：`log_efmi_state` 整个函数体包在一个 `try` 里，
+    `staging_root.iterdir()` 一处抛 `FileNotFoundError` ⇒ 后面 `loader_debug.log` /
+    `d3d11_log.txt` 的采集**一行都没执行**，而在最需要现场的那一次崩溃包里，
+    取证代码自己整段放弃了。
+    """
+    try:
+        return func(*args, **kwargs)
+    except Exception as exc:  # noqa: BLE001
+        log_exception(config, f"采集失败: {what}", exc, category="diag")
+        return None
 
 
 def _capture_postmortem(config: Any, game_dir: Path | None, reason: str) -> None:
@@ -473,22 +1146,75 @@ def _capture_postmortem(config: Any, game_dir: Path | None, reason: str) -> None
     `diagnostics-<stamp>.zip`（而 `crashwatch` 在真崩溃时还会再打一个 `crash-*.zip`，
     一次崩溃两个大包、正常退出也堆包）。现在：只有**异常退出/超时**才打包，
     正常退出（`exit_code=0` 且没有崩溃特征）只写日志与尾巴文件。
+
+    ⚠️ **2026-10-04 扩充**（用户原话：「日志包尽量多塞东西，**不要老是判据不够**」）：
+      * 每条采集都进 `capture-manifest.txt`（"没有现场" vs "没去抓"必须能分开）；
+      * `ReShade.log` **多候选**：它按 `RESHADE_BASE_PATH_OVERRIDE` 落在 `runtime\\reshade\\`，
+        只抓游戏目录等于整条丢失（issue #13 缺陷三，2026-10-04 实测再次复现）；
+      * 补 `Player.log`（Unity 侧最后几句话 —— 区分"崩了"与"被外部结束"的关键）；
+      * EFMI 与 3DMigoto **两侧**日志都抓，并标出"是不是本次运行写过的"（旧日志
+        被当现场用比没有更危险：那份 12.6 MB 的 `d3d11_log.txt` 半小时没变过）。
     """
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     target_dir = logs_dir(config)
-    loader = config.migoto_loader_path
-    loader_dir = Path(loader).parent if loader else Path(config.runtime_path) / "migoto"
-    _capture_tail(game_dir / "ReShade.log" if game_dir else Path("__missing__"), target_dir / f"ReShade-{stamp}.log", lines=500)
-    _capture_tail(loader_dir / "loader_debug.log", target_dir / f"loader_debug-{stamp}.log", lines=500)
-    _capture_tail(loader_dir / "mc_bootstrap.log", target_dir / f"mc_bootstrap-{stamp}.log", lines=500)
-    _capture_tail(Path(os.environ.get("WINDIR", r"C:\Windows")) / "System32" / "loader_debug.log", target_dir / f"loader_debug-system32-{stamp}.log", lines=500)
-    _capture_tail(loader_dir / "d3d11_log.txt", target_dir / f"d3d11_log-{stamp}.log", lines=500)
-    log_efmi_state(config, user_ini_path=loader_dir / "d3dx_user.ini", staging_root=loader_dir / "Mods")
+    manifest = _new_capture_manifest()
+
+    # ① ReShade 日志（多候选，文件名带来源标签，谁也不覆盖谁）
+    for label, source in _try_capture(config, "ReShade 候选路径", reshade_log_candidates, config, game_dir) or []:
+        arc = f"logs/ReShade-{label}-{stamp}.log"
+        _try_capture(config, arc, _capture_tail, source, target_dir / f"ReShade-{label}-{stamp}.log",
+                     lines=800, manifest=manifest, arcname=arc)
+    # 兼容旧名字 `ReShade-<stamp>.log`（issue #13 的反馈者按这个找过），仅在游戏目录那份存在时
+    game_reshade = (Path(game_dir) / "ReShade.log") if game_dir else None
+    if game_reshade is not None and game_reshade.is_file():
+        _try_capture(config, "ReShade-<stamp>", _capture_tail, game_reshade,
+                     target_dir / f"ReShade-{stamp}.log", lines=800,
+                     manifest=manifest, arcname=f"logs/ReShade-{stamp}.log")
+
+    # ② EFMI / 3DMigoto 两侧的日志与 ini
+    for label, source in _try_capture(config, "EFMI 日志候选", efmi_log_candidates, config) or []:
+        arc = f"logs/{source.stem}-{label}-{stamp}{source.suffix}"
+        _try_capture(config, arc, _capture_tail, source,
+                     target_dir / f"{source.stem}-{label}-{stamp}{source.suffix}",
+                     lines=500, manifest=manifest, arcname=arc)
+
+    # ③ Unity 的 Player.log / Player-prev.log（游戏自己写的最后几句话）
+    for path in _try_capture(config, "Player.log 候选", player_log_candidates) or []:
+        arc = f"player/{path.parent.name}-{path.name}"
+        _try_capture(config, arc, _capture_tail, path,
+                     target_dir / f"player-{path.parent.name}-{path.name}",
+                     lines=400, manifest=manifest, arcname=arc)
+
+    # ④ 游戏目录里的 loader 残留（System32 那份 loader_debug.log 也看一眼）
+    probes = _try_capture(config, "EFMI 路径", efmi_probe_paths, config) or {}
+    loader_dir = probes.get("loader_dir")
+    if loader_dir is not None:
+        for name in ("loader_debug.log", "mc_bootstrap.log", "inject_order.txt"):
+            arc = f"logs/{name}-{stamp}"
+            _try_capture(config, arc, _capture_tail, Path(loader_dir) / name,
+                         target_dir / f"{name}-{stamp}", lines=500,
+                         manifest=manifest, arcname=arc)
+    _try_capture(config, "loader_debug(System32)", _capture_tail,
+                 Path(os.environ.get("WINDIR", r"C:\Windows")) / "System32" / "loader_debug.log",
+                 target_dir / f"loader_debug-system32-{stamp}.log", lines=500,
+                 manifest=manifest, arcname=f"logs/loader_debug-system32-{stamp}.log")
+
+    # ⑤ EFMI 状态（路径以 config 为准；内部三路各自独立兜底）
+    _try_capture(config, "EFMI 状态", log_efmi_state, config)
+
     if _is_normal_exit_reason(reason):
+        # 正常退出不打包，但**采集清单仍然落盘**（下次排查能看出"当时抓了什么"）
+        try:
+            target_dir.mkdir(parents=True, exist_ok=True)
+            (target_dir / f"capture-{stamp}.txt").write_text(
+                capture_manifest_text(manifest), encoding="utf-8", errors="replace")
+        except OSError:
+            pass
         log_event(config, "游戏正常退出（不生成诊断包）", category="monitor", reason=reason)
         return
     _capture_windows_events(config)
-    bundle = create_diagnostic_bundle(config, game_dir=game_dir, note=f"auto-postmortem: {reason}")
+    bundle = create_diagnostic_bundle(config, game_dir=game_dir,
+                                      note=f"auto-postmortem: {reason}", manifest=manifest)
     log_event(config, "已生成诊断包", category="crash", path=bundle, reason=reason)
 
 
@@ -502,6 +1228,8 @@ def _is_normal_exit_reason(reason: str) -> bool:
 
 
 def _monitor_process(config: Any, game_dir: Path | None, image_name: str, timeout: float) -> None:
+    global _LAST_GAME_START
+
     log_event(config, "进程监视启动", category="monitor", image=image_name, timeout=timeout)
     found_pid: int | None = None
     handle: int | None = None
@@ -524,6 +1252,9 @@ def _monitor_process(config: Any, game_dir: Path | None, image_name: str, timeou
                     found_pid = pid
                     handle = _open_process_handle(pid)
                     command_line = _process_command_line(pid)
+                    # 记下"这次游戏是什么时候起来的" —— 采集层用它判断抓到的日志
+                    # 是**本次现场**还是上一次留下的旧文件（2026-10-04 加）。
+                    _LAST_GAME_START = time.time()
                     log_event(config, "检测到游戏进程", category="monitor", image=image_name, pid=pid,
                               # 读不到就把原因写出来（否则"命令行是空的"永远是个谜 ——
                               # 原来那条 wmic 兜底在新系统上必然失败且不留痕迹）
@@ -677,6 +1408,72 @@ def _safe_zip_write(archive: zipfile.ZipFile, path: Path, arcname: str, *, max_b
                          f"{path}: 原 {size} 字节，已截断为 {max_bytes} 字节\n")
     except (OSError, zipfile.BadZipFile):
         return
+
+
+def _zip_tracked(
+    archive: zipfile.ZipFile,
+    source: Path,
+    arcname: str,
+    manifest: list[dict[str, Any]] | None,
+    *,
+    max_bytes: int = 8 * 1024 * 1024,
+    required: bool = False,
+) -> None:
+    """把 `source` 收进包 **并在采集清单里记一行结果**（找不到也记）。
+
+    `required=True` = "这个文件本该在"（例如 `Player.log`、`sbm_log.txt`）——
+    找不到时清单里会写明"本该存在却找不到"，而不是含糊的 missing。
+    """
+    source = Path(source)
+    if not source.is_file():
+        _manifest_add(manifest, arcname=arcname, source=source, status="missing",
+                      note=("本该存在却找不到（这条请一并反馈）" if required else "按当前配置不存在"))
+        return
+    try:
+        stat = source.stat()
+    except OSError as exc:
+        _manifest_add(manifest, arcname=arcname, source=source, status="error", note=str(exc))
+        return
+    _safe_zip_write(archive, source, arcname, max_bytes=max_bytes)
+    note = "" if stat.st_size <= max_bytes else f"超过 {max_bytes:,} 字节，只收了尾部"
+    _manifest_add(manifest, arcname=arcname, source=source, status="ok", note=note,
+                  size=stat.st_size, mtime=stat.st_mtime, fresh=_is_fresh(stat.st_mtime))
+
+
+def _game_injection_summary(config: Any, game_dir: Path | None) -> list[str]:
+    """summary 里那段"游戏目录注入了什么"的精简版（完整清单在 `game-inventory.txt`）。"""
+    lines = ["", "-- 游戏目录注入（游戏起不来 / 缺 DLL 时先看这里）--"]
+    from . import reshade_integration
+
+    if game_dir is None or not Path(game_dir).is_dir():
+        lines.append(f"（没有游戏目录：{game_dir}）")
+        return lines
+    game = Path(game_dir)
+    for name in reshade_integration.LOADER_PROXY_MODULES:
+        path = game / name
+        if not path.is_file():
+            continue
+        try:
+            if not reshade_integration.looks_like_loader_proxy(path):
+                continue
+            kind = reshade_integration.loader_kind(path) or "未知"
+            size = path.stat().st_size
+        except (OSError, AttributeError):
+            continue
+        backup = path.with_name(name + ".bak")
+        lines.append(f"{name}: loader proxy（归属={kind}）{size:,} B；"
+                     f"原版备份 {backup.name}：{'在' if backup.is_file() else '**缺失 —— 无法安全还原**'}")
+    plugin = game / reshade_integration.PLUGIN_DIR_NAME
+    if plugin.is_dir():
+        try:
+            for entry in sorted(plugin.iterdir(), key=lambda p: p.name.lower()):
+                if entry.is_file():
+                    lines.append(f"plugin\\{entry.name}: {entry.stat().st_size:,} B")
+        except OSError:
+            pass
+    if len(lines) == 2:
+        lines.append("（游戏目录里没有检测到第三方注入 proxy）")
+    return lines
 
 
 def _nvngx_fingerprint(config: Any) -> list[str]:
@@ -847,8 +1644,27 @@ def _shader_summary(config: Any) -> list[str]:
     return lines
 
 
-def create_diagnostic_bundle(config: Any, *, game_dir: Path | None = None, note: str = "manual") -> Path:
-    """Create a zip with logs and lightweight context files (no game binaries)."""
+def create_diagnostic_bundle(
+    config: Any,
+    *,
+    game_dir: Path | None = None,
+    note: str = "manual",
+    manifest: list[dict[str, Any]] | None = None,
+) -> Path:
+    """打一个诊断包（zip）：日志 + 上下文 + **采集清单**（不含游戏二进制）。
+
+    ⚠️ **2026-10-04 大幅扩充**（用户原话：「日志包尽量多塞东西，**不要老是判据不够**」）。
+    这次进来的是之前反复缺的判据：
+      * `ReShade.log` —— **多候选**（它按 `RESHADE_BASE_PATH_OVERRIDE` 落在
+        `runtime\\reshade\\`，只抓游戏目录等于整份丢失；issue #13 缺陷三）；
+      * `Player.log` / `Player-prev.log` —— Unity 侧最后几句话（整份，不截尾）；
+      * WER 报告（`Report.wer`）与 Unity / 官方崩溃目录里的文本日志；
+      * `game-inventory.txt` —— 游戏目录清单 + **proxy 归属 / 原版备份在不在** + plugin 清单；
+      * `environment.txt` —— 事件日志 / 反作弊服务 / 崩溃转储 / 游戏版本 / 相关进程；
+      * `xxmi/Config.json`（**脱敏**）+ `XXMI Launcher Log.txt`（注入参数的一手记录）；
+      * `plugin/` 下的文本（`sbm_log.txt`、`poser-install.json`…）与 `SecondaryMotion/**/*.json`；
+      * **`capture-manifest.txt`** —— 每项"抓到没有、为什么没抓到、是不是本次运行写过的"。
+    """
     _capture_windows_events(config)
     runtime = Path(config.runtime_path)
     target_dir = logs_dir(config)
@@ -859,9 +1675,12 @@ def create_diagnostic_bundle(config: Any, *, game_dir: Path | None = None, note:
     from . import fsutil
 
     out = fsutil.unique_sibling(target_dir / f"diagnostics-{stamp}.zip")
-    loader = config.migoto_loader_path
-    loader_dir = Path(loader).parent if loader else runtime / "migoto"
+    if manifest is None:
+        manifest = _new_capture_manifest()
+    probes = _try_capture(config, "EFMI 路径", efmi_probe_paths, config) or {}
+    loader_dir = Path(probes["loader_dir"]) if probes.get("loader_dir") else runtime / "migoto"
     config_path = Path(getattr(config, "_config_path", "") or "")
+    game_path = Path(game_dir) if game_dir is not None else None
 
     summary = [
         "EndfieldModController diagnostic bundle",
@@ -872,9 +1691,10 @@ def create_diagnostic_bundle(config: Any, *, game_dir: Path | None = None, note:
         f"loader={loader_dir}",
         f"game_dir={game_dir}",
     ]
+    summary.extend(_game_injection_summary(config, game_path))
     summary.extend(_nvngx_fingerprint(config))
     summary.extend(_xxmi_summary(config))
-    summary.extend(_ngx_consumer_summary(game_dir))
+    summary.extend(_ngx_consumer_summary(game_path))
     summary.extend(_shader_summary(config))
     # 运行时组件清单（2026-10-02 加）：文件名 / 字节 / sha256 / 是否偏离随包基线。
     # 那天用户遇到"配套损坏 ⇒ 游戏启动几十秒后崩"，包里却没有这份清单，
@@ -896,23 +1716,104 @@ def create_diagnostic_bundle(config: Any, *, game_dir: Path | None = None, note:
     except Exception as exc:  # noqa: BLE001
         summary.append(f"（设备信息读取失败: {exc}）")
 
+    # 游戏之外的现场（事件日志 / 反作弊服务 / 转储 / 版本 / 进程）——**一次 PowerShell 拿全**；
+    # 拿不到也把原因写进 environment.txt 与采集清单（"抓不到"本身是判据：
+    # 比如"没有 WER 记录"能说明进程不是自己崩的，而"采集失败"什么也说明不了）。
+    env_text, env_error = collect_environment_report(config, game_path)
+    inventory_text = game_dir_inventory_text(config, game_path)
+
     with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for path in sorted(target_dir.glob("*.log")):
             _safe_zip_write(archive, path, f"logs/{path.name}")
         _safe_zip_write(archive, launch_log_path(config), "logs/launch.log")
         for path in sorted(target_dir.glob("*.txt")):
             _safe_zip_write(archive, path, f"logs/{path.name}")
-        if game_dir is not None:
-            for name in ("ReShade.ini", "ReShade.log", "actions.tsv", "user_ini_path.txt", "loader_debug.log", "d3d11_log.txt", "endfieldmodcontroller.addon.log"):
-                _safe_zip_write(archive, game_dir / name, f"game/{name}")
-        for name in ("ReShade.ini", "d3dx.ini", "d3dx_user.ini", "inject_order.txt", "actions.tsv", "user_ini_path.txt", "loader_debug.log", "mc_bootstrap.log", "mc_bootstrap.dll", "d3d11_log.txt", "endfieldmodcontroller.addon.log"):
-            _safe_zip_write(archive, loader_dir / name, f"loader/{name}")
+        # ① 游戏目录里的文本类产物（不收 dll/exe 本体）
+        if game_path is not None:
+            from . import reshade_integration
+
+            for name in ("ReShade.ini", "ReShade.log", "actions.tsv", "user_ini_path.txt",
+                         "loader_debug.log", "d3d11_log.txt", "endfieldmodcontroller.addon.log",
+                         "d3dx.ini", "d3dx_user.ini", "inject_order.txt", "version.txt", "app.info"):
+                _zip_tracked(archive, game_path / name, f"game/{name}", manifest,
+                             required=name in ("d3dx.ini", "d3dx_user.ini"))
+            # ①a ReShade 日志的其它候选位置（**这就是 issue #13 缺陷三**：
+            #     它按 `RESHADE_BASE_PATH_OVERRIDE` 落在 `runtime\reshade\`）
+            for label, source in _try_capture(config, "ReShade 候选", reshade_log_candidates,
+                                              config, game_path) or []:
+                if label == "game":
+                    continue                      # 上面那条已按原名收过
+                _zip_tracked(archive, source, f"reshade/{label}-ReShade.log", manifest)
+            # ①b plugin 目录下的文本（`sbm_log.txt` 是"插件到底起没起来"的一手材料）
+            plugin = game_path / reshade_integration.PLUGIN_DIR_NAME
+            if plugin.is_dir():
+                try:
+                    entries = sorted(plugin.iterdir(), key=lambda p: p.name.lower())
+                except OSError:
+                    entries = []
+                for entry in entries:
+                    if not entry.is_file():
+                        continue
+                    if entry.suffix.lower() not in (".log", ".txt", ".json", ".ini", ".tsv"):
+                        continue
+                    _zip_tracked(archive, entry, f"plugin/{entry.name}", manifest,
+                                 required=entry.name.lower() == "sbm_log.txt")
+            # ①c SecondaryMotion 的 json（插件运行状态 / 角色数据 / 预设）
+            secondary = game_path / "SecondaryMotion"
+            if secondary.is_dir():
+                try:
+                    payloads = [p for p in secondary.rglob("*.json") if p.is_file()]
+                    payloads.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+                except OSError:
+                    payloads = []
+                for entry in payloads[:80]:
+                    arc = "game/SecondaryMotion/" + entry.relative_to(secondary).as_posix()
+                    _zip_tracked(archive, entry, arc, manifest, max_bytes=2 * 1024 * 1024)
+
+        # ② EFMI / 3DMigoto 两侧的 ini 与日志（**两侧都收**，谁是谁写清楚）
+        for label, source in _try_capture(config, "EFMI 日志候选", efmi_log_candidates, config) or []:
+            if source.is_file():
+                _zip_tracked(archive, source, f"loader/{label}-{source.name}", manifest)
+        # ②a loader 目录里的其它产物（自造的 loader / bootstrap 残留）
+        for name in ("mc_bootstrap.log", "mc_bootstrap.dll", "inject_order.txt", "actions.tsv",
+                     "user_ini_path.txt", "endfieldmodcontroller.addon.log"):
+            _zip_tracked(archive, loader_dir / name, f"loader/{name}", manifest)
+
+        # ③ Unity 的 Player.log（整份；这是"崩了 vs 被外部结束"的关键判据）
+        for path in _try_capture(config, "Player.log 候选", player_log_candidates) or []:
+            _zip_tracked(archive, path, f"player/{path.parent.name}-{path.name}", manifest,
+                         max_bytes=32 * 1024 * 1024,
+                         required=path.name.lower() == "player.log")
+
+        # ④ WER 报告 + Unity / 官方崩溃目录里的文本日志
+        for path in _try_capture(config, "WER 报告", wer_report_paths) or []:
+            _zip_tracked(archive, path, f"wer/{path.parent.name}-{path.name}", manifest)
+        for path in _try_capture(config, "Unity 崩溃日志", unity_crash_logs) or []:
+            _zip_tracked(archive, path, f"unity-crash/{path.parent.name}-{path.name}", manifest)
+
+        # ⑤ XXMI 侧：脱敏配置 + 它自己的日志（注入参数与注入结果的一手记录）
+        xxmi_text, xxmi_note = sanitized_xxmi_config(config)
+        if xxmi_text:
+            archive.writestr("xxmi/Config.json", xxmi_text)
+            _manifest_add(manifest, arcname="xxmi/Config.json", source="(XXMI 配置，签名值已脱敏)",
+                          status="ok", note="signature 字段只保留长度")
+        else:
+            _manifest_add(manifest, arcname="xxmi/Config.json", source="(XXMI 配置)",
+                          status="missing", note=xxmi_note)
+        launcher = config.xxmi_launcher_path
+        if launcher is not None:
+            xxmi_root = Path(launcher).parent.parent.parent
+            for name in ("XXMI Launcher Log.txt", "XXMI Launcher Log.old.txt"):
+                _zip_tracked(archive, xxmi_root / name, f"xxmi/{name}", manifest,
+                             required=name == "XXMI Launcher Log.txt")
         # DLSS5 现场：`dlss5-feed.log` 是判断"神经渲染有没有出帧、卡在哪一步"的关键证据。
         # 2026-09-30 有一个 issue 就因为它没被收进包里，导致只能靠猜（那条反馈最终是
         # 靠 dlss5-feed.addon64 的 fileVersion 才对上线索）。
         dlss5_dir = Path(config.dlss5_path)
-        for name in ("dlss5-feed.log", "dlss5-feed.cfg", "ReShade.ini", "ReShadePreset.ini", "ReShade.log"):
-            _safe_zip_write(archive, dlss5_dir / name, f"dlss5/{name}")
+        for name in ("dlss5-feed.log", "dlss5-feed.cfg", "ReShade.ini", "ReShadePreset.ini", "ReShade.log",
+                     "panel_info.txt", "actions.tsv", "user_ini_path.txt"):
+            _zip_tracked(archive, dlss5_dir / name, f"dlss5/{name}", manifest,
+                         required=name in ("dlss5-feed.log", "ReShade.ini"))
         state = mod_conflict_state(config)
         if state:
             try:
@@ -927,21 +1828,37 @@ def create_diagnostic_bundle(config: Any, *, game_dir: Path | None = None, note:
         # 少了它们，用户报"还原没生效 / 游戏起不来"时只能**凭日志反推**，往往要再来一轮
         # —— 与用户定的"日志包一次抓齐所有数据，不要搞好几轮"冲突。
         # 单个上限 256 KB（超了 `_safe_zip_write` 会收尾部并在包内注明被截断）。
+        # 2026-10-04 再扩：`.jsonl`（运行时采样曲线）与 `logs\*.json` 也一并收。
         for path in sorted(runtime.glob("*.json")):
             _safe_zip_write(archive, path, f"runtime-state/{path.name}", max_bytes=256 * 1024)
         for folder, arc in ((runtime / "_state", "runtime-state/_state"),
                             (runtime / "_update", "runtime-state/_update"),
-                            (runtime / "_net", "runtime-state/_net")):
+                            (runtime / "_net", "runtime-state/_net"),
+                            (runtime / "_sample", "runtime-state/_sample")):
             if not folder.is_dir():
                 continue
-            for path in sorted(folder.glob("*.json")):
-                _safe_zip_write(archive, path, f"{arc}/{path.name}", max_bytes=256 * 1024)
+            for pattern in ("*.json", "*.jsonl"):
+                for path in sorted(folder.glob(pattern)):
+                    _safe_zip_write(archive, path, f"{arc}/{path.name}", max_bytes=256 * 1024)
         if config_path.is_file():
             _safe_zip_write(archive, config_path, "config.json")
         archive.writestr("runtime-inventory.txt", inventory + "\n")
+        archive.writestr("game-inventory.txt", inventory_text)
+        archive.writestr("environment.txt",
+                         env_text + (f"\n[采集提示] {env_error}\n" if env_error else ""))
+        _manifest_add(manifest, arcname="environment.txt", source="(事件日志/服务/转储/版本/进程)",
+                      status="error" if env_error else "ok", note=env_error)
+        manifest_text = capture_manifest_text(manifest)
+        archive.writestr("capture-manifest.txt", manifest_text)
+        overview = manifest_text.splitlines()[2] if len(manifest_text.splitlines()) > 2 else ""
+        summary[1:1] = ["-- 采集清单（完整清单见 capture-manifest.txt）--",
+                        overview,
+                        "missing/error 表示**没抓到**（不是没有内容）；带「⚠ 上次运行留下的旧文件」的日志不能当本次现场用。"]
         archive.writestr("summary.txt", "\n".join(summary) + "\n")
 
-    log_event(config, "诊断包已创建", category="diag", path=out, note=note)
+    log_event(config, "诊断包已创建", category="diag", path=out, note=note,
+              items=len(manifest),
+              missing=sum(1 for item in manifest if item.get("status") == "missing"))
     return out
 
 
@@ -975,92 +1892,166 @@ def clear_logs(config: Any) -> list[str]:
 
 
 def _capture_windows_events(config: Any) -> None:
-    """Append the newest Application Error / Hang entries when available."""
+    """把"游戏之外"的现场落一份到 `logs\\windows-events-<stamp>.log`。
+
+    ⚠️ **2026-10-04 改**：原实现是"抓到内容才写文件、抓不到就静默 return" ——
+    于是包里既没有事件文件、也没有任何说明，看包的人分不清"这台机器没有崩溃事件"
+    和"我们没抓成功"。这两者在归因上完全相反（没有 WER/Application Error 事件
+    恰恰能说明**进程不是自己崩的，而是被外部结束的**）。
+    现在**永远写文件**：抓到就写事件，抓不到就写明原因或"近 60 分钟内没有相关事件"。
+    """
     if os.name != "nt":
         return
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    command = [
-        "powershell",
-        "-NoProfile",
-        "-NonInteractive",
-        "-Command",
-        "Get-WinEvent -FilterHashtable @{LogName='Application'; ProviderName='Application Error','Application Hang'; StartTime=(Get-Date).AddMinutes(-15)} -ErrorAction SilentlyContinue | Select-Object -First 8 | Format-List TimeCreated,Id,ProviderName,Message",
-    ]
-    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    try:
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=15,
-            creationflags=creationflags,
-        )
-    except Exception:  # noqa: BLE001
-        return
-    text = (result.stdout or "").strip()
-    if not text:
-        return
+    text, error = collect_environment_report(config, None)
     target = logs_dir(config) / f"windows-events-{stamp}.log"
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(text + "\n", encoding="utf-8", errors="replace")
-        log_event(config, "已捕获 Windows 应用错误事件", category="crash", path=target)
+        target.write_text(text + (f"\n[采集提示] {error}\n" if error else ""),
+                          encoding="utf-8", errors="replace")
+        log_event(config, "已捕获 Windows 现场（事件/服务/转储）", category="crash",
+                  path=target, error=error or "")
     except OSError:
         return
 
 
 def log_efmi_state(config: Any, *, user_ini_path: Path | None = None, staging_root: Path | None = None) -> None:
-    """Log whether EFMI actually loaded the staged Mods/controller/probe files."""
-    try:
-        if user_ini_path is not None:
-            user_ini = Path(user_ini_path)
-            if user_ini.is_file():
-                text = user_ini.read_text(encoding="utf-8", errors="replace")
-                wanted = ("mc_probe", "mc_controller_loaded", "mc_last_wire", "mc_last_value", "mc_state_")
-                for line in text.splitlines():
-                    lowered = line.lower()
-                    if any(token in lowered for token in wanted):
-                        log_event(config, "EFMI user ini state", category="efmi", line=line)
-            else:
-                log_event(config, "EFMI user ini missing", category="efmi", path=user_ini)
-        if staging_root is not None:
-            root = Path(staging_root)
+    """记录 EFMI / 3DMigoto 到底有没有把 staged 的 Mods / controller / probe 读进去。
+
+    ⚠️ **2026-10-04 重写**（issue #13 缺陷一 + 二；同一天另一位反馈者的包里原地复现）：
+      * **路径以 config 解析结果为准**，`loader` 推导只作兜底；调用方传进来的路径算
+        **额外候选**，不再覆盖 config 的结论 —— 原来 `_capture_postmortem` 传的是
+        `loader_dir/Mods`，而那位反馈者的 `migoto_loader` 指向的是**另一套 3DMigoto**
+        （`D:\\d3dxSkinManage\\…\\work`），于是包里报出一串 `exists=False` 误报，
+        真实 staging 在 `…\\XXMI Launcher\\EFMI\\Mods` —— 同一份日志的「应用配置」行里写着。
+      * **两侧都探**：EFMI 侧与 loader 侧各报一条（谁在、谁不在，一眼看清）。
+      * **三路独立兜底**：user ini / staging / loader 日志互不牵连；任何一路抛异常都不会
+        吃掉另外两路（原来整个函数体一个 `try`，一处 `iterdir()` 就把后面的采集全吞了）。
+      * **目录不存在不是异常，而是一条结论**（"这条链本来就没部署"）。
+    """
+    probes = _try_capture(config, "EFMI 路径", efmi_probe_paths, config) or {}
+
+    def _dedupe(items: list[tuple[str, Path]]) -> list[tuple[str, Path]]:
+        seen: set[str] = set()
+        out: list[tuple[str, Path]] = []
+        for label, path in items:
+            key = str(path).lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append((label, path))
+        return out
+
+    ini_candidates = [("caller", Path(user_ini_path))] if user_ini_path is not None else []
+    ini_candidates += list(probes.get("user_ini") or [])
+    staging_candidates = [("caller", Path(staging_root))] if staging_root is not None else []
+    staging_candidates += list(probes.get("staging") or [])
+
+    def _step(name: str, func: Any) -> None:
+        try:
+            func()
+        except Exception as exc:  # noqa: BLE001
+            log_exception(config, f"EFMI 状态采集失败: {name}", exc, category="efmi")
+
+    # ---- ① user ini（谁写进去了什么：面板状态、probe、controller 标记）----
+    for label, path in _dedupe(ini_candidates):
+        def _read_ini(path: Path = path, label: str = label) -> None:
+            if not path.is_file():
+                log_event(config, "EFMI user ini missing", category="efmi", source=label, path=path,
+                          note="这条路径没有这个文件（见同批其它候选行，不要据此判定 EFMI 没部署）")
+                return
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError as exc:
+                log_event(config, "EFMI user ini 读取失败", level="WARN", category="efmi",
+                          source=label, path=path, error=str(exc))
+                return
+            log_event(config, "EFMI user ini 命中", category="efmi", source=label, path=path,
+                      size=path.stat().st_size)
+            wanted = ("mc_probe", "mc_controller_loaded", "mc_last_wire", "mc_last_value", "mc_state_")
+            hits = 0
+            for line in text.splitlines():
+                lowered = line.lower()
+                if any(token in lowered for token in wanted):
+                    log_event(config, "EFMI user ini state", category="efmi", source=label, line=line)
+                    hits += 1
+                    if hits >= 60:
+                        break
+            if not hits:
+                log_event(config, "EFMI user ini 里没有任何 mc_* 状态",
+                          level="WARN", category="efmi", source=label, path=path,
+                          note="面板/控制器没往这份 ini 写过东西 —— 要么游戏里没按过面板，"
+                               "要么游戏读的是**另一份** ini")
+
+        _step(f"user ini {label}", _read_ini)
+
+    # ---- ② staging（staged 的 Mods / probe / controller 到底在不在）----
+    for label, root in _dedupe(staging_candidates):
+        def _read_staging(root: Path = root, label: str = label) -> None:
+            if not root.is_dir():
+                log_event(config, "staged Mods 目录不存在（不是报错，是这条链本来就没部署）",
+                          level="WARN", category="efmi", source=label, path=root)
+                return
             managed = root / "EndfieldModControllerManaged"
             probe = root / "MC_Probe.ini"
             controller = root / "MC_Controller" / "controller.ini"
-            log_event(config, "staged metadata root", category="efmi", path=managed, exists=managed.is_dir())
-            log_event(config, "staged probe", category="efmi", path=probe, exists=probe.is_file())
-            log_event(config, "staged controller", category="efmi", path=controller, exists=controller.is_file())
+            log_event(config, "staged metadata root", category="efmi", source=label, path=managed,
+                      exists=managed.is_dir())
+            log_event(config, "staged probe", category="efmi", source=label, path=probe,
+                      exists=probe.is_file())
+            log_event(config, "staged controller", category="efmi", source=label, path=controller,
+                      exists=controller.is_file())
             active_dirs = [p for p in root.iterdir() if p.is_dir() and p.name.startswith("MC_")]
             ini_count = sum(1 for _ in root.rglob("*.ini"))
-            log_event(config, "staged inventory", category="efmi", mod_dirs=len(active_dirs), ini_files=ini_count)
-        loader = getattr(config, "migoto_loader_path", None)
-        if loader is not None:
-            loader_dir = Path(loader).parent
-            debug = loader_dir / "loader_debug.log"
-            if debug.is_file():
-                lines = debug.read_text(encoding="utf-8", errors="replace").splitlines()
-                for line in lines[-120:]:
-                    log_event(config, "loader debug", category="efmi", line=line)
-            efmi_log = loader_dir / "d3d11_log.txt"
-            if efmi_log.is_file():
-                try:
-                    log_event(config, "EFMI d3d11_log", category="efmi", path=efmi_log, size=efmi_log.stat().st_size)
-                    text = efmi_log.read_text(encoding="utf-8", errors="replace")
-                    for token in ("MC_Probe", "mc_probe", "mc_controller", "EndfieldModControllerManaged", "MC_Controller"):
-                        count = text.count(token)
-                        if count:
-                            log_event(config, "EFMI d3d11_log token", category="efmi", token=token, count=count)
-                    shown = 0
-                    for line in text.splitlines():
-                        if any(token in line for token in ("mc_probe", "mc_controller", "MC_Probe", "MC_Controller", "EndfieldModControllerManaged")):
-                            log_event(config, "EFMI d3d11_log line", category="efmi", line=line[:500])
-                            shown += 1
-                            if shown >= 40:
-                                break
-                except OSError:
-                    pass
-    except Exception as exc:  # noqa: BLE001
-        log_exception(config, "EFMI state logging failed", exc, category="efmi")
+            log_event(config, "staged inventory", category="efmi", source=label,
+                      mod_dirs=len(active_dirs), ini_files=ini_count,
+                      sample=", ".join(sorted(p.name for p in active_dirs)[:12]))
+
+        _step(f"staging {label}", _read_staging)
+
+    # ---- ③ loader 侧日志（含"这份日志是不是本次运行写的"）----
+    loader_dir = probes.get("loader_dir")
+    if loader_dir is not None:
+        def _read_loader_debug() -> None:
+            debug = Path(loader_dir) / "loader_debug.log"
+            if not debug.is_file():
+                return
+            lines = debug.read_text(encoding="utf-8", errors="replace").splitlines()
+            for line in lines[-120:]:
+                log_event(config, "loader debug", category="efmi", line=line)
+
+        def _read_loader_d3d11() -> None:
+            log = Path(loader_dir) / "d3d11_log.txt"
+            if not log.is_file():
+                return
+            stat = log.stat()
+            log_event(config, "loader d3d11_log", category="efmi", path=log, size=stat.st_size,
+                      mtime=datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
+                      fresh=_is_fresh(stat.st_mtime))
+            # 只读尾部 2 MB：这份日志常有十几 MB，而"我们关心的 Mod 有没有被加载"
+            # 在最近的记录里就能看出来（顺带避免崩溃时卡在这一步）。
+            try:
+                with open(log, "rb") as handle:
+                    handle.seek(max(0, stat.st_size - 2 * 1024 * 1024))
+                    text = handle.read().decode("utf-8", errors="replace")
+            except OSError:
+                return
+            for token in ("MC_Probe", "mc_probe", "mc_controller", "EndfieldModControllerManaged", "MC_Controller"):
+                count = text.count(token)
+                if count:
+                    log_event(config, "loader d3d11_log token", category="efmi", token=token, count=count)
+            shown = 0
+            for line in text.splitlines():
+                if any(token in line for token in ("mc_probe", "mc_controller", "MC_Probe", "MC_Controller",
+                                                   "EndfieldModControllerManaged")):
+                    log_event(config, "loader d3d11_log line", category="efmi", line=line[:500])
+                    shown += 1
+                    if shown >= 40:
+                        break
+            if not shown:
+                log_event(config, "loader d3d11_log 里没有控制器铺的 Mod 的任何痕迹",
+                          level="WARN", category="efmi", path=log,
+                          note="要么游戏读的不是这个 loader 的 Mods，要么控制器铺的 Mod 没进游戏")
+
+        _step("loader_debug", _read_loader_debug)
+        _step("loader d3d11_log", _read_loader_d3d11)

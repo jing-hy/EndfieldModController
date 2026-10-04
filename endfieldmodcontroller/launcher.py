@@ -2404,6 +2404,27 @@ def launch(
             "建议用「清理游戏目录注入」把它停放，避免两个 ReShade 抢 hook。",
         )
 
+    # **一键启动前的自动净化**（2026-10-04 用户要求；设置页开关，默认开）。
+    #
+    # 原话：「在设置做个开关，一键还原终末地清除所有第三方注入，**默认开**，
+    # 开了之后**不管是不是管理器注入的，都要去掉（要备份）**」。
+    # 顺序**必须**在这里（`ensure_injections` 之前）：先把游戏目录里任何第三方注入
+    # 痕迹备份移走、把系统原版补回，再由下面按当前开关重新铺我们自己那一份 ——
+    # 反过来的话，刚铺好的注入会被当成"残留"清掉。
+    # 只搬不删、写备份清单、随时可一键还原（`game_clean.restore`）。
+    if not dry_run:
+        try:
+            from . import game_clean
+
+            clean_report = game_clean.auto_clean_before_launch(
+                config, log=lambda message: _append_log(config, message))
+            if clean_report.get("moved"):
+                _append_log(config,
+                            f"启动前净化完成：移走 {len(clean_report['moved'])} 项；"
+                            f"备份在 {clean_report.get('backup_dir')}（可在设置页一键还原）")
+        except Exception as exc:  # noqa: BLE001 —— 净化失败不能拦住启动
+            _append_log(config, f"WARN 启动前净化失败（继续启动）: {exc}")
+
     if not dry_run:
         injection_report = ensure_injections(config)
         reshade["injection_report"] = injection_report
