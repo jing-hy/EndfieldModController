@@ -4,9 +4,9 @@
 > 目的：让「当时为什么这么改、踩过什么坑」跟着源码一起留在仓库里。
 > 想改内容 → 改记忆库（用记忆工具），再跑一次本脚本；不要直接编辑本文件。
 
-- 生成时间：2026-10-04 11:05:35
+- 生成时间：2026-10-04 11:51:39
 - 来源：`.dsh-meow/memory.db`
-- 条目：499 条（已跳过 archived / 其它项目的条目）
+- 条目：504 条（已跳过 archived / 其它项目的条目）
 
 ---
 
@@ -237,7 +237,7 @@
 
 `关键词：["启动页UI铁律","尽早展示加载页","不要cmd黑窗","CREATE_NO_WINDOW","日志框纯黑可复制","text_select True","滑块要真的有用","弹窗按钮自解释","一个弹窗只做一件事","推荐动作放右侧橙色主按钮","更多要出就地菜单","网址直接点开"]`
 
-## 项目记忆（结构 / 决策 / 部署 / 待办）（29 条）
+## 项目记忆（结构 / 决策 / 部署 / 待办）（31 条）
 
 ### 项目概述
 
@@ -360,6 +360,13 @@ runtime\dlss5                      38 字符  ❌ 崩
 
 `关键词：["面板发Mod原键","F13到F24走不通","mc_action_seen涨到15","跨命名空间变量被丢弃","CommandList只认本ini变量","press_all original_keys","controller.ini注释停用","creditinfo内部锁","不必再试F1到F12"]`
 
+### 「启动前清除游戏目录里的所有第三方注入」= 开关 `cl…
+*2026-10-04 11:30*
+
+「启动前清除游戏目录里的所有第三方注入」= 开关 `clear_game_injections_on_launch`（**默认开**），一键启动时自动跑 `game_clean.backup_and_clean`。**关键设计：先净化、后补齐** —— 先不管是谁铺的（本程序的、别的工具的、别人整合包的残留）一律**备份移走**并把系统原版补回，随后自检按**当前开关**重新铺我们自己要用的那一份，于是"清干净"与"功能还在"不冲突（顺序反了会把刚铺好的当残留清掉）。配套：游戏运行时跳过；只搬不删、写清单、可一键还原；覆盖面扩到"非本程序装的"痕迹（更多 proxy 名 + 3DMigoto 的 `d3dx.ini`/`ShaderFixes\`/`loader_debug.log`）；自检补 `backup_ok`（缺 `.bak` 自动从 System32 补齐，补不到明确"先别点还原"）。
+
+`关键词：["clear_game_injections_on_launch","一键还原终末地","清除第三方注入","backup_and_clean","先净化后补齐","game_backup","backup_ok","System32 补齐","默认开","启动前净化","proxy"]`
+
 ### 用户原话
 
 ### 【用户会怎样问"审计屎山"这类活（2026-10-04 …
@@ -368,6 +375,13 @@ runtime\dlss5                      38 字符  ❌ 崩
 【用户会怎样问"审计屎山"这类活（2026-10-04 原话）】：「我需要你审计这个项目中的屎山，bug，漏洞，能复用不复用，逻辑不合理，前后端不匹配等问题。除了要与其他依赖交互且不是备份问题以外，都修一下，能复用的复用，前后端不匹配以补齐为主。我划定不让你改的也要审计，但先不改，用goal，todo」。含义：① 他点名的**六类**都要覆盖；② 修复范围 = 除"与外部依赖交互且非备份语义"之外全部修，**备份语义类是例外（允许修，即使涉及外部对象）**；③ 前后端不匹配要他定的方向是"**补齐**"（补缺失那一侧，不是删字段）；④ 禁改的部分**也要审、要报告**，只是不动手；⑤ 用 goal + todo 组织。落地成果见 `docs\审计报告-2026-10-04.md`（两轮共 46 文件 +1749/-494、外加 2 个新测试文件；pytest 661 passed；前端已重建）。
 
 `关键词：["审计","屎山","漏洞","前后端不匹配","补齐","备份语义","改动边界","审计报告","goal","todo","用户指令","禁改也要审"]`
+
+### 用户 2026-10-04 原话（两条，都是本轮需求）：…
+*2026-10-04 11:30*
+
+用户 2026-10-04 原话（两条，都是本轮需求）：①「**你先都处理，日志包尽量多塞东西，不要老是判据不够**」；②「还有在设置做个开关，一键还原终末地清除所有第三方注入，**默认开**，开了之后**不管是不是管理器注入的，都要去掉（要备份）**」。
+
+`关键词：["用户原话","日志包尽量多塞东西","不要老是判据不够","一键还原终末地","清除所有第三方注入","默认开","不管是不是管理器注入的","要备份"]`
 
 ### 部署与数据
 
@@ -480,18 +494,18 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 `关键词：["MMD素材来源","v-idol组织","vidol-dance仓库","codeload取tar.gz","default_branch","lobe-vidol-market","r2.vidol.chat已失效","BowlRoll要登录","镜头可匿名下载","极乐净土已归档"]`
 
 ### **modecontroller 当前状态 · 唯一真源…
-*2026-10-04 10:51*
+*2026-10-04 11:41*
 
 **modecontroller 当前状态 · 唯一真源**（有变动请**更新本条**，别再另开新条目）
-**发布**：GitHub **Latest = v1.0.7**（2026-10-04T02:50:24Z）—— https://github.com/jing-hy/EndfieldModController/releases/tag/v1.0.7 ；远端 main = `0dec139`（本地已推平）。附件两件（**只推不带版本号的 exe + assets-bundle.zip**）：
-`EndfieldModController.exe` 29,892,548 B / sha256 `7f515c18b9c4a2ab9107c56ff0ac1259fd6faaab94ecc6661bcb6344cf2d9b32`；
-`assets-bundle.zip` 144,696,905 B / sha256 `060fc4d20e337423170eabf2fbab705ea9bc7bf82a0526e2e1fa3722ab948fb8`（83 文件 / 原始 138 MB）。GitHub 上的 asset digest 与本地 sha256 逐字节一致 ✓。发版正文用 `RELEASE_NOTES.md`（发前**必须**核对首行是不是这个 tag —— v1.0.5 那次就发错了正文）。
-**v1.0.7 的内容**：① 全项目审计修复（6 处前端"引用了不存在的名字"导致点了没反应、2 个 P0（续传残留让坏包报成功 / 依赖清空删掉唯一还原点）、4 个安全项、9 条备份语义、一批"能复用不复用"收敛）；② 你实测报的三件：缺下载→引导去依赖页、香蕉网按**最新更新的资源清单**（`Updates._aFileRowIds`）下载、暂停/终止在探测期也能秒停；③ 双显卡（5080+4060）不再被 DLSS5 开关挡住（逐卡判代次取最高）；④ 9 条"边界外"问题全修（提权白名单、taskkill 不再误杀、Apps 不再被抹、不再硬写 external、preset 护栏、extractall 留备份、d3d12.dll 备份、d3dx_user.ini 乐观并发、全局 ReShade 三套合一）；⑤ 三项拍板（诊断包收状态 json、主题单一真源、web/dist 入库）。**674 passed**（新增 13 条回归）。
-**流程**：改代码 → pytest → **自己 commit** → `build_release.py --modtest-both`（第 6 步检测到 Endfield/管理器在跑就**跳过** modtest 同步、不杀进程；务必回看那行）→ `prepare_release.py`（生成 assets-bundle）→ `push.py`（先快照 `D:\zmdmod\_snapshot_<ver>-<ts>`、刷记忆日志 + 结构树、再推 main）→ `gh release create <tag> --notes-file RELEASE_NOTES.md --latest`（**不带附件**）→ `upload_release_assets.py --tag <tag>`（同名资产 422）。⚠️ gh 未登录时按技能 `gh-token-pr` 注入 `$env:GH_TOKEN = [Environment]::GetEnvironmentVariable('GH_TOKEN','User')`。
-**仓库里随源码走的产出**：`CONTRIBUTING.md`、`docs\AI-记忆日志.md`（记忆导出，路径脱敏、不传 memory.db）、`docs\structure\`（结构树镜像）。
-⚠️ **遗留**：**v1.0.5 的 Release 正文与标题不符**（发它时 `RELEASE_NOTES.md` 还是上一版内容）—— 要修就 `gh release edit v1.0.5 --notes-file …`（只改正文、不动附件），**等他点头**。
+**发布**：GitHub **Latest = v1.0.7**（2026-10-04T02:50:24Z）https://github.com/jing-hy/EndfieldModController/releases/tag/v1.0.7 。
+**本地**：main = `0b847ff`（前一个 `cbb25b0`），版本号 **1.0.8**（= 最新 Release + 1），**未推送、未发版**。
+**v1.0.8（未发）内容**：① 诊断包「一次抓齐」（修 issue #13 三条缺陷；新增 `capture-manifest.txt`/`Player.log`/WER/`game-inventory.txt`/`environment.txt`/`xxmi`/`plugin` 文本/`SecondaryMotion` json/EFMI+3DMigoto 两侧日志）；② 新开关「启动前清除游戏目录里的所有第三方注入」（`clear_game_injections_on_launch`，默认开，先净化后补齐、可还原）；③ 自检补 `backup_ok`（缺 `.bak` 自动从 System32 补齐）；④ **第一人称中文修复**（生效那份 `runtime\reshade\ReShade.ini` 从没被同步过 → 补段补键 + 顺序修好 + 字体写到生效那份）。**pytest 701 passed**。⚠️ **未构建新 exe** —— 用户那份实例（`D:\zmdmod\modtest`）的 ini 已用源码热修好，但 exe 里还是老逻辑。
+**流程**：改代码 → pytest → **自己 commit** → `build_release.py --modtest-both`（检测到 Endfield/管理器在跑就跳过 modtest 同步）→ `prepare_release.py` → `push.py`（先快照 + 刷记忆日志/结构树）→ `gh release create <tag> --notes-file RELEASE_NOTES.md --latest` → `upload_release_assets.py --tag <tag>`。⚠️ **前端重建**：`pnpm build` 会触发 install 并因 esbuild 构建脚本被忽略而失败 —— 用 `node node_modules/vite/bin/vite.js build`（在 `frontend\` 下）。
+**issue**：仓库只剩 **#5**（用户说"不要管"）与 **#13**（已修，**等用户确认后再回复/关闭**）。
+**遗留**：v1.0.5 的 Release 正文与标题不符（等他点头改）；normify 结构树待重跑四步；**待用户实测**：addon 每进一次游戏会不会又把生效那份 ini 写回 `Language=0`（若会，需要加"游戏进程出现后再钉一次"的兜底）。
+**Steam++ 调研（2026-10-04，报告在 `_tmp/research/steampp-accelerator.md`）**：加速内核是 FastGithub 2.1.4 移植（本地反代 + 自签证书 HTTPS 中间人 + WinDivert/hosts）、GPL-3.0 不可内嵌；**它和我们 `fastnet.MIRRORABLE_HOSTS` 都漏了 `release-assets.githubusercontent.com`** —— 很可能是"大文件 20 秒超时"的根因，待验证镜像是否支持该主机。香蕉网走自有 nginx CDN、多节点择优只差 2.5 倍且都慢 ⇒ 无收益。
 
-`关键词：["当前状态唯一真源","Latest v0.9.4","0.9.5未发Release","远端main","版本号只跟Release比","发版流程","必须自己commit","build_release第0步校验版本号","推送前自动快照","只推不带版本号exe","modtest只放最新exe"]`
+`关键词：["modecontroller 当前状态","唯一真源","v1.0.8","Release v1.0.7","未推送","诊断包一次抓齐","clear_game_injections_on_launch","pytest 695","issue 13","前端重建 vite","Steam++ 调研","release-assets.githubusercontent.com"]`
 
 ### 待办
 
@@ -648,7 +662,7 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 
 `关键词：["全项目审计","静态扫描脚本","并行subagent深读","逐条核实再改","审计报告","661 passed","未修清单","已实现却未被调用","未推送未发版","备份语义例外","前后端不匹配补齐","禁改也要审"]`
 
-## 经验教训（被纠正过的、踩过的坑）（355 条）
+## 经验教训（被纠正过的、踩过的坑）（357 条）
 
 ### XXMI/EFMI 启动终末地是 Endfield.ex…
 *2026-09-27 14:58*
@@ -3916,7 +3930,21 @@ tkinter 只留作源码模式兜底，且失败时给出**可照做的替代**�
 
 `关键词：["暂停无效","cancel 被丢掉","探测期间无法暂停","fastnet.fetch 一次性 read","_http_get 内存分支","一路查到最底层","_readable select 探测","cannot read from timed out object","轮询粒度","Cancelled 不是线路故障","点了终止没反应"]`
 
-## 事实（细碎的原子信息）（68 条）
+### 诊断/崩溃取证必须做到四条（2026-10-04，iss…
+*2026-10-04 11:30*
+
+诊断/崩溃取证必须做到四条（2026-10-04，issue #13 的反馈者提的三条 + 我实测补的一条）：① **路径以 config 解析结果为准**，`loader` 推导只作兜底 —— 否则会报一串 `…\work\Mods\… exists=False` 误报（真实 staging 在 `XXMI Launcher\EFMI\Mods`）；② **每一路采集各自兜底**，一处异常不许吃掉后面全部（原来整个函数包在一个 `try` 里，`iterdir()` 一抛后面几路一行都没跑）；③ **日志位置多候选** —— `ReShade.log` 实际按 `RESHADE_BASE_PATH_OVERRIDE` 落在 `runtime\reshade\`，只抓游戏目录会**整条丢失且包里连占位都没有**；④ 采集不到要**留占位 + 写进 `capture-manifest.txt`**（"没有现场"与"没去抓"必须能分开），并标出**这份日志是不是本次运行写的**（旧日志当现场用比没有更危险：那天 12.6 MB 的 `d3d11_log.txt` 半小时没变过却被当成现场）。配套：`Player.log`/WER 是"自己崩了 vs 被外部结束"的关键判据。
+
+`关键词：["诊断包","崩溃取证","ReShade.log","RESHADE_BASE_PATH_OVERRIDE","EFMI 路径误报","exists=False","采集清单","capture-manifest","日志新鲜度","Player.log","WER","一次抓齐"]`
+
+### 【"我们配一份、程序读另一份"的坑（2026-10-04…
+*2026-10-04 11:41*
+
+【"我们配一份、程序读另一份"的坑（2026-10-04 用户报「第一人称的中文没了」）】凡是我们写 A 份、程序读 B 份的设置，三件事缺一不可：① **先确认到底哪份被读** —— ReShade 读的是 `RESHADE_BASE_PATH_OVERRIDE` 指向的 `runtime\reshade\ReShade.ini`，**不是** dll 旁边的 `dlss5\ReShade.ini`（`ReShade.log` 也落在前者，issue #13 同一族）；② 同步函数要**缺段补段、缺键补键** —— 只改"目标里已存在的键"等于一次都补不上，而且**静默无痕**（判据：那份 ini 旁边有没有 `.bak-before-enhancer-sync`，从没出现过就说明同步从未生效）；③ **调用顺序**：重建源 ini 的那一步（`initialize`）必须在同步**之前**，否则源不存在 ⇒ 同步静默返回 0（`launch.log` 会写「面板字体: 没有 …dlss5\ReShade.ini」）。最终修法：`_sync_*` 支持补段补键 + 新增幂等的 `sync_effective_reshade_ini()` + 在 `ensure_injections()` **之后**再同步一次 + `ensure_panel_font(ini=…)` 也写到生效那份。顺带发现：`prepare_reshade_runtime` 的补键只在"遇到下一个段头"时触发 ⇒ **文件末尾那一段**（`[GENERAL]`）缺键永远补不上。
+
+`关键词：["生效那份","RESHADE_BASE_PATH_OVERRIDE","runtime\\reshade","dlss5\\ReShade.ini","两份 ini 分叉","缺段补段","补键","同步顺序","第一人称中文","Language=1","中文字体 Font","addon 写出厂值","bak-before-enhancer-sync"]`
+
+## 事实（细碎的原子信息）（69 条）
 
 ### modecontroller：游戏目录 loader_l…
 *2026-09-27 14:58*
@@ -4671,6 +4699,13 @@ modecontroller 仓库可发现性：`jing-hy/EndfieldModController` **一直是 
 【DLSS5 支持判据必须**逐张显卡**判代次并取最高 —— 双显卡机器曾被开关挡住】（2026-10-04 用户转来的反馈）反馈原话：「双显卡（**一张 5080，一张 4060**）会被 dlss5 的开关挡住，显示只支持 50 显卡」。根因：`deviceinfo.dlss5_supported()` 把**所有** NVIDIA 卡名拼成一串，再 `re.search` **第一个** `rtx\d{4}` 当代次 ⇒ 取到哪张**完全看适配器枚举顺序**，于是装了 5080 的机器被判成 40 系、开关直接被拒（`rejected=dlss5_unsupported_gpu`）。修法：新增 `nvidia_generations()`（列出全部代次）；`dlss5_supported()` **逐张卡判 + 取最高**，多卡时提示写明「哪张满足前提、请让游戏用那张跑」；`_verdict()`（诊断包那段结论）同样按最高代次并标注多卡；`nvidia_generation()` 保留原语义但注明"只取第一个、判支持别用它"。**通用判据**：凡"从多个同类对象里取一个代表"的判据（显卡、磁盘、进程、网络线路、同名文件），只要**结果取决于枚举顺序**就是 bug —— 必须显式定义聚合规则（取最优 / 取全部 / 明确报错），并在多实例机器上验证。
 
 `关键词：["双显卡","DLSS5 开关被挡","只支持50系","nvidia_generations","逐卡判代次取最高","枚举顺序决定结论","dlss5_unsupported_gpu","多卡提示用哪张","设备判据聚合规则","适配器顺序"]`
+
+### Steam++（Watt Toolkit）加速内核 = …
+*2026-10-04 11:30*
+
+Steam++（Watt Toolkit）加速内核 = **FastGithub 2.1.4 的移植**：本地反向代理 + **自签根证书做 HTTPS 中间人** + WinDivert 内核驱动 / hosts 改写把流量引到本机 80/443；规则是**按域名表**（服务端下发），不是通用反代。仓库 `BeyondDimension/SteamTools` **GPL-3.0** ⇒ 内嵌会传染、且需管理员 + 装本机根证书 + 改 hosts + 装驱动 ⇒ **不可自带**（与"不要改系统、用完马上关"冲突）。香蕉网走**自有 nginx CDN（filecacheNN）**，实测 4 节点 3.8–9.7 KB/s、择优只差 2.5 倍 ⇒ 套同一套方案**无收益**。⚠️ **高价值发现**：它覆盖了 `objects.githubusercontent.com` 却**漏了 `release-assets.githubusercontent.com`**（Release 资产的真实落点），而我们的 `fastnet.MIRRORABLE_HOSTS` **同样漏了它** —— 很可能就是"大文件 20 秒超时（WinError 10060）"的根因，待验证镜像站是否代理该主机。完整报告：`_tmp/research/steampp-accelerator.md`。
+
+`关键词：["Steam++","Watt Toolkit","FastGithub","反向代理","HTTPS 中间人","WinDivert","GPL-3.0","release-assets.githubusercontent.com","MIRRORABLE_HOSTS","fastnet","香蕉网 CDN","WinError 10060"]`
 
 ## 用户偏好与环境（**含个人信息，公开前请自行取舍**）（18 条）
 
