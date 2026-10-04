@@ -284,11 +284,61 @@ async function fileWatchdogGate() {
   }
 }
 
+// ── 杀毒软件（2026-10-04 用户要求：「杀毒有没有办法处理，或者检测加弹窗」）────────
+// 与上面那条的分工：`fileWatchdogGate` 只能说"我们的文件反复不见了，多半是杀毒"（推断），
+// 而这里读的是 **Windows Defender 自己的处置记录**（被隔离文件的原路径）—— 能点名。
+//
+// ⚠️ 页面一加载就发、**不 await**：一次检测要走 PowerShell 查 Defender（1~3 秒），
+// 等用户点「一键启动」时结果通常已经回来了，所以下面那道闸门是同步读，不拖慢启动。
+const antivirusInfo = ref(null);
+call("antivirus_check").then((r) => { antivirusInfo.value = r || null; }).catch(() => { });
+let antivirusPrompted = false;
+
+/** ④ 杀毒软件：Defender 处置过与本程序相关的文件 ⇒ 告诉用户，并给一键还原。 */
+async function antivirusGate() {
+  const info = antivirusInfo.value;
+  if (!info || antivirusPrompted) return true;
+  const hits = info.detections || [];
+  if (!hits.length) return true;
+  antivirusPrompted = true;
+  const names = [];
+  for (const hit of hits.slice(0, 3)) {
+    for (const f of (hit.files || []).slice(0, 3)) names.push(`· ${f}`);
+  }
+  const ok = await showModalDialog({
+    title: "Windows Defender 处理过这些文件",
+    message: [
+      "Defender 最近隔离 / 删除了本程序或游戏要用的文件：",
+      ...names,
+      "",
+      "缺了它们游戏可能起不来、或者装好的功能失效。点下面的按钮把它们从隔离区还原回去。",
+      "若反复发生，可在设置里确认「自动加 Defender 白名单」是开着的（默认开）。",
+    ].join("\n"),
+    okText: "从隔离区还原", cancelText: "知道了",
+  });
+  if (!ok) return true;
+  let done = 0;
+  for (const hit of hits) {
+    for (const f of (hit.files || []).slice(0, 3)) {
+      try {
+        const r = await call("antivirus_restore", f);
+        if (r && r.ok) done += 1;
+      } catch (e) { /* 单个失败不影响其它 */ }
+    }
+  }
+  // ⚠️ **如实说结果**：`MpCmdRun -Restore` 会因威胁名/路径不匹配而失败（不同 Defender
+  // 版本行为有差异）。所以成功才说成功，没成才指路日志 —— 不粉饰。
+  showToast(done ? `已还原 ${done} 个文件` : "还原没成功，原始错误在日志里",
+    done ? "success" : "danger");
+  return true;
+}
+
 /** 三段预警按顺序跑；任一环节用户选择"不启动"就返回 false。 */
 async function preflightGate() {
   if (!(await alertGate())) return false;
   if (!(await riskGate())) return false;
   await fileWatchdogGate();
+  await antivirusGate();
   return true;
 }
 

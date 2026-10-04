@@ -182,5 +182,46 @@ class FileWatchTests(unittest.TestCase):
         self.assertIsNone(filewatch.pending(self.config))
 
 
+class WatchScopeTests(unittest.TestCase):
+    """⭐ 2026-10-04：守护范围扩到「游戏目录 + System32」之后的两条硬要求。
+
+    用户那天问「杀毒有没有办法处理」—— 而旧范围只盯 `runtime\\` 里的 11 个文件，
+    游戏目录的两个 loader 底座、以及 System32 里的转发目标（proxy **真正去加载**的地方）
+    一个都没盯，正好是"游戏起不来 / 闪退"那一类事故的现场。
+    """
+
+    def test_scope_covers_game_dir_and_system32(self) -> None:
+        keys = {item.key for item in filewatch.WATCHED}
+        self.assertIn("game/d3dcompiler_47.dll", keys)
+        self.assertIn("game/vulkan-1.dll", keys)
+        self.assertIn("system32/d3dcompiler_47.dll", keys)
+        self.assertIn("system32/vulkan-1.dll", keys)
+
+    def test_unresolvable_items_are_skipped_not_counted(self) -> None:
+        """★ 游戏目录探测不到时，那几项**一个计数都不动** —— 绝不当作"被删了"。
+
+        这是这次扩展最容易出冤案的地方：`数据根\\d3dcompiler_47.dll` 是个根本不该存在的
+        路径，要是退回去拼数据根，下一轮就被算成"缺了一次"，再下一轮就弹一个冤枉窗 ——
+        而这套判据的价值全在"不误报"上。
+        """
+        import types
+
+        from endfieldmodcontroller import reshade_integration
+
+        with tempfile.TemporaryDirectory(prefix="mc-scope-") as tmp:
+            config = types.SimpleNamespace(base_dir=Path(tmp),
+                                           runtime_path=Path(tmp) / "runtime")
+            with mock.patch.object(filewatch, "_SESSION", "scope-s1"), \
+                 mock.patch.object(reshade_integration, "detect_game_dir", return_value=None):
+                filewatch.scan(config)
+                state = filewatch.load_state(config)
+                pending = filewatch.pending(config)
+            for key in ("game/d3dcompiler_47.dll", "game/vulkan-1.dll"):
+                entry = state["files"].get(key)
+                self.assertTrue(entry is None or int(entry.get("missing") or 0) == 0,
+                                f"{key} 在没有游戏目录时不该被计成缺失")
+            self.assertIsNone(pending, "不适用 ≠ 缺失，不该弹提醒")
+
+
 if __name__ == "__main__":
     unittest.main()

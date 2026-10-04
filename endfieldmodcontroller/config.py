@@ -449,6 +449,19 @@ class AppConfig:
     # 要用的那一份重新铺好 —— 于是"清干净"与"功能还在"不再互斥。
     # 备份落在 `runtime\game_backup\<时间戳>\`，随时可一键还原。默认 True。
     clear_game_injections_on_launch: bool = True
+    # ⚠️ **自动把游戏目录 / 数据根加进 Windows Defender 白名单**（2026-10-04 用户要求，
+    # **默认开**：原话是「3 默认开，在设置留个开关」）。
+    #
+    # 为什么需要：安全软件把文件当威胁隔离掉，是这个项目**已知的问题类** ——
+    # 表现是「明明修好了，第二天又缺文件 / 玩着玩着游戏起不来了」；而这次反馈者的退出码正是
+    # `0xC0000135 STATUS_DLL_NOT_FOUND`（有 DLL 没加载起来），"杀毒隔离"是最吻合的机制之一。
+    # 与其每次弹窗让用户自己去点，不如默认替他加好 —— 用户一贯的判据是
+    # 「**能自动补齐的就别让他手动**」。
+    #
+    # ⚠️ 代价（用户已知情并选择默认开）：这些目录下的文件不再被 Defender 实时扫描。
+    # ⚠️ **对 360 / 火绒这类第三方杀毒无效** —— 它们没有通用的命令行排除接口，
+    #    那种情况只能继续用弹窗引导用户手动加白名单。
+    defender_exclusions_enabled: bool = True
     selected_mods: list[str] = field(default_factory=list)
     auto_update_dependencies: bool = False
     # 默认为 True：XXMI Launcher 的 exe 要求管理员权限（非管理员启动会直接报

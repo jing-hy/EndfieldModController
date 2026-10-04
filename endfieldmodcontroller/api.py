@@ -990,6 +990,53 @@ class EndfieldModControllerApi:
 
         return filewatch.ack(self.config, list(keys or []))
 
+    # ── 杀毒软件（2026-10-04 用户要求：「杀毒有没有办法处理，或者检测加弹窗」）──────
+    # 与 `filewatch` 分工：那个回答"我们的文件是不是反复不见了"，这里回答
+    # "**杀毒对哪个文件动过手**"（Defender 隔离清单里的真实路径）以及
+    # "**把该放过的目录加进白名单**"。
+    def _antivirus_snapshot(self) -> dict[str, Any] | None:
+        """**只读缓存**，绝不在这里跑 PowerShell。
+
+        为什么：`get_state()` 是界面每次刷新都会走的热路径，而一条 Defender 查询要
+        1~3 秒 —— 挂在这儿会让"打开管理器"这一下明显卡住（用户对启动慢很敏感）。
+        真正的检测走 `antivirus_check()`（前端在启动页异步调一次）。
+        """
+        from . import antivirus
+
+        return antivirus.cached()
+
+    def antivirus_check(self) -> dict[str, Any]:
+        """检测一次杀毒相关的事实，并按设置**顺手把白名单加好**。
+
+        * 条数少、幂等、进程内只真跑一次（`antivirus.scan_once` 自带节流）；
+        * 开关 `defender_exclusions_enabled` **默认开**（用户 2026-10-04：「3 默认开」）——
+          发现该放过的目录不在白名单里就自动加上，而不是再弹一个窗让用户自己去点；
+        * 非管理员 / 没有 Defender 时**如实返回 `supported=False`**，前端据此降级成"提示"。
+        """
+        from . import antivirus
+
+        try:
+            return antivirus.scan_once(self.config, log=lambda m: launcher._append_log(self.config, m))
+        except Exception as exc:  # noqa: BLE001 —— 这条线坏掉绝不能影响启动
+            return {"supported": False, "note": f"检测失败：{exc}", "detections": [],
+                    "missing": [], "exclusions": [], "wanted": [], "applied": None,
+                    "admin": False}
+
+    def antivirus_apply_exclusions(self) -> dict[str, Any]:
+        """手动把该放过的目录加进 Defender 白名单（弹窗上的按钮走这条）。"""
+        from . import antivirus
+
+        result = antivirus.apply_exclusions(
+            self.config, log=lambda m: launcher._append_log(self.config, m))
+        antivirus.reset_cache()          # 加了之后重新读一次，界面上的状态才是真的
+        return result
+
+    def antivirus_restore(self, path: str) -> dict[str, Any]:
+        """把被隔离的文件从 Defender 隔离区还原回原位置。"""
+        from . import antivirus
+
+        return antivirus.restore(self.config, path, log=lambda m: launcher._append_log(self.config, m))
+
     def collect_crash_report(self) -> dict[str, Any]:
         """立刻收集一次崩溃现场并写成报告（不等游戏退出）。"""
         from . import crashwatch
@@ -1215,6 +1262,11 @@ class EndfieldModControllerApi:
             # 关键文件被反复删掉（疑似杀毒软件）→ 前端弹窗建议加白名单（用户 2026-10-01 要求）。
             # 只读、轻量（十来次存在性判断），不在这里触发任何补齐动作。
             "file_watchdog": self._file_watchdog(),
+            # 杀毒软件：Defender 处置过哪些**相关**文件 + 白名单缺不缺（2026-10-04 加）。
+            # ⚠️ 这里**只读缓存**（`_antivirus_snapshot` 不跑 PowerShell）—— 真正的检测由前端
+            # 在启动页异步调一次 `antivirus_check()`。一条 Defender 查询要 1~3 秒，挂在
+            # 每次 state 刷新上会让"打开管理器"明显卡住（用户对启动慢很敏感）。
+            "antivirus": self._antivirus_snapshot(),
         }
     def autodetect_paths(self) -> dict[str, Any]:
         """**自动检测外部程序路径并回填配置**（2026-10-03 补回归）。

@@ -737,6 +737,8 @@ useLogAutoScroll(probeBox, () => probeText);
         hint="默认开。每次点「一键启动」时，先把游戏目录里原版不会有的注入痕迹全部移走 —— 不管是不是本程序装的（各种 proxy DLL、plugin 下的插件、3DMigoto 的 d3dx.ini / ShaderFixes、OptiScaler、ReShade 残留、被替换的 nvngx…），再把系统原版补回去；随后自检按你现在的开关把本程序要用的那一份重新铺好，所以功能不会因此失效。移走的东西整体备份在 runtime\\game_backup\\，随时可用「撤销清除」原样放回。游戏正在运行时自动跳过。" />
       <SettingSwitch k="auto_disable_feed_on_native_dlss" label="游戏自带 DLSS 时自动停用喂帧组件"
         hint="终末地自带 DLSS 时，喂帧组件会与游戏自己的 DLSS 抢同一条 NGX 链路。开启时自检会把它停用（移进 runtime\dlss5\_disabled，可逆）—— 但只有游戏确实跑在 D3D12 时才停：被 XXMI/EFMI 强制 -force_d3d11 时游戏建不出自己的 DLSS，喂帧组件是 DLSS5 的必需环节，此时会保持启用。" />
+      <SettingSwitch k="defender_exclusions_enabled" label="自动把游戏目录 / 程序目录加进 Windows Defender 白名单"
+        hint="默认开。安全软件把文件当威胁隔离掉是本项目已知的问题类（表现是「明明修好了，第二天又缺文件」「游戏突然起不来」）—— 开启后，检测到这两个目录不在 Defender 的排除项里就自动加上，而不是弹窗让你自己去点系统设置。⚠️ 只对 Windows Defender 有效：360 / 火绒这类没有通用的命令行排除接口，只能手动加。⚠️ 代价是这两个目录里的文件不再被 Defender 实时扫描。" />
       <SettingSwitch k="inject_reshade_ui" label="注入统一控制面板（自研 ReShade addon）"
         hint="放进 ReShade 真正读取的目录（d3d12.dll 所在处）。关掉后不注入面板；此时「整合 Mod 快捷键」会拒绝锁键。" />
       <SettingSwitch k="prefer_internal_dependencies" label="依赖包优先用控制器维护的那份"
