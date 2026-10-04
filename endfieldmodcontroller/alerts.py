@@ -72,20 +72,20 @@ def restore_point_path(config: Any) -> Path:
 
 
 # ---------------------------------------------------------------- 读写
+# ⚠️ 实现已收敛到 `fsutil.read_json` / `fsutil.write_json`（2026-10-04）：
+# 同一份"读 JSON 对象、坏了就返回 {}"与"原子写 JSON"原先在 alerts / character_sync /
+# sbm_data_sync 各抄了一遍（逐字节相同）。留这两个薄壳是因为测试与诊断脚本直接调它们。
 def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return data if isinstance(data, dict) else {}
+    from . import fsutil
+
+    return fsutil.read_json(path)
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     from . import fsutil
 
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        fsutil.write_text_atomic(path, json.dumps(payload, ensure_ascii=False, indent=2), newline="\n")
+        fsutil.write_json(path, payload)
     except OSError:
         pass
 

@@ -195,6 +195,11 @@ class Snapshot:
                      f"清单 {len(self.manifest['data_root_listing'])} 项")
         else:
             self.log(f"[2/4] !! 数据根不存在：{root}")
+            # ⚠️ 让"这次快照其实没内容"**可被程序判定**（2026-10-04 修）：
+            # 原来这两处只打印一行，退出码仍是 0，而 `push.py` 只看退出码 ⇒
+            # "推送照常、快照里既没有 config/Mod 清单也没有游戏目录清单"，
+            # 与用户「每次推 github 都要做快照」的本意不符（回溯价值为零）。
+            self.manifest.setdefault("incomplete_reasons", []).append(f"数据根不存在：{root}")
 
         # 游戏目录（只记清单 + 复制注入类小文件）
         game = None
@@ -224,6 +229,12 @@ class Snapshot:
             self.log(f"[3/4] 游戏目录 {game}：清单 {len(self.manifest['game_files'])} 项")
         else:
             self.log(f"[3/4] !! 没定位到游戏目录（config.game_exe={game_exe or '空'}）")
+            self.manifest.setdefault("incomplete_reasons", []).append(
+                f"没定位到游戏目录（config.game_exe={game_exe or '空'}）")
+
+        # 快照是否"完整"：没有任何 incomplete 原因才算完整（见上面两处说明）。写进 manifest，
+        # 让 `push.py` 能据此给出醒目警告，而不是靠人去看日志。
+        self.manifest["complete"] = not self.manifest.get("incomplete_reasons")
 
         (self.dir / "manifest.json").write_text(
             json.dumps(self.manifest, ensure_ascii=False, indent=2), encoding="utf-8")

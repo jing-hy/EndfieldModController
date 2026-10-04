@@ -3,6 +3,11 @@
 // 走后端 choose_path —— 它弹的是系统原生选择框。
 import { settings, saveSetting } from "../../lib/settings.js";
 import { call } from "../../lib/bridge.js";
+// ⚠️ showAlert 以前**没导入**（2026-10-04 修）：下面那句提示会抛 ReferenceError，
+// 又被本函数的 `catch (e) { /* call() 已经弹过窗 */ }` 吞掉 ⇒ 后端 choose_path
+// 返回 ok=false（exe 里 tkinter 被排除时是常态）时，界面上就是"浏览点了没反应" ——
+// 正是这段注释声称已经修好的那条。
+import { showAlert } from "../../lib/dialog.js";
 import Btn from "./Btn.vue";
 
 const props = defineProps({

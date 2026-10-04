@@ -27,12 +27,9 @@ const dlTimer = ref(null);
 // 防重入：轮询可能连着几轮都看到"已下载"，别弹出多个确认框
 const applying = ref(false);
 
-function humanSize(bytes) {
-  const n = Number(bytes) || 0;
-  if (n >= 1048576) return (n / 1048576).toFixed(1) + " MB";
-  if (n >= 1024) return (n / 1024).toFixed(0) + " KB";
-  return n.toFixed(0) + " B";
-}
+// ⚠️ `humanSize` 复用 `lib/util.js`（2026-10-04）：本文件原先自己又抄了一份。本文件
+// 原本还 import 了 `call`，所以这里改用命名导入（`call` 的导入在上面，不受影响）。
+import { humanSize } from "../lib/util.js";
 
 function stopPolling() {
   if (dlTimer.value) { clearInterval(dlTimer.value); dlTimer.value = null; }

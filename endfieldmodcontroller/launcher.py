@@ -246,18 +246,21 @@ def _stop_locked_files_processes(config: AppConfig, *, include_game: bool = Fals
     return running
 
 
-def _ensure_reshade_disabled_addons(game_dir: Path) -> None:
-    """Disable only RenoDX/DLSS add-on while keeping Endfield Enhancer enabled.
+def _merge_disabled_addons(game_dir: Path) -> str:
+    """把 `renodx-dlss.addon64` **并入**游戏目录 `ReShade.ini` 的 `[ADDON] DisabledAddons`。
 
-    EndfieldModController and the user's ``终末地EE.addon64`` are expected to coexist.
-    RenoDX/DLSS is the known conflicting add-on in the current mixed setup, so
-    only that one is listed in DisabledAddons.  Files are never deleted.
+    ⚠️⚠️ 三处修正（2026-10-04，都属于**备份语义 / 别毁用户原有配置**）：
+      ① **写入必须走 `_write_ini_atomic`**（它就在本文件里，会先留一份 `ReShade.ini.mc.bak`、
+         且是原子写）—— 原来直接 `write_text`，**没有备份、写到一半被杀就是半截 ini**；
+      ② **`DisabledAddons` 要合并而不是覆盖**：用户/其它整合包可能已经禁用了别的 addon，
+         原来整行替换成只留 `renodx-dlss.addon64`，**把用户原有的项静默删掉**；
+      ③ `LoadFromDllMain` 行仍然移除（这是原设计的意图，保持）。
     """
     disabled_value = "renodx-dlss.addon64"
     ini_path = game_dir / "ReShade.ini"
     if not ini_path.is_file():
-        ini_path.write_text("[ADDON]" + chr(10) + "DisabledAddons=" + disabled_value + chr(10), encoding="utf-8")
-        return
+        _write_ini_atomic(ini_path, "[ADDON]" + chr(10) + "DisabledAddons=" + disabled_value + chr(10))
+        return disabled_value
     lines = ini_path.read_text(encoding="utf-8", errors="ignore").splitlines()
     out: list[str] = []
     in_addon = False
@@ -274,13 +277,28 @@ def _ensure_reshade_disabled_addons(game_dir: Path) -> None:
         if in_addon and stripped.lower().startswith("loadfromdllmain"):
             continue
         if in_addon and stripped.lower().startswith("disabledaddons"):
-            out.append("DisabledAddons=" + disabled_value)
+            # **保留用户已有的其它项**，只把我们要禁用的这个补进去（去重）
+            existing = [item.strip() for item in line.split("=", 1)[1].split(",") if item.strip()]
+            if disabled_value not in existing:
+                existing.append(disabled_value)
+            out.append("DisabledAddons=" + ",".join(existing))
             inserted = True
             continue
         out.append(line)
     if in_addon and not inserted:
         out.append("DisabledAddons=" + disabled_value)
-    ini_path.write_text(chr(10).join(out) + chr(10), encoding="utf-8")
+    _write_ini_atomic(ini_path, chr(10).join(out) + chr(10))
+    return disabled_value
+
+
+def _ensure_reshade_disabled_addons(game_dir: Path) -> None:
+    """Disable only RenoDX/DLSS add-on while keeping Endfield Enhancer enabled.
+
+    EndfieldModController and the user's ``终末地EE.addon64`` are expected to coexist.
+    RenoDX/DLSS is the known conflicting add-on in the current mixed setup, so
+    only that one is listed in DisabledAddons.  Files are never deleted.
+    """
+    _merge_disabled_addons(game_dir)
 
 
 def resolve_hotkey_takeover(
@@ -869,6 +887,63 @@ def _write_ini_atomic(path: Path, text: str) -> None:
     fsutil.write_text_atomic(path, text, newline=chr(10))
 
 
+def restore_ini_backups(config: AppConfig) -> dict[str, Any]:
+    r"""把 `<某个 ini>.mc.bak` 搬回原位（**`.mc.bak` 家族此前没有任何还原入口**）。
+
+    2026-10-04 补。`_write_ini_atomic()` 会在**首次**改写前留一份 `<名>.mc.bak`，覆盖了
+    EFMI 的 `d3dx.ini`、`runtime\dlss5\ReShade.ini`、游戏目录 `ReShade.ini` 与
+    `user_ini_path.txt`；但全库只有 `restore_xxmi_extra_libraries()` 和 `api.rollback()`
+    会读它，而且只覆盖 XXMI 配置与 `d3dx_user.ini` —— 其余几个用户**没有任何办法**搬回去
+    （只能在资源管理器里翻出隐藏的 `.mc.bak` 手工改名）。这里统一处理我们能枚举到的那些。
+
+    备份文件**保留不动**（它是唯一的"改之前"副本，删了就真回不去了）。
+    """
+    candidates: list[Path] = []
+
+    def _add(path: Any) -> None:
+        if not path:
+            return
+        try:
+            candidate = Path(path)
+        except TypeError:
+            return
+        if candidate not in candidates:
+            candidates.append(candidate)
+
+    _add(getattr(config, "dlss5_ini_path", None))
+    _add(getattr(config, "user_ini_path", None))
+    loader = getattr(config, "migoto_loader_path", None)
+    if loader is not None:
+        try:
+            loader_dir = Path(loader).parent
+            _add(loader_dir / "d3dx.ini")
+            _add(loader_dir / "ReShade.ini")
+        except (TypeError, OSError):
+            pass
+    try:
+        from . import reshade_integration
+
+        game_dir = reshade_integration.detect_game_dir(config)
+        if game_dir is not None:
+            _add(game_dir / "ReShade.ini")
+            _add(game_dir / "user_ini_path.txt")
+    except Exception:  # noqa: BLE001
+        pass
+
+    actions: list[str] = []
+    warnings: list[str] = []
+    for target in candidates:
+        backup = target.with_name(target.name + ".mc.bak")
+        if not backup.is_file():
+            continue
+        try:
+            shutil.copy2(backup, target)
+            actions.append(f"restored {target}（来自 {backup.name}）")
+        except OSError as exc:
+            warnings.append(f"还原 {target.name} 失败: {exc}")
+    return {"ok": not warnings, "actions": actions, "warnings": warnings, "checked": len(candidates)}
+
+
 def _image_pids(image_name: str) -> set[int]:
     """当前正在运行的某映像名的 PID 集合。
 
@@ -909,6 +984,37 @@ def _copy_file_atomic(source: Path, target: Path) -> None:
     fsutil.write_bytes_atomic(target, source.read_bytes())
 
 
+def _sync_addon_location(source_dir: Path, target_dir: Path,
+                         globs: tuple[str, ...]) -> tuple[list[str], list[str]]:
+    """把 `source_dir` 里匹配 `globs` 的 addon **搬到** `target_dir`，返回 (移动, 清理)。
+
+    ⚠️ **目标已存在时不能只是 `continue`**（2026-10-04 抽出）：这正是
+    `set_feed_addon_enabled` 那处修过的坑 —— 用户机器上 `runtime\\dlss5\\` 与
+    `_disabled\\` **各有一份同名 addon**（"放回"时用了复制而不是移动、或手工拷回），
+    于是状态判据说"启用中"、这里说"无需处理"，**两处互相矛盾、实际什么都没做**，
+    连点几次开关都毫无反应。目标位置已经是我们想要的状态 ⇒ 把源位置那份**多余副本删掉**
+    才算真到位。
+    """
+    moved: list[str] = []
+    removed: list[str] = []
+    for pattern in globs:
+        for path in sorted(source_dir.glob(pattern)):
+            target = target_dir / path.name
+            if target.exists():
+                try:
+                    path.unlink()
+                except OSError:
+                    continue
+                removed.append(path.name)
+                continue
+            try:
+                shutil.move(str(path), str(target))
+            except OSError:
+                continue
+            moved.append(path.name)
+    return moved, removed
+
+
 def set_component_addons(config: AppConfig, component: str, enabled: bool) -> dict[str, Any]:
     """单独启停 DLSS5 或第一人称插件（移动 addon 文件，可逆）。
 
@@ -918,24 +1024,13 @@ def set_component_addons(config: AppConfig, component: str, enabled: bool) -> di
     base = config.dlss5_path
     disabled = base / ADDON_DISABLED_DIR
     disabled.mkdir(parents=True, exist_ok=True)
-    moved: list[str] = []
-    if enabled:
-        for pattern in globs:
-            for path in sorted(disabled.glob(pattern)):
-                target = base / path.name
-                if target.exists():
-                    continue
-                shutil.move(str(path), str(target))
-                moved.append(path.name)
-    else:
-        for pattern in globs:
-            for path in sorted(base.glob(pattern)):
-                target = disabled / path.name
-                if target.exists():
-                    continue
-                shutil.move(str(path), str(target))
-                moved.append(path.name)
-    return {"ok": True, "component": component, "enabled": enabled, "moved": moved}
+    source_dir, target_dir = (disabled, base) if enabled else (base, disabled)
+    # ⚠️ 复用 `_sync_addon_location`（2026-10-04）：这里原来与 `set_feed_addon_enabled`
+    # 是两套实现，而那处已经为"两处各有一份同名 addon ⇒ 点了开关毫无反应"修过一次
+    # —— 只修一处的后果就是同一个 bug 在 DLSS5 / 第一人称这两个开关上继续存在。
+    moved, removed = _sync_addon_location(source_dir, target_dir, tuple(globs))
+    return {"ok": True, "component": component, "enabled": enabled,
+            "moved": moved, "removed": removed}
 
 
 def set_feed_addon_enabled(

@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -33,6 +34,16 @@ from release_version import report as report_version_rule  # noqa: E402
 ROOT = Path(__file__).resolve().parents[1]
 REPO = "jing-hy/EndfieldModController"
 ENV_NAME = "GH_TOKEN"
+
+
+def _latest_snapshot_dir(output: str) -> Path | None:
+    """从 `snapshot.py` 的输出里解析出这次快照的目录（它最后会打印 `SNAPSHOT=<路径>`）。"""
+    for line in reversed(str(output or "").splitlines()):
+        text = line.strip()
+        if text.startswith("SNAPSHOT="):
+            candidate = Path(text.split("=", 1)[1].strip())
+            return candidate if candidate.is_dir() else None
+    return None
 
 
 def get_token() -> str:
@@ -189,6 +200,21 @@ def main(argv: list[str] | None = None) -> int:
         if snap.returncode != 0:
             print("      !! 快照失败 —— 按约定中止推送（修好快照，或用 --skip-snapshot 显式跳过）", flush=True)
             return 1
+        # ⚠️ 退出码 0 **不等于**"快照里真有东西"（2026-10-04 修）：`snapshot.py` 在
+        # "数据根不存在 / 没定位到游戏目录"时只打印一行、仍然返回 0 —— 那样推上去的记录里
+        # 既没有 config/Mod 清单也没有游戏目录清单，回溯价值为零，而这里会静默放行。
+        # 现在按 manifest 里的 `complete` 给醒目警告（不中止：这类快照仍可能是有用的，
+        # 但绝不能让"这次快照是空的"这件事无声无息地过去）。
+        snap_dir = _latest_snapshot_dir(out)
+        if snap_dir is not None:
+            try:
+                manifest = json.loads((snap_dir / "manifest.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                manifest = {}
+            if manifest and not manifest.get("complete", True):
+                reasons = "；".join(str(x) for x in (manifest.get("incomplete_reasons") or []))
+                print(f"      !! 快照不完整（{reasons}）—— 已照常继续，但这次快照回溯价值有限",
+                      flush=True)
 
     # ② 记忆日志：**每次推送都刷新并单独提交**（用户 2026-10-03 的要求）
     print("[2/5] 刷新记忆日志（docs/AI-记忆日志.md，随源码一起走）…", flush=True)

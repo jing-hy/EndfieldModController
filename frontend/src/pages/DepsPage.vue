@@ -6,7 +6,17 @@ import { call } from "../lib/bridge.js";
 import { useLogAutoScroll } from "../lib/autoscroll.js";
 import { store, refreshState } from "../store.js";
 import { loadSettings } from "../lib/settings.js";
-import { showToast, showAlert, showModalDialog } from "../lib/dialog.js";
+// ⚠️ `sleep` 原先**根本没定义**（2026-10-04 修）：第 96 行 `await sleep(300)` 会抛
+// ReferenceError，被上面的 catch 吞成一句 danger toast —— 用户看到"操作失败"，
+// 而实际上后端那步已经成功。现在复用 lib/util.js 里唯一那份实现。
+import { sleep } from "../lib/util.js";
+// ⚠️ 用到的都列全（2026-10-04 修）：下面 `updateComponent()` / `dryRunCheck()` 里用了
+// showProgressToast / hideProgressToast，而原先只导入了 showToast/showAlert/showModalDialog
+// ⇒ 点「更新到 vX」与「检查状态（不下载）」**必定抛 ReferenceError**（被 catch 成一句
+// danger toast），用户看到的就是"点了确认，什么都没发生"。
+import {
+  showToast, showAlert, showModalDialog, showProgressToast, hideProgressToast,
+} from "../lib/dialog.js";
 import Card from "../components/ui/Card.vue";
 import Btn from "../components/ui/Btn.vue";
 import Badge from "../components/ui/Badge.vue";
@@ -75,7 +85,7 @@ async function modDlControl(act) {
     const ok = await showModalDialog({
       title: "终止下载",
       message: "会停下所有 Mod 下载任务，**已下完的部分会被清掉**。\n\n确定终止吗？\n（只是想暂存进度就选「暂停」，那会保留断点。）",
-      okText: "终止并清掉半成品", cancelText: "取消", focusCancel: true,
+      okText: "终止并清掉半成品", cancelText: "继续下载", focusCancel: true,
     });
     if (!ok) return;
   }
@@ -103,7 +113,7 @@ async function updateComponent(d) {
       "",
       "会下载并替换它。**已经是最新的其它组件会自动跳过**，不会白下。",
     ].filter((x) => x !== "").join("\n"),
-    okText: "开始更新", cancelText: "取消",
+    okText: "开始更新", cancelText: "先不更新",
   });
   if (!ok) return;
   showProgressToast("comp-update", `正在更新 ${d.display || d.key}…`);
@@ -190,12 +200,9 @@ const speedText = computed(() => {
   if (modDlPhase.value === "prep") return "探测中…";
   return "—";
 });
-function humanSize(bytes) {
-  const n = Number(bytes) || 0;
-  if (n >= 1048576) return (n / 1048576).toFixed(1) + " MB";
-  if (n >= 1024) return (n / 1024).toFixed(0) + " KB";
-  return n.toFixed(0) + " B";
-}
+// ⚠️ `humanSize` 复用 `lib/util.js`（2026-10-04）：本文件原先自己又抄了一份
+// （只差 `toFixed(0)` 与默认值处理），另一份在 UpdateBadge.vue —— 三份实现各自漂移。
+import { humanSize } from "../lib/util.js";
 
 const progressLabel = computed(() => {  // 评审指出：摘要写「已就绪」、进度写「尚未开始」，两个状态互相打架 ——
   // 这里统一成**一次流程**的状态，并且明确"还没检查过"这一档。

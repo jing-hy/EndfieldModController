@@ -175,7 +175,18 @@ class Report:
     def to_dict(self) -> dict[str, Any]:
         pending = [c for c in self.checks if not c["ok"] and not c["fixed"]]
         return {
-            "ok": not pending,
+            # ⚠️⚠️ **`ok` 必须是"这个接口调通了"**（2026-10-04 修），不能是"没有待处理项"。
+            #
+            # 全项目约定 `{ok: bool}` = 调用成功/失败（前端 100+ 处 `r.ok === false` 都当失败
+            # 处理）。这里原来写 `"ok": not pending` —— 只要有**一条**需要用户处理的自检项
+            # （例如"未定位到游戏目录"），`SettingsPage.run()` 就先弹一个 danger toast
+            # 「操作失败」，然后 `return` **把整份 checks/actions 丢掉**；`LaunchPage.run()`
+            # 则弹「操作未完成」。结果：**自检功能除了全绿的理想情况之外等于不可用**
+            # （用户看不到到底缺什么、也看不到已经自动修好了什么）。
+            # "有没有待处理项"另有 `pending_count` / `pending` 表达。
+            "ok": True,
+            "success": True,
+            "pending_count": len(pending),
             "checks": self.checks,
             "actions": self.actions,
             "warnings": self.warnings,
@@ -421,11 +432,29 @@ def _merge_preset_line(body: str, key: str, required: list[str], *, front: bool 
             continue
         items = [item.strip() for item in line.split("=", 1)[1].split(",") if item.strip()]
         have = {item.split("@", 1)[0] if "@" in item else item for item in items}
-        for name in required:
-            bare = name.split("@", 1)[0] if "@" in name else name
-            if bare not in have:
-                items.insert(0, name) if front else items.append(name)
-                have.add(bare)
+
+        def _bare(name: str) -> str:
+            return name.split("@", 1)[0] if "@" in name else name
+
+        if front:
+            # ⚠️⚠️ **`front` 必须一次性插到最前面**（2026-10-04 修）。
+            # 原来对 `required` 逐个 `items.insert(0, name)` —— 这会把列表**反序**：
+            # 调用方传 `[launchpad, feed]` 想要"launchpad（provider）在前"，
+            # 实际写出来是 **feed 在前**。而 `DLSS5_Feed.fx` 的说明书明确要求
+            # provider 排在它**上面**，写反了 addon 就会报
+            # `motion-vector provider MartysMods_Launchpad is installed but DISABLED:
+            #  enable it above DLSS 5 Feed.` —— 那次"顺序修正"实际从未生效
+            #（只有"整行不存在"的追加分支是对的，而真实 preset 里这两行总是存在）。
+            missing = [name for name in required if _bare(name) not in have]
+            items[:0] = missing
+            for name in missing:
+                have.add(_bare(name))
+        else:
+            for name in required:
+                bare = _bare(name)
+                if bare not in have:
+                    items.append(name)
+                    have.add(bare)
         lines[index] = f"{key}=" + ",".join(items)
         return "\n".join(lines)
     # 没有这一行就追加
@@ -494,7 +523,20 @@ def _check_dlss5_preset(config: AppConfig, report: Report, log: Callable[[str], 
     # 只认 `=1` 会把 ReShade 写的合法格式误判成"没启用"，于是每次启动都去"修"一遍
     # （2026-09-29 实测：ReShade 写的是不带 `=1` 的形式）。
     enabled_map: dict[str, str] = {}
-    for name, value in re.findall(r"([\w.\-]+@[\w.\-]+\.fx)\s*(?:=\s*([01]))?", body):
+    # ⚠️⚠️ **只扫 `Techniques=` 那一行**（2026-10-04 修）。
+    # 原来对**整份 preset** 做正则，而 `TechniqueSorting=` / `EffectSorting=` 两行本身
+    # 就是 `Name@Effect.fx` 形式、并且**列出全部 technique（含未启用的）** ——
+    # 于是只要排序表里出现过 `DLSS5_Feed@DLSS5_Feed.fx`（几乎必然），它就会被记成 "1"，
+    # 下面"两项都启用"的分支**恒成立** ⇒ 用户停用后自检**永远报 OK、永不修复**
+    #（与注释里批判的"旧判据只看有没有就放行"是同一个洞）。
+    # technique 的真实启用状态写在 `Techniques=` 行：列出即启用，也可写 `=1`/`=0`。
+    techniques_line = ""
+    for line in body.splitlines():
+        if line.strip().startswith("Techniques="):
+            techniques_line = line.split("=", 1)[1]
+            break
+    scan_text = techniques_line if techniques_line else body   # 老格式/空 preset 退回旧行为
+    for name, value in re.findall(r"([\w.\-]+@[\w.\-]+\.fx)\s*(?:=\s*([01]))?", scan_text):
         enabled_map[name] = value or "1"
     sorting_line = ""
     for line in body.splitlines():

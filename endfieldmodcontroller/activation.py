@@ -780,6 +780,14 @@ def stage_and_prepare(
     managed_root.mkdir(parents=True, exist_ok=True)
 
     active_targets: list[str] = []
+    # ⚠️⚠️ **必须成对记录 (mod, dest)**（2026-10-04 修一个真实错位 bug）：
+    # 原来只 `active_targets.append(str(dest))`，末尾再 `zip(active_plan, active_targets)` 配对。
+    # 而复制失败的分支是 `continue`（**不打断启动**，这是用户 2026-10-03 明确要的）——
+    # 于是第 k 个 Mod 失败后，第 k+1 个 Mod 会拿到第 k+2 个 Mod 的目录：
+    # `staged.name` 与 `path` 从此对不上，actions/source 全部指错目录
+    # ⇒ **游戏内面板把 A 的档位写到 B 的变量上**（只影响 staging 产物，不动库，但用户看到的是
+    # "点了没反应 / 串档"）。成对追加就不会错位。
+    active_pairs: list[tuple[mc_core.ModInfo, str]] = []
     # 复制不过去的 Mod（失败**不打断启动**，只是如实记下来：
     # 用户 2026-10-03「启动弹出失败弹窗，但 xxmi 成功拉起」—— 那是误报）
     stage_failed: list[dict[str, str]] = []
@@ -821,6 +829,7 @@ def stage_and_prepare(
         except OSError:
             pass
         active_targets.append(str(dest))
+        active_pairs.append((mod, str(dest)))
     fsutil.write_text_atomic(
         managed_root / "active_targets.json",
         json.dumps(active_targets, ensure_ascii=False, indent=2),
@@ -845,7 +854,7 @@ def stage_and_prepare(
     )
 
     staged_mods: list[mc_core.ModInfo] = []
-    for mod, target in zip(active_plan, active_targets):
+    for mod, target in active_pairs:
         target_path = Path(target)
         meta = mc_core.load_sidecar(mod.path)
         staged = mc_core._make_mod_info(target_path, target_path, mod.group, mod.kind, meta, staging_root)

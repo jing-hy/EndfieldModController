@@ -2,11 +2,17 @@
 // 启动页（旧 #tab-launch）：一键启动 + 六个注入开关（**与设置页共享同一份 settings 状态**）。
 import { ref, computed, onMounted, onUnmounted } from "vue";
 import { call } from "../lib/bridge.js";
-import { showModalDialog } from "../lib/dialog.js";
+// ⚠️ 这里**必须把用到的都列全**（2026-10-04 修）：原先只导入了 showModalDialog / showAlert，
+// 而「检查/修复完整性」那条链路用了 showProgressToast(313) / showToast(327) /
+// hideProgressToast(329) —— 三个都不在作用域里 ⇒ 一点「修复」就在 try 之前抛
+// ReferenceError，**自动修复分支根本不执行**（与历史上 `modDownloadFinished is not defined`
+// 那次静默退化同型：控制台只报一句，界面上看起来只是"操作没做成"）。
+import {
+  showModalDialog, showAlert, showToast, showProgressToast, hideProgressToast,
+} from "../lib/dialog.js";
 import { refreshState } from "../store.js";
 import { loadSettings } from "../lib/settings.js";
 import { useLogAutoScroll } from "../lib/autoscroll.js";
-import { showAlert } from "../lib/dialog.js";
 import { settings, saveSetting, syncConfig } from "../lib/settings.js";
 import { store } from "../store.js";
 import Card from "../components/ui/Card.vue";
@@ -292,8 +298,22 @@ async function preflightGate() {
 // 换代后只剩 `run('check_integrity')`：**结果丢弃、`repair_integrity` 前端零调用** ——
 // 标签写着「检查/修复完整性」，实际**只能检查、结果还看不见**。
 async function checkIntegrity() {
-  const r = await run("check_integrity");
-  if (!r || r.ok === false) return r;
+  // ⚠️⚠️ **不能拿 `r.ok === false` 当"调用失败"**（2026-10-04 修）。
+  // `integrity.check_integrity()` 的 `ok` 语义是"**没有 critical 缺失**"，而不是
+  // "这个接口调通了" —— 于是真有缺失时这里直接 return，`run()` 只会弹一句
+  // 「操作未完成 / 未知原因」（返回里没有 message），**"是否自动修复"这条闭环根本不可达**，
+  // 用户点了「检查/修复完整性」永远得不到修复选项。
+  let r = null;
+  try {
+    r = await call("check_integrity");
+  } catch (e) {
+    await showAlert("完整性检查失败", String((e && e.message) || e || "未知原因"));
+    return null;
+  }
+  if (!r || typeof r !== "object") {
+    await showAlert("完整性检查失败", "后端没有返回检查结果。");
+    return null;
+  }
   const checks = r.checks || [];
   const bad = checks.filter((c) => c.ok === false);
   const lines = checks.map((c) => `${c.ok ? "✓" : "✗"} ${c.message || c.key}${c.ok ? "" : `\n    ${c.path}`}`);
@@ -336,7 +356,7 @@ async function clearLaunchLog() {
   const ok = await showModalDialog({
     title: "清空启动日志",
     message: "会清空 `runtime\\logs\\launch.log`。\n\n排查问题时日志很有用，建议**先导出一份诊断包**再清。",
-    okText: "清空", cancelText: "取消", focusCancel: true,
+    okText: "清空", cancelText: "保留日志", focusCancel: true,
   });
   if (!ok) return;
   const r = await run("clear_launch_log");

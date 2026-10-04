@@ -595,6 +595,13 @@ def prelaunch_risks(config: AppConfig) -> dict[str, Any]:
                 if _same_combo(list(e.get("mods") or []), mods)]
     return {
         "blocking": bool(conflicts or memories),
+        # ⚠️ 别名（2026-10-04 修前后端不匹配）：前端 `LaunchPage.riskGate()` 读的是
+        # `risks.risky` / `risks.crashed`，而后端给的是 `blocking` / `memories` ——
+        # `!risks.risky` 恒为真 ⇒ **启动前风险弹窗一条都不再提示**（连同"以前崩过"
+        # 的提示与那条自动撤回通道的用户可见效果一起失效）。
+        # 按"以补齐为主"补别名，原字段保留（自检报告与测试都在用）。
+        "risky": bool(conflicts or memories),
+        "crashed": memories[:3],
         "conflicts": conflicts,
         "groups": groups,
         "memories": memories[:3],
@@ -1116,7 +1123,12 @@ def make_bundle(config: AppConfig, evidence: dict[str, Any] | None = None,
                 *, log: Callable[[str], None] | None = None) -> dict[str, Any]:
     """把崩溃现场 + 控制器日志 + 终末地日志打成 zip，返回路径信息。"""
     ts = time.strftime("%Y%m%d-%H%M%S")
-    bundle_dir = bundles_root(config) / f"crash-{ts}"
+    from . import fsutil
+
+    # ⚠️ 同秒两次崩溃包不能互相覆盖（2026-10-04）：`mkdir(exist_ok=True)` + `make_archive`
+    # 在同一个秒级名字上会**合并进上一次的目录/覆盖上一份 zip**（"验收发现两套实现同族
+    # 只修一处"里的另一处 —— `game_clean.backup_and_clean` 早就防了这个）。
+    bundle_dir = fsutil.unique_sibling(bundles_root(config) / f"crash-{ts}")
     bundle_dir.mkdir(parents=True, exist_ok=True)
 
     if evidence is None:
@@ -1234,7 +1246,9 @@ def make_bundle(config: AppConfig, evidence: dict[str, Any] | None = None,
             pass
 
     # ⑤ 打包
-    zip_path = bundles_root(config) / f"crash-{ts}.zip"
+    # 名字直接取目录名（可能带 `-1` 之类去重后缀），别再用 `crash-{ts}` 拼一遍
+    # （那会变成 `crash-crash-…`）。
+    zip_path = bundles_root(config) / f"{bundle_dir.name}.zip"
     try:
         shutil.make_archive(str(zip_path.with_suffix("")), "zip", bundle_dir)
         ok_zip = zip_path.is_file()
@@ -1246,6 +1260,16 @@ def make_bundle(config: AppConfig, evidence: dict[str, Any] | None = None,
         "ok": True,
         "dir": str(bundle_dir),
         "zip": str(zip_path) if ok_zip else "",
+        # ⚠️ 下面四个是**给前端弹窗补的别名**（2026-10-04 修前后端不匹配）：
+        # `App.vue` 的崩溃弹窗读 `fresh.path / fresh.bundle / fresh.reason / fresh.mods`，
+        # 而后端原先只给 `zip / dir / crashed / cause` ⇒ 弹窗里路径**恒显示
+        # 「（路径读取失败）」**、点「打开诊断包」**什么都不打开**（违反"必须给出文件在哪"
+        # 的准则），也看不到崩溃时启用了哪些 Mod。`reason` 用归因 kind（可能是
+        # `exit_code=0` 的正常退出），前端不再无脑写死 `process_disappeared`。
+        "path": str(zip_path) if ok_zip else str(bundle_dir),
+        "bundle": str(bundle_dir),
+        "reason": str((cause or {}).get("kind") or ""),
+        "mods": staging_mods(config),
         "game_logs": game_logs,
         "crashed": is_crash(evidence),
         "cause": cause,

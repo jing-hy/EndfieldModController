@@ -161,7 +161,7 @@ async function menuAct(act) {
         title: "移出 辅助 Mod？",
         message: `${m.name}\n\n它会从辅助 Mod 列表里移出并留一份备份，之后不再加载。`
           + `\n不会删除你的其它 Mod，也不会动游戏本体。`,
-        okText: "移出并备份", cancelText: "保留在库",
+        okText: "移出并备份", cancelText: "保留在库", focusCancel: true,
       });
       if (!ok) return;
       const r = await call("delete_mod", m.id);

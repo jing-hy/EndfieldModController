@@ -263,9 +263,21 @@ def _payload(config: AppConfig, items: list[dict[str, Any]], dirs: list[str]) ->
     data_root = str(_root(config))
     if data_root not in dirs:
         dirs.append(data_root)
+    # ⚠️ 这里同时给**两套字段名**（2026-10-04 修前后端不匹配）：
+    # 前端 `LaunchPage.fileWatchdogGate()` 读的是 `flagged / files[].name / watch_dir /
+    # acknowledged`，而本函数原先只给 `items / dirs / note` —— 于是 `st.flagged` 恒为
+    # undefined，**用户 2026-10-01 点名要的"建议加杀毒白名单"提醒从来没弹过**
+    #（后端为此写的四段计数、`isolated`、`streak>=2` 判据全部无人受益）。
+    # 按"以补齐为主"：后端补别名，老的 `items/dirs` 原样保留（诊断与测试都在用）。
+    files = [{**item, "name": item.get("label") or item.get("key") or ""} for item in items]
     return {
         "items": items,
+        "files": files,
         "dirs": dirs,
+        "flagged": bool(items),
+        "watch_dir": dirs[0] if dirs else data_root,
+        # 没有待提醒项 = 已经被用户处理过（`ack` 之后判据不再命中，flagged 自然变 False）
+        "acknowledged": not items,
         # ⚠ 这段文字会被前端 `showModalDialog` 用 **textContent** 原样显示
         # （`web/app.js`），所以**不能写 markdown**（星号会露出来）。
         "note": (

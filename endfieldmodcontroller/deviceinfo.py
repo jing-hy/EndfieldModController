@@ -204,8 +204,12 @@ def _verdict(names_lower: str) -> str:
     """
     if "rtx" in names_lower:
         gen = nvidia_generation(names_lower)
-        if gen == 50:
-            return "检测到 RTX 50 系显卡 → 具备 DLSS5 神经渲染的硬件前提"
+        # ⚠️ 判据要与 `dlss5_supported()` 一致（2026-10-04 修）：那边是 `generation >= 50`
+        # （为将来 60/70 系留门），这里原来写死 `gen == 50` ⇒ 未来更高代次的机器会被
+        # 开关放行、却在诊断包里读到"首发仅支持 50 系…属于支持范围问题"这种互相矛盾的结论，
+        # 看包的人会被同一份总结里的两句话带偏。
+        if gen is not None and gen >= 50:
+            return f"检测到 RTX {gen} 系显卡 → 具备 DLSS5 神经渲染的硬件前提"
         if gen is not None:
             return (
                 f"检测到 RTX {gen} 系显卡 → **DLSS5 神经渲染首发仅支持 RTX 50 系**（官方已表态"

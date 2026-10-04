@@ -5,6 +5,9 @@ import { ref, watch, nextTick, onUnmounted } from "vue";
 import { computed } from "vue";
 import { call } from "../lib/bridge.js";
 import { uiState, resolveDialog } from "../lib/dialog.js";
+// ⚠️ `escapeHtml` 复用 `lib/util.js` 的唯一实现（2026-10-04）：本文件原先自己又抄了一份
+// （逐字节相同），改一处漏一处 —— 而这个函数是**弹窗正文的 XSS 防线**，更不能有两份。
+import { escapeHtml } from "../lib/util.js";
 import Btn from "./ui/Btn.vue";
 
 // 破坏性动作默认把焦点放在**安全项**（取消）上 —— `focusCancel: true` 时。
@@ -51,16 +54,6 @@ onUnmounted(stopHold);
 //   * 再把**路径**（`X:\…` 或 `/…`）自动变成可点击的 `<a>`，点一下调
 //     `open_path_in_explorer` 打开它的所在位置 —— 用户不用再手动复制路径。
 // 只此三种变换，其余一律按纯文本走。
-
-/** HTML 转义（顺序很重要：& 必须最先）。 */
-function escapeHtml(text) {
-  return String(text == null ? "" : text)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
 
 // 形如 `D:\a\b`（含空格的路径用引号包着的情况也认）
 const PATH_RE = /([A-Za-z]:\\[^\n<>"']+?|(?:\\\\)[^\n<>"']+?)(?=[\s，。；、）)\]"]|$)/g;

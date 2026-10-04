@@ -105,8 +105,13 @@ def _looks_like_reshade_payload(path: Path) -> bool:
         if callable(inner):
             return bool(inner(path))
     except (OSError, ValueError):
-        return True
-    return True
+        # ⚠️ **判不出就返回 False**（2026-10-04 修：原来返回 True）。
+        # 这个函数是"要不要把这个文件移走"的判据，返回 True = 判它是 ReShade 载荷
+        # ⇒ 会被备份并从游戏目录**移走**。判定本身抛错时保守当作"不是我们的载荷"：
+        # 漏移只是体检少报一项（用户毫无感觉），而误移会让**游戏当场起不来**
+        #（游戏自带的 d3d12.dll 被搬走，要用户自己点还原才能回来）。
+        return False
+    return False
 
 
 def _stamp() -> str:
@@ -362,13 +367,23 @@ def quarantine_injector(
                 "message": "第三方注入器已不在游戏目录"}
 
     stamp = _stamp()
-    root = backup_root(config) / f"ngx-conflict-{stamp}"
+    # ⚠️ 目录名与清单里的 `stamp` **必须一致**（见下面写清单处），且同秒两次调用不能互相覆盖
+    # —— 两条都由 `fsutil.unique_sibling` + `"stamp": root.name` 保证（2026-10-04 修）。
+    from . import fsutil
+
+    root = fsutil.unique_sibling(backup_root(config) / f"ngx-conflict-{stamp}")
     files_dir = root / "files"
     moved: list[dict[str, Any]] = []
     restored: list[dict[str, Any]] = []
     errors: list[str] = []
     for path in plan:
-        relative = path.name
+        # ⚠️ **用相对游戏目录的路径**（2026-10-04 修）：原来只取 `path.name`，而
+        # `optiscaler_present()` 报的文件可能是 `plugin\xxx.dll` ⇒ 还原时会被放回
+        # **游戏目录根**而不是原位置（位置错 = 第三方注入器回不去、或顶掉别的文件）。
+        try:
+            relative = path.relative_to(game_dir).as_posix()
+        except ValueError:
+            relative = path.name
         try:
             size = path.stat().st_size
             digest = _sha256(path)
@@ -395,7 +410,10 @@ def quarantine_injector(
         try:
             root.mkdir(parents=True, exist_ok=True)
             (root / MANIFEST_NAME).write_text(json.dumps({
-                "stamp": stamp,
+                # ⚠️ 用**目录名**（不是 `_stamp()` 的结果）：`fsutil.unique_sibling` 可能给它
+                # 加上 `-1` 后缀，清单里必须跟着变，否则"按 stamp 还原"取错份。
+                "stamp": root.name,
+                "kind": "ngx_conflict",
                 "created_at": int(time.time()),
                 "reason": "OptiScaler 截获 NGX 调用，导致 DLSS5 的神经渲染无法生效（成功NR帧 0 / 0xBAD00001）",
                 "game_dir": str(game_dir),
@@ -440,14 +458,13 @@ def backup_and_clean(
                 "moved": [], "backup_dir": "", "game_dir": str(game_dir)}
 
     stamp = _stamp()
-    root = backup_root(config) / stamp
-    # 同一秒内连做两次备份不能互相覆盖（第一次的"净化前"状态才是有价值的那份）
-    if root.exists():
-        index = 2
-        while (backup_root(config) / f"{stamp}-{index}").exists():
-            index += 1
-        stamp = f"{stamp}-{index}"
-        root = backup_root(config) / stamp
+    # ⚠️ 同一秒内连做两次备份不能互相覆盖（第一次的"净化前"状态才是有价值的那份）。
+    # 判据收敛到 `fsutil.unique_sibling`（2026-10-04）：项目里"取一个不覆盖的名字"
+    # 曾有 4 份各写各的，这里是其中一份。
+    from . import fsutil
+
+    root = fsutil.unique_sibling(backup_root(config) / stamp)
+    stamp = root.name
     files_dir = root / "files"
     if dry_run:
         return {
@@ -460,6 +477,31 @@ def backup_and_clean(
     moved: list[dict[str, Any]] = []
     restored_modules: list[dict[str, Any]] = []
     errors: list[str] = []
+
+    # ⚠️⚠️ **先落一份"计划清单"，再动第一个文件**（2026-10-04 修，备份语义）。
+    #
+    # 原顺序是"逐个搬完 → 最后才写清单"，而 `list_backups()` 只认**带清单**的目录
+    # ⇒ 中途断电/进程被杀/写清单失败时，真实的备份就躺在 `files\` 里**却没人看得见**：
+    # `restore()` 会说"没有找到任何游戏目录备份"，而游戏目录已经被切掉一半。
+    # 现在：动第一份之前先写 `status="in_progress"` 的清单（哪怕 entries 还是空的），
+    # 全部搬完再原子地改成 `status="complete"` —— 任何时刻都能被 `list_backups` 看见。
+    manifest_path = root / MANIFEST_NAME
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+        from . import fsutil
+
+        fsutil.write_json(manifest_path, {
+            "stamp": stamp,
+            "kind": "clean",
+            "status": "in_progress",
+            "created_at": int(time.time()),
+            "game_dir": str(game_dir),
+            "entries": [],
+            "restored_modules": [],
+            "errors": [],
+        })
+    except OSError as exc:
+        errors.append(f"写清单失败: {exc}")
 
     for finding in findings:
         source = Path(finding.absolute)
@@ -493,6 +535,14 @@ def backup_and_clean(
 
     manifest = {
         "stamp": stamp,
+        # ⚠️ `kind` 是**区分备份用途**的唯一判据（2026-10-04 加）：`restore()` 默认要挑
+        # "净化备份（clean）"，不能挑到 `quarantine_injector` 留下的 `ngx-conflict-*`
+        # —— 那份里是 OptiScaler 的文件，把它"还原"回游戏目录正是我们要避免的事。
+        # 旧备份没有这个字段，`list_backups` 会按目录名/清单内容推断（见那边）。
+        "kind": "clean",
+        # `complete` = 所有项都已搬完（`restore()` 对 `in_progress` 的清单也照样能用，
+        # 它只用 `entries`；这个字段是给 `list_backups` 标"这份可能不完整"用的）。
+        "status": "complete",
         "created_at": int(time.time()),
         "game_dir": str(game_dir),
         "entries": entries,
@@ -500,9 +550,10 @@ def backup_and_clean(
         "errors": errors,
     }
     try:
-        root.mkdir(parents=True, exist_ok=True)
-        (root / MANIFEST_NAME).write_text(
-            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+        # 原子写（2026-10-04）：清单是还原的唯一索引，半截 JSON 等于没有索引。
+        from . import fsutil
+
+        fsutil.write_json(root / MANIFEST_NAME, manifest)
     except OSError as exc:
         errors.append(f"写清单失败: {exc}")
 
@@ -518,34 +569,93 @@ def backup_and_clean(
 
 
 def list_backups(config: AppConfig) -> list[dict[str, Any]]:
+    """列出游戏目录备份（**最近的在最前**），并标出它是哪一类备份。
+
+    ⚠️⚠️ **两类备份不能混着当"净化备份"用**（2026-10-04 审计发现的 P1）：
+      * `clean`（`backup_and_clean` 的产物）= 游戏目录被净化前的文件，**还原用它**；
+      * `ngx_conflict`（`quarantine_injector` 的产物，目录名 `ngx-conflict-*`）= 被移走的
+        OptiScaler 文件，**它是"要移走的东西"**。
+    原来两者都被当成净化备份，而排序是字符串降序（`'n' > '2'`）⇒ `backups[0]`
+    **永远是 ngx-conflict 那份** ⇒ 点「从备份还原游戏目录」/「依赖清空」会把刚移走的
+    OptiScaler 原样搬回游戏目录、并删掉补回的系统模块，DLSS5 立刻又失效，界面上毫无提示。
+    现在返回 `kind`，并由 `restore()` 只认 `clean`（旧备份按目录名/清单内容推断）。
+    """
     root = backup_root(config)
     if not root.is_dir():
         return []
+    from . import fsutil
+
     rows: list[dict[str, Any]] = []
     for item in sorted(root.iterdir(), reverse=True):
+        if not item.is_dir():
+            continue
         manifest = item / MANIFEST_NAME
         if not manifest.is_file():
+            # ⚠️⚠️ **没有清单但确实存了文件的目录也要列出来**（2026-10-04 修，备份语义）。
+            # 旧版这里 `continue` 直接跳过 ⇒ 一次"搬到一半就断电/被杀"的过程会留下
+            # `files\` 里真实的备份，而用户看到的是"没有找到任何游戏目录备份"、
+            # 游戏目录却已经被移走了一半 —— 那是最容易让人彻底失去数据的组合。
+            # 现在：只要 `files\` 非空就当作"一份可能不完整的净化备份"报出来。
+            files_dir = item / "files"
+            try:
+                has_payload = files_dir.is_dir() and any(files_dir.rglob("*"))
+            except OSError:
+                has_payload = False
+            if not has_payload:
+                continue
+            rows.append({
+                "stamp": item.name,
+                "kind": "ngx_conflict" if item.name.startswith("ngx-conflict-") else "clean",
+                "status": "unknown",
+                "incomplete": True,
+                "created_at": 0,
+                "entries": 0,
+                "game_dir": "",
+                "path": str(item),
+                "note": "这份备份没有清单（多半是备份过程被打断），内容在 files\\ 下，可手动取回",
+            })
             continue
-        try:
-            data = json.loads(manifest.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        data = fsutil.read_json(manifest)
+        if not data:
             continue
+        kind = str(data.get("kind") or "")
+        if not kind:
+            # 兼容旧备份：目录名带 `ngx-conflict-` 前缀的就是第三方注入器备份
+            kind = "ngx_conflict" if item.name.startswith("ngx-conflict-") else "clean"
         rows.append({
             "stamp": data.get("stamp") or item.name,
+            "kind": kind,
+            "status": str(data.get("status") or "complete"),
+            "incomplete": str(data.get("status") or "complete") != "complete",
             "created_at": data.get("created_at", 0),
             "entries": len(data.get("entries") or []),
             "game_dir": data.get("game_dir", ""),
             "path": str(item),
         })
+    # **净化备份排前面**（同 kind 内保持上面的"名字降序 = 时间新在前"）—— Python 的 sort
+    # 是稳定的，所以这一句就够了，`restore()` 的"取第一个"永远取到该取的那份。
+    rows.sort(key=lambda row: row["kind"] != "clean")
     return rows
 
 
 def restore(config: AppConfig, *, stamp: str = "", log: Log = None) -> dict[str, Any]:
-    """按备份清单把游戏目录还原成净化前的样子。"""
+    """按备份清单把游戏目录还原成净化前的样子（**只认净化备份**）。"""
     backups = list_backups(config)
     if not backups:
         return {"ok": False, "message": "没有找到任何游戏目录备份", "restored": []}
-    target = next((b for b in backups if b["stamp"] == stamp), backups[0]) if stamp else backups[0]
+    # ⚠️ 只从 `clean` 里挑（见 list_backups 的说明）：ngx-conflict 那份装的是**被移走的**
+    #    第三方注入器文件，把它"还原"回游戏目录等于把问题装回去。
+    usable = [b for b in backups if b.get("kind") == "clean"] or backups
+    if stamp:
+        target = next((b for b in usable if b["stamp"] == stamp), None)
+        if target is None:
+            # ⚠️ **不许静默回落到最新那份**（原来 `next(..., backups[0])`）：
+            # 用户以为还原的是 A，实际还原的是 B —— 而"还原错备份"在游戏目录上是破坏性的。
+            stamps = "、".join(str(b["stamp"]) for b in usable[:8])
+            return {"ok": False, "restored": [],
+                    "message": f"找不到 stamp 为 {stamp} 的备份。可用的是：{stamps}"}
+    else:
+        target = usable[0]
     root = Path(target["path"])
     try:
         manifest = json.loads((root / MANIFEST_NAME).read_text(encoding="utf-8"))
@@ -558,12 +668,37 @@ def restore(config: AppConfig, *, stamp: str = "", log: Log = None) -> dict[str,
 
     restored: list[str] = []
     errors: list[str] = []
-    # 先删掉我们补进去的系统模块，再把 proxy 搬回来（顺序反了会被覆盖）
+    # ⚠️⚠️ **系统模块要"确认能还原 proxy 了再删"**（2026-10-04 修）。
+    #
+    # 净化时我们把 proxy（`d3dcompiler_47.dll` / `vulkan-1.dll`）搬走、并从 System32
+    # **补回一份系统原版**（否则游戏当场起不来）。还原时必须反过来：先删补回的那份、
+    # 再放回我们搬走的 proxy —— 顺序反了会被覆盖。
+    # 但原实现是**无条件先全删**，然后才逐个尝试还原：只要某个 proxy 的备份源缺失
+    #（清单损坏 / 备份被清理 / 复制失败），游戏目录就**永远缺这个模块**
+    #（官方启动器校验失败、游戏起不来），而函数只返回一个 errors 数组。
+    #
+    # 现在逐个判：**只有该名字对应的 proxy 条目确实能从备份还原时，才删系统模块**。
+    proxy_entries: list[dict[str, Any]] = [e for e in (manifest.get("entries") or [])
+                                           if isinstance(e, dict)]
     for module in manifest.get("restored_modules") or []:
-        path = game_dir / str(module.get("name") or "")
+        name = str(module.get("name") or "")
+        if not name:
+            continue
+        path = game_dir / name
+        if not path.is_file():
+            continue
+        restorable = any(
+            Path(str(entry.get("relative") or "")).name.lower() == name.lower()
+            and (root / "files" / str(entry.get("relative") or "")).exists()
+            for entry in proxy_entries
+        )
+        if not restorable:
+            # 还原不回来 ⇒ **留着系统原版**（游戏至少能起），并如实说清
+            errors.append(
+                f"{name}: 备份里没有可还原的 proxy，已保留系统原版（游戏仍可启动）")
+            continue
         try:
-            if path.is_file():
-                path.unlink()
+            path.unlink()
         except OSError as exc:
             errors.append(f"清理 {path.name}: {exc}")
 

@@ -52,6 +52,11 @@ PROJECT_ROOT = _detect_project_root()
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config.json"
 DEFAULT_DATA_ROOT = PROJECT_ROOT / "runtime"
 
+# 主题白名单：**必须与 `frontend/src/store.js` 的 `THEMES` 完全一致**（2026-10-04 加）。
+# 加载配置时会用它做校验 —— 两侧一旦不一致，用户选的主题就会被静默改回默认
+# （历史上这里只认 dark/light，而前端有 6 套，于是琥珀/青蓝/紫罗兰/翡翠**存不住**）。
+THEMES = ("light", "dark", "amber", "cyan", "violet", "emerald")
+
 
 def resource_root() -> Path:
     """**只读资源根**（`web/`、随包 addon 等）—— 与数据根正好相反。
@@ -469,8 +474,16 @@ class AppConfig:
             _safe_save(cfg, path)
             return cfg
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+            # ⚠️ **编码必须容错**（2026-10-04 修）：Windows 用户用记事本「另存为 ANSI」
+            # （GBK）改 config.json 是常见操作，而 `read_text(encoding="utf-8")` 抛的是
+            # `UnicodeDecodeError` —— **既不是 OSError 也不是 JSONDecodeError**，于是下面
+            # 那条"隔离 + 重建默认配置"的自愈分支**完全走不到**，异常直接冒到
+            # `AppConfig.load()` 外面（`api.py` 构造 API 时没有 try）⇒ **程序起不来**。
+            # 编码容错的唯一实现在 `fsutil.read_text_tolerant`（core.read_text 也转调它）。
+            from . import fsutil
+
+            data = json.loads(fsutil.read_text_tolerant(path))
+        except (OSError, ValueError):
             _quarantine_broken_config(path)
             cfg = cls()
             cfg._config_path = str(path)
@@ -489,7 +502,11 @@ class AppConfig:
         filtered = {k: v for k, v in data.items() if k in known}
         cfg = cls(**filtered)
         cfg._config_path = str(path)
-        if cfg.theme not in {"dark", "light"}:
+        # ⚠️ 主题白名单**必须与前端一致**（2026-10-04 修）：前端 `store.js` 的 `THEMES`
+        # 有 6 套（light/dark/amber/cyan/violet/emerald），而这里只认 dark/light ⇒
+        # 用户选「琥珀/青蓝/紫罗兰/翡翠」存进 config.json 后，**下次启动被静默改回 light**
+        # （设置页下拉显示「浅色」而界面还是琥珀色，两处还对不上）。
+        if cfg.theme not in THEMES:
             cfg.theme = "light"
         # **一次性默认值迁移**（2026-10-01 用户要求「把快捷键整合设为默认开启」）：
         # 老配置里躺着显式的 `"hotkey_takeover": false`，光改 dataclass 默认值对它无效 ——
@@ -613,37 +630,17 @@ class AppConfig:
         self._config_path = str(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = json.dumps(self.to_dict(), ensure_ascii=False, indent=2)
-        # **原子写**：直接 write_text 覆盖时，写到一半被杀/断电会留下半截 JSON，
+        # **原子写 + 退避重试**：直接 write_text 覆盖时，写到一半被杀/断电会留下半截 JSON，
         # 下次启动解析失败 → 配置静默重置（"配置莫名清空"就是这么来的）。
-        # 先写同目录临时文件再 os.replace：目标要么是旧的完整文件，要么是新的完整文件。
-        # ⚠️ **必须重试**（2026-10-03 用户实测）：
-        #     set_component_addon failed: [WinError 2] 系统找不到指定的文件。:
-        #         'D:\zmdmod\modtest\config.json.tmp-10116' -> 'D:\zmdmod\modtest\config.json'
-        # `tmp.write_text()` 明明成功了，可轮到 `os.replace` 时**临时文件已经没了** ——
-        # 这是**杀软实时扫描**把刚写出的文件吃掉的特征（用户机器上就有，
-        # 且他此前反馈过"某文件老是被删掉"）。扫描通常只持续几十到几百毫秒，
-        # 短暂退避后重试即可；多次仍失败才如实抛错。
-        last_exc: OSError | None = None
-        for attempt in range(6):
-            # 每次换一个临时名：被杀软"记住"的那个名字重试也大概率再被吃掉
-            tmp = path.with_name(f"{path.name}.tmp-{os.getpid()}-{attempt}")
-            try:
-                tmp.write_text(payload, encoding="utf-8")
-                os.replace(tmp, path)
-                return
-            except OSError as exc:
-                last_exc = exc
-                try:
-                    tmp.unlink()
-                except OSError:
-                    pass
-                # ⚠️ `WinError 5 拒绝访问` 通常是**另一个实例正在 replace 同一个文件**
-                # （用户实测：两个管理器同时跑，报 `config.json.tmp-8668-4 -> config.json`
-                #  拒绝访问）。这种占用比杀软扫描持续得久，退避要长一些；
-                # 另外 WinError 2（临时文件被吃掉）也用同一套退避，不必区分。
-                time.sleep(0.15 * (attempt + 1))     # 150/300/450/600ms
-        assert last_exc is not None
-        raise last_exc
+        #
+        # ⚠️ 这套"临时文件 + 每次换名 + 6 次退避重试"原先只在本方法里实现（2026-10-03 用户
+        # 实测 `[WinError 2] 'config.json.tmp-10116' -> 'config.json'` —— 杀软实时扫描把刚写出的
+        # 临时文件吃掉），而 activation 的清单、MC_Probe.ini、注入库写入等**同样会被杀软吃**。
+        # 2026-10-04 把它下沉成 `fsutil.write_text_atomic`（唯一实现），这里复用它 ——
+        # 一处修好，全项目的原子写都跟着受益。
+        from . import fsutil
+
+        fsutil.write_text_atomic(path, payload, newline="\n")
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -1176,7 +1173,13 @@ def auto_detect_migoto_loader(refresh: bool = False) -> str:
     if not refresh and "migoto" in _DETECT_CACHE:
         return _DETECT_CACHE["migoto"]
     result = _scan_migoto_loader()
-    _DETECT_CACHE["migoto"] = result
+    # ⚠️ **空结果不进缓存**（2026-10-04 修，与 game_dir / xxmi 对齐）：
+    # 探测失败常常是**一时**的（刚启动时盘还没就绪、被杀软拖慢、UAC 未提权），
+    # 一旦把空串固化进进程内缓存，之后所有调用都拿空 —— 一键启动时就会"定位不到
+    # 3DMigoto loader"。同一个问题另两处早已按这个写法处理（见 auto_detect_game_dir），
+    # 这里与 launcher 是漏改的同一处。
+    if result:
+        _DETECT_CACHE["migoto"] = result
     return result
 
 
@@ -1218,7 +1221,9 @@ def auto_detect_official_launcher(refresh: bool = False) -> str:
     if not refresh and "launcher" in _DETECT_CACHE:
         return _DETECT_CACHE["launcher"]
     result = _scan_official_launcher()
-    _DETECT_CACHE["launcher"] = result
+    # ⚠️ **空结果不进缓存**（2026-10-04 修，理由同 auto_detect_migoto_loader）
+    if result:
+        _DETECT_CACHE["launcher"] = result
     return result
 
 

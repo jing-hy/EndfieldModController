@@ -3,7 +3,7 @@ import { ref, computed, onMounted } from "vue";
 import {
   Library, Wrench, PackageCheck, Rocket, Settings, Info, Palette,
 } from "lucide-vue-next";
-import { store, refreshState, applyTheme, currentTheme, THEMES, PAGE_IDS, onStateRefreshed } from "./store.js";
+import { store, refreshState, setTheme, THEMES, PAGE_IDS, onStateRefreshed } from "./store.js";
 import { waitForBridge, reportFrontendError } from "./lib/bridge.js";
 import { loadSettings } from "./lib/settings.js";
 import { dragHasFiles, importDroppedFile } from "./lib/importMod.js";
@@ -37,13 +37,15 @@ const tabs = [
   { id: "about", name: "说明", icon: Info },
 ];
 const THEME_LABELS = { light: "浅色", dark: "深色", amber: "琥珀", cyan: "青蓝", violet: "紫罗兰", emerald: "翡翠" };
-const theme = ref(currentTheme());
+// ⚠️ 主题读 **store 的单一真源**（2026-10-04）：原先这里是 `ref(currentTheme())` 的本地副本，
+// 于是"设置页改了主题、侧栏标签不跟着变"（两套真相）。现在两边都只认 `store.theme`。
+const theme = computed(() => store.theme);
 const themeLabel = computed(() => THEME_LABELS[theme.value] || theme.value);
 // 版本号与更新入口统一在左侧栏的 UpdateBadge 里（顶栏不再显示，这里也就没有 versionText 了）
 // 拖放导入：提示层**松开鼠标就消失**（用户要求「应该是释放就消失」），拖拽计数避免子元素抖动
 const dragging = ref(false);
-// 公告条（用户每次启动都会看到；点关闭就告诉后端"已读"）
-const notices = ref([]);
+// ⚠️ 原来这里还有一个 `notices` 公告条 ref（以及模板里那块卡片）——公告改成**弹窗**之后
+// 它再也没有被赋过值，属于死代码，2026-10-04 一并删除（见 `maybeShowAnnouncements`）。
 let firstRunChecked = false;
 const tourVisible = ref(false);   // 新手引导浮层（挖孔高亮 + 气泡）
 let dragDepth = 0;
@@ -58,6 +60,10 @@ let crashTimer = null;
 let crashPolling = false;
 async function pollCrash() {
   if (crashPolling) return;
+  // ⚠️ 没有 pywebview 桥时直接跳过（2026-10-04 修）：`#preview` / `?demo=1` / 直接
+  // 用浏览器打开这个页面时没有桥，而 `call()` 内部会 `waitForBridge` **等满 15 秒**
+  // 才抛错 —— 每 3 秒一次、每次挂 15 秒，预览页/截图环境控制台会持续刷错误。
+  if (!(window.pywebview && window.pywebview.api)) return;
   crashPolling = true;
   try {
     const r = await call("crash_bundle_status");
@@ -74,7 +80,11 @@ async function pollCrash() {
       // 用户看到"崩了、包在这"，然后呢？还是得自己去库里猜是哪两个冲突。
       const cause = (fresh.cause && typeof fresh.cause === "object") ? fresh.cause : {};
       const kind = String(cause.kind || fresh.cause_kind || "");
-      const isConflict = kind === "mod_conflict" || !!cause.conflict_group || !!cause.conflicts;
+      // ⚠️ **判据只认 `kind === "mod_conflict"`**（2026-10-04 修）。原先还看
+      // `!!cause.conflict_group || !!cause.conflicts`，而后端 `gpu_compiler` 那条归因
+      // **也带 conflicts 列表**（crashwatch 特意把"显卡编译器崩"与"Mod 冲突"分开，
+      // 就是为了避免让用户白折腾去清 Mod）—— 多加这两个条件等于把它又合并回去了。
+      const isConflict = kind === "mod_conflict";
       const lines = [
         `游戏进程在启动后异常结束了（${reason}）。`,
         "",
@@ -165,14 +175,12 @@ async function maybeShowAnnouncements() {
 }
 
 // 打开外部链接（弹窗里的网址点了直接开，与"能点的网址不另外配按钮"一致）
+// 打开外部链接（弹窗里的网址点了直接开，与"能点的网址不另外配按钮"一致）
+// ⚠️ 这里是**唯一实现**（2026-10-04）：`lib/util.js` 里那份 `openExternal` 已删 ——
+// 它直接调 `window.pywebview.api`，绕过了 `call()` 的"失败弹窗 + 桥未就绪重试"。
 async function openExternal(url) {
   if (!url) return;
   try { await call("open_external", String(url)); } catch (e) { /* call 已弹窗 */ }
-}
-
-async function dismissNotices() {
-  notices.value = [];
-  try { await call("announcements_seen"); } catch (e) { /* 忽略 */ }
 }
 
 async function onDrop(event) {
@@ -244,9 +252,9 @@ async function goTab(id) {
   try { await call("save_config", { last_tab: id }); } catch (e) { /* 记不上不影响使用 */ }
 }
 
-function pickTheme(name) {
-  theme.value = name;
-  applyTheme(name);
+// 主题切换：走 store 的唯一入口（它会写 localStorage + store.theme + config.json）
+async function pickTheme(name) {
+  await setTheme(name);
   themeOpen.value = false;
 }
 
@@ -270,7 +278,7 @@ onMounted(async () => {
     });
     if (window.__DEMO_STATE__) {
       store.state = window.__DEMO_STATE__;
-      store.mods = store.state.mods || [];
+      // ⚠️ 不再往 `store.mods` 写一份（2026-10-04：那个字段只写不读，页面统一读 `store.state.mods`）
       // 快照里预置的封面（data URI）——file:// 下前端拿不到本地图片，只能内联
       store.demoCovers = window.__DEMO_STATE__.demo_covers || {};
       store.demoPending = window.__DEMO_STATE__.demoPending || null;
@@ -398,7 +406,11 @@ onStateRefreshed(() => { maybeShowAnnouncements(); });
 // 崩溃轮询：常驻但很轻（一次 get_state 级别的小调用）。游戏异常退出后
 // 后端会自动收集现场并放进 `fresh`，这里取到就弹窗。
 crashTimer = setInterval(pollCrash, 3000);
-[4000, 10000].forEach((d) => setTimeout(pollCrash, d));
+// ⚠️ 这两个兜底 setTimeout **也要登记**（2026-10-04 修）：它们原先没进 `announceTimers`，
+// 而下面 `clearAnnounceTimers()` 只清登记过的 —— 用户正好在 4~10 秒窗口内关窗口时，
+// pywebview 会等这两个回调跑完（与历史上"关程序卡死"同源）。
+const crashKickTimers = [];
+[4000, 10000].forEach((d) => crashKickTimers.push(setTimeout(pollCrash, d)));
 // 启动后的一段时间里**每 5 秒轮询一次**：公告是后端后台线程稍后才填进去的
 // （实测启动后约 4 秒到），具体到几点不确定，所以用轮询兜住，而不是猜几个时刻。
 // 60 秒后自然停下，不做常驻轮询。消费一旦成功，`shownNoticeKeys` 会去重，不会重复弹。
@@ -420,6 +432,8 @@ announceTimers.push(setInterval(() => {
 // 关窗/刷新时一律清干净，绝不拖住退出流程
 function clearAnnounceTimers() {
   if (crashTimer) { clearInterval(crashTimer); crashTimer = null; }
+  crashKickTimers.forEach((t) => clearTimeout(t));
+  crashKickTimers.length = 0;
   announceTimers.forEach((t) => { clearInterval(t); clearTimeout(t); });
   announceTimers.length = 0;
 }
@@ -465,21 +479,11 @@ window.addEventListener("pagehide", clearAnnounceTimers);
     </aside>
 
     <main id="main-scroll" class="flex-1 min-w-0 overflow-auto">
-      <!-- 公告条 -->
-      <div v-if="notices.length" class="px-6 pt-4">
-        <div class="card p-3" style="border-color: var(--accent)">
-          <div class="flex items-start justify-between gap-3">
-            <div class="min-w-0 space-y-1">
-              <div v-for="n in notices" :key="n.key" class="text-sm">
-                <b v-if="n.title">{{ n.title }}</b>
-                <span v-if="n.body" class="ml-1">{{ n.body }}</span>
-                <a v-if="n.link" class="text-accent ml-1" :href="n.link" target="_blank" rel="noopener">{{ n.link }}</a>
-              </div>
-            </div>
-            <button class="btn btn-mini shrink-0" @click="dismissNotices">知道了</button>
-          </div>
-        </div>
-      </div>
+      <!-- ⚠️ 2026-10-04 删掉「公告条」这一块：公告改成**弹窗**之后（用户点破
+           「公告要的是弹窗，不是顶部那条卡片」），`notices` 再也没有被赋过值 ——
+           模板留着也不会渲染，但它内部那个 `<a :href>` 是**唯一没走 open_external** 的
+           远端链接（真被填上时点击行为与其他链接不一致）。死代码连同 `dismissNotices`
+           一起删除。 -->
       <header class="h-14 px-6 flex items-center justify-between border-b sticky top-0 z-10"
               style="background: var(--surface); border-color: var(--border)">
         <div>

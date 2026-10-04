@@ -588,20 +588,49 @@ def manifest_path(config: AppConfig) -> Path:
 
 
 def _read_manifest(config: AppConfig) -> dict[str, Any]:
-    path = manifest_path(config)
-    if not path.is_file():
-        return {}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    if not isinstance(data, dict):
-        return {}
-    return data
+    """读集成清单 —— 实现收敛到 `fsutil.read_json`（2026-10-04）。
+
+    原先 `_read_manifest` / `_read_safe_mode_manifest` / `_read_d3d12_swap_manifest`
+    三份逐字节相同；对应的三份 `_write_*` 也都不是原子写。任一处修好另两处不会跟着修
+    —— 本次审计里"安全模式 manifest 非原子"与"d3d12 swap manifest 非原子"就是这么重复出来的。
+    """
+    from . import fsutil
+
+    return fsutil.read_json(manifest_path(config))
 
 
 def _backup_name(path: Path) -> Path:
-    return path.with_name(path.name + ".endfieldmodcontroller.bak")
+    """给"即将被我们覆盖的文件"取一个备份名 —— **名字里带内容指纹**（2026-10-04 改）。
+
+    为什么不再用固定名（原来叫 `<名>.endfieldmodcontroller.bak`）：那份备份**只建一次**
+    （`if not candidate.exists()`），于是"目标后来被游戏或用户更新过"时，我们覆盖它
+    **不留新备份**，而 `remove_existing_reshade()` 还原回去的是**更早那份内容** ——
+    用户以为回到了"我们动手之前"，其实回到了更早的状态（**还原失真**）。
+    带 sha256 之后：内容变了就是新备份名（保留历史、不覆盖），内容没变则复用同一份
+    （不会每启动一次就多一个垃圾文件）。
+    """
+    from . import fsutil
+
+    try:
+        digest = fsutil.sha256_file(path)[:12]
+    except OSError:
+        digest = "unreadable"
+    return path.with_name(f"{path.name}.endfieldmodcontroller.{digest}.bak")
+
+
+# 我们自己装进游戏目录的文件都带这个标记（addon 的版本资源、面板 ini 的注释头…）。
+# 用在 manifest 丢失时**别把我们自己的文件当成"用户原件"备份**（那会让还原把我们的
+# addon 当原版放回去）。只读文件头，开销可忽略。
+_OUR_MARKER = b"EndfieldModController"
+
+
+def _looks_like_ours(path: Path) -> bool:
+    try:
+        with open(path, "rb") as handle:
+            head = handle.read(1 << 16)
+    except OSError:
+        return False
+    return _OUR_MARKER in head
 
 
 def _install_file(
@@ -615,6 +644,11 @@ def _install_file(
     target.parent.mkdir(parents=True, exist_ok=True)
     backup: Path | None = None
     if target.is_file():
+        # ⚠️ manifest 丢失时，**别把我们自己的文件当成"用户原件"备份**（2026-10-04 修）：
+        # 那会在还原时把我们的 addon 当原版放回游戏目录（`remove_existing_reshade` 就是
+        # 照着 manifest 的 `backup` 复制的）。判据 = 内容里有我们的标记 ⇒ 视为自有文件。
+        if not owned and _looks_like_ours(target):
+            owned = True
         if owned:
             if previous_backup:
                 candidate = Path(previous_backup)
@@ -691,12 +725,20 @@ def deploy_existing_reshade(
 
 
 def remove_existing_reshade(config: AppConfig) -> dict[str, Any]:
+    """把"我们装进游戏目录的那套 ReShade 集成"撤掉，并把用户原件放回去。
+
+    ⚠️ **失败时不许把清单删掉**（2026-10-04 修）：清单是"原件存在哪个 .bak"的唯一索引。
+    原来删除目标失败只 `continue`、回拷失败只 `pass`，**随后无条件删清单** ⇒ 之后再也
+    没法重试还原、`.endfieldmodcontroller.bak` 变成没人认领的孤儿文件（用户只能手工去
+    改名）。现在：只有全部成功才删清单，有失败就把失败项如实返回、清单留着。
+    """
     path = manifest_path(config)
     if not path.is_file():
         return {"ok": True, "removed": [], "restored": []}
     data = _read_manifest(config)
     removed: list[str] = []
     restored: list[str] = []
+    failures: list[str] = []
     for entry in data.get("files", []):
         if not isinstance(entry, dict):
             continue
@@ -706,20 +748,24 @@ def remove_existing_reshade(config: AppConfig) -> dict[str, Any]:
             try:
                 target.unlink()
                 removed.append(str(target))
-            except OSError:
+            except OSError as exc:
+                failures.append(f"删除 {target.name} 失败: {exc}")
                 continue
         if backup is not None and backup.is_file():
             try:
                 shutil.copy2(backup, target)
-                backup.unlink()
+                # ⚠️ 备份**不再删掉**：它是唯一一份用户原件。删了之后万一这次复制是坏的，
+                # 就再也回不去了（"有备份但还原不回去"是本项目最忌讳的一类问题）。
                 restored.append(str(target))
-            except OSError:
-                pass
-    try:
-        path.unlink()
-    except OSError:
-        pass
-    return {"ok": True, "removed": removed, "restored": restored}
+            except OSError as exc:
+                failures.append(f"还原 {target.name} 失败: {exc}")
+    if not failures:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+    return {"ok": not failures, "removed": removed, "restored": restored,
+            "warnings": failures}
 
 
 SAFE_MODE_MANIFEST_NAME = "anti_cheat_safe_mode.json"
@@ -730,24 +776,36 @@ def safe_mode_manifest_path(config: AppConfig) -> Path:
 
 
 def _read_safe_mode_manifest(config: AppConfig) -> dict[str, Any]:
-    path = safe_mode_manifest_path(config)
-    if not path.is_file():
-        return {}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return data if isinstance(data, dict) else {}
+    from . import fsutil
+
+    return fsutil.read_json(safe_mode_manifest_path(config))
 
 
 def _write_safe_mode_manifest(config: AppConfig, data: dict[str, Any]) -> None:
-    path = safe_mode_manifest_path(config)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    """**原子写**（2026-10-04 修）：这份清单是"安全模式改过哪些文件"的唯一还原依据，
+    原来直接 `write_text` —— 写到一半被杀/断电就留下半截 JSON，`_read_*` 只能返回 {}，
+    而 `safe_mode_active()` 只看文件在不在 ⇒ 界面说"安全模式开着"，点还原却什么都不做。"""
+    from . import fsutil
+
+    fsutil.write_json(safe_mode_manifest_path(config), data)
 
 
 def safe_mode_active(config: AppConfig) -> bool:
-    return safe_mode_manifest_path(config).is_file()
+    """安全模式是不是真的生效中 —— **判据是"清单能解析且条目非空"**（2026-10-04 修）。
+
+    原来只看 `manifest.is_file()`：文件存在但内容半截（写坏）/ 是空 `{}` 时同样返回 True，
+    于是 `enable_d3d12_proxy_mode` 会去调 `restore_anti_cheat_safe_mode`，而那边一条条目
+    都拿不到、空转一遍再把清单删掉 —— 用户看到"还原了"但文件其实没动。
+    """
+    data = _read_safe_mode_manifest(config)
+    if not data:
+        return False
+    for key in ("disabled_proxies", "restored", "moved", "apps", "entries"):
+        value = data.get(key)
+        if value:
+            return True
+    # 认不出的清单结构：保守认为"生效中"（宁可让用户看到还原按钮，也别隐瞒状态）
+    return bool(data)
 
 
 def _looks_like_reshade_dll(path: Path) -> bool:
@@ -805,6 +863,19 @@ def adopt_game_reshade_dll(config: AppConfig, info: dict[str, Any] | None = None
 
 
 def disable_game_reshade_proxies(config: AppConfig, info: dict[str, Any] | None = None) -> dict[str, Any]:
+    """把游戏目录里的 ReShade proxy 改名停用（**改名不删**，可还原）。
+
+    ⚠️⚠️ 两处修正（2026-10-04，都属于**备份名互相覆盖 / 还原信息丢失**）：
+      ① 原来若 `<proxy>.endfieldmodcontroller.disabled` 已存在就**先 unlink 再 rename** ——
+         那个 `.disabled` 里很可能就是**游戏自带的原始 dll**（不是我们放的），
+         删掉就永久无主了。现在改用 `fsutil.unique_sibling` 取一个不冲突的名字
+         （与 `launcher._unique_backup_path` 的"备份只增不删"同一原则）。
+      ② 原来 `data["disabled_proxies"] = entries` **整份覆盖**，上一次的条目连同
+         "怎么还回去"的信息一起丢失 ⇒ `restore_game_reshade_proxies()` 再也找不到它们。
+         现在**追加合并**（按 disabled 路径去重）。
+    """
+    from . import fsutil
+
     info = info or detect_existing_reshade(config)
     if info is None:
         return {"ok": True, "disabled": []}
@@ -813,14 +884,16 @@ def disable_game_reshade_proxies(config: AppConfig, info: dict[str, Any] | None 
     for proxy in [Path(item) for item in info.get("proxies", [])]:
         if not proxy.is_file():
             continue
-        disabled = proxy.with_name(proxy.name + ".endfieldmodcontroller.disabled")
-        if disabled.exists():
-            disabled.unlink()
+        disabled = fsutil.unique_sibling(proxy.with_name(proxy.name + ".endfieldmodcontroller.disabled"))
         proxy.rename(disabled)
         entries.append({"original": str(proxy), "disabled": str(disabled)})
     data = _read_safe_mode_manifest(config)
     data["game_dir"] = str(game_dir)
-    data["disabled_proxies"] = entries
+    known = {str(item.get("disabled")) for item in (data.get("disabled_proxies") or [])
+             if isinstance(item, dict)}
+    merged = [item for item in (data.get("disabled_proxies") or []) if isinstance(item, dict)]
+    merged.extend(item for item in entries if item["disabled"] not in known)
+    data["disabled_proxies"] = merged
     _write_safe_mode_manifest(config, data)
     return {"ok": True, "game_dir": str(game_dir), "disabled": entries}
 
@@ -858,20 +931,16 @@ def d3d12_swap_manifest_path(config: AppConfig) -> Path:
 
 
 def _read_d3d12_swap_manifest(config: AppConfig) -> dict[str, Any]:
-    path = d3d12_swap_manifest_path(config)
-    if not path.is_file():
-        return {}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return data if isinstance(data, dict) else {}
+    from . import fsutil
+
+    return fsutil.read_json(d3d12_swap_manifest_path(config))
 
 
 def _write_d3d12_swap_manifest(config: AppConfig, data: dict[str, Any]) -> None:
-    path = d3d12_swap_manifest_path(config)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    """**原子写**（2026-10-04 修，理由同 `_write_safe_mode_manifest`）。"""
+    from . import fsutil
+
+    fsutil.write_json(d3d12_swap_manifest_path(config), data)
 
 
 def swap_dxgi_to_d3d12(config: AppConfig, info: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -1049,6 +1118,13 @@ def disable_global_reshade_for_game(config: AppConfig) -> dict[str, Any]:
 
 
 def restore_global_reshade_apps(config: AppConfig) -> dict[str, Any]:
+    """把 `%ProgramData%\\ReShade\\ReShadeApps.ini` 还原成我们动手之前的样子。
+
+    ⚠️⚠️ **备份丢了就不许报成功**（2026-10-04 修的"假还原"）：原来 `backup` 不存在时
+    **什么都不做**，却返回 `ok=True, restored=[target]` 并把清单删掉 —— 界面上显示
+    "已还原"，实际 `Apps=` 里根本没把 Endfield.exe 加回去，用户**永久**失去全局注入
+    且再也查不出原因。现在：缺备份 → `ok=False` + 说清该怎么手工补，并且**保留清单**。
+    """
     manifest_path = global_reshade_manifest_path(config)
     if not manifest_path.is_file():
         return {"ok": True, "restored": []}
@@ -1058,12 +1134,23 @@ def restore_global_reshade_apps(config: AppConfig) -> dict[str, Any]:
         return {"ok": False, "message": "global_reshade_apps.json is invalid"}
     backup = Path(str(manifest.get("backup") or ""))
     target = Path(str(manifest.get("path") or ""))
-    if backup.is_file() and target.parts:
+    if not target.parts:
+        return {"ok": False, "restored": [],
+                "message": "还原清单里没有记录目标路径（global_reshade_apps.json 不完整），未做任何改动"}
+    if not backup.is_file():
+        return {
+            "ok": False, "restored": [],
+            "message": (
+                f"找不到备份文件，**没有做任何改动**：\n  {backup}\n\n"
+                f"你可以手动编辑 {target}，把 Endfield.exe 加回 `Apps=` 那一行"
+                f"（或直接删掉这一行让 ReShade 自己重新收集）。\n"
+                "清单已保留，修好备份后可以再点一次还原。"
+            ),
+        }
+    try:
         shutil.copy2(backup, target)
-        try:
-            backup.unlink()
-        except OSError:
-            pass
+    except OSError as exc:
+        return {"ok": False, "restored": [], "message": f"还原 {target} 失败: {exc}"}
     try:
         manifest_path.unlink()
     except OSError:
@@ -1378,6 +1465,8 @@ def disable_game_dir_injections(config: AppConfig, game_dir: Path | None = None)
     if target is None:
         return {"ok": False, "message": "没有找到游戏目录", "disabled": [], "restored": [], "plugins": [], "warnings": []}
 
+    from . import fsutil      # 给"取唯一备份名"用（见下面两处 rename 的注释）
+
     disabled: list[str] = []
     restored: list[str] = []
     plugins: list[str] = []
@@ -1388,10 +1477,11 @@ def disable_game_dir_injections(config: AppConfig, game_dir: Path | None = None)
         path = target / name
         if not path.is_file() or not looks_like_loader_proxy(path):
             continue
-        parked = path.with_name(name + LOADER_PROXY_DISABLED_SUFFIX)
+        # ⚠️ **不许"先 unlink 旧的 `.disabled` 再 rename"**（2026-10-04 修）：
+        # 那个 `.disabled` 里很可能就是**游戏自带的原始 dll**，删掉就永久无主了。
+        # 用 `fsutil.unique_sibling` 取不冲突的名字（备份只增不删）。
+        parked = fsutil.unique_sibling(path.with_name(name + LOADER_PROXY_DISABLED_SUFFIX))
         try:
-            if parked.exists():
-                parked.unlink()
             path.rename(parked)
             disabled.append(str(parked))
         except OSError as exc:
@@ -1415,10 +1505,9 @@ def disable_game_dir_injections(config: AppConfig, game_dir: Path | None = None)
     plugin_dir = target / PLUGIN_DIR_NAME
     if plugin_dir.is_dir():
         for payload in sorted(plugin_dir.glob("*.dll")):
-            parked = payload.with_name(payload.name + PLUGIN_DISABLED_SUFFIX)
+            # 同上：不删旧副本，取唯一名（原来 `parked.unlink()` 会把上一份原件删掉）
+            parked = fsutil.unique_sibling(payload.with_name(payload.name + PLUGIN_DISABLED_SUFFIX))
             try:
-                if parked.exists():
-                    parked.unlink()
                 payload.rename(parked)
                 plugins.append(str(parked))
             except OSError as exc:
@@ -1432,8 +1521,11 @@ def disable_game_dir_injections(config: AppConfig, game_dir: Path | None = None)
         }
         manifest_path = game_injection_manifest_path(config)
         try:
-            manifest_path.parent.mkdir(parents=True, exist_ok=True)
-            manifest_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            # ⚠️ 原子写（2026-10-04）：这份清单是"被停用的注入文件怎么还回去"的唯一依据，
+            # 写到一半被杀就成了半截 JSON ⇒ 还原时会当"清单损坏"直接失败。
+            from . import fsutil
+
+            fsutil.write_json(manifest_path, data)
         except OSError as exc:
             warnings.append(f"写入清单失败: {exc}")
 
@@ -1447,8 +1539,29 @@ def disable_game_dir_injections(config: AppConfig, game_dir: Path | None = None)
     }
 
 
+def _strip_disable_suffix(name: str, suffix: str) -> str:
+    """从"被停用的文件名"里还原出原始文件名。
+
+    `foo.dll.endfieldmodcontroller.disabled` → `foo.dll`；
+    也容忍"唯一名"后缀（`…disabled-1`，见 `fsutil.unique_sibling` 的使用处）。
+    """
+    index = name.find(suffix)
+    if index == -1:
+        return name
+    return name[:index]
+
+
 def restore_game_dir_injections(config: AppConfig) -> dict[str, Any]:
-    """Undo :func:`disable_game_dir_injections` using its manifest."""
+    """Undo :func:`disable_game_dir_injections` using its manifest.
+
+    ⚠️⚠️ **清单里的路径必须先过"在游戏目录内"这一关**（2026-10-04 修的 P1）：
+    `parked` / `target` 全部直接来自 manifest 字符串，原来**没有任何校验** ——
+    清单被改坏、或从别处拷来的清单，就能让这里 `unlink()`/`rename()` **任意路径的文件**。
+    对照 `game_clean.restore()` 早就有 `is_relative_to(game_dir)` 的判断，这里漏了。
+    另外原来 1471-1475 那段"大小相同才删"的保护被紧随其后的 `if target.exists(): unlink()`
+    **完全抹掉**（死逻辑），现在改成：**大小一致才认为"这是我们自己放的那份"并删掉，
+    否则保留**（那是用户/游戏自己写的新文件，删了就是数据丢失）。
+    """
     manifest_path = game_injection_manifest_path(config)
     if not manifest_path.is_file():
         return {"ok": False, "message": "没有找到注入清理记录", "restored": [], "warnings": []}
@@ -1456,6 +1569,18 @@ def restore_game_dir_injections(config: AppConfig) -> dict[str, Any]:
         data = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         return {"ok": False, "message": f"读取清单失败: {exc}", "restored": [], "warnings": []}
+
+    game_dir_raw = str(data.get("game_dir") or "")
+    game_dir = Path(game_dir_raw) if game_dir_raw else None
+
+    def _inside(path: Path) -> bool:
+        """这个路径落在记录的游戏目录里吗（没有记录游戏目录时不放行）。"""
+        if game_dir is None:
+            return False
+        try:
+            return path.resolve().is_relative_to(game_dir.resolve())
+        except (OSError, ValueError):
+            return False
 
     restored: list[str] = []
     warnings: list[str] = []
@@ -1465,16 +1590,25 @@ def restore_game_dir_injections(config: AppConfig) -> dict[str, Any]:
         parked = Path(str(entry.get("disabled") or ""))
         if not parked.is_file():
             continue
-        name = parked.name[: -len(LOADER_PROXY_DISABLED_SUFFIX)]
+        # ⚠️ 名字推导要**容忍唯一名后缀**（2026-10-04）：`disable_*` 现在用
+        # `fsutil.unique_sibling` 取名，冲突时会变成 `x.dll.endfieldmodcontroller.disabled-1`
+        # —— 直接按固定后缀切片会得到 `x.dll.endfieldmodcontroller.disabled-1`（切错）。
+        name = _strip_disable_suffix(parked.name, LOADER_PROXY_DISABLED_SUFFIX)
         target = parked.with_name(name)
+        if not (_inside(parked) and _inside(target)):
+            warnings.append(f"{name}: 清单里的路径不在游戏目录内，已跳过（{parked}）")
+            continue
         restored_from = entry.get("restored_from")
         try:
             if target.is_file() and restored_from:
                 backup = Path(str(restored_from))
+                # 大小一致 ⇒ 这份就是我们（或系统补回的模块）放下的，可以覆盖；
+                # 不一致 ⇒ 游戏/用户后来自己写了新内容，**保留它**并如实说明。
                 if backup.is_file() and target.stat().st_size == backup.stat().st_size:
                     target.unlink()
-            if target.exists():
-                target.unlink()
+                else:
+                    warnings.append(f"{name}: 游戏目录里已有一份同名文件，内容与记录不同，未覆盖")
+                    continue
             parked.rename(target)
             restored.append(str(target))
         except OSError as exc:
@@ -1483,7 +1617,10 @@ def restore_game_dir_injections(config: AppConfig) -> dict[str, Any]:
         parked = Path(str(item))
         if not parked.is_file():
             continue
-        target = parked.with_name(parked.name[: -len(PLUGIN_DISABLED_SUFFIX)])
+        target = parked.with_name(_strip_disable_suffix(parked.name, PLUGIN_DISABLED_SUFFIX))
+        if not (_inside(parked) and _inside(target)):
+            warnings.append(f"{target.name}: 清单里的路径不在游戏目录内，已跳过")
+            continue
         try:
             if target.exists():
                 target.unlink()

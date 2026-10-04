@@ -3,15 +3,22 @@
 // 用户 2026-10-01 要求：「每组冲突单独下拉框」，选要保留的；
 // 「发现 mod 冲突风险应该先去清理才是右边的橙色主选项」—— 所以主按钮在右、
 // "仍然继续"在最左且是次要样式。
-import { ref, watch } from "vue";
+import { ref, watch, computed } from "vue";
 
 const props = defineProps({ groups: { type: Array, default: () => [] } });
 
 // 结论时间（后端 `conflict_groups` 里带的 checked_at）
+// ⚠️⚠️ 2026-10-04 修：这里原来写成 `computed(() => { const g = groups.value ... })` ——
+// 既没导入 `computed`（组件一 mount 就抛 `ReferenceError: computed is not defined`），
+// 又引用了不存在的自由变量 `groups`（prop 应当读 `props.groups`），还读了一个**根本没声明**
+// 的 prop `props.checkedAt`。后果：`<ConflictDialog v-if="conflicts">` 一旦为真，
+// 组件渲染期直接抛错 → **冲突弹窗永远出不来，还可能把整个 Mod 库页面渲染打断**
+//（与历史上"点 ⋯ 整页变白"同型事故）。判据只在 `props.groups` 里取。
 const checkedAt = computed(() => {
-  const g = groups.value || [];
-  for (const x of g) { if (x && x.checked_at) return String(x.checked_at); }
-  return props.checkedAt ? String(props.checkedAt) : "";
+  for (const x of (props.groups || [])) {
+    if (x && x.checked_at) return String(x.checked_at);
+  }
+  return "";
 });
 const emit = defineEmits(["resolve", "cancel"]);
 // 组序号 -> 要保留的 mod id。

@@ -57,7 +57,21 @@ def sync(src: Path, dst: Path, *, dry_run: bool = False) -> tuple[int, int]:
         return files, size
 
     if dst.exists():
+        # ⚠️ **不许"先整份删掉再复制"**（2026-10-04 修）：中途失败（文件被占用/权限/磁盘满）
+        # 会让仓库里的 `docs/structure/` 只剩空目录，而 `push.py` 随后会把这次"删除"
+        # 提交并推送出去。改成"先复制到临时目录 → 全成功了才替换"。
+        staging = dst.with_name(dst.name + ".new")
+        if staging.exists():
+            shutil.rmtree(staging)
+        staging.mkdir(parents=True, exist_ok=True)
+        for path, target in plan:
+            relative = target.relative_to(dst)
+            staged = staging / relative
+            staged.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, staged)
         shutil.rmtree(dst)
+        staging.rename(dst)
+        return files, size
     for path, target in plan:
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(path, target)

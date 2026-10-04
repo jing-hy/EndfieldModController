@@ -141,13 +141,49 @@ def static_checks() -> None:
     #    这里校验**产物存在且不比源码旧**（"改了 frontend/ 忘了 npm run build" 是最容易犯的错，
     #    否则会静默打出一个旧界面）。旧的原生前端已删除，所以产物缺失一律直接失败。
     dist_html = ROOT / "web" / "dist" / "index.html"
-    frontend_src = ROOT / "frontend" / "src"
+    frontend_dir = ROOT / "frontend"
     if dist_html.is_file():
-        newest = max((p.stat().st_mtime for p in frontend_src.rglob("*") if p.is_file()),
-                     default=0.0)
+        # ⚠️ 参与比较的输入**不只 frontend/src**（2026-10-04 修）：
+        # `frontend/index.html`（主题内联脚本就在这里）、`vite.config.js`、
+        # `tailwind.config.js`、`postcss.config.js`、`package.json` 改了同样会改变产物，
+        # 而原判据只看 src ⇒ 改这些不重建也能通过（打出旧界面）。
+        # `demo-state.json` 要排除：它会被 make_demo / normify 刷新，mtime 变新会**误伤**
+        #（明明没改代码却拒绝构建）。`node_modules/` 直接跳过（几万个文件，且不是输入）。
+        skip_dirs = {"node_modules", "dist", ".vite"}
+        inputs: list[Path] = []
+        for path in frontend_dir.iterdir():
+            if path.is_file():
+                if path.name != "demo-state.json":
+                    inputs.append(path)
+                continue
+            if not path.is_dir() or path.name in skip_dirs:
+                continue
+            inputs.extend(p for p in path.rglob("*")
+                          if p.is_file() and p.name != "demo-state.json"
+                          and not skip_dirs.intersection(p.parts))
+        newest = max((p.stat().st_mtime for p in inputs), default=0.0)
         if newest and dist_html.stat().st_mtime < newest:
-            raise SystemExit("!! web/dist/index.html 比 frontend/src 旧 —— 请先 cd frontend && npm run build")
+            stale = sorted(
+                (p for p in inputs if p.stat().st_mtime > dist_html.stat().st_mtime),
+                key=lambda p: p.stat().st_mtime, reverse=True)[:5]
+            detail = "、".join(str(p.relative_to(ROOT)) for p in stale)
+            raise SystemExit(
+                f"!! web/dist/index.html 比前端输入旧 —— 请先 cd frontend && npm run build\n"
+                f"   比产物新的输入（前 5 个）：{detail}")
         print(f"      前端产物 ok（web/dist/index.html {dist_html.stat().st_size:,} B）", flush=True)
+        # ⚠️ 产物还得**真的在 git 里**（2026-10-04）：`.gitignore` 曾用一条全局 `dist/` 把它
+        # 吃掉（而同一个文件的注释却写着"要提交构建产物"），于是别人 clone 下来没有它，
+        # `build_exe.py` 只能回退到 `web/` 兜底页 ⇒ 打出"界面产物缺失"的 exe。
+        # 这里只**提醒**不阻断（首次入库前它本来就没被跟踪）。
+        try:
+            tracked = subprocess.run(
+                ["git", "ls-files", "--error-unmatch", str(dist_html.relative_to(ROOT))],
+                cwd=str(ROOT), capture_output=True, text=True, encoding="utf-8", errors="replace")
+            if tracked.returncode != 0:
+                print("      !! web/dist/index.html 还没提交进 git —— 别人 clone 后构建会退化成"
+                      "「界面产物缺失」兜底页，记得 `git add web/dist/index.html`", flush=True)
+        except Exception:  # noqa: BLE001 —— 不是 git 仓库 / 没有 git 都不该阻断构建
+            pass
     else:
         # 旧的原生前端已在 0.9.6 删除（归档在仓库外与 git 历史里），
         # 现在只有这一条路：产物必须在。没有就直接失败，别静默打出没有界面的包。

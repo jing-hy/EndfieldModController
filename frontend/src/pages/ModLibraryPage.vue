@@ -184,7 +184,7 @@ async function menuAct(act, mod = null) {
         title: "移出 服装 Mod？",
         message: `${m.name}\n\n它会从 服装 Mod列表里移出并留一份备份，之后不再加载。`
           + `\n不会删除你的其它 Mod，也不会动游戏本体。`,
-        okText: "移出并备份", cancelText: "保留在库",
+        okText: "移出并备份", cancelText: "保留在库", focusCancel: true,
       });
       if (!ok) return;
       const r = await call("delete_mod", m.id);
@@ -303,7 +303,7 @@ async function fixAll() {
       "• 已经修过的会跳过",
       "• 过程中界面不会卡（后台跑，这里显示进度）",
     ].join("\n"),
-    okText: "开始修复", cancelText: "取消",
+    okText: "开始修复", cancelText: "先不修复",
   });
   if (!ok) return;
 
@@ -315,7 +315,12 @@ async function fixAll() {
   if (started && started.already) {
     showToast("已经有一轮修复在进行中", "info");
   } else {
-    showToast(`已开始修复${started && started.count ? ` ${started.count} 个` : ""} Mod…`, "success");
+    // ⚠️ 后端 `fix_all_mods()` 返回的是 `{ok, started, total, message}`（2026-10-04 修）：
+    // 原来读 `started.count` ⇒ 恒 undefined ⇒ 数量永远不显示，提示退化成"已开始修复 Mod…"。
+    showToast(
+      `已开始修复${started && started.total ? ` ${started.total} 个` : ""} Mod…`,
+      "success",
+    );
   }
 
   fixRunning.value = true;
@@ -357,12 +362,10 @@ async function fixAll() {
 
 
 
-function speedText() {
-  const bps = dl.value.speed_bps || 0;
-  if (!dl.value.total_bytes) return dl.value.done_bytes ? `已下 ${humanSize(dl.value.done_bytes)}` : "等待服务器响应…";
-  return `${humanSize(dl.value.done_bytes)} / ${humanSize(dl.value.total_bytes)} · `
-    + `${Math.round((dl.value.done_bytes / dl.value.total_bytes) * 100)}% · ${humanSize(bps)}/s`;
-}
+// ⚠️ 2026-10-04 删掉 `speedText()`：它读的是一个**本文件从未定义**的 `dl.value`，
+// 完全是历史上那次 `modDownloadFinished is not defined` 的同型残留 —— 现在模板没引用它
+// 所以还没炸，但只要有人把它接回模板（Mod 下载速度显示本来就需要它），页面立刻 ReferenceError。
+// 真要做下载速度显示，数据源应当是 `call("mod_download_progress")` 的返回值。
 
 // 封面**串行**加载：后端每张都要 PIL 打开+缩放+JPEG 编码（CPU 密集），
 // 一次性并发十几张会把界面拖卡、用户感觉"图片加载很慢"（2026-10-03 反馈）。
@@ -392,17 +395,26 @@ function queueCovers(mods) {
 }
 
 // ⚠️ **C2：Esc 关闭 ⋯ 菜单**（0.9.5 的 `app.js:805` 有，换代时丢了）。
+// ⚠️ 回调必须**具名**才能解绑（2026-10-04 修）：原来传的是匿名箭头函数，`onUnmounted`
+// 里既没解绑、也没法解绑 ⇒ `<component :is>` 每次切页都会重建本组件，监听器一次次累积
+// （闭包还一直持有已卸载组件的 `menu` ref），页签来回切 N 次就挂上 N 个 Esc 处理器。
+function onEscapeKey(e) {
+  if (e.key === "Escape" && menu.value) closeMenu();
+}
 onMounted(() => {
-  window.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && menu.value) closeMenu();
-  });
+  window.addEventListener("keydown", onEscapeKey);
 });
 
 onMounted(async () => {
   await refreshState().catch(() => {});
   queueCovers(store.state.mods);
 });
-onUnmounted(() => { if (timer) clearInterval(timer); stopFixPoll(); coverQueue = []; });
+onUnmounted(() => {
+  window.removeEventListener("keydown", onEscapeKey);
+  if (timer) clearInterval(timer);
+  stopFixPoll();
+  coverQueue = [];
+});
 
 // ⚠️ Vue 里**子组件的 onMounted 先于父组件执行**，而 demo 模式的封面是父组件（App.vue）
 // 在自己的 onMounted 里才灌进 store 的 —— 那时封面还没到，一开始全是占位图。

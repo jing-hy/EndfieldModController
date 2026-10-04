@@ -131,13 +131,14 @@ def download_file(
 
 
 def _cache_dir() -> Path:
-    """组件安装包的下载缓存目录（`<runtime>/_downloads`）。"""
-    from .config import AppConfig
+    """组件安装包的下载缓存目录（`<runtime>/_downloads`）。
 
-    try:
-        return AppConfig.load().runtime_path / "_downloads"
-    except Exception:  # noqa: BLE001
-        return Path.cwd() / "runtime" / "_downloads"
+    ⚠️ 实现收敛到 `fsutil.downloads_cache_dir()`（2026-10-04）：原先与
+    `dependencies._cache_dir` 逐字节相同。
+    """
+    from . import fsutil
+
+    return fsutil.downloads_cache_dir()
 
 
 def _cache_target(dest: Path) -> tuple[Path | None, Path | None]:

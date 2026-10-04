@@ -21,6 +21,7 @@ import os
 import re
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -38,6 +39,26 @@ RATE_LIMIT_HINT = (
 
 class GitHubError(RuntimeError):
     """消息已经是可以直接展示给用户的中文说明。"""
+
+
+# ⚠️ **凭据只发给 GitHub 自己的域**（2026-10-04 修一个真实的凭据泄漏）：
+# `api_get()` 原先不看 host 就给每个请求加 `Authorization: Bearer <GH_TOKEN>`，
+# 而 `dependencies._fetch_json()` 拿它去打 `https://gamebanana.com/apiv11/...` ——
+# 于是**用户的 GitHub token 被发给了第三方站点**（而且那个请求还会被缓存）。
+# 现在按 host 白名单决定带不带，非 GitHub 域一律匿名请求。
+_TOKEN_HOST_SUFFIXES = (".github.com", ".githubusercontent.com", ".githubassets.com")
+
+
+def _token_allowed_for(url: str) -> bool:
+    """这个 URL 是不是 GitHub 自己的域（只有它才配拿到用户的 token）。"""
+    try:
+        host = urllib.parse.urlsplit(str(url)).hostname or ""
+    except ValueError:
+        return False
+    host = host.lower()
+    if host in ("github.com", "api.github.com", "codeload.github.com", "raw.githubusercontent.com"):
+        return True
+    return any(host.endswith(suffix) for suffix in _TOKEN_HOST_SUFFIXES)
 
 
 def _cache_path() -> Path:
@@ -142,7 +163,7 @@ def api_get(
 
     headers = {"User-Agent": USER_AGENT, "Accept": "application/vnd.github+json"}
     secret, _source = token()
-    if secret:
+    if secret and _token_allowed_for(url):
         headers["Authorization"] = f"Bearer {secret}"
     request = urllib.request.Request(url, headers=headers)
     try:

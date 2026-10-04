@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import activation, core, dependencies, diagnostics, dlss5_fetcher, integrity, launcher, moddl, reshade, reshade_integration, runtime_assets, runtime_deps, selfupdate
+from . import activation, core, dependencies, diagnostics, dlss5_fetcher, fsutil, integrity, launcher, moddl, reshade, reshade_integration, runtime_assets, runtime_deps, selfupdate
 from .config import AppConfig, auto_detect_migoto_loader, auto_detect_official_launcher, auto_detect_xxmi, cached_detect
 
 # 拖进 Mod 库页面的压缩包格式（用户 2026-10-01：「需要增加支持拖入 7z」「rar 也要」）。
@@ -142,6 +142,76 @@ class EndfieldModControllerApi:
         for note in list(getattr(self.config, "_relocated", []) or []):
             launcher._append_log(self.config, f"数据根与配置里记录的不同，已自动纠正路径 {note}")
         self.config.ensure_dirs()
+        # ⚠️⚠️ **下面这段原先缩进在 `config` 的 setter 里**（2026-10-04 修正）。
+        #
+        # 症状：它看起来是 `__init__` 的尾巴，其实整个函数体都属于
+        # `@config.setter def config(...)` —— 因为 `__init__` 在 `self.config = load(...)`
+        # 之后就没有语句了，后面那段 8 空格缩进的代码紧跟在 setter 的 `self._config = value`
+        # 后面。为什么一直没炸：`__init__` 第 129 行那句赋值**本身就会触发 setter**，
+        # 于是这些初始化"顺带"跑了一次 —— 靠巧合工作。
+        #
+        # 代价（真实后果）：任何 `api.config = xxx` 赋值（测试里就有、将来热重载也可能走）
+        # 都会**重置正在进行的下载任务状态**（`_mod_dl` 变回空表）、清掉 Mod 列表缓存、
+        # 换掉 `_ui_ready` 事件（正在等的预热线程永远等不到），并**再起一个预热线程**
+        # （重复全盘扫描、重复拉公告/角色表）。现在归位：setter 只赋值。
+        self._mods_cache = None
+        self._dep_task: dict[str, Any] | None = None
+        # Mod 下载（粘贴网址 → 并行下载 → 自动解压入库）：任务表 + 一把入库锁
+        # （下载并行、解压入库串行 —— 用户 2026-10-02 要求"并行多线程下载"）
+        self._mod_dl: dict[str, Any] = {"done": True, "items": [], "cancel": False, "pause": False}
+        # 「下载中关窗口要弹窗提示」用（用户 2026-10-02）：用户在确认框里点了
+        # 「仍然退出」后置 True，closing 事件就放行。
+        self.exit_confirmed = False
+        self._mod_dl_lock = threading.Lock()
+        # 把用户的下载加速/线路偏好装进 fastnet（只在下载时生效，用完即放）
+        try:
+            from . import fastnet
+
+            fastnet.set_policy(getattr(self.config, "download_boost", "auto"))
+            fastnet.set_line_mode(getattr(self.config, "download_line", "auto"))
+            # 代理：VPN 只对浏览器生效时，程序这边得单独配（用户 2026-10-02 实测确认）
+            fastnet.set_proxy(getattr(self.config, "download_proxy", ""))
+            if fastnet.proxy_in_use():
+                launcher._append_log(self.config, f"下载代理: {fastnet.proxy_in_use()}")
+        except Exception:  # noqa: BLE001
+            pass
+        # **构造函数必须快**：窗口是在它返回之后才创建的，这里做任何全盘扫描都会让
+        # "加载页"迟迟不出现（用户要求"所有情况都要尽早展示加载页面"）。于是所有
+        # 重活（深探测、清理上次更新残留）挪到后台预热线程：前端先看到加载页，
+        # 预热完成后再刷新一次即可（2026-10-01 改）。
+        #
+        # 2026-10-01 追加修复（实测从零启动窗口要 9.8 秒）：预热里的全盘扫描会和
+        # WebView2 初始化抢磁盘与 GIL —— 有 config 时 autofill 直接跳过探测所以很快，
+        # 从零时才真扫，正好卡在 webview.start() 里。现在预热先等前端首屏就绪
+        # （ui_ready()）再动手，最多等 15 秒。
+        self._warm_done = False
+        # 未读的"公告"（info/warning）：后台预热拉到、由 get_state 带给前端弹一次。
+        # **异常状态预警（critical）不走这里** —— 它由 prelaunch_alerts() 在点「一键启动」时
+        # 现拉现弹（每次都弹、强制停留，用户 2026-09-30 要求）。
+        self._announcements: list[dict[str, Any]] = []
+        self._ui_ready = threading.Event()
+        # Mod 备份仓的后台状态（去重：同一时刻只跑一个打包任务）
+        self._modbackup_lock = threading.Lock()
+        self._modbackup_running = False
+        self._warm_up_thread: threading.Thread | None = None
+        self._start_warm_up()
+
+    def _start_warm_up(self) -> None:
+        """起（或复用）那个唯一的后台预热线程。
+
+        抽出来是为了**不会再起第二个**：原来它写在 config setter 里，每次赋值都会多一个。
+        已经有活着的预热线程时直接返回。
+        """
+        current = getattr(self, "_warm_up_thread", None)
+        if current is not None and current.is_alive():
+            return
+        self._warm_up_thread = threading.Thread(target=self._warm_up, name="mc-warm-up", daemon=True)
+        self._warm_up_thread.start()
+
+    def ui_ready(self) -> dict[str, Any]:
+        """前端首屏渲染完成后调用：这时才允许后台开始全盘探测。"""
+        self._ui_ready.set()
+        return {"ok": True}
 
     # ── 配置热重载（用户 2026-10-03：「改一下就读一次」）──────────────────────
     def _config_file_mtime(self) -> float:
@@ -182,54 +252,8 @@ class EndfieldModControllerApi:
 
     @config.setter
     def config(self, value) -> None:
+        """只赋值 —— 初始化逻辑一律在 `__init__` 里（见那边的说明）。"""
         self._config = value
-
-
-        self._mods_cache = None
-        self._dep_task: dict[str, Any] | None = None
-        # Mod 下载（粘贴网址 → 并行下载 → 自动解压入库）：任务表 + 一把入库锁
-        # （下载并行、解压入库串行 —— 用户 2026-10-02 要求"并行多线程下载"）
-        self._mod_dl: dict[str, Any] = {"done": True, "items": [], "cancel": False, "pause": False}
-        # 「下载中关窗口要弹窗提示」用（用户 2026-10-02）：用户在确认框里点了
-        # 「仍然退出」后置 True，closing 事件就放行。
-        self.exit_confirmed = False
-        self._mod_dl_lock = threading.Lock()
-        # 把用户的下载加速/线路偏好装进 fastnet（只在下载时生效，用完即放）
-        try:
-            from . import fastnet
-
-            fastnet.set_policy(getattr(self.config, "download_boost", "auto"))
-            fastnet.set_line_mode(getattr(self.config, "download_line", "auto"))
-            # 代理：VPN 只对浏览器生效时，程序这边得单独配（用户 2026-10-02 实测确认）
-            fastnet.set_proxy(getattr(self.config, "download_proxy", ""))
-            if fastnet.proxy_in_use():
-                launcher._append_log(self.config, f"下载代理: {fastnet.proxy_in_use()}")
-        except Exception:  # noqa: BLE001
-            pass
-        # **构造函数必须快**：窗口是在它返回之后才创建的，这里做任何全盘扫描都会让
-        # "加载页"迟迟不出现（用户要求"所有情况都要尽早展示加载页面"）。于是所有
-        # 重活（深探测、清理上次更新残留）挪到后台预热线程：前端先看到加载页，
-        # 预热完成后再刷新一次即可（2026-10-01 改）。
-        #
-        # 2026-10-01 追加修复（实测从零启动窗口要 9.8 秒）：预热里的全盘扫描会和
-        # WebView2 初始化抢磁盘与 GIL —— 有 config 时 autofill 直接跳过探测所以很快，
-        # 从零时才真扫，正好卡在 webview.start() 里。现在预热先等前端首屏就绪
-        # （ui_ready()）再动手，最多等 15 秒。
-        self._warm_done = False
-        # 未读的"公告"（info/warning）：后台预热拉到、由 get_state 带给前端弹一次。
-        # **异常状态预警（critical）不走这里** —— 它由 prelaunch_alerts() 在点「一键启动」时
-        # 现拉现弹（每次都弹、强制停留，用户 2026-09-30 要求）。
-        self._announcements: list[dict[str, Any]] = []
-        self._ui_ready = threading.Event()
-        # Mod 备份仓的后台状态（去重：同一时刻只跑一个打包任务）
-        self._modbackup_lock = threading.Lock()
-        self._modbackup_running = False
-        threading.Thread(target=self._warm_up, name="mc-warm-up", daemon=True).start()
-
-    def ui_ready(self) -> dict[str, Any]:
-        """前端首屏渲染完成后调用：这时才允许后台开始全盘探测。"""
-        self._ui_ready.set()
-        return {"ok": True}
 
     # ------------------------------------------------------------------
     # Mod 备份仓（用户 2026-10-01 要求）
@@ -1093,9 +1117,6 @@ class EndfieldModControllerApi:
             entry["status"] = f"v{__version__}（检查失败：{exc}）"
         return entry
 
-    def _json(self, data: Any) -> Any:
-        return data
-
     # ------------------------------------------------------------------
     # state and config
     # ------------------------------------------------------------------
@@ -1678,9 +1699,13 @@ class EndfieldModControllerApi:
                 combined_specs = {key: spec for key, spec in manifest_all.items() if spec.enabled}
                 combined_specs.update(missing_specs)
                 try:
-                    asset_count = len(runtime_assets.manifest_entries(self.config)) or 1
+                    # ⚠️ **不要写 `len(...) or 1`**（2026-10-04 修）：清单为空 = 真的没有要
+                    # 处理的项，`0 or 1` 会**凭空把分母加 1**，于是完成时"100%"和"N/N 项"
+                    # 对不上（多出的一项永远补不齐）。`_estimate_update_total()` 里已经因为
+                    # 同一个写法踩过一次并留了注释，这里是漏改的同一处。
+                    asset_count = len(runtime_assets.manifest_entries(self.config))
                 except Exception:  # noqa: BLE001
-                    asset_count = 1
+                    asset_count = 0
                 self._dep_task["total"] = max(
                     len(combined_specs), 1,
                 ) + 3 + len(dlss5_fetcher.COMPONENTS) + asset_count + 1
@@ -1805,7 +1830,10 @@ class EndfieldModControllerApi:
 
                     from . import updates as updates_mod
 
-                    ureport = updates_mod.check_updates(self.config, log=progress and None)
+                    # ⚠️ 这里原是 `log=progress and None` —— `progress` 是函数（恒真），
+                    # `and None` 让整个表达式**恒等于 None**，等于白写一句。语义就是"不传日志
+                    # 回调"（进度由 progress/byte_progress 两条通道上报）。改成显式 None。
+                    ureport = updates_mod.check_updates(self.config, log=None)
                     sm = ureport.get("secondary_motion") or {}
                     current = sm.get("current") or ""
                     latest = sm.get("latest") or ""
@@ -2808,7 +2836,11 @@ class EndfieldModControllerApi:
             # 于是识别不出角色的包**根本不弹角色确认窗**（2026-10-01 用户反馈的 bug）。
             self._invalidate_mods()
             mods = self._mods()
-            target = next((m for m in mods if str(m.path).startswith(str(dest))), None)
+            # ⚠️ **别用字符串前缀判断"这个 Mod 是不是刚解压的那个"**（2026-10-04 修）：
+            # 旧写法 `str(m.path).startswith(str(dest))` 在库里同时存在 `foo` 与 `foo_bar`
+            # 时会命中错的那个（`…\foo_bar` 也是 `…\foo` 的前缀），于是"插入了 A、界面却
+            # 提示 B 的角色归属"。统一走 `fsutil.is_within`（resolve + is_relative_to）。
+            target = next((m for m in mods if fsutil.is_within(dest, m.path)), None)
             pending = self.pending_characters()
             pending_ids = {item.get("id") for item in (pending.get("pending") or [])}
         except Exception as exc:  # noqa: BLE001
@@ -3377,6 +3409,12 @@ class EndfieldModControllerApi:
                 item["status"] = "等待中"
                 item["message"] = ""
             dir_path = str(self._mod_dl.get("dir") or moddl.downloads_dir(self.config))
+            # ⚠️ **必须把 `done` 翻回 False**（2026-10-04 修）：上一批 worker 结束时把它设成了
+            # True，而 `start_mod_download` 正是用 `if not self._mod_dl.get("done", True)` 来
+            # "上一批还在跑就拒绝开新批次"。继续下载时若不翻回来，用户在这批还没跑完时点
+            # 「开始下载」会被放行 → **两个 worker 并发改同一份 `_mod_dl` 状态**（进度乱跳、
+            # 完成标志互相覆盖、解压入库的串行假设也被破坏）。
+            self._mod_dl["done"] = False
         launcher._append_log(self.config, f"Mod 下载: 继续 {len(pending)} 个任务（断点续传）")
         threading.Thread(target=self._mod_download_worker, args=(pending, Path(dir_path)),
                          daemon=True).start()
@@ -3416,26 +3454,31 @@ class EndfieldModControllerApi:
         """
         import zipfile
 
+        from . import fsutil
         from . import longpath as lp
 
         written: list[Path] = []
         try:
-            root = str(dest.resolve())
             with zipfile.ZipFile(archive_path) as archive:
                 for info in archive.infolist():
                     member = info.filename
                     if not member or member.endswith("/"):
                         continue
-                    target = (dest / member)
+                    # ⚠️⚠️ **zip-slip 校验必须用"路径语义"而不是字符串前缀**（2026-10-04 修）。
+                    # 旧写法 `if not str(dest / member).startswith(str(dest))` 有两个洞：
+                    #   ① `..\foobar\x.ini` 拼出来是 `…\dest\..\foobar\x.ini`，**字符串确实
+                    #      以 dest 开头** ⇒ 校验通过，而实际写盘时 `..` 被解析 ⇒ 文件落到
+                    #      Mod 库**外面**（甚至覆盖库里别的 Mod）；
+                    #   ② 库里存在同前缀目录（`foo` 与 `foobar`）时判定也会互相串。
+                    # `fsutil.safe_join` 直接拒绝绝对路径 / 盘符 / 任何 `..` 段。
+                    target = fsutil.safe_join(dest, member)
+                    if target is None:
+                        raise ValueError(f"压缩包里有非法路径: {member}")
                     # ⚠️ **每一次文件系统操作都要带扩展前缀**（2026-10-03 实测教训）：
                     # 第一次写的时候只在 `open()` 上加了前缀，而 `mkdir` 用的是普通路径
                     # ⇒ 超长时**父目录建不出来** ⇒ 整个方案失败。
                     # `pathlib` 的 `mkdir` 不会自己加前缀，所以这里显式用 `os.makedirs`。
                     target_ext = lp.extended(target)
-                    # zip-slip 校验：解出来的路径必须仍在 dest 之内
-                    #（这里用**未加前缀**的路径做前缀比较，语义更直观）
-                    if not str(target).startswith(str(dest)):
-                        raise ValueError(f"压缩包里有非法路径: {member}")
                     parent_ext = lp.extended(target.parent)
                     os.makedirs(parent_ext, exist_ok=True)
                     with archive.open(info) as src:
@@ -3459,11 +3502,11 @@ class EndfieldModControllerApi:
         """把 zip 解进 ``dest``，逐条做 zip-slip 校验（任何逃逸条目直接拒绝）。"""
         import zipfile
 
-        root = dest.resolve()
+        from . import fsutil
+
         with zipfile.ZipFile(archive_path) as archive:
             for member in archive.namelist():
-                target = (dest / member).resolve()
-                if not str(target).startswith(str(root)):
+                if fsutil.safe_join(dest, member) is None:
                     raise ValueError(f"压缩包里有非法路径: {member}")
             archive.extractall(dest)
 
@@ -4220,10 +4263,23 @@ class EndfieldModControllerApi:
         from . import game_clean
 
         try:
-            return game_clean.audit(self.config)
+            report = game_clean.audit(self.config)
         except Exception as exc:  # noqa: BLE001
             launcher._append_log(self.config, f"game clean audit failed: {exc}")
-            return {"ok": False, "message": str(exc), "findings": []}
+            return {"ok": False, "message": str(exc), "findings": [],
+                    "injections": 0, "multi_instance": 0}
+        # ⚠️ 两个字段是**给前端补齐的**（2026-10-04 修前后端不匹配）：设置页的
+        # 「游戏目录体检」结果框读 `r.injections` 与 `r.multi_instance`，而 audit 只给
+        # `findings`/`counts` ⇒ 界面上**恒显示"第三方注入文件：0 个"**、多实例警告永不出现。
+        # 数据都是真实存在的（findings 条数 + 正在跑的终末地进程数），这里如实补上。
+        if isinstance(report, dict):
+            report.setdefault("injections", len(report.get("findings") or []))
+            try:
+                multi = launcher.check_game_multi_instance(self.config)
+                report["multi_instance"] = len(multi.get("processes") or [])
+            except Exception:  # noqa: BLE001 —— 进程枚举失败不该让体检整体失败
+                report["multi_instance"] = 0
+        return report
 
     def game_clean_backup_and_clean(self, include_plugin_data: bool = True) -> dict[str, Any]:
         """先整体备份，再把游戏目录净化成原版（只移动不删除，可一键还原）。"""
@@ -4268,6 +4324,34 @@ class EndfieldModControllerApi:
             restore_info: dict[str, Any] = self.game_clean_restore("")
         except Exception as exc:  # noqa: BLE001
             restore_info = {"ok": False, "message": f"还原时出错：{exc}"}
+
+        # ⚠️⚠️ **还原失败就不许往下清**（2026-10-04 审计发现的 P0）。
+        #
+        # 原来的顺序是「还原 → 无条件 rmtree(runtime)」，而 `restore_info` 的 ok/errors
+        # **返回后从未被检查**。而 `runtime\game_backup\` 里放的是**唯一一份"净化前"的
+        # 游戏目录文件** —— 还原本身就失败（清单损坏 / 备份源缺失 / 文件被占用）时再把它
+        # 删掉，用户就永久停在"净化后"的状态：游戏目录缺 `d3dcompiler_47.dll` / `vulkan-1.dll`，
+        # 第三方注入器已被移走，**而且再也没有任何办法还原**。
+        # 同时被删掉的还有 `_state\crash_memory.json` / `proven_combos.json` / `file_watch.json`。
+        # 这里的取舍很明确：**宁可让用户手动再点一次，也不能把唯一的还原点清掉。**
+        if not restore_info.get("ok", True) or restore_info.get("errors"):
+            detail = restore_info.get("message") or "；".join(
+                str(x) for x in (restore_info.get("errors") or [])) or "未知原因"
+            launcher._append_log(
+                self.config, f"依赖清空: 已中止 —— 游戏本体还原未成功（{detail}）")
+            return {
+                "ok": False,
+                "aborted": "restore_failed",
+                "message": (
+                    "已中止：**没能把游戏本体还原成原版**，所以这次没有清空任何东西。\n\n"
+                    f"原因：{detail}\n\n"
+                    "为什么必须中止：`runtime\\game_backup` 里是你唯一一份「净化前」的备份，"
+                    "清空 runtime 会把它一起删掉 —— 那样游戏目录就再也回不去了。\n\n"
+                    "可以先把游戏目录里被移走的文件手动放回（备份就在 runtime\\game_backup 下），"
+                    "或者点「一键还原游戏本体」成功之后再回来清空。"
+                ),
+                "restore": restore_info,
+            }
 
         # ② 先记住关键路径（删完配置要原样写回）
         preserved: dict[str, Any] = {}
@@ -4406,6 +4490,16 @@ class EndfieldModControllerApi:
                 actions.append(f"removed {managed}")
             except OSError as exc:
                 errors.append(f"remove managed staging failed: {exc}")
+        # ⚠️ `.mc.bak` 家族统一还原（2026-10-04）：原来这里只处理 `d3dx_user.ini` 的
+        # `.mc.bak`，而 EFMI 的 `d3dx.ini.mc.bak`、两份 `ReShade.ini.mc.bak`、
+        # `user_ini_path.txt.mc.bak` **没有任何还原创口**（用户只能在资源管理器里翻出来改名）。
+        # 现在交给 `launcher.restore_ini_backups()`（它枚举我们写过的那些 ini）。
+        try:
+            ini_restore = launcher.restore_ini_backups(self.config)
+            actions.extend(ini_restore.get("actions") or [])
+            warnings.extend(ini_restore.get("warnings") or [])
+        except Exception as exc:  # noqa: BLE001
+            warnings.append(f"还原 ini 备份失败: {exc}")
         backup = self.config.user_ini_path.with_suffix(self.config.user_ini_path.suffix + ".mc.bak")
         if backup.is_file():
             try:
@@ -4436,31 +4530,27 @@ class EndfieldModControllerApi:
         # 并且**不直接运行**可执行文件（要跑什么请用对应功能按钮）。
         exec_suffixes = (".exe", ".bat", ".cmd", ".com", ".ps1", ".vbs", ".msi", ".lnk", ".scr")
 
-        def _under(candidate: Path, root: Path) -> bool:
-            try:
-                candidate.relative_to(root.resolve())
-                return True
-            except (ValueError, OSError):
-                return False
-
         allowed = [self.config.runtime_path, self.config.base_dir, self.config.library_path]
         game_dir = reshade_integration.detect_game_dir(self.config)
         if game_dir is not None:
             allowed.append(game_dir)
-        if not any(_under(target, root) for root in allowed):
+        if not any(fsutil.is_within(root, target) for root in allowed):
             return {"ok": False, "message": f"出于安全考虑，只允许打开本程序自己的目录：{target}"}
         if target.is_file() and target.suffix.lower() in exec_suffixes:
             return {"ok": False,
                     "message": f"出于安全考虑，不直接运行可执行文件：{target.name}（请用对应功能按钮）"}
+        # 全程不允许出现 cmd / 控制台黑窗（用户硬要求）：Popen 也要带 CREATE_NO_WINDOW。
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         if sys.platform.startswith("win"):
             if target.is_dir():
                 os.startfile(str(target))  # type: ignore[attr-defined]
             else:
-                subprocess.Popen(["explorer", "/select,", str(target)])  # noqa: S603,S607
+                subprocess.Popen(["explorer", "/select,", str(target)],
+                                 creationflags=creationflags)  # noqa: S603,S607
         elif sys.platform == "darwin":
-            subprocess.Popen(["open", str(target)])  # noqa: S603,S607
+            subprocess.Popen(["open", str(target)], creationflags=creationflags)  # noqa: S603,S607
         else:
-            subprocess.Popen(["xdg-open", str(target)])  # noqa: S603,S607
+            subprocess.Popen(["xdg-open", str(target)], creationflags=creationflags)  # noqa: S603,S607
         return {"ok": True, "path": str(target)}
 
     def log(self) -> dict[str, Any]:

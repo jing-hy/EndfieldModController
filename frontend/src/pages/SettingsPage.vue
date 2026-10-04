@@ -5,8 +5,8 @@
 import { computed, onMounted, ref } from "vue";
 import { call } from "../lib/bridge.js";
 import { useLogAutoScroll } from "../lib/autoscroll.js";
-import { store, applyTheme, THEMES, refreshState } from "../store.js";
-import { settings, saveSetting } from "../lib/settings.js";
+import { store, THEMES, refreshState, setTheme } from "../store.js";
+import { settings, saveSetting, loadSettings } from "../lib/settings.js";
 import Card from "../components/ui/Card.vue";
 import Btn from "../components/ui/Btn.vue";
 import Badge from "../components/ui/Badge.vue";
@@ -139,7 +139,9 @@ function formatResult(method, r) {
       ].filter((x) => x !== "");
       if (!findings.length) return head.join("\n") + "没有发现问题。";
       const body = findings.map((f) => {
-        const size = f.size_kb ? `　${f.size_kb} KB` : "";
+        // ⚠️ 后端给的是 `size`（字节），前端原来读的是自己编的 `size_kb` ⇒ 永远不显示大小。
+        // 用已有的 `humanSize`（lib/util.js，唯一实现）而不是再拼一个单位换算。
+        const size = f.size ? `　${humanSize(f.size)}` : "";
         return `· ${f.label || f.name || f.path}${size}${f.detail ? `　${f.detail}` : ""}`;
       });
       return head.join("\n") + `共 ${findings.length} 项：\n` + body.join("\n");
@@ -158,7 +160,10 @@ function formatResult(method, r) {
         }
         if (actions.length > 60) lines.push(`…另有 ${actions.length - 60} 项`);
       }
-      if (r.backup) lines.push("", `备份位置：${r.backup}`);
+      // ⚠️ 后端返回的是 `backup_dir`（原来的 `r.backup` 恒为 undefined ⇒ **备份位置这一行
+      // 永远不显示**，而这是用户唯一能找回被移走文件的线索 —— 违反「必须给出文件在哪」）。
+      const backupDir = r.backup_dir || r.backup || "";
+      if (backupDir) lines.push("", `备份位置：${backupDir}`);
       return lines.join("\n");
     }
     case "check_component_updates": {
@@ -227,7 +232,7 @@ async function startFullUpdate() {
       "**缺的会下载、旧的有新版会更新**，已经是最新的会跳过。",
       "过程比较长（视网络几分钟到十几分钟）。点「开始」会跳到「依赖」页显示实时日志与进度。",
     ].join("\n"),
-    okText: "开始", cancelText: "取消",
+    okText: "开始", cancelText: "先不装",
   });
   if (!ok) return;
   store.autoStartDeps = true;
@@ -245,7 +250,7 @@ async function updateReshade() {
       "**替换前会自动备份旧的那份**，出问题可以还原。",
       "游戏正在运行的话，建议先关掉它。",
     ].join("\n"),
-    okText: "开始更新", cancelText: "取消",
+    okText: "开始更新", cancelText: "先不更新",
   });
   if (!ok) return;
   showProgressToast("reshade-update", "正在更新 ReShade 底座…（下载中，可能几分钟）");
@@ -284,8 +289,15 @@ async function runFullCheck() {
   const actions = r.actions || [];
   const pending = r.pending || [];
   if (actions.length) lines.push("", "已自动处理：", ...actions.map((a) => `· ${a}`));
-  if (pending.length) lines.push("", `还有 ${pending.length} 项需要你处理：`,
-    ...pending.map((p) => `· ${p}`));
+  if (pending.length) {
+    lines.push("", `还有 ${pending.length} 项需要你处理：`);
+    // ⚠️ 后端 `pending` 是**字典列表**（`{key, ok, fixed, manual, message}`），原来写成
+    // `` `· ${p}` `` ⇒ 界面上输出一串 **`· [object Object]`**（2026-10-04 修）。
+    for (const p of pending) {
+      const text = (p && (p.message || p.label)) || (p && p.key) || String(p);
+      lines.push(`· ${text}`);
+    }
+  }
   const bad = entries.filter((c) => c.ok === false).length;
   await showModalDialog({
     title: bad ? `自检完成：${bad} 项有问题` : "自检完成：全部正常",
@@ -318,7 +330,8 @@ async function probe(method) {
   }
 }
 
-async function changeTheme(v) { await saveSetting("theme", v); applyTheme(v); }
+// 主题：走 store 的唯一入口（与侧栏菜单同一个真源，切完两边立刻一致）
+async function changeTheme(v) { await setTheme(v); loadSettings(); }
 // ⚠️⚠️ **`run()` 绝不能静默**（2026-10-03 用户：「**现在导出诊断包的弹窗也没了**」）。
 // 原实现是 `try { return await call(...) } catch { return null }` ——
 // 异常被无声吞掉、返回的 `{ok:false}` 也没人检查，于是**本页 18 个按钮**（见模板）
@@ -452,7 +465,7 @@ async function globalRollback() {
       "**你的 Mod 库、游戏本体、已装组件都不受影响。**",
       "回滚后要重新用「一键启动」或「生成控制器」再铺一次。",
     ].join("\n"),
-    okText: "回滚", cancelText: "取消", focusCancel: true,
+    okText: "回滚", cancelText: "保持现状", focusCancel: true,
   });
   if (!ok) return;
   showProgressToast("global-rollback", "正在回滚控制器产物…");
@@ -488,7 +501,7 @@ async function restoreGameToVanilla() {
       "· loader proxy 会用系统原版文件补回",
       "· Mod 库、配置与已装组件都不受影响",
     ].join("\n"),
-    okText: "备份并还原", cancelText: "取消", focusCancel: true,
+    okText: "备份并还原", cancelText: "先不还原", focusCancel: true,
   });
   if (!ok) return;
   showProgressToast("game-restore", "正在备份并还原游戏本体…（文件较多，请稍候）");
@@ -505,7 +518,7 @@ async function restoreGameToVanilla() {
           actions.length ? `\n共处理 ${actions.length} 项：` : "",
           ...actions.slice(0, 20).map((a) => "· " + (typeof a === "string" ? a : (a.label || a.name || a.path || ""))),
           actions.length > 20 ? `…另有 ${actions.length - 20} 项` : "",
-          r && r.backup ? `\n备份位置：${r.backup}` : "",
+          (r && (r.backup_dir || r.backup)) ? `\n备份位置：${r.backup_dir || r.backup}` : "",
         ].filter((x) => x !== "").join("\n"),
         okText: "知道了", showCancel: false,
       });
@@ -525,7 +538,12 @@ async function restoreGameToVanilla() {
 async function autodetectPaths() {
   const r = await run("autodetect_paths");
   if (!r || r.ok === false) return;              // run() 已经 toast 过
-  await store.refreshState();
+  // ⚠️ `store.refreshState()` 不存在（2026-10-04 修）：store 上只有数据字段，
+  // refreshState 是 store.js 的**模块级导出**（本文件顶部已 import）。
+  // 原来这句抛 `TypeError: store.refreshState is not a function` ⇒ 函数在这里中断，
+  // 下面三条 showToast **全部不可达** —— 用户点「自动检测」永远没有任何提示
+  // （而且异常还会被上报成一条前端错误）。
+  await refreshState();
   const filled = Object.keys(r.filled || {});
   const skipped = Object.keys(r.skipped || {});
   if (filled.length) {
@@ -728,7 +746,9 @@ useLogAutoScroll(probeBox, () => probeText);
     <Card title="⑥ 外观">
       <div class="flex items-center gap-3 py-1.5">
         <span class="w-56 shrink-0 text-sm">主题色</span>
-        <select class="field flex-1" :value="settings.theme" @change="changeTheme($event.target.value)">
+        <!-- ⚠️ 读 `store.theme`（单一真源）而不是 `settings.theme`：侧栏菜单切了主题之后，
+             这个下拉要立刻跟着变（2026-10-04 统一两套真相）。 -->
+        <select class="field flex-1" :value="store.theme" @change="changeTheme($event.target.value)">
           <option v-for="o in THEME_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
         </select>
       </div>
@@ -807,7 +827,10 @@ useLogAutoScroll(probeBox, () => probeText);
             <div class="flex items-center gap-2">
               <span class="w-32 shrink-0" style="color: var(--text-muted)">Mod 备份仓</span>
               <span class="text-xs" style="color: var(--text-muted)">
-                {{ (store.state.mod_backup || {}).count || 0 }} 个 · {{ (store.state.mod_backup || {}).size_text || "0 B" }}
+                <!-- ⚠️ 后端 `modbackup.status()` 给的是 `bytes`（不是 `size_text`）⇒ 原来这里
+                     恒显示 "0 B"（2026-10-04 修）。用 humanSize 复用现成的换算。 -->
+                {{ (store.state.mod_backup || {}).count || 0 }} 个 ·
+                {{ humanSize((store.state.mod_backup || {}).bytes) }}
               </span>
             </div>
             <div v-if="store.state.warming" class="text-xs" style="color: var(--text-muted)">后台预热中…（预热完会自动刷新）</div>

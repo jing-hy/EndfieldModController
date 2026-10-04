@@ -74,14 +74,16 @@ class IniParseError(EndfieldModControllerError):
 # ---------------------------------------------------------------------------
 
 def read_text(path: Path) -> str:
-    """Read UTF-8 text, tolerating a UTF-8 BOM and legacy encodings."""
-    raw = path.read_bytes()
-    for encoding in ("utf-8-sig", "utf-8", "cp932", "gbk", "latin-1"):
-        try:
-            return raw.decode(encoding)
-        except UnicodeDecodeError:
-            continue
-    return raw.decode("utf-8", errors="replace")
+    """Read text, tolerating a UTF-8 BOM and legacy encodings.
+
+    ⚠️ 实现已收敛到 `fsutil.read_text_tolerant`（2026-10-04）：同一套编码容错原先在
+    这里与 `config.AppConfig.load()` 处各写一份，而 **config 那份漏了容错** ——
+    GBK 的 config.json 会抛 UnicodeDecodeError 让程序起不来（见 fsutil 里的说明）。
+    这里保留函数名（调用点很多），只是不再自己维护编码表。
+    """
+    from . import fsutil
+
+    return fsutil.read_text_tolerant(path)
 
 
 def sha256_text(text: str) -> str:
@@ -2541,14 +2543,31 @@ def prepare_runtime(
     """Scan, patch and generate controller files for the PoC.
 
     ``patch`` 默认 **False**：2026-10-01 起不再改写 Mod 自带热键（控制面板还没做好，
-    见 ``activation.stage_and_prepare``）—— 只有显式传 True 才把键改成 ``VK_F24``。
+    见 ``activation.stage_and_prepare``）—— 只有显式传 True 才把键改成锁键值。
+
+    ⚠️⚠️ **`patch=True` 永不动"用户的 Mod 库"**（2026-10-04 修，数据安全红线）。
+    它曾遍历 `scan_library()` 的全部结果逐个 `patch_mod_hotkeys(mod.path, …)` 原地改写
+    ini 里的 `key=`，而 `mod.path` 可能就是**库内路径**；原件只落在
+    `runtime\\backups\\hotkey_patch`，而**还原入口 `restore_mod_hotkeys()` 在生产代码里
+    零调用**（只有测试用），UI 也没有按钮 —— 等于"改了用户的东西且回不去"。
+    用户定过的硬规则是：「**任何情况都不要动用户的 mod 库**（唯一允许的删除入口是界面上
+    「移出 Mod 库」）」。正确的做法（改 staging 副本）早已存在于
+    `activation.stage_and_prepare`，所以这里**跳过库内 Mod** 并如实回报（返回值的
+    `patch_skipped`），而不是把整个 CLI 调用打崩。
     """
     mods = scan_library(library_root, mods_root)
     patch_records: list[PatchRecord] = []
+    patch_skipped: list[str] = []
     if patch:
+        from . import fsutil
+
         backup_root = runtime_dir / "backups" / "hotkey_patch"
         for mod in mods:
             if mod.is_dependency:
+                continue
+            if library_root is not None and fsutil.is_within(library_root, mod.path):
+                # 库内 Mod：只读，绝不就地改写（要改热键请走 staging 那条链路）
+                patch_skipped.append(mod.name)
                 continue
             patch_records.extend(patch_mod_hotkeys(mod.path, backup_root, mod.id))
     manifest = generate_controller_mod(mods, runtime_dir / "controller", dry_run=dry_run)
@@ -2556,6 +2575,8 @@ def prepare_runtime(
     return {
         "mods": [m.to_dict() for m in mods],
         "patch_records": [asdict(r) for r in patch_records],
+        # 被跳过的（= 库内 Mod）：让调用方知道"为什么这次没改到它"
+        "patch_skipped": patch_skipped,
         "actions_manifest": manifest,
         "dependency_report": dep_report,
     }

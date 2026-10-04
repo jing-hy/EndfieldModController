@@ -22,13 +22,27 @@
 from __future__ import annotations
 
 import argparse
+import sys
 import threading
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 
-DEFAULT_ASSET = ("https://github.com/jing-hy/EndfieldModController/releases/download/"
-                 "v1.0.5/EndfieldModController.exe")
+def _default_asset() -> str:
+    """默认测速资产 —— **跟着当前版本号走**（2026-10-04 修，理由见 speedtest_lines.py）。"""
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from endfieldmodcontroller.version import __version__
+
+        tag = f"v{__version__}"
+    except Exception:  # noqa: BLE001
+        tag = "latest"
+    return ("https://github.com/jing-hy/EndfieldModController/releases/download/"
+            f"{tag}/EndfieldModController.exe")
+
+
+DEFAULT_ASSET = _default_asset()
 DEFAULT_LINES: list[tuple[str, str]] = [
     ("gh.nxnow.top", "https://gh.nxnow.top/"),
     ("ghproxy.net", "https://ghproxy.net/"),

@@ -20,6 +20,9 @@ _SESSION_ID = datetime.now().strftime("%Y%m%d-%H%M%S")
 _LOCK = threading.RLock()
 _MONITOR_LOCK = threading.Lock()
 _MONITOR_THREAD: threading.Thread | None = None
+# 「请停下」信号：`stop_process_monitor()` 置位，`_monitor_process` 每轮检查一次。
+# 没有它的话，关窗口时那个最长 1800 秒的监视线程根本没法早点收工（见 stop_process_monitor）。
+_MONITOR_STOP = threading.Event()
 
 
 def open_path(config: Any, path: Path) -> dict[str, Any]:
@@ -355,12 +358,20 @@ def _find_process_ids(image_name: str) -> list[int]:
 
 
 def _process_command_line(pid: int) -> str:
+    """取某个进程的完整命令行（崩溃报告用）。
+
+    ⚠️ **删掉了 `wmic` 兜底**（2026-10-04）：`wmic` 自 Windows 11 24H2 起默认不再随系统提供，
+    那条兜底在新系统上必然失败且**没有任何记录**（这里连日志都不写），留着只会让人以为
+    "命令行读不到是权限问题"。现在只有 PowerShell 一条路径，失败就在报告里写明原因。
+    """
     if os.name != "nt":
         return ""
+    global _LAST_COMMAND_LINE_ERROR
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     try:
         ps = subprocess.run(
-            ["powershell", "-NoProfile", "-NonInteractive", "-Command", f"(Get-CimInstance Win32_Process -Filter \"ProcessId={int(pid)}\").CommandLine"],
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+             f"(Get-CimInstance Win32_Process -Filter \"ProcessId={int(pid)}\").CommandLine"],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -368,27 +379,19 @@ def _process_command_line(pid: int) -> str:
             timeout=8,
             creationflags=creationflags,
         )
-        text = (ps.stdout or "").strip()
-        if text:
-            return text.splitlines()[-1].strip()
-    except Exception:  # noqa: BLE001
-        pass
-    try:
-        result = subprocess.run(
-            ["wmic", "process", "where", f"ProcessId={int(pid)}", "get", "CommandLine", "/value"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=8,
-            creationflags=creationflags,
-        )
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        _LAST_COMMAND_LINE_ERROR = f"读取命令行失败: {exc}"
         return ""
-    for line in (result.stdout or "").splitlines():
-        if line.lower().startswith("commandline="):
-            return line.split("=", 1)[1].strip()
-    return ""
+    text = (ps.stdout or "").strip()
+    if not text:
+        _LAST_COMMAND_LINE_ERROR = (ps.stderr or "").strip()[:200] or "PowerShell 没有返回命令行"
+        return ""
+    _LAST_COMMAND_LINE_ERROR = ""
+    return text.splitlines()[-1].strip()
+
+
+# 最近一次读命令行失败的原因（写进崩溃报告，免得"读不到"变成一个谜）
+_LAST_COMMAND_LINE_ERROR = ""
 
 
 _KERNEL32 = None
@@ -463,6 +466,14 @@ def _capture_tail(source: Path, target: Path, *, lines: int = 300) -> None:
 
 
 def _capture_postmortem(config: Any, game_dir: Path | None, reason: str) -> None:
+    """游戏退出后收集现场。
+
+    ⚠️ **正常退出不打完整诊断包**（2026-10-04 修）：原来无论什么原因都会走到
+    `create_diagnostic_bundle()` —— 于是"每次正常退出游戏"都在 logs 目录留下一个几十 MB 的
+    `diagnostics-<stamp>.zip`（而 `crashwatch` 在真崩溃时还会再打一个 `crash-*.zip`，
+    一次崩溃两个大包、正常退出也堆包）。现在：只有**异常退出/超时**才打包，
+    正常退出（`exit_code=0` 且没有崩溃特征）只写日志与尾巴文件。
+    """
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     target_dir = logs_dir(config)
     loader = config.migoto_loader_path
@@ -472,10 +483,22 @@ def _capture_postmortem(config: Any, game_dir: Path | None, reason: str) -> None
     _capture_tail(loader_dir / "mc_bootstrap.log", target_dir / f"mc_bootstrap-{stamp}.log", lines=500)
     _capture_tail(Path(os.environ.get("WINDIR", r"C:\Windows")) / "System32" / "loader_debug.log", target_dir / f"loader_debug-system32-{stamp}.log", lines=500)
     _capture_tail(loader_dir / "d3d11_log.txt", target_dir / f"d3d11_log-{stamp}.log", lines=500)
-    _capture_windows_events(config)
     log_efmi_state(config, user_ini_path=loader_dir / "d3dx_user.ini", staging_root=loader_dir / "Mods")
+    if _is_normal_exit_reason(reason):
+        log_event(config, "游戏正常退出（不生成诊断包）", category="monitor", reason=reason)
+        return
+    _capture_windows_events(config)
     bundle = create_diagnostic_bundle(config, game_dir=game_dir, note=f"auto-postmortem: {reason}")
     log_event(config, "已生成诊断包", category="crash", path=bundle, reason=reason)
+
+
+def _is_normal_exit_reason(reason: str) -> bool:
+    """这次退出算"正常"吗（只有 `exit_code=0` 才算；超时/进程消失一律按异常处理）。
+
+    为什么不看 Player.log 的卸载统计：那个判据属于"崩溃归因"（`crashwatch`），
+    而这里只是决定**要不要打一个几十 MB 的包**——保守一点，只认明确的退出码 0。
+    """
+    return str(reason or "").strip() in ("exit_code=0", "exit_code=None")
 
 
 def _monitor_process(config: Any, game_dir: Path | None, image_name: str, timeout: float) -> None:
@@ -483,8 +506,14 @@ def _monitor_process(config: Any, game_dir: Path | None, image_name: str, timeou
     found_pid: int | None = None
     handle: int | None = None
     started = time.monotonic()
+    # ⚠️ 句柄打不开时的降级判据（2026-10-04 修，见下面 `handle is None` 分支的说明）
+    degraded_logged = False
     try:
         while time.monotonic() - started < timeout:
+            if _MONITOR_STOP.is_set():
+                log_event(config, "进程监视被请求停止", category="monitor", image=image_name)
+                _close_handle(handle)
+                return
             ids = _find_process_ids(image_name)
             if ids:
                 pid = ids[0]
@@ -495,8 +524,23 @@ def _monitor_process(config: Any, game_dir: Path | None, image_name: str, timeou
                     found_pid = pid
                     handle = _open_process_handle(pid)
                     command_line = _process_command_line(pid)
-                    log_event(config, "检测到游戏进程", category="monitor", image=image_name, pid=pid, command_line=command_line)
-                if handle and _process_exited(handle):
+                    log_event(config, "检测到游戏进程", category="monitor", image=image_name, pid=pid,
+                              # 读不到就把原因写出来（否则"命令行是空的"永远是个谜 ——
+                              # 原来那条 wmic 兜底在新系统上必然失败且不留痕迹）
+                              command_line=command_line or (_LAST_COMMAND_LINE_ERROR or "（读不到命令行）"))
+                if handle is None and found_pid is not None and not degraded_logged:
+                    # ⚠️⚠️ **`OpenProcess` 拿不到句柄时必须降级**（2026-10-04 修）。
+                    # 游戏以管理员运行时，非提权的我们 `OpenProcess` 会 Access denied
+                    # ⇒ `handle = None` ⇒ 下面 `if handle and ...` **永远不成立**，
+                    # 而 `ids` 又一直非空（进程还在）⇒ 连 `elif found_pid is not None` 也走不到
+                    # ⇒ 这个线程**空转到超时**（默认 1800 秒），最后按 `monitor_timeout`
+                    # 调 `_capture_postmortem` 再生成一个大诊断包 —— 崩溃取证白白晚 30 分钟。
+                    # 降级为"按进程名消失"判据（下面那个 elif 分支），行为与句柄可用时等价。
+                    degraded_logged = True
+                    log_event(config, "拿不到游戏进程句柄（多半是它以管理员运行）——"
+                                     "改用进程名消失作为退出判据", category="monitor",
+                              level="WARN", pid=found_pid)
+                if handle is not None and _process_exited(handle):
                     code = _process_exit_code(handle)
                     log_event(config, "游戏进程已退出", category="crash", image=image_name, pid=pid, exit_code=code)
                     _close_handle(handle)
@@ -514,6 +558,21 @@ def _monitor_process(config: Any, game_dir: Path | None, image_name: str, timeou
         log_exception(config, "进程监视异常", exc, category="monitor")
 
 
+def stop_process_monitor() -> bool:
+    """请求停掉进程监视线程（**关窗口时调**）。
+
+    ⚠️ 这个函数曾经**不存在**，而 `api.shutdown()` 用
+    `getattr(diagnostics, "stop_process_monitor", None)` 期望它存在 —— 于是那个
+    "停掉后台任务"的动作是**空操作**：监视线程是 daemon、最长跑 1800 秒，
+    用户关窗后若进程没真正退出，它还会继续跑完并生成诊断包（2026-10-04 审计发现）。
+    """
+    _MONITOR_STOP.set()
+    thread = _MONITOR_THREAD
+    if thread is not None and thread.is_alive():
+        thread.join(timeout=2.0)
+    return True
+
+
 def start_process_monitor(config: Any, *, game_dir: Path | None = None, image_name: str = "Endfield.exe", timeout: float = 1800.0) -> bool:
     global _MONITOR_THREAD
     if os.name != "nt":
@@ -523,6 +582,7 @@ def start_process_monitor(config: Any, *, game_dir: Path | None = None, image_na
         if _MONITOR_THREAD is not None and _MONITOR_THREAD.is_alive():
             log_event(config, "进程监视已在运行，跳过重复启动", category="monitor")
             return False
+        _MONITOR_STOP.clear()      # 上一轮可能被 stop_process_monitor() 置过位
         thread = threading.Thread(
             target=_monitor_process,
             args=(config, game_dir, image_name, timeout),
@@ -592,11 +652,30 @@ def mod_conflict_state(config: Any) -> dict[str, Any]:
 
 
 def _safe_zip_write(archive: zipfile.ZipFile, path: Path, arcname: str, *, max_bytes: int = 8 * 1024 * 1024) -> None:
+    """把一个文件写进诊断包；**超大时只收尾部 `max_bytes`，并在包内注明被截断**。
+
+    ⚠️ 原来超限就 `return`（**静默丢弃**）：`log_event` 把同一行同时写进 daily/session/launch
+    三个日志且**没有轮转**，跑久了很容易超过 8 MB ⇒ 用户交上来的包里**最关键的日志整份缺失**，
+    而包内没有任何提示（排查的人只会以为"日志是空的"）。
+    现在改成尾部截断 + 带一行 `（已截断，仅保留最后 N MB）` 的说明——"一次抓齐"的前提是
+    拿到的数据本身要能看出它被裁过。
+    """
     try:
-        if not path.is_file() or path.stat().st_size > max_bytes:
+        if not path.is_file():
             return
-        archive.write(path, arcname)
-    except OSError:
+        size = path.stat().st_size
+        if size <= max_bytes:
+            archive.write(path, arcname)
+            return
+        with open(path, "rb") as handle:
+            handle.seek(size - max_bytes)
+            tail = handle.read(max_bytes)
+        header = (f"[诊断包提示] 原文件 {size:,} 字节，超过单文件上限 {max_bytes:,} 字节，"
+                  f"这里只保留**尾部** {max_bytes:,} 字节（崩溃现场通常在末尾）。\n").encode("utf-8")
+        archive.writestr(arcname, header + tail)
+        archive.writestr(arcname + ".truncated.txt",
+                         f"{path}: 原 {size} 字节，已截断为 {max_bytes} 字节\n")
+    except (OSError, zipfile.BadZipFile):
         return
 
 
@@ -775,7 +854,11 @@ def create_diagnostic_bundle(config: Any, *, game_dir: Path | None = None, note:
     target_dir = logs_dir(config)
     target_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    out = target_dir / f"diagnostics-{stamp}.zip"
+    # ⚠️ 同秒两次导出的包不能互相覆盖（2026-10-04）：名字是秒级时间戳，
+    # `zipfile` 打开同名文件会**合并/覆盖**上一次的内容。收敛到 fsutil.unique_sibling。
+    from . import fsutil
+
+    out = fsutil.unique_sibling(target_dir / f"diagnostics-{stamp}.zip")
     loader = config.migoto_loader_path
     loader_dir = Path(loader).parent if loader else runtime / "migoto"
     config_path = Path(getattr(config, "_config_path", "") or "")
@@ -836,6 +919,23 @@ def create_diagnostic_bundle(config: Any, *, game_dir: Path | None = None, note:
                 archive.writestr("mod_conflicts.json", json.dumps(state, ensure_ascii=False, indent=2))
             except (OSError, ValueError):
                 pass
+        # ⚠️⚠️ **把各状态 json 一起收进包**（2026-10-04 用户拍板）。
+        #
+        # 原来这里只单独塞了 `mod_conflicts.json`，而"注入 / 还原 / 安全模式**现在到底是什么
+        # 状态**"全写在这些 json 里：安全模式改了哪些文件、停用了哪些注入、采纳过哪份 ReShade、
+        # 全局 Apps 打算怎么还、崩溃记忆与"跑通过"的台账、文件守护计数、上次更新检查结果。
+        # 少了它们，用户报"还原没生效 / 游戏起不来"时只能**凭日志反推**，往往要再来一轮
+        # —— 与用户定的"日志包一次抓齐所有数据，不要搞好几轮"冲突。
+        # 单个上限 256 KB（超了 `_safe_zip_write` 会收尾部并在包内注明被截断）。
+        for path in sorted(runtime.glob("*.json")):
+            _safe_zip_write(archive, path, f"runtime-state/{path.name}", max_bytes=256 * 1024)
+        for folder, arc in ((runtime / "_state", "runtime-state/_state"),
+                            (runtime / "_update", "runtime-state/_update"),
+                            (runtime / "_net", "runtime-state/_net")):
+            if not folder.is_dir():
+                continue
+            for path in sorted(folder.glob("*.json")):
+                _safe_zip_write(archive, path, f"{arc}/{path.name}", max_bytes=256 * 1024)
         if config_path.is_file():
             _safe_zip_write(archive, config_path, "config.json")
         archive.writestr("runtime-inventory.txt", inventory + "\n")

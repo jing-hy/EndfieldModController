@@ -206,22 +206,30 @@ def _fetch_json(url: str) -> dict[str, Any]:
 
 
 def _cache_dir() -> Path:
-    """依赖安装包的下载缓存目录（`<runtime>/_downloads`）。"""
-    from .config import AppConfig
+    """依赖安装包的下载缓存目录（`<runtime>/_downloads`）。
 
-    try:
-        return AppConfig.load().runtime_path / "_downloads"
-    except Exception:  # noqa: BLE001
-        return Path.cwd() / "runtime" / "_downloads"
+    ⚠️ 实现收敛到 `fsutil.downloads_cache_dir()`（2026-10-04）：`updates._cache_dir`
+    原先与之逐字节相同，两份各改一处迟早漂移。
+    """
+    from . import fsutil
+
+    return fsutil.downloads_cache_dir()
 
 
-def _download(url: str, dest: Path, chunk_callback: Callable[[int, int], None] | None = None) -> Path:
+def _download(url: str, dest: Path, chunk_callback: Callable[[int, int], None] | None = None,
+              *, expected_sha256: str = "") -> Path:
     """下载依赖包：走 fastnet（慢/抖时临时并发，直连不通时临时换镜像线路）。
 
     **同一 URL 已经下过就直接复用缓存** —— 以前下载目标是调用方给的临时目录
     （`tempfile.TemporaryDirectory`），用完即弃，于是"明明装过一次，再更新还要
     重新下载一遍"。缓存落在 `<runtime>/_downloads/<文件名>`，并配一份
     `<文件名>.url` 记录来源；只有 URL 完全一致才复用，避免误用旧包。
+
+    ⚠️ `expected_sha256`（2026-10-04 补）：GitHub Release 的 asset 自带 `digest`，
+    而依赖包下完会被**直接解压进 `_deps\\`**（`update_all` 是先 `rmtree` 再解压，
+    失败无回滚）—— 不校验就等于"镜像/中间人给什么就装什么"。`runtime_deps` 与
+    `selfupdate` 早就传了 digest，只有依赖这条链路没传，这里补上。
+    **缓存命中时也要校验**：只在下完之后校验的话，一个被截断的缓存会被无限复用。
     """
     from . import fastnet
 
@@ -230,10 +238,18 @@ def _download(url: str, dest: Path, chunk_callback: Callable[[int, int], None] |
     if target.is_file() and meta.is_file():
         try:
             if meta.read_text(encoding="utf-8").strip() == url and target.stat().st_size > 0:
-                size = target.stat().st_size
-                if chunk_callback:
-                    chunk_callback(size, size)
-                return target
+                if not expected_sha256 or (
+                    _sha256_file(target).lower() == fastnet.norm_sha256(expected_sha256)
+                ):
+                    size = target.stat().st_size
+                    if chunk_callback:
+                        chunk_callback(size, size)
+                    return target
+                # 缓存内容与期望不符：丢掉它，老老实实重下
+                try:
+                    target.unlink()
+                except OSError:
+                    pass
         except OSError:
             pass
 
@@ -242,7 +258,8 @@ def _download(url: str, dest: Path, chunk_callback: Callable[[int, int], None] |
             chunk_callback(done, total)
 
     target.parent.mkdir(parents=True, exist_ok=True)
-    report = fastnet.download(url, target, progress=on_progress, timeout=60)
+    report = fastnet.download(url, target, progress=on_progress, timeout=60,
+                              expected_sha256=expected_sha256)
     if not report.ok:
         raise RuntimeError(report.message)
     try:
@@ -294,7 +311,11 @@ def _download_for_spec(
             raise RuntimeError(f"no GitHub release asset matched {spec.asset_pattern!r}")
         asset = max(candidates, key=github.asset_sort_key)
         url = str(asset.get("browser_download_url") or "")
-        return _download(url, work_dir / str(asset.get("name") or "dependency.bin"), chunk_callback), str(release.get("tag_name") or "")  # type: ignore[return-value]
+        # GitHub 对每个 asset 给 `digest`（`sha256:<hex>`）；拿得到就**校验**，拿不到就不校验
+        # （老 API / 自建镜像可能没有这个字段，不能因此让依赖装不上）。
+        digest = str(asset.get("digest") or "")
+        return _download(url, work_dir / str(asset.get("name") or "dependency.bin"),
+                         chunk_callback, expected_sha256=digest), str(release.get("tag_name") or "")  # type: ignore[return-value]
 
     if spec.source == "url" and spec.url:
         target = work_dir / Path(spec.url).name

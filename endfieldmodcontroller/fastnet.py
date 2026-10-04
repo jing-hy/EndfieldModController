@@ -568,6 +568,38 @@ def has_partial_parts(dest: Path) -> bool:
     return _parts_path(dest).is_file()
 
 
+def _partial_artifacts(dest: Path) -> tuple[Path, ...]:
+    """某个目标文件**全部**断点续传产物：目标 / 工作文件 / 两份 sidecar 命名。
+
+    单点定义（`discard_partial` 是唯一动作入口）：文件名清单一旦在别处再抄一份，
+    就很容易抄漏 —— 2026-10-04 审计发现 `moddl._cleanup_partial` 正是漏了 sidecar，
+    导致"重试跳过已删的块 → 落位空洞文件却报成功"。
+    """
+    target = Path(dest)
+    work = target.with_name(target.name + ".mcdownload")
+    return (target, work, _parts_path(work), _parts_path(target))
+
+
+def discard_partial(dest: Path) -> list[Path]:
+    """删掉某个目标文件的全部续传产物（工作文件 + sidecar + 可能已落位的一半），返回删掉的文件。
+
+    只在"这次下载彻底失败 / 用户点了终止"时调用 —— 调用方要接受"下次从头下"。
+    """
+    removed: list[Path] = []
+    seen: set[Path] = set()
+    for path in _partial_artifacts(dest):
+        if path in seen:
+            continue
+        seen.add(path)
+        try:
+            if path.exists():
+                path.unlink()
+                removed.append(path)
+        except OSError:
+            pass
+    return removed
+
+
 def _load_parts(dest: Path, size: int) -> set[tuple[int, int]]:
     try:
         data = json.loads(_parts_path(dest).read_text(encoding="utf-8"))
@@ -687,6 +719,24 @@ def _download_parallel(
     piece_chunk = max(piece_chunk, -(-size // MAX_PIECES))
     spans = [(pos, min(pos + piece_chunk - 1, size - 1)) for pos in range(0, size, piece_chunk)]
     done_spans = _load_parts(dest, size)
+    # ⚠️⚠️ **sidecar 不能盲信**（2026-10-04 审计发现的**数据损坏**级坑）。
+    #
+    # sidecar 只说"这些块下好了"，但工作文件可能已经被删/被截断过（上一次失败清理只删了
+    # `.mcdownload` 而漏删 sidecar；或用户手工删过工作文件）。这时如果照 sidecar 跳过这些块，
+    # 新 touch 出来的文件里对应区间**就是空洞**，而块是 seek 写的 ⇒ 文件长度照样能到 `size`
+    # ⇒ 上层"`report.bytes == size`"判据通过 ⇒ `finish()` 落位 ⇒ **报成功却给出一个坏包**
+    #（rar/7z 只查 8 字节头，坏包会静默进 Mod 库）。
+    #
+    # 判据：**块必须完全落在文件当前长度之内**才算"真的有这些字节"。
+    #   * 正常续传：文件长度 = 已下块的最大结束位置 ⇒ 最后一块 `b == actual - 1 < actual` ✓ 全部保留；
+    #   * 空洞场景：工作文件被删后被 touch 成 0 字节 ⇒ 全部过滤 ⇒ **老老实实重下**。
+    if done_spans:
+        try:
+            actual_size = dest.stat().st_size
+        except OSError:
+            actual_size = 0
+        if actual_size < size:
+            done_spans = {(a, b) for a, b in done_spans if b < actual_size}
     if not done_spans and start > 0:
         done_spans = {(a, b) for a, b in spans if b < start}
     # **长块优先**：对应 PCL 的"寻找最大碎片"——先让大块开跑，
@@ -963,6 +1013,12 @@ def _remember_line(name: str, ok: bool, mbps: float, *, cert_error: bool = False
 
     cert_error=True 表示这次失败是 **HTTPS 证书不匹配**（不是超时/抖动）：那种失败是
     确定性的，所以直接把失败计数顶到阈值，配合更长的冷却一次就跳过它。
+
+    rate_limited=True 表示被 **403/429 拒绝**：同样是确定性失败（一次就该跳过），
+    ⚠️ 但冷却要短得多（`LINE_RATE_LIMIT_TTL` = 5 分钟）—— 限流本来就会自己恢复，
+    套用证书错误那个 30 分钟的冷却会让一条好线路白停半小时（2026-10-04 修：
+    原先这里把 403/429 **当成证书错误**记进 `entry["cert"]`，于是共用 30 分钟冷却，
+    而 `LINE_RATE_LIMIT_TTL` 这个常量、`rate_limited` 这个形参**从来没有被用过**）。
     """
     cache = _load_lines_cache()
     entry = cache.get(name) if isinstance(cache.get(name), dict) else {}
@@ -973,21 +1029,32 @@ def _remember_line(name: str, ok: bool, mbps: float, *, cert_error: bool = False
         entry["ok"] = True
         entry.pop("fail_at", None)
         entry.pop("cert", None)
+        entry.pop("rate", None)
         entry["fails"] = 0        # 成功一次就把失败计数清零，避免历史失败累积成"永久封禁"
     else:
         entry["ok"] = False
         entry["fail_at"] = int(time.time())
         if cert_error:
             entry["cert"] = True
+            entry.pop("rate", None)
+            entry["fails"] = max(int(entry.get("fails") or 0) + 1, LINE_FAIL_THRESHOLD)
+        elif rate_limited:
+            entry["rate"] = True
+            entry.pop("cert", None)
             entry["fails"] = max(int(entry.get("fails") or 0) + 1, LINE_FAIL_THRESHOLD)
         else:
             entry.pop("cert", None)
+            entry.pop("rate", None)
             entry["fails"] = int(entry.get("fails") or 0) + 1
     cache[name] = entry
     try:
         path = _cache_path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8", newline="\n")
+        # 原子写（2026-10-04）：线路成绩是"哪条快"的唯一记忆，写坏半截就白测一场；
+        # 且多线程下载会并发读写它（原来直接 write_text）。
+        from . import fsutil
+
+        fsutil.write_text_atomic(path, json.dumps(cache, ensure_ascii=False, indent=2), newline="\n")
     except OSError:
         pass
 
@@ -1025,11 +1092,13 @@ def _line_blocked(name: str, cache: dict[str, Any]) -> bool:
     """
     entry = cache.get(name) or {}
     cert = bool(entry.get("cert"))
-    threshold = 1 if (name == DIRECT.name or cert) else LINE_FAIL_THRESHOLD
+    rate = bool(entry.get("rate"))
+    threshold = 1 if (name == DIRECT.name or cert or rate) else LINE_FAIL_THRESHOLD
     if int(entry.get("fails") or 0) < threshold:
         return False
     fail_at = int(entry.get("fail_at") or 0)
     ttl = (LINE_CERT_FAIL_TTL if cert
+           else LINE_RATE_LIMIT_TTL if rate          # 403/429：限流会自己恢复，只停 5 分钟
            else DIRECT_FAIL_TTL if name == DIRECT.name
            else LINE_FAIL_TTL)
     return bool(fail_at) and (time.time() - fail_at) < ttl
@@ -1258,12 +1327,12 @@ def download(
         cert_error = ("CERTIFICATE_VERIFY_FAILED" in message
                       or "certificate verify failed" in message.lower())
         # 被 403/429 拒绝也是**确定性失败**：PCL（`SourceFail`）就直接把源禁用掉。
-        # 复用 cert_error 的语义 —— 它与证书错误一样"一次就该跳过"，否则每次下载都白试。
+        # ⚠️ 但冷却用**限流专用的 5 分钟**（`LINE_RATE_LIMIT_TTL`），不要复用证书错误那个
+        # 30 分钟 —— 限流会自己恢复，停半小时等于白瞎一条好线路（2026-10-04 修）。
         rate_limited = _looks_rate_limited(message)
         if rate_limited and not cert_error:
-            cert_error = True          # 复用"确定性失败"的阈值语义（一次就跳）
             _log(log, f"（{line.name} 返回 403/429 —— 这条线路在限流或拒绝访问，"
-                      f"本次先跳过它，换个线路继续）")
+                      f"本次先跳过它 {int(LINE_RATE_LIMIT_TTL / 60)} 分钟，换个线路继续）")
         if network_wide:
             # ⚠️ 2026-10-04：**不再只是"不计入失败"** —— 那样域名已经没了的线路会永远
             # 排在候选里被反复白试（用户实测日志：一秒刷十几遍「gh.xmly.dev 失败」）。

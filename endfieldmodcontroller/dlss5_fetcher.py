@@ -83,14 +83,14 @@ def _stamp() -> str:
 
 
 def _unique_sibling(path: Path) -> Path:
-    """目标已存在时换一个名字（备份只增不删）。"""
-    if not path.exists():
-        return path
-    for index in range(1, 100):
-        candidate = path.with_name(f"{path.name}-{index}")
-        if not candidate.exists():
-            return candidate
-    return path.with_name(f"{path.name}-{os.getpid()}")
+    """目标已存在时换一个名字（备份只增不删）。
+
+    ⚠️ 实现收敛到 `fsutil.unique_sibling`（2026-10-04）：这里原先是同一套逻辑的第二份
+    （上限还不同 —— 这里 100、fsutil 1000），"改了备份命名规则只改一处"迟早出事。
+    """
+    from . import fsutil
+
+    return fsutil.unique_sibling(path)
 
 
 def _version_tuple(value: str) -> tuple[int, ...]:

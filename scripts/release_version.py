@@ -76,6 +76,29 @@ def next_version(version: str) -> str:
     return f"{major}.{minor}.{patch + 1}"
 
 
+def _commits_since(tag: str) -> int:
+    """`<tag>..HEAD` 之间有多少个提交（查不到 tag / 不在 git 仓库里 → 0）。
+
+    用来把"本地 == 最新 Release"分成两种情况：**刚发完版**（没有新提交，正常）与
+    **发完版又攒了改动却没升号**（用户明确要求"有改动就领先一个版本"）。查不到就当作
+    0（保守：不因为 git 环境问题让构建/推送被拦住）。
+    """
+    try:
+        out = subprocess.run(
+            ["git", "rev-list", "--count", f"{tag}..HEAD"],
+            cwd=str(Path(__file__).resolve().parents[1]),
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
+        )
+    except Exception:  # noqa: BLE001
+        return 0
+    if out.returncode != 0:
+        return 0
+    try:
+        return int((out.stdout or "0").strip() or "0")
+    except ValueError:
+        return 0
+
+
 def check(local: str | None = None) -> dict[str, object]:
     """核对"本地版本号 vs 最新 Release"。返回 dict（含 `ok` / `kind` / `message`）。"""
     local = str(local or read_version())
@@ -87,10 +110,23 @@ def check(local: str | None = None) -> dict[str, object]:
                        "本地应保持在「最新 Release + 1」；只推了源码没发 Release 时不动号",
         }
     if local == latest:
+        # ⚠️ `local == latest` **不一定是 OK**（2026-10-04 修）：用户规则是"本地/源码只要有
+        # 改动就领先 Release 一个号"（原话：「不发 release，但是本地和源码如果有改动要领先
+        # release 一个版本」）。原来这里一律 `ok=True`，于是"发完 Release 忘了 +1、又攒了一批
+        # 改动"会**静默通过**检查。
+        # 判据用 git 说实话：`<tag>..HEAD` 里有提交 ⇒ 有改动却没升号 ⇒ 不通过。
+        ahead_commits = _commits_since(f"v{latest}")
+        if ahead_commits:
+            return {
+                "ok": False, "kind": "same-with-commits", "local": local, "latest": latest,
+                "message": f"本地 {local} 与最新 Release v{latest} 相同，但**`v{latest}` 之后还有 "
+                           f"{ahead_commits} 个提交** —— 按规则应当升到 **{next_version(latest)}**"
+                           f"（只有「准备重发同一个版本」才该保持相同）",
+            }
         return {
             "ok": True, "kind": "same", "local": local, "latest": latest,
-            "message": f"本地 {local} 与最新 Release v{latest} **相同** —— 只有「准备重发 / 覆盖同一个版本」"
-                       f"才是这样；若这一版确实有改动，应当升到 **{next_version(latest)}**",
+            "message": f"本地 {local} 与最新 Release v{latest} **相同**，且 `v{latest}` 之后没有新提交"
+                       f" —— 属于「刚发完版、还没攒新改动」的正常状态",
         }
     if local == next_version(latest):
         return {

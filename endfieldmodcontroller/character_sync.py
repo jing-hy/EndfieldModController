@@ -195,20 +195,19 @@ def merge_payload(local: dict[str, Any], official: dict[str, Any]) -> dict[str, 
 
 
 # ---------------------------------------------------------------- 状态文件
+# ⚠️ 实现已收敛到 `fsutil.read_json` / `fsutil.write_json`（2026-10-04）——
+# 与 alerts.py / sbm_data_sync.py 原先那三份逐字节相同的实现合并成一份。
 def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return data if isinstance(data, dict) else {}
+    from . import fsutil
+
+    return fsutil.read_json(path)
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     from . import fsutil
 
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        fsutil.write_text_atomic(path, json.dumps(payload, ensure_ascii=False, indent=2), newline="\n")
+        fsutil.write_json(path, payload)
     except OSError:
         pass
 

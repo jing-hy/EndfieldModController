@@ -57,11 +57,10 @@ def _log(log: Callable[[str], None] | None, message: str) -> None:
 
 
 def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return data if isinstance(data, dict) else {}
+    """读状态 JSON —— 实现收敛到 `fsutil.read_json`（2026-10-04，原先是三份逐字节相同）"""
+    from . import fsutil
+
+    return fsutil.read_json(path)
 
 
 def state_path(config: AppConfig) -> Path:

@@ -291,7 +291,7 @@ VBS_TEMPLATE = r'''Option Explicit
 ' NOTE: keep this file ASCII-only. Windows Script Host reads .vbs as ANSI and does NOT
 ' accept a UTF-8 BOM -- a BOM makes it fail with "Invalid character" (0x800A0408) on
 ' line 1, char 1, which is exactly what happened before (2026-09-27).
-Dim fso, sh, wmi, procs, target, newFile, backup, i, failed, ts, procname
+Dim fso, sh, wmi, procs, target, newFile, backup, i, failed, ts, procname, rolled_ok
 Set fso = CreateObject("Scripting.FileSystemObject")
 Set sh = CreateObject("WScript.Shell")
 ' Paths come from the COMMAND LINE, never inlined: this script has to stay pure
@@ -347,13 +347,36 @@ End If
 If failed Then
   Err.Clear
   If fso.FileExists(target & ".new") Then fso.DeleteFile target & ".new", True
-  If fso.FileExists(target) Then fso.DeleteFile target, True
-  If fso.FileExists(backup) Then fso.MoveFile backup, target
+  ' NOTE (2026-10-04): the rollback must NOT "delete target first, then MoveFile backup".
+  ' It used to be exactly that, under `On Error Resume Next`: if the MoveFile failed
+  ' (antivirus lock / permissions) the target was ALREADY deleted while the backup sat
+  ' on disk unnoticed, and the script still wrote "Rolled back to the previous version."
+  ' => the user saw "update failed" but the program file was simply gone.
+  ' Now: CopyFile back over the target (the backup is left untouched), then verify the
+  ' target really exists; if verification fails we write the backup path into the notice
+  ' file so the user can copy it back manually, and we do NOT try to launch anything.
+  rolled_ok = False
+  If fso.FileExists(backup) Then
+    fso.CopyFile backup, target, True
+    If Err.Number = 0 Then rolled_ok = fso.FileExists(target)
+    Err.Clear
+  End If
   On Error Resume Next
   Set ts = fso.CreateTextFile(fso.GetParentFolderName(target) & "\update-failed.txt", True)
   If Err.Number = 0 Then
-    ts.WriteLine "Update failed (" & Now & "). Rolled back to the previous version."
+    If rolled_ok Then
+      ts.WriteLine "Update failed (" & Now & "). Rolled back to the previous version."
+    Else
+      ts.WriteLine "Update failed (" & Now & ") and the automatic rollback did NOT succeed."
+      ts.WriteLine "The previous version is still at: " & backup
+      ts.WriteLine "Copy it over EndfieldModController.exe manually."
+    End If
     ts.Close
+  End If
+  If Not rolled_ok Then
+    ' Nothing to launch: exit quietly instead of silently failing to start a missing exe.
+    fso.DeleteFile WScript.ScriptFullName, True
+    WScript.Quit 1
   End If
   WScript.Sleep 1500
   sh.Run """" & target & """", 1, False

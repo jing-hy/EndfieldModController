@@ -24,9 +24,28 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 
-DEFAULT_ASSET = ("https://github.com/jing-hy/EndfieldModController/releases/download/"
-                 "v1.0.5/EndfieldModController.exe")
+def _default_asset() -> str:
+    """默认测速用的资产 URL —— **跟着当前版本号走**（2026-10-04 修）。
+
+    原来写死 `v1.0.5`：那个 tag 的资产一旦被清理，所有线路都会拿到 0 字节，脚本会
+    输出一片"✗ 不可用"，而**这个结论会被用来决定 fastnet 的线路排序**（误导后续决策）。
+    现在从 `endfieldmodcontroller/version.py` 取当前版本；取不到就退回 `latest` 这个
+    永远存在的别名（Release 资产名不带版本号，见发布规则）。
+    """
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from endfieldmodcontroller.version import __version__
+
+        tag = f"v{__version__}"
+    except Exception:  # noqa: BLE001
+        tag = "latest"
+    return ("https://github.com/jing-hy/EndfieldModController/releases/download/"
+            f"{tag}/EndfieldModController.exe")
+
+
+DEFAULT_ASSET = _default_asset()
 # (标签, 前缀) —— 前缀空 = 直连
 DEFAULT_LINES: list[tuple[str, str]] = [
     ("直连", ""),

@@ -53,6 +53,24 @@ def valid_variable_name(name: str) -> bool:
     return bool(VALID_NAME_RE.match(name))
 
 
+def _near_miss(token: str, declared: set[str]) -> str:
+    """`token` 与本文件声明过的某个变量"只差大小写/下划线"时返回那个名字，否则空串。
+
+    用途见右值检查处的注释：跨命名空间/驼峰变量是**合法且常见**的，不能一律报"未声明"；
+    真正值得报的是"本文件声明了 `$cape` 却写成了 `$Cape`"这种拼错。
+    """
+    def _fold(name: str) -> str:
+        return name.lstrip("$").replace("_", "").lower()
+
+    folded = _fold(token)
+    if not folded:
+        return ""
+    for name in declared:
+        if _fold(name) == folded:
+            return name
+    return ""
+
+
 def _const_value_ok(value: str) -> tuple[bool, str]:
     """模拟 `swscanf_s(L"%f%n")` 的"必须完整吃掉"语义。"""
     v = value.strip()
@@ -137,8 +155,23 @@ def lint_text(text: str) -> list[str]:
                     elif lhs not in declared:
                         problems.append(f"{idx}: [{section}] 赋值给**未声明**的变量（该行会被丢弃）: {lhs}")
                 for tok in re.findall(r"\$[A-Za-z_][A-Za-z0-9_]*", rhs):
-                    if tok not in declared:
-                        problems.append(f"{idx}: [{section}] 右值变量**未声明**（该行会被丢弃）: {tok}")
+                    # ⚠️ **右值只报"本文件里声明过、但拼错名字"的近似项**（2026-10-04 修）。
+                    #
+                    # 原来写的是 `if tok not in declared: 报未声明`，而左值那边早已因为
+                    # "Mod 生态大量用驼峰名 + `$\EFMIv1\xxx` 跨命名空间引用、而且它们都能
+                    # 正常工作"而放宽（见本文件 43-48 行的教训：**会误报的检查器只会训练人
+                    # 去忽略它，比没有更糟**）。右值这条没有跟着放宽 ⇒ 同一个判据两套口径，
+                    # 凡是引用别的 ini 里定义的变量（`$\EFMIv1\...`、`$backSkirt` 这种由别的
+                    # Mod 声明的名字）都会被报"未声明"，而 lint 结果会经 `core.py` 写进
+                    # `controller.lint.txt` 并提示给用户 —— 等于用一堆假警报掩盖真问题。
+                    # 现在只在"本文件确实声明过某个变量、而这个 token 与它只差大小写/下划线"
+                    # 时才报（那才是真的拼错）。
+                    if tok in declared:
+                        continue
+                    near = _near_miss(tok, declared)
+                    if near:
+                        problems.append(
+                            f"{idx}: [{section}] 右值变量疑似拼错（本文件声明的是 {near}）: {tok}")
 
     # run = 目标段是否存在（含命名空间前缀写法）
     for sec, targets in pending.items():
@@ -168,8 +201,25 @@ if __name__ == "__main__":
         except Exception:  # noqa: BLE001
             pass
 
-    target = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(
-        r"D:\zmdmod\modtest\runtime\builtin\XXMI\EFMI\Mods\MC_Controller\controller.ini")
+    # ⚠️ 默认目标**不再写死开发机路径**（2026-10-04）：原来硬编码
+    # `D:\zmdmod\modtest\runtime\...\controller.ini`，在别的机器上直接 FileNotFoundError。
+    # 现在"没给参数"就按当前数据根推（`config.PROJECT_ROOT`），推不到就提示怎么用。
+    if len(sys.argv) > 1:
+        target = Path(sys.argv[1])
+    else:
+        try:
+            from endfieldmodcontroller.config import AppConfig
+
+            default_dir = AppConfig.load().controller_dir
+        except Exception:  # noqa: BLE001
+            default_dir = None
+        if default_dir is None:
+            print("用法: python -m endfieldmodcontroller.ini_lint <controller.ini 路径>")
+            raise SystemExit(2)
+        target = Path(default_dir) / "controller.ini"
+    if not target.is_file():
+        print(f"找不到目标文件：{target}\n用法: python -m endfieldmodcontroller.ini_lint <controller.ini 路径>")
+        raise SystemExit(2)
     found = lint_file(target)
     print(f"体检: {target}\n  行数={len(target.read_text(encoding='utf-8', errors='replace').splitlines())}")
     if not found:

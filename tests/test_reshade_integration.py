@@ -63,8 +63,11 @@ class ExistingReShadeIntegrationTests(unittest.TestCase):
             str(self.config.user_ini_path),
         )
         self.assertTrue(Path(result["manifest"]).is_file())
-        backup = self.game_dir / "actions.tsv.endfieldmodcontroller.bak"
-        self.assertTrue(backup.is_file())
+        # ⚠️ 备份名现在带**内容指纹**（2026-10-04）：`actions.tsv.endfieldmodcontroller.<sha12>.bak`
+        # —— 固定名只在首次创建，目标后来被更新时不留新备份 ⇒ 还原会得到更早那份（还原失真）。
+        backups = list(self.game_dir.glob("actions.tsv.endfieldmodcontroller.*.bak"))
+        self.assertEqual(len(backups), 1, [p.name for p in backups])
+        self.assertEqual(backups[0].read_text(encoding="utf-8"), "original-actions\n")
 
         removals = reshade_integration.remove_existing_reshade(self.config)
         self.assertFalse((self.game_dir / "endfieldmodcontroller.addon64").exists())

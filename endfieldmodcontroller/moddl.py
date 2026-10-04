@@ -166,21 +166,23 @@ def looks_like_slow(error: str) -> bool:
 def _cleanup_partial(target: Path, *, log: Callable[[str], None] | None = None) -> None:
     """失败时把半成品清掉（用户 2026-10-02：「下载失败要清理掉失败的半成品」）。
 
-    要清两个东西：
-      * fastnet 的断点续传文件 `<名字>.mcdownload`（实测现场：失败后留下一个 256 KB 的
-        `1820618.mcdownload` 躺在下载目录里）；
-      * 目标文件本身（万一已经落盘了一部分）。
+    ⚠️⚠️ **必须连分块记录（sidecar）一起删**（2026-10-04 审计发现的**数据损坏**级坑）：
+    fastnet 的分块下载有两份产物 —— 工作文件 `<名字>.mcdownload` 与"哪些块已完成"的
+    `<名字>.mcdownload.mcparts.json`。原实现只删了前者，于是下次重试时 sidecar 还在、
+    里面记着"这些块已下好" ⇒ **跳过它们**，而工作文件是新建的空文件 ⇒ 那些区间是空洞；
+    又因为块是 seek 写的、文件长度照样能到总大小 ⇒ 上层"大小相等"判据通过 ⇒
+    **报成功并落位一个坏包**（rar/7z 只查文件头，坏包会静默进 Mod 库）。
+
+    现在直接把 fastnet 认识的**全部续传产物**清掉（`fastnet.discard_partial` 是唯一真源，
+    避免这里再抄一份文件名清单 —— 抄漏一个就是这个坑）。
     ⚠️ 代价：清掉续传文件后，**下次重试是从头下**（不再续传）—— 用户要的是"别留垃圾"，
     所以这里按他说的做。清理本身失败也不抛（删不掉不该让任务结果变样）。
     """
-    for path in (Path(target), Path(str(target) + ".mcdownload")):
-        try:
-            if path.exists():
-                path.unlink()
-                if log:
-                    log(f"已清理失败的半成品：{path.name}")
-        except OSError:
-            pass
+    from . import fastnet
+
+    for path in fastnet.discard_partial(Path(target)):
+        if log:
+            log(f"已清理失败的半成品：{path.name}")
 
 
 # Mod 下载专用的"这条线路还能不能救"阈值。

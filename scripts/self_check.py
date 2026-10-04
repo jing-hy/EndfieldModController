@@ -21,12 +21,20 @@ def main() -> int:
     except Exception:  # noqa: BLE001
         pass
     print("== EndfieldModController self-check ==")
-    tests = run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"])
+    # ⚠️ 用 **pytest** 而不是 `unittest discover`（2026-10-04 修）：本项目 658 个用例里
+    # 绝大多数是 pytest 风格的**模块级 `def test_*`**（还带 49 个 subTest），
+    # `unittest discover` **只收集 TestCase 子类** ⇒ 这个自检给出的"通过"是偏乐观的
+    # （和构建入口 build_release 跑的不是一套）。两个入口必须跑同一套测试。
+    tests = run([sys.executable, "-m", "pytest", "tests", "-q"])
     print(tests.stderr.strip() or tests.stdout.strip())
     if tests.returncode != 0:
         return tests.returncode
 
-    addon = ROOT / "dist" / "endfieldmodcontroller.addon"
+    # ⚠️ addon 的实际产物名是 `EndfieldModController.addon` / `*.addon64`（大写），
+    # 原来硬写小写，只靠 Windows 不区分大小写才通过（换到任何大小写敏感的环境就误报 missing）。
+    dist = ROOT / "dist"
+    addons = sorted(p for p in dist.glob("*.addon*")) if dist.is_dir() else []
+    addon = addons[0] if addons else (dist / "EndfieldModController.addon")
     print(f"addon: {addon} ({'ok' if addon.is_file() else 'missing'}, {addon.stat().st_size if addon.is_file() else 0} bytes)")
 
     # 发行形态只有单文件 exe（用户 2026-10-01：「我从来没做过便携版，不用做」），

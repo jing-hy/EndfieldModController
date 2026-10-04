@@ -77,6 +77,13 @@ desktop.ini
 # 而构建机以外的机器没有 node），node_modules 绝不入库。
 frontend/node_modules/
 frontend/.vite/
+# ⚠️ 上面第 17 行那条全局 `dist/` 会把 web/dist/ 一起吃掉（2026-10-04 实测：
+# `git ls-files web` 里只有 app.ico 与 index.html，**产物从来没进过仓库**），
+# 而 `build_exe.py` 在找不到 `web/dist/index.html` 时会**回退到 `web/`**（只有兜底页）
+# ⇒ 别人 clone 后直接构建，打出来的 exe 界面是"界面产物缺失"那一页。
+# 这里按注释的本意把它放回仓库。
+!web/dist/
+!web/dist/index.html
 # 运行时产物：Mod 备份仓（内容随用户库变化，不该进版本库）
 mod-backup/
 
@@ -99,3 +106,7 @@ _*.txt
 _*.md
 # 唯一例外：这份发布说明是要进仓库的
 !_release_notes_0.9.1.md
+# 例外：`tests/` 下的辅助模块（被测试 import）**必须进仓库** ——
+# 否则 clone 下来跑 pytest 会直接 ModuleNotFoundError（2026-10-04 加：
+# `tests/_frontend_freevars.py` 就被上面那条 `_*.py` 吃掉过一次）。
+!tests/_*.py
