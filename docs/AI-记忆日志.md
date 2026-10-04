@@ -4,7 +4,7 @@
 > 目的：让「当时为什么这么改、踩过什么坑」跟着源码一起留在仓库里。
 > 想改内容 → 改记忆库（用记忆工具），再跑一次本脚本；不要直接编辑本文件。
 
-- 生成时间：2026-10-04 10:50:14
+- 生成时间：2026-10-04 11:05:35
 - 来源：`.dsh-meow/memory.db`
 - 条目：499 条（已跳过 archived / 其它项目的条目）
 
@@ -480,15 +480,16 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 `关键词：["MMD素材来源","v-idol组织","vidol-dance仓库","codeload取tar.gz","default_branch","lobe-vidol-market","r2.vidol.chat已失效","BowlRoll要登录","镜头可匿名下载","极乐净土已归档"]`
 
 ### **modecontroller 当前状态 · 唯一真源…
-*2026-10-04 05:20*
+*2026-10-04 10:51*
 
 **modecontroller 当前状态 · 唯一真源**（有变动请**更新本条**，别再另开新条目）
-**发布**：GitHub **Latest = v1.0.6**（2026-10-03T17:29Z）—— https://github.com/jing-hy/EndfieldModController/releases/tag/v1.0.6 ；远端 main = `fa38b03`。附件：`EndfieldModController.exe` **29,852,594 B / sha256 `F869D32B6A774472207B08BDD357696712B331A80D51BD473F86ABAA1330C7EB`**；`assets-bundle.zip` 144,696,905 B / `6638bf9b…1cd17`。附件只推**不带版本号**的 exe + assets-bundle。
-**本地领先情况（2026-10-04）**：**已有 46 个文件（+1749/-494，含 2 个新测试文件）尚未 commit/push**；`version.py` 仍是 1.0.6，按规则"有改动要领先 Release 一个" ⇒ **这批推送前应升到 1.0.7**（一整批只挂一个号，别每改一次就 +1）。`pytest` 现在 **661 passed**；`web\dist\index.html` 已重建（前端已从原生 JS 换成 Vue+Vite）。
-**v1.0.6 修的东西**（来自"下载慢/下不下来"两条反馈）：gh.xmly.dev 死域名；"DNS 故障不计失败"的豁免让死线路永远排第一（改 `_DNS_DEAD` 短冷却）；raw/codeload/objects 接入镜像；**多线路动态抢块**（实测 3.423 MB/s）；速度卡改由 `fastnet.global_speed()` 统一采样（一键启动那条路径原先没传 `byte_progress`）；撤回"静态等分"造成的 5.1 倍减速。
-**发版流程（两次实走）**：改代码 → `pytest` → **自己 commit**（`push.py`/`build_release.py` 都不替你 commit）→ `build_release.py`（第 0 步卡 version.py 与两份 README 一致；程序运行时第 6 步会**静默跳过** modtest 同步，构建完务必回看）→ `prepare_release.py` → `push.py`（先快照，顺带刷记忆日志 + 结构树）→ `gh release create <tag> --notes-file RELEASE_NOTES.md --latest`（⚠️ 建出来**不带附件**）→ `upload_release_assets.py --tag <tag>`（同名资产会 HTTP 422）。
-**仓库里随源码走的产出**：`CONTRIBUTING.md`、`docs\AI-记忆日志.md`（记忆导出，路径已脱敏，**不传 memory.db**）、`docs\structure\`（结构树镜像）。
-⚠️ **遗留**：**v1.0.5 的 Release 正文与标题不符**（发它时 `RELEASE_NOTES.md` 装的还是上一版 v1.0.4 内容）—— 要修就 `gh release edit v1.0.5 --notes-file …`（只改正文、不动附件），**等他点头**。
+**发布**：GitHub **Latest = v1.0.7**（2026-10-04T02:50:24Z）—— https://github.com/jing-hy/EndfieldModController/releases/tag/v1.0.7 ；远端 main = `0dec139`（本地已推平）。附件两件（**只推不带版本号的 exe + assets-bundle.zip**）：
+`EndfieldModController.exe` 29,892,548 B / sha256 `7f515c18b9c4a2ab9107c56ff0ac1259fd6faaab94ecc6661bcb6344cf2d9b32`；
+`assets-bundle.zip` 144,696,905 B / sha256 `060fc4d20e337423170eabf2fbab705ea9bc7bf82a0526e2e1fa3722ab948fb8`（83 文件 / 原始 138 MB）。GitHub 上的 asset digest 与本地 sha256 逐字节一致 ✓。发版正文用 `RELEASE_NOTES.md`（发前**必须**核对首行是不是这个 tag —— v1.0.5 那次就发错了正文）。
+**v1.0.7 的内容**：① 全项目审计修复（6 处前端"引用了不存在的名字"导致点了没反应、2 个 P0（续传残留让坏包报成功 / 依赖清空删掉唯一还原点）、4 个安全项、9 条备份语义、一批"能复用不复用"收敛）；② 你实测报的三件：缺下载→引导去依赖页、香蕉网按**最新更新的资源清单**（`Updates._aFileRowIds`）下载、暂停/终止在探测期也能秒停；③ 双显卡（5080+4060）不再被 DLSS5 开关挡住（逐卡判代次取最高）；④ 9 条"边界外"问题全修（提权白名单、taskkill 不再误杀、Apps 不再被抹、不再硬写 external、preset 护栏、extractall 留备份、d3d12.dll 备份、d3dx_user.ini 乐观并发、全局 ReShade 三套合一）；⑤ 三项拍板（诊断包收状态 json、主题单一真源、web/dist 入库）。**674 passed**（新增 13 条回归）。
+**流程**：改代码 → pytest → **自己 commit** → `build_release.py --modtest-both`（第 6 步检测到 Endfield/管理器在跑就**跳过** modtest 同步、不杀进程；务必回看那行）→ `prepare_release.py`（生成 assets-bundle）→ `push.py`（先快照 `D:\zmdmod\_snapshot_<ver>-<ts>`、刷记忆日志 + 结构树、再推 main）→ `gh release create <tag> --notes-file RELEASE_NOTES.md --latest`（**不带附件**）→ `upload_release_assets.py --tag <tag>`（同名资产 422）。⚠️ gh 未登录时按技能 `gh-token-pr` 注入 `$env:GH_TOKEN = [Environment]::GetEnvironmentVariable('GH_TOKEN','User')`。
+**仓库里随源码走的产出**：`CONTRIBUTING.md`、`docs\AI-记忆日志.md`（记忆导出，路径脱敏、不传 memory.db）、`docs\structure\`（结构树镜像）。
+⚠️ **遗留**：**v1.0.5 的 Release 正文与标题不符**（发它时 `RELEASE_NOTES.md` 还是上一版内容）—— 要修就 `gh release edit v1.0.5 --notes-file …`（只改正文、不动附件），**等他点头**。
 
 `关键词：["当前状态唯一真源","Latest v0.9.4","0.9.5未发Release","远端main","版本号只跟Release比","发版流程","必须自己commit","build_release第0步校验版本号","推送前自动快照","只推不带版本号exe","modtest只放最新exe"]`
 
@@ -516,13 +517,14 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 `关键词：["审计完成","两轮修复","备份语义","B1-B5","prepare_runtime库只读","前端防线入库","661 passed","verify_fixes","待拍板","结构树未更新","TESTING未出","未推送"]`
 
 ### **modecontroller 待办（2026-10-…
-*2026-10-04 05:20*
+*2026-10-04 10:53*
 
-**modecontroller 待办（2026-10-04 整理；做完即更新本条）**
-🔨 **该做**：① **2026-10-04 审计批次（46 文件 +1749/-494，含 2 个新测试文件）尚未 commit / 推送 / 发版** —— 未修项已按编号列在 `docs\审计报告-2026-10-04.md` 第四节等他挑；② normify 结构树待重跑四步（行号全变，见"normify 结构树"条）；③ 该批次改动多，`TESTING.md` 编号测试清单未出。
-⏳ **等用户实测/结论**：① **"进去之后感觉好卡"** 的对照结论（先移出 RabbitFX 试，还卡再关 DLSS5）；② **MMD 播放测试** —— 极乐净土素材已备好（`D:\zmdmod\mmd素材\极乐净土\`），但 `poser_injection=false`、`plugin\poser.dll` 仍是 `.disabled`，**要测必须先开 Poser**。
-**收尾待办（下一版）**：崩溃包补 `Mods` 清单 + 主链路 stage 后打日志；`[Key*]` 协议退役；`hotkey_takeover` 语义与 UI 文案；TESTING 与详细文档的 DLSS5 节；「移出 Mod 库」清理 `d3dx_user.ini` 残留；依赖项缺界面入口；`load_library_redirect` 待验证；湿润效果 `match_index_count` 与换 mesh 皮肤匹配未深挖。
-**别忘的其他线**：**issue** 仓库只剩 **#5（问题合集）** —— 用户说过"**5 不要管**"，要动必须等他说；**sbm 自维护** 提弗洛斯运动数值三选一、含 PR #4 的 `sbm.dll` 与 Manager 未部署、「1.5 适配」PR 未提；**宣传片** BGM 与简介方案已定但**还没写进 `docs\宣传视频脚本-2分钟.md`**（那份脚本的简介模板仍停在 v0.3.2）。
+**modecontroller 待办（2026-10-04 发版后整理；做完即更新本条）**
+✅ **已了结**：全项目审计（两轮）→ 三项拍板（诊断包收状态 json / 主题单一真源 / `web/dist` 入库）→ 9 条"边界外"问题全修（U1–U8、U10）→ 你实测报的三件（缺下载引导跳依赖页 / 香蕉网按最新更新资源清单下载 / 暂停终止在探测期秒停）→ 双显卡不再被 DLSS5 挡；**已 commit、已推 main（0dec139）、已发 Release v1.0.7（Latest）**；TESTING.md 已出（三段：III 403–416 / JJJ 417–424 / KKK 425–429 / LLL 430–431）。
+🔨 **还欠的**：① **normify 结构树待重跑四步**（`normify_realign.py --apply` → `normify_module_refresh(all=true)` → `normify_validate` 0 error → `normify_build`+`normify_render`）—— 本次 60+ 文件改动让行号全变；后三步是**插件工具**，要在有 normify 工具的会话里做（本会话没有，`push.py` 那次报"结构树无变化"就是因为它只同步镜像、没重算）。② **v1.0.5 的 Release 正文与标题不符**（发它时 `RELEASE_NOTES.md` 还是上一版内容）—— 修法 `gh release edit v1.0.5 --notes-file …`，**等他点头**。③ 下一批改动起版本号要走 **1.0.8**。
+⏳ **等用户实测/结论**：① **"进去之后感觉好卡"** 的对照结论（先移出 RabbitFX 试，还卡再关 DLSS5）；② **MMD 播放测试**（极乐净土素材已备 `D:\zmdmod\mmd素材\极乐净土\`，但 `poser_injection=false`、`plugin\poser.dll` 仍是 `.disabled`，要测必须先开 Poser）。
+**收尾待办（下一版）**：崩溃包补 `Mods` 清单 + 主链路 stage 后打日志；`[Key*]` 协议退役；`hotkey_takeover` 语义与 UI 文案；详细文档的 DLSS5 节；「移出 Mod 库」清理 `d3dx_user.ini` 残留；依赖项缺界面入口；`load_library_redirect` 待验证；湿润效果 `match_index_count` 与换 mesh 皮肤匹配未深挖。
+**别忘的其他线**：**issue** 仓库只剩 **#5（问题合集）** —— 用户说过"**5 不要管**"；**sbm 自维护** 提弗洛斯运动数值三选一、含 PR #4 的 `sbm.dll` 与 Manager 未部署、「1.5 适配」PR 未提；**宣传片** BGM 与简介方案已定但**还没写进 `docs\宣传视频脚本-2分钟.md`**。
 
 `关键词：["待办清单","审计批次未推送","结构树待重跑","TESTING未出","好卡对照结论","MMD播放测试要开Poser","崩溃包补Mods清单","Key协议退役","issue5不要管","sbm自维护","宣传片脚本未落盘","d3dx_user残留"]`
 
