@@ -1,4 +1,4 @@
-# v1.0.8 —— 诊断包「一次抓齐」：修掉取证链的三个洞，外加「启动前清除所有第三方注入」
+# v1.0.8 —— 诊断包「一次抓齐」+ 启动前清除所有第三方注入 + 修好「第一人称中文又没了」
 
 > 这一版两块内容：① 一位反馈者在 issue 里指出**崩溃取证链自己有三个缺陷** —— 路径取错导致误报、
 > 一处异常吞掉后面所有采集、`ReShade.log` 没收进包；② 你要求的「设置里一个开关，
@@ -56,10 +56,27 @@
 2. **乳摇卸载不再"删了不补"。** 没有原版备份时会**保留注入不动**并说明原因，
    而不是把 proxy 删掉、留下一个缺模块的游戏目录。
 
-## 四、验证
+## 四、「第一人称的中文没了」—— 生效那份 ini 从来没被同步过
 
-- `python -m pytest tests -q` → **695 passed**（本轮新增 21 条回归：
-  `tests/test_diagnostics_capture.py`、`tests/test_game_clean_auto.py`）。
+你反馈的这条是**另一个老问题**，根因和上面那条诊断包缺陷是同一族（都是"生效的那份"找错了）：
+
+- ReShade 实际读的是 `runtime\reshade\ReShade.ini`（`RESHADE_BASE_PATH_OVERRIDE` 决定），
+  而初始化只维护 `dlss5\ReShade.ini`；
+- 负责把差异补过去的那两个同步函数 ① 跑在初始化**之前**（那份源 ini 当时还不存在 ⇒ 静默空转），
+  ② 且只在目标"已有该段、已有该键"时才改写 ⇒ **一次都没生效过**
+  （那份 ini 旁边从来没有 `.bak-before-enhancer-sync`），里面积着插件写的
+  `Language=0`（英文）与空的 `Font=`（中文画方块）。
+
+现在：同步**缺段补段、缺键补键**，并且在**初始化之后再同步一次**（顺序修好），
+中文字体也写到生效那份。**实测**（在你正在用的那份实例上跑）：`Language=0 → 1`、
+`CameraEFMICompatibility=0 → 1`、`ShortcutFirstPerson → 112`、`Font=` 补成中文字体。
+顺带修掉"文件末尾那一段缺 `TextureSearchPaths` / `PresetPath` 永远补不上"的老毛病。
+
+## 五、验证
+
+- `python -m pytest tests -q` → **全部通过**（本轮新增回归：
+  `tests/test_diagnostics_capture.py`、`tests/test_game_clean_auto.py`，
+  以及 `tests/test_firstperson_defaults.py` 里针对"生效那份 ini"的 6 条）。
 - 另外在**一份完整的真实运行环境**上跑过 `create_diagnostic_bundle()`：产出的包约 0.7 MB、
   66 项采集，其中 `reshade/runtime-ReShade.log`、`player/Endfield-Player.log`、
   `plugin/sbm_log.txt`、`environment.txt`（含真实事件日志与服务状态）都在包里 ——

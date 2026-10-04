@@ -137,19 +137,25 @@ def panel_status(config: AppConfig) -> dict[str, Any]:
     }
 
 
-def ensure_panel_font(config: AppConfig, *, log: Callable[[str], None] | None = None) -> dict[str, Any]:
+def ensure_panel_font(config: AppConfig, *, log: Callable[[str], None] | None = None,
+                      ini: Path | None = None) -> dict[str, Any]:
     """让 ReShade 用一个**带中文字形**的字体，否则面板里的中文全是方块。
 
     ReShade 默认字体是内置的 `ProggyClean`（纯 ASCII）。ReShade 6.8 用的 ImGui 1.92 是
     **动态字体**：字体文件里有字就能画出来，不需要预先声明字形范围 —— 所以只要把
     `ReShade.ini` 的 `[STYLE] Font=` 指向系统里的中文字体（`C:\\Windows\\Fonts\\msyh.ttc`），
     面板的中文含义就能正常显示（写前备份，且**只在原来为空时**才写，绝不覆盖用户的选择）。
+
+    `ini`（2026-10-04 加）：要改哪一份。默认 `dlss5\\ReShade.ini`，但**游戏真正读的是
+    `runtime\\reshade\\ReShade.ini`**（`RESHADE_BASE_PATH_OVERRIDE`）—— 只改前者的话，
+    生效那份的 `[STYLE] Font=` 永远是空的，用户看到的就是「中文没了（方块）」
+    （用户 2026-10-04 反馈）。launcher 的 `sync_effective_reshade_ini()` 会把生效那份传进来。
     """
     if not getattr(config, "reshade_panel_font", True):
         return {"changed": False, "reason": "面板字体开关已关闭"}
-    ini = config.dlss5_ini_path
-    if not ini.is_file():
-        return {"changed": False, "reason": f"没有 {ini}"}
+    ini_path = Path(ini) if ini is not None else config.dlss5_ini_path
+    if not ini_path.is_file():
+        return {"changed": False, "reason": f"没有 {ini_path}"}
 
     font_dir = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
     chosen: Path | None = None
@@ -162,7 +168,7 @@ def ensure_panel_font(config: AppConfig, *, log: Callable[[str], None] | None = 
         return {"changed": False, "reason": "系统里找不到中文字体（msyh/simhei/…）"}
 
     try:
-        text = ini.read_text(encoding="utf-8-sig", errors="replace")
+        text = ini_path.read_text(encoding="utf-8-sig", errors="replace")
     except OSError as exc:
         return {"changed": False, "reason": f"读取失败: {exc}"}
 
@@ -197,10 +203,10 @@ def ensure_panel_font(config: AppConfig, *, log: Callable[[str], None] | None = 
         changed = True
 
     try:
-        backup = ini.with_name(ini.name + ".bak-before-panel-font")
+        backup = ini_path.with_name(ini_path.name + ".bak-before-panel-font")
         if not backup.exists():
-            shutil.copy2(ini, backup)
-        ini.write_text("\n".join(out) + "\n", encoding="utf-8", newline="\r\n")
+            shutil.copy2(ini_path, backup)
+        ini_path.write_text("\n".join(out) + "\n", encoding="utf-8", newline="\r\n")
         if log is not None:
             log(f"统一面板字体: ReShade 字体已指向 {chosen.name}（备份 {backup.name}）")
     except OSError as exc:

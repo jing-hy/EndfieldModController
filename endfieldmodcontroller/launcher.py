@@ -368,13 +368,6 @@ def _sync_enhancer_section(source: Path, target: Path,
                                "CameraMeshHeadHiding",
                                "CameraSmoothPerspectiveTransition",
                                "ShortcutFirstPerson",
-                               # ⚠️ **2026-10-03 改变主意：`Language` 重新纳入同步**。
-                               # 上一版我把它排除在外（理由"它是用户偏好，别覆盖用户的选择"），
-                               # 但实测结果是：**addon 每次游戏启动都把它读的那份 ini 写成出厂值**
-                               #（`Language=2` 英文、`CameraEFMICompatibility=0` …），
-                               # 于是"一键启动时同步成中文 → 游戏一跑又被写回英文"，
-                               # 用户看到的就是「第一人称打开又是英文」且每次都要手动再改一遍。
-                               # 用户明确要中文，所以改成每次一键启动都写回 `Language=1`。
                                "Language",
                            )) -> int:
     """把源 ini 里 `[endfield-enhancer]` 段的关键项同步进目标 ini，返回改了几项。
@@ -382,14 +375,20 @@ def _sync_enhancer_section(source: Path, target: Path,
     为什么需要它：`core.py` 给游戏进程设了 `RESHADE_BASE_PATH_OVERRIDE` = `runtime\\reshade`，
     **ReShade 读的是那一份** `ReShade.ini`；而初始化只维护 `dlss5\\ReShade.ini`。
     两份内容会分叉 —— addon 首次运行会把**出厂值（全 0）**写进它读的那份，于是
-    「与 EFMI 共存必需的 `CameraEFMICompatibility`」「F1 快捷键 `ShortcutFirstPerson`」等
-    在生效的那份里全是 0，用户看到的就是"第一人称不会自动配置"（2026-10-03 反馈）。
+    「与 EFMI 共存必需的 `CameraEFMICompatibility`」「F1 快捷键 `ShortcutFirstPerson`」
+    「界面语言 `Language`」在生效的那份里都是默认值，用户看到的就是
+    「第一人称又是英文 / 面板里点按钮没反应」（2026-10-03、2026-10-04 两次反馈）。
 
-    ⚠️ **`Language` 故意不在同步列表里**（2026-10-03 踩到）：它是**用户偏好**，
-    用户在 addon 面板里随时可以改。我第一版把它也放进来了，结果每次一键启动都拿
-    `dlss5` 那份的旧值把用户刚改的中文**覆盖回去** —— 用户的原话正是
-    「第一人称还是进去英文，**我又手改成了中文**」（暗示下次还得再改一遍）。
-    只同步"不一致就会不工作"的项，用户的个人偏好一律不碰。
+    `Language` 是**故意**纳入同步的（2026-10-03 改变主意）：addon 每次游戏启动都会把它读的
+    那份写成出厂值，逐字保留"用户偏好"的结果就是「一键启动同步成中文 → 游戏一跑又变英文」，
+    而用户明确要中文 ⇒ 每次一键启动都写回中文。
+
+    ⚠️ **2026-10-04 关键修复（用户报「第一人称的中文没了」）**：原实现只在目标 ini
+    **已经有这个段**、且那个键**已经存在**时才改写它 —— 而生效那份在初始化重建
+    ReShade.ini 之后**可能整段都没有**（内置模板里只有 GENERAL/INPUT/OVERLAY/STYLE/SCREENSHOT），
+    于是同步**一个键都补不上、连备份都不留**（实测：那份 ini 旁边从来没有
+    `.bak-before-enhancer-sync`，而它里面是 addon 写的 `Language=0` ⇒ 游戏里永远是英文）。
+    现在：段不存在就**补段**、键不存在就**补键**，写进去的才是"生效的那份"。
     """
     # ⚠️ 同 prepare_reshade_runtime 的硬闸：超过 1 MB 的 ini 一律当损坏，别去读它
     # （3 GB 的版本一读就把内存吃爆 —— 2026-10-03 事故）
@@ -410,26 +409,48 @@ def _sync_enhancer_section(source: Path, target: Path,
         if inside and "=" in text:
             key, _, value = text.partition("=")
             good[key.strip()] = value.strip()
-    if not good:
+    wanted = {key: good[key] for key in keys if key in good}
+    if not wanted:
         return 0
 
     lines = target.read_text(encoding="utf-8", errors="replace").splitlines()
     out: list[str] = []
     inside = False
+    section_seen = False
+    present: set[str] = set()
+    insert_at: int | None = None          # 段内最后一行之后的位置（用来补缺失的键）
     changed = 0
     for line in lines:
         text = line.strip()
         if text.startswith("["):
+            if inside and insert_at is None:
+                insert_at = len(out)
             inside = text == "[endfield-enhancer]"
+            if inside:
+                section_seen = True
             out.append(line)
             continue
         if inside and "=" in text:
             key = text.partition("=")[0].strip()
-            if key in keys and key in good and good[key] != text.partition("=")[2].strip():
-                out.append(f"{key}={good[key]}")
+            present.add(key)
+            if key in wanted and wanted[key] != text.partition("=")[2].strip():
+                out.append(f"{key}={wanted[key]}")
                 changed += 1
                 continue
         out.append(line)
+    if inside and insert_at is None:
+        insert_at = len(out)
+
+    missing = [key for key in wanted if key not in present]
+    if not section_seen:
+        # 整段都不在（初始化重建 ini 后的常态）⇒ 补段，否则这些键在生效那份里根本不存在
+        out.extend(["", "[endfield-enhancer]"] + [f"{key}={wanted[key]}" for key in wanted])
+        changed += len(wanted)
+    elif missing:
+        position = insert_at if insert_at is not None else len(out)
+        out[position:position] = [f"{key}={wanted[key]}" for key in missing]
+        changed += len(missing)
+
     if changed:
         backup = target.with_name(target.name + ".bak-before-enhancer-sync")
         if not backup.exists():
@@ -444,11 +465,16 @@ def _sync_enhancer_section(source: Path, target: Path,
 
 def _sync_style_section(source: Path, target: Path,
                         keys: tuple[str, ...] = ("Font", "FontSize", "EditorFont", "EditorFontSize")) -> int:
-    """把源 ini 里 `[STYLE]` 段的字体相关项同步进目标 ini，返回改了几项。
+    """把源 ini 里 `[STYLE]` 段的字体相关项同步进目标 ini（**缺段补段、缺键补键**），返回改了几项。
 
     为什么需要：见调用处注释 —— 生效那份 `[STYLE] Font=` 为空时，第一人称的中文
     会因缺少中文字体而显示不出来（addon 自己会在日志里报 "Chinese font missing"）。
-    只动字体相关键，不碰用户自己调过的配色/圆角那些。
+    用户 2026-10-04 报的「中文没了」正是这两层叠在一起：语言被 addon 写回默认（英文），
+    字体键在生效那份里也是空的（中文就算选了也画成方块）。
+
+    ⚠️ 与 `_sync_enhancer_section` 同一处修复：原来只改**已存在且为空**的键 ⇒
+    生效那份根本没有这两个键时一个都补不上。现在缺键就补。
+    仍然只动字体相关键，不碰用户自己调过的配色/圆角那些，也**不覆盖用户已设的非空字体**。
     """
     # ⚠️ 同 prepare_reshade_runtime 的硬闸：超过 1 MB 的 ini 一律当损坏，别去读它
     # （3 GB 的版本一读就把内存吃爆 —— 2026-10-03 事故）
@@ -469,28 +495,50 @@ def _sync_style_section(source: Path, target: Path,
         if inside and "=" in text:
             key, _, value = text.partition("=")
             good[key.strip()] = value.strip()
-    if not good:
+    wanted = {key: good[key] for key in keys if good.get(key)}
+    if not wanted:
         return 0
 
     lines = target.read_text(encoding="utf-8", errors="replace").splitlines()
     out: list[str] = []
     inside = False
+    section_seen = False
+    present: set[str] = set()
+    insert_at: int | None = None
     changed = 0
     for line in lines:
         text = line.strip()
         if text.startswith("["):
+            if inside and insert_at is None:
+                insert_at = len(out)
             inside = text == "[STYLE]"
+            if inside:
+                section_seen = True
             out.append(line)
             continue
         if inside and "=" in text:
             key = text.partition("=")[0].strip()
+            present.add(key)
             value = text.partition("=")[2].strip()
             # ⚠️ 只在**目标为空**时才补（不要覆盖用户在 ReShade 里自己挑过的字体）
-            if key in keys and key in good and not value and good[key]:
-                out.append(f"{key}={good[key]}")
+            if key in wanted and not value:
+                out.append(f"{key}={wanted[key]}")
                 changed += 1
                 continue
         out.append(line)
+    if inside and insert_at is None:
+        insert_at = len(out)
+
+    # 目标里**压根没有**这些键时也要补（但要避免覆盖用户已设的非空值 —— 上面那一步已经处理过）
+    missing = [key for key in wanted if key not in present]
+    if missing:
+        if not section_seen:
+            out.extend(["", "[STYLE]"] + [f"{key}={wanted[key]}" for key in missing])
+        else:
+            position = insert_at if insert_at is not None else len(out)
+            out[position:position] = [f"{key}={wanted[key]}" for key in missing]
+        changed += len(missing)
+
     if changed:
         backup = target.with_name(target.name + ".bak-before-style-sync")
         if not backup.exists():
@@ -501,6 +549,62 @@ def _sync_style_section(source: Path, target: Path,
         target.write_text("\r\n".join(ln.replace("\r", "") for ln in out) + "\r\n",
                           encoding="utf-8", newline="")
     return changed
+
+
+def sync_effective_reshade_ini(config: AppConfig, *, log: Callable[[str], None] | None = None) -> dict[str, Any]:
+    """把**游戏真正读的那份** `ReShade.ini` 对齐成我们配好的样子。
+
+    哪份是"真正读的那份"：`core.py` / `launcher` 给游戏进程设
+    `RESHADE_BASE_PATH_OVERRIDE` = `runtime\\reshade` ⇒ ReShade 以它为基准目录
+    （`ReShade.log` 也写在那里，2026-10-04 在反馈者的诊断包里确认过）。
+    而初始化（`initialize.ensure_all`）、面板字体（`ensure_panel_font`）都只维护
+    `dlss5\\ReShade.ini` —— 两份必须显式对齐。
+
+    ⚠️ **必须在初始化之后调用**（2026-10-04 的根因就在顺序上）：
+    `prepare_reshade_runtime()` 跑在 `ensure_injections()`（内部会重建 `dlss5\\ReShade.ini`）
+    **之前**，那时源 ini 可能还不存在 ⇒ 同步静默空转 ⇒ 生效那份保持 addon 写的
+    `Language=0`（英文），用户看到的就是「第一人称的中文没了」。
+    所以这个函数是**幂等**的，并且在启动流程里**调用两次**（prepare 之后一次保证目标存在，
+    初始化之后再调一次保证内容正确）。
+    """
+    source = config.dlss5_ini_path
+    target = config.reshade_runtime_path / "ReShade.ini"
+    result: dict[str, Any] = {"ok": False, "source": str(source), "target": str(target),
+                              "created": False, "enhancer": 0, "style": 0, "font": ""}
+    if not source.is_file():
+        result["reason"] = f"源 ini 还不存在（{source}）—— 初始化生成后会自动再同步一次"
+        if log is not None:
+            log(f"第一人称设置: {result['reason']}")
+        return result
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if not target.is_file():
+            # 生效那份不存在（首次运行 / 被清掉）：直接复制我们配好的那份过去。
+            # 否则 ReShade 会自建一份**出厂值**的 ini —— 中文、字体、快捷键全丢。
+            shutil.copy2(source, target)
+            result.update({"ok": True, "created": True})
+            if log is not None:
+                log(f"第一人称设置: 生效那份 ReShade.ini 不存在 → 已用配好的那份创建（{target}）")
+            return result
+        result["enhancer"] = _sync_enhancer_section(source, target)
+        result["style"] = _sync_style_section(source, target)
+        from . import reshade_integration
+
+        font = reshade_integration.ensure_panel_font(config, log=None, ini=target)
+        result["font"] = str(font.get("font") or "")
+        result["font_reason"] = str(font.get("reason") or "")
+        result["ok"] = True
+        if log is not None:
+            log(f"第一人称设置: 已写入生效那份 ReShade.ini（第一人称 {result['enhancer']} 项、"
+                f"字体 {result['style']} 项"
+                + (f"，字体指向 {result['font']}" if result["font"] else "")
+                + "）")
+        return result
+    except OSError as exc:
+        result["reason"] = f"写入失败: {exc}"
+        if log is not None:
+            log(f"WARN 第一人称设置: 写入生效那份 ReShade.ini 失败: {exc}")
+        return result
 
 
 def prepare_reshade_runtime(config: AppConfig, controller_dir: Path) -> dict[str, Any]:
@@ -668,6 +772,19 @@ def prepare_reshade_runtime(config: AppConfig, controller_dir: Path) -> dict[str
                     seen.add(key)
                     continue
             merged.append(line)
+        # ⚠️ **文件末尾那一段也要补全**（2026-10-04 修）。
+        # 上面的补键是在"遇到下一个段头"时触发的 ⇒ **最后一段**（通常是 `[GENERAL]`，
+        # 后面没有别的段了）永远走不到那段代码：实测 `runtime\reshade\ReShade.ini` 里
+        # `[GENERAL]` 少了 `TextureSearchPaths` / `PresetPath` —— 前者缺失意味着
+        # **DLSS5 找不到纹理**，而它一直没被补上（直到文件后面出现别的段才顺带补）。
+        # 现在循环结束后对"最后那一段"做同样的事，一次调用就收敛（也顺带让
+        # 「反复调用 ini 不增长」这条回归重新成立 —— 以前它靠"永远补不全"侥幸通过）。
+        if section == "[ADDON]" and "AddonPath" not in seen:
+            merged.append(f"AddonPath={rel}")
+        if section == "[GENERAL]":
+            for key in ("EffectSearchPaths", "TextureSearchPaths", "PresetPath"):
+                if key not in seen:
+                    merged.append(f"{key}={wanted_keys[key]}")
         # 文件里压根没有这两个段时，补在末尾
         if "[ADDON]" not in [ln.strip() for ln in merged if ln.strip().startswith("[")]:
             merged += ["", "[ADDON]", f"AddonPath={rel}"]
@@ -698,16 +815,13 @@ def prepare_reshade_runtime(config: AppConfig, controller_dir: Path) -> dict[str
     # ReShade 以基准目录（= runtime\reshade）为准，所以它读的 `[endfield-enhancer]` /
     # `[STYLE]` 段是**这份**；而初始化只维护 `dlss5\ReShade.ini`。两份会分叉：
     #   * addon 首次运行把它读的那份写成**出厂值（全 0）** ⇒ `CameraEFMICompatibility=0`
-    #     （与 EFMI 共存必需）、`ShortcutFirstPerson=0`（F1 没配上）—— 用户看到的
-    #     「第一人称视角不会自动配置」；
-    #   * `[STYLE] Font` 为空 ⇒ addon 报 `Chinese font missing` ⇒ 中文显示不出来 ——
-    #     用户看到的「还是英文」。
-    # 两个同步都必须放在**写 ini 之后**（写的是合并结果，同步只补差异项）。
-    try:
-        _sync_enhancer_section(config.dlss5_path / "ReShade.ini", ini_path)
-        _sync_style_section(config.dlss5_path / "ReShade.ini", ini_path)
-    except OSError as exc:
-        _append_log(config, f"同步 [endfield-enhancer] / [STYLE] 到 runtime\\reshade 失败（忽略）: {exc}")
+    #     （与 EFMI 共存必需）、`ShortcutFirstPerson=0`（F1 没配上）、`Language=0`（英文）；
+    #   * `[STYLE] Font` 为空 ⇒ addon 报 `Chinese font missing` ⇒ 中文显示成方块。
+    # 2026-10-04 把这段收敛成 `sync_effective_reshade_ini()`（它会补段/补键），并且
+    # **启动流程里还会在初始化之后再调一次** —— 因为这一步跑在 `initialize` 之前，
+    # 那时 `dlss5\ReShade.ini` 可能还不存在（11:33 那份日志就是 `没有 …dlss5\ReShade.ini`
+    # ⇒ 同步静默空转 ⇒ 生效那份留着 addon 写的 `Language=0` ⇒ 用户看到「中文没了」）。
+    sync_effective_reshade_ini(config, log=lambda message: _append_log(config, message))
 
     return {
         "reshade_dir": str(reshade_dir),
@@ -2430,6 +2544,14 @@ def launch(
         reshade["injection_report"] = injection_report
         for warning in injection_report.get("warnings", []):
             _append_log(config, f"WARN 注入自检: {warning}")
+        # ⚠️ **必须放在 `ensure_injections()` 之后**（2026-10-04 用户报「第一人称的中文没了」的根因）：
+        # `initialize.ensure_all()` 会在这一步**重建** `dlss5\ReShade.ini`（里面才带
+        # `[endfield-enhancer] Language=1` 与中文字体）；而上面 `prepare_reshade_runtime()`
+        # 里的那次同步跑在它**之前** —— 源 ini 还不存在时同步只会静默返回 0，
+        # 于是"生效的那份"（`runtime\reshade\ReShade.ini`，由 `RESHADE_BASE_PATH_OVERRIDE`
+        # 决定）保持 addon 写的 `Language=0`（英文）⇒ 用户进游戏看到英文。
+        # 这里再同步一次是**幂等**的，只补差异项，不会覆盖用户自己调过的值。
+        sync_effective_reshade_ini(config, log=lambda message: _append_log(config, message))
 
     # ⚠ **2026-10-01 根因修复：EFMI 的 `skip_early_includes_load` 必须为 0。**
     #   EFMI 的 `d3dx.ini` 出厂默认是 `skip_early_includes_load = 1`（配套
