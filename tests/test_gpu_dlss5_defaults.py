@@ -20,9 +20,10 @@ from endfieldmodcontroller import deviceinfo
 from endfieldmodcontroller.config import AppConfig
 
 
-def _fake_adapter(name: str):
+def _fake_adapter(*names: str):
+    """打桩显卡探测；**支持多张卡**（双显卡机器用，见 `DualGpuTests`）。"""
     def _collect(refresh: bool = False):
-        return {"adapters": [{"name": name}]}
+        return {"adapters": [{"name": name} for name in names]}
 
     return _collect
 
@@ -153,6 +154,80 @@ class Dlss5GpuSelfCheckTests(_GpuCase):
         check = next(c for c in report.to_dict()["checks"] if c["key"] == "dlss5:gpu_support")
         self.assertTrue(check["ok"])
         self.assertIn("5080", check["message"])
+
+
+class DualGpuTests(_GpuCase):
+    """⭐ 双显卡机器不能被判成"只支持 50 系"（2026-10-04 用户转来的反馈）。
+
+    反馈原话：「双显卡（**一张 5080，一张 4060**）会被 dlss5 的开关挡住，显示只支持 50 显卡」。
+    根因：`dlss5_supported()` 把**所有** NVIDIA 卡的名字拼成一串，再 `re.search` 第一个
+    `rtx\\d{4}` —— 取到哪张**完全看适配器枚举顺序**，取到 4060 就把 5080 用户挡在门外。
+    正确语义：**只要有一张够格就该放行**（用户当然会用那张跑游戏），并告诉他用哪张。
+    """
+
+    def test_5080_plus_4060_is_supported(self) -> None:
+        with mock.patch.object(deviceinfo, "collect",
+                               _fake_adapter("NVIDIA GeForce RTX 4060 Laptop GPU",
+                                             "NVIDIA GeForce RTX 5080")):
+            supported, gpu, reason = deviceinfo.dlss5_supported(refresh=True)
+        self.assertTrue(supported, f"有 5080 就该支持，实际：{reason}")
+        self.assertIn("5080", reason, "要说清是哪张卡够格")
+        self.assertIn("4060", gpu, "两张卡都要报出来")
+        self.assertIn("多张显卡", reason)
+
+    def test_order_does_not_matter(self) -> None:
+        """枚举顺序反过来（5080 在前）结论必须一样 —— 这正是原来会翻车的地方。"""
+        with mock.patch.object(deviceinfo, "collect",
+                               _fake_adapter("NVIDIA GeForce RTX 5080",
+                                             "NVIDIA GeForce RTX 4060 Laptop GPU")):
+            supported, _gpu, reason = deviceinfo.dlss5_supported(refresh=True)
+        self.assertTrue(supported, f"顺序不该影响结论，实际：{reason}")
+
+    def test_two_old_cards_still_unsupported(self) -> None:
+        with mock.patch.object(deviceinfo, "collect",
+                               _fake_adapter("NVIDIA GeForce RTX 4060 Laptop GPU",
+                                             "NVIDIA GeForce RTX 4070 Laptop GPU")):
+            supported, _gpu, reason = deviceinfo.dlss5_supported(refresh=True)
+        self.assertFalse(supported)
+        self.assertIn("50 系", reason)
+
+    def test_switch_is_allowed_on_dual_gpu(self) -> None:
+        """端到端：双显卡机器上手动打开 DLSS5 **不该被拒**（原来会被判 dlss5_unsupported_gpu）。"""
+        from endfieldmodcontroller import launcher
+        from endfieldmodcontroller.api import EndfieldModControllerApi
+
+        path = self.root / "dual.json"
+        with mock.patch.object(deviceinfo, "collect",
+                               _fake_adapter("NVIDIA GeForce RTX 4060 Laptop GPU",
+                                             "NVIDIA GeForce RTX 5080")):
+            deviceinfo.collect(refresh=True)
+            cfg = AppConfig(
+                library_dir=str(self.root / "library"),
+                runtime_dir=str(self.root / "runtime"),
+                staging_mods_dir=str(self.root / "runtime" / "EFMI" / "Mods"),
+                dlss5_addon_enabled=False,
+            )
+            cfg.save(path)
+            api = EndfieldModControllerApi(path)
+            api.config.dlss5_addon_enabled = False
+            with mock.patch.object(launcher, "set_component_addons", return_value={"moved": []}), \
+                    mock.patch.object(launcher, "configure_dlss5_injection", return_value={}):
+                result = api.set_component_addon("dlss5", True)
+        self.assertNotEqual(result.get("rejected"), "dlss5_unsupported_gpu",
+                            f"有 5080 却被拒了：{result}")
+
+    def test_generations_lists_every_card(self) -> None:
+        self.assertEqual(deviceinfo.nvidia_generations(
+            "nvidia geforce rtx 5080 / nvidia geforce rtx 4060 laptop gpu"), [50, 40])
+        self.assertEqual(deviceinfo.nvidia_generations("nvidia geforce rtx 4060"), [40])
+        self.assertEqual(deviceinfo.nvidia_generations("intel arc a770"), [])
+        # 单值接口保持原语义（只取第一个），别被多卡改动带偏
+        self.assertEqual(deviceinfo.nvidia_generation("nvidia geforce rtx 5080"), 50)
+
+    def test_verdict_uses_highest_generation(self) -> None:
+        verdict = deviceinfo._verdict("nvidia geforce rtx 4060 / nvidia geforce rtx 5080")
+        self.assertIn("50 系", verdict)
+        self.assertIn("具备 DLSS5", verdict)
 
 
 if __name__ == "__main__":

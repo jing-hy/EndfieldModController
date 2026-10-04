@@ -450,19 +450,52 @@ async function pollProgress() {
           await call("scan");
           await refreshState();
         } catch (e) { /* 刷不动不影响弹窗 */ }
-        const okItems = items.filter((it) => !/失败/.test(String(it.status || "")));
+        // ⚠️⚠️ **状态口径必须按后端定义的字符串来**（2026-10-04 修，用户实测报的 bug）。
+        // 原来这里是 `!/失败/.test(status)` ⇒「**已暂停**」「已终止」「需手动解压」乃至
+        // 「等待中」都会被算成"已下载并入库"：他点了暂停，却看到
+        // 「暂停显示**已下载并入库 1 个**（列表已刷新）」；而"继续"再跑一轮时 `done`
+        // 又出现一次边沿 ⇒ **同样的内容再弹一遍**（他原话：「再点继续也会弹这个内容」）。
+        // 后端只有 `已入库` 才代表真的进库了（见 `_mod_download_one` 的 status 赋值）。
+        const imported = items.filter((it) => String(it.status || "") === "已入库");
         const badItems = items.filter((it) => /失败/.test(String(it.status || "")));
-        if (okItems.length) {
-          const lines = okItems.map((it) => `· ${it.name || it.url}${it.group ? ` —— 识别为「${it.group}」` : ""}`);
+        const stopped = items.filter((it) => /^(已暂停|已终止)$/.test(String(it.status || "")));
+        const manualItems = items.filter((it) => String(it.status || "") === "需手动解压");
+        // 哪些进了库但**没识别出角色**（只有这些才需要提示去「更换归属」）
+        const unknown = imported.filter((it) => !it.group);
+        const nameOf = (it) => it.name || it.url || "（未命名）";
+        if (stopped.length) {
+          // 用户自己停的：如实说"停住了 + 本次已完成几个"，**绝不能**说成"下载完成"
+          const isPaused = stopped.some((it) => String(it.status) === "已暂停");
+          await showAlert(
+            isPaused ? "Mod 下载已暂停" : "Mod 下载已终止",
+            (isPaused
+              ? "已停下（断点保留）。"
+              : "已终止（半成品已清理）。") + "\n\n" +
+            (imported.length
+              ? `本次已经完成入库 ${imported.length} 个：\n${imported.map((it) => `· ${nameOf(it)}`).join("\n")}\n\n`
+              : "") +
+            (isPaused
+              ? `还有 ${stopped.filter((it) => String(it.status) === "已暂停").length} 个没下完 —— ` +
+                "点本页的「继续」会从断点接着下，已下的部分不用重来。"
+              : "没下完的那几个可以在本页重新开始。"),
+          );
+        } else if (imported.length) {
+          const lines = imported.map((it) => `· ${nameOf(it)}${it.group ? ` —— 识别为「${it.group}」` : ""}`);
           await showAlert(
             "Mod 下载完成",
-            `已下载并入库 ${okItems.length} 个（列表已刷新）：\n${lines.join("\n")}\n\n` +
+            `已下载并入库 ${imported.length} 个（列表已刷新）：\n${lines.join("\n")}\n\n` +
             (badItems.length ? `另有 ${badItems.length} 个失败，可在本页重试。\n\n` : "") +
-            "如果某个没识别出角色，去「服装 Mod / 辅助 Mod」页点它的「⋯ → 更换归属」设定。",
+            (unknown.length
+              ? `有 ${unknown.length} 个没识别出角色（${unknown.map(nameOf).join("、")}），` +
+                "去「服装 Mod / 辅助 Mod」页点它的「⋯ → 更换归属」设定。"
+              : ""),
           );
+        } else if (manualItems.length) {
+          await showAlert("需要手动解压",
+            manualItems.map((it) => `· ${nameOf(it)}\n    ${it.message || ""}`).join("\n"));
         } else if (badItems.length) {
           await showAlert("Mod 下载失败",
-            badItems.map((it) => `· ${it.name || it.url}：${it.message || it.status}`).join("\n"));
+            badItems.map((it) => `· ${nameOf(it)}：${it.message || it.status}`).join("\n"));
         }
       }
       wasModDlActive = modDlActive.value;

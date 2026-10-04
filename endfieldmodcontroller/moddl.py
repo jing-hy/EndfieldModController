@@ -391,10 +391,96 @@ def gamebanana_id(url: str) -> int | None:
 #  而它作为 `_core_2.zip`(275 B) 单独挂在同一个 Mod 页面上）。
 AUX_FILE_MAX_BYTES = 2 * 1024 * 1024
 
+# 更新记录（Updates）接口 —— **"这一版需要下什么"的权威来源**。
+# 用户 2026-10-04 原话：「香蕉网的下载逻辑有问题，应该先去
+# https://gamebanana.com/mods/updates/690864 ，看**最新版需要下什么资源**，然后再去下载，
+# 而不是一上来就下最新的包」。
+GAMEBANANA_UPDATES_API = "https://gamebanana.com/apiv11/Mod/{mod_id}/Updates"
 
-def split_mod_files(files: list[dict]) -> tuple[dict | None, list[dict]]:
-    """从文件列表里挑出**主包**，并把**配套小文件**一起返回。
 
+def _plain_text(value: str, limit: int = 400) -> str:
+    """把更新说明的 HTML 压成一行纯文本（只用于在界面上展示"这一版改了什么"）。"""
+    import html as _html
+
+    text = re.sub(r"<br\s*/?>", "\n", str(value or ""), flags=re.I)
+    text = re.sub(r"</(?:p|li|ul|div)>", "\n", text, flags=re.I)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = _html.unescape(text)
+    text = re.sub(r"[ \t\r\f\v]+", " ", text)
+    text = re.sub(r"\n{2,}", " ", text)
+    return text.strip()[:limit]
+
+
+def gamebanana_updates(mod_id: int, *, timeout: int = EXTRA_TIMEOUT,
+                       cancel=None) -> list[dict]:
+    """取一个 Mod 的**更新记录**（最新在前）；取不到就返回空列表（绝不影响下载主流程）。
+
+    实测（mod 690864，2026-10-04）：
+        最新那条 update 的 `_aFileRowIds = [1813631, 1809855]`
+        精确对应 `changescreens_182.zip`(957 MB 主包) + `_core_2.zip`(275 B 补丁)
+    —— 这正是"最新版需要哪些资源"。而按"未归档里挑最新/最大"只是**猜**：
+    作者把补丁单独挂着、或旧版包比新版大时就会挑错（本项目真踩过：下到 1.3.1 旧版，
+    而必需的 `_Core.ini` 从来没被下载过）。
+
+    单条记录的字段：`_idRow`(update id) / `_sVersion` / `_sName` / `_tsDateAdded` /
+    `_sText`(HTML 说明) / `_aFileRowIds`(关联的文件 id) / `_aFiles`(作者随帖上传的文件)。
+    """
+    import json
+
+    from . import dependencies, fastnet
+
+    url = GAMEBANANA_UPDATES_API.format(mod_id=mod_id)
+    try:
+        raw = dependencies._http_get(url, timeout=timeout, cancel=cancel)
+    except fastnet.Cancelled:
+        raise                           # 用户点的暂停/终止，原样抛给上层
+    except Exception as exc:  # noqa: BLE001 —— **更新记录拿不到不该让整次下载失败**
+        return []
+    try:
+        data = json.loads(raw.decode("utf-8", "replace"))
+    except (ValueError, AttributeError):
+        return []
+    if not isinstance(data, dict):
+        return []
+    records: list[dict] = []
+    for record in data.get("_aRecords") or []:
+        if not isinstance(record, dict):
+            continue
+        try:
+            record_id = int(record.get("_idRow") or 0)
+        except (TypeError, ValueError):
+            record_id = 0
+        file_ids: list[int] = []
+        for value in record.get("_aFileRowIds") or []:
+            try:
+                file_ids.append(int(value))
+            except (TypeError, ValueError):
+                continue
+        records.append({
+            "id": record_id,
+            "version": str(record.get("_sVersion") or ""),
+            "name": str(record.get("_sName") or ""),
+            "added": int(record.get("_tsDateAdded") or 0),
+            "text": _plain_text(record.get("_sText") or ""),
+            "file_ids": file_ids,
+            "files": [str(f.get("_sFile") or "") for f in (record.get("_aFiles") or [])
+                      if isinstance(f, dict)],
+        })
+    # 最新在前（`_aRecords` 本来就是，但别依赖这个隐含顺序）
+    records.sort(key=lambda item: item["added"], reverse=True)
+    return records
+
+
+def split_mod_files(files: list[dict],
+                    required_ids: Sequence[int] | None = None) -> tuple[dict | None, list[dict]]:
+    """从文件列表里挑出**主包**，并把**需要一起下的其它文件**返回。
+
+    优先口径（用户 2026-10-04 要求）—— *required_ids* = **最新更新记录里列出的文件 id**：
+    给了它就**只认这些**（"这一版需要什么就下什么"），主包 = 其中最大的那个，
+    其余全部作为配套一起下。这比"猜"准确：作者把补丁单独挂着时不会再漏，
+    也不会把同页面**别的模块**的大包（例如同页的 CharacterChange 86 MB）顺手拖下来。
+
+    退回口径（没有更新记录的老 Mod / 更新接口取不到时）：
     * **主包** = 未归档的中**最新**那个（按 `_tsDateAdded`）——
       不能取"列表第一个"：API 的 `_aFiles` **不是**按时间排的，
       实测那个 Mod 把 1.3.1(86 MB) 排在 1.8.2(957 MB) 前面，取第一个就下到了旧版。
@@ -404,6 +490,12 @@ def split_mod_files(files: list[dict]) -> tuple[dict | None, list[dict]]:
     pool = live or list(files)
     if not pool:
         return None, []
+    if required_ids:
+        wanted = {int(value) for value in required_ids}
+        picked = [f for f in pool if f.get("id") in wanted]
+        if picked:
+            main = max(picked, key=lambda f: (f.get("size") or 0))
+            return main, [f for f in picked if f is not main]
     big = [f for f in pool if not f.get("aux")]
     main_pool = big or pool
     main = max(main_pool, key=lambda f: (f.get("added") or 0, f.get("size") or 0))
@@ -411,19 +503,27 @@ def split_mod_files(files: list[dict]) -> tuple[dict | None, list[dict]]:
     return main, aux
 
 
-def gamebanana_profile(mod_id: int, *, timeout: int = EXTRA_TIMEOUT) -> dict:
+def gamebanana_profile(mod_id: int, *, timeout: int = EXTRA_TIMEOUT, cancel=None) -> dict:
     """取一个 Mod 的元数据（含真实下载直链与封面图）。
 
     访问不上时抛 `GameBananaUnreachable` —— **这条是给用户看的**（"检查 VPN"），
     所以不要把底层异常原样丢出去。
+
+    *cancel* = 用户点了「暂停 / 终止」时的判据（2026-10-04 加，用户实测报的问题）：
+    这个请求最长要等 25 秒，而原来**探测期间完全不检查暂停/终止** ⇒ 他的感受是
+    「**探测期间无法暂停**」「**点了终止也还是探测中**」。现在把 cancel 一路传进
+    `_http_get`（fastnet 在数据块边界会中断），中断时**原样抛 `fastnet.Cancelled`** ——
+    那不是"访问不上"，上层要按"用户停的"来收尾，不能报成网络错误。
     """
     import json
 
-    from . import dependencies
+    from . import dependencies, fastnet
 
     url = GAMEBANANA_API.format(mod_id=mod_id)
     try:
-        raw = dependencies._http_get(url, timeout=timeout)
+        raw = dependencies._http_get(url, timeout=timeout, cancel=cancel)
+    except fastnet.Cancelled:
+        raise
     except Exception as exc:  # noqa: BLE001 —— 网络层各种异常统一成"访问不上"
         raise GameBananaUnreachable(str(exc)) from exc
     try:
@@ -446,6 +546,9 @@ def gamebanana_profile(mod_id: int, *, timeout: int = EXTRA_TIMEOUT) -> dict:
         link = entry.get("_sDownloadUrl") or ""
         if link:
             files.append({
+                # ⚠️ **文件 id 必须带上**（2026-10-04）：更新记录的 `_aFileRowIds` 就是靠它
+                # 和这里对上的 —— 有了它才能按"最新版需要哪些资源"精确下载。
+                "id": int(entry.get("_idRow") or 0),
                 "file": entry.get("_sFile") or "",
                 "size": int(entry.get("_nFilesize") or 0),
                 "url": link,
@@ -462,6 +565,22 @@ def gamebanana_profile(mod_id: int, *, timeout: int = EXTRA_TIMEOUT) -> dict:
     if not files:
         raise GameBananaUnreachable("这个页面里没有可下载的文件")
 
+    # ── **"这一版需要什么资源"：以最新更新记录为准**（用户 2026-10-04 要求）──────────
+    # 拿最新那条 update 的 `_aFileRowIds`（它列出的就是这一版关联的文件），
+    # 映射到上面的 `files`；映射不到的（作者已删/归档）如实记下来，别静默当没有。
+    latest_update: dict = {}
+    required_ids: list[int] = []
+    missing: list[int] = []          # ⚠️ 必须在分支外初始化（否则没有更新记录时 UnboundLocalError）
+    try:
+        updates = gamebanana_updates(mod_id, cancel=cancel)
+    except Exception:  # noqa: BLE001 —— 含用户暂停；更新记录不该让整次下载失败
+        updates = []
+    if updates:
+        latest_update = updates[0]
+        known = {f["id"] for f in files}
+        required_ids = [fid for fid in latest_update.get("file_ids") or [] if fid in known]
+        missing = [fid for fid in latest_update.get("file_ids") or [] if fid not in known]
+
     return {
         "mod_id": int(data.get("_idRow") or mod_id),
         "name": data.get("_sName") or "",
@@ -472,11 +591,20 @@ def gamebanana_profile(mod_id: int, *, timeout: int = EXTRA_TIMEOUT) -> dict:
         "page": data.get("_sProfileUrl") or f"https://gamebanana.com/mods/{mod_id}",
         "cover": cover,
         "files": files,
+        # 最新更新（"这一版改了什么 + 要下哪些"）
+        "latest_update": latest_update,
+        "required_ids": required_ids,
+        "required_missing": missing,
     }
 
 
-def download_cover(url: str, dest_dir: Path, *, timeout: int = EXTRA_TIMEOUT) -> Path | None:
-    """把封面图下到临时目录；失败返回 None（**图只是锦上添花，不该让整个任务失败**）。"""
+def download_cover(url: str, dest_dir: Path, *, timeout: int = EXTRA_TIMEOUT,
+                   cancel=None) -> Path | None:
+    """把封面图下到临时目录；失败返回 None（**图只是锦上添花，不该让整个任务失败**）。
+
+    *cancel*（2026-10-04 加）：封面也是一次网络请求（最长 25 秒），用户点了暂停/终止时
+    同样不该卡在这里 —— 中断时直接返回 None（封面本来就是可选的，不需要报错）。
+    """
     if not url:
         return None
     from . import dependencies
@@ -486,8 +614,8 @@ def download_cover(url: str, dest_dir: Path, *, timeout: int = EXTRA_TIMEOUT) ->
         name += ".jpg"
     target = unique_path(Path(dest_dir), name)
     try:
-        dependencies._http_get(url, target, timeout=timeout)
-    except Exception:  # noqa: BLE001
+        dependencies._http_get(url, target, timeout=timeout, cancel=cancel)
+    except Exception:  # noqa: BLE001 —— 含 fastnet.Cancelled（用户停的，封面就不要了）
         return None
     return target
 

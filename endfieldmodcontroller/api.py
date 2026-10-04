@@ -2936,11 +2936,23 @@ class EndfieldModControllerApi:
         finally:
             with self._mod_dl_lock:
                 self._mod_dl["done"] = True
+                paused = bool(self._mod_dl.get("pause"))
+                stopped = bool(self._mod_dl.get("cancel"))
                 counts = moddl.summarize(items)
-            launcher._append_log(
-                self.config,
-                f"Mod 下载: 全部结束（入库 {counts['imported']}，需手动解压 {counts['manual']}，"
-                f"失败 {counts['failed']}）")
+            if paused or stopped:
+                # 用户主动停的（2026-10-04 修）：别写成"全部结束" —— 他会以为没停下。
+                # 也别把"已经下完并入库的那几个"说成还在跑：如实写"本次入库 N 个，
+                # 其余保留断点/已终止"（他实测报过「暂停显示已下载并入库 1 个」的困惑）。
+                launcher._append_log(
+                    self.config,
+                    f"Mod 下载: 已{'暂停' if paused else '终止'}"
+                    f"（本次已完成入库 {counts['imported']} 个，"
+                    f"{'其余保留断点，点「继续」接着下' if paused else '半成品已清理'}）")
+            else:
+                launcher._append_log(
+                    self.config,
+                    f"Mod 下载: 全部结束（入库 {counts['imported']}，需手动解压 {counts['manual']}，"
+                    f"失败 {counts['failed']}）")
 
     @staticmethod
     def _cover_data_uri(path: Any) -> str:
@@ -3040,6 +3052,28 @@ class EndfieldModControllerApi:
     def _mod_download_one(self, item: dict[str, Any], dest_dir: Path) -> None:
         url = item["url"]
         item["status"] = "下载中"
+
+        # ⚠️⚠️ **「用户停了吗」这个判据必须在最前面就能用**（2026-10-04 修，用户实测）。
+        # 原来 `cancelled()` 定义在真正开始下载之前、也只在下载循环里被检查 ⇒ 用户在
+        # **探测阶段**（「读取香蕉网信息」＝ `gamebanana_profile` 请求 + 下封面，各 25 秒超时）
+        # 点「暂停」或「终止」**完全没用**，界面上一直停在"探测中"。他的原话：
+        #   「mod下载过程中，**探测期间无法暂停**」「点了**终止也还是探测中**」
+        # 现在：探测前 / 探测后 / 封面 / 每个配套文件都检查，并把 `cancel=` 传进那两个网络请求。
+        def cancelled() -> bool:
+            with self._mod_dl_lock:
+                return bool(self._mod_dl.get("cancel") or self._mod_dl.get("pause"))
+
+        def finish_cancelled() -> None:
+            """被用户停下时统一收尾：状态写「已暂停 / 已终止」+ 说明（**这不是失败**）。"""
+            with self._mod_dl_lock:
+                stopping = bool(self._mod_dl.get("pause"))
+            item["status"] = "已暂停" if stopping else "已终止"
+            item["message"] = ("暂停中（点「继续」会从断点接着下）" if stopping
+                               else "已终止（半成品已清掉）")
+
+        if cancelled():
+            finish_cancelled()
+            return
         # ⚠️ **必须在函数开头初始化**（2026-10-03 踩到）：它只在下面的 GameBanana 分支里被赋值，
         # 而普通 URL 直接下载不走那条路 ⇒ 后面读它就成了 `UnboundLocalError`，
         # 整个下载线程静默挂掉、任务永远停在"下载中"（7 个测试一起红了）。
@@ -3068,9 +3102,15 @@ class EndfieldModControllerApi:
         # 然后如果访问不上，就弹窗提示无法访问，建议检查 vpn」。
         banana_id = moddl.gamebanana_id(url)
         if banana_id is not None:
+            from . import fastnet as _fastnet
+
             item["status"] = "读取香蕉网信息"
             try:
-                profile = moddl.gamebanana_profile(banana_id)
+                # 把 cancel 传进去 ⇒ 探测本身也能被「暂停 / 终止」打断（见上面 cancelled() 说明）
+                profile = moddl.gamebanana_profile(banana_id, cancel=cancelled)
+            except _fastnet.Cancelled:
+                finish_cancelled()
+                return
             except moddl.GameBananaUnreachable as exc:
                 # 这里刻意**不**抛给上层：一个任务失败不该影响同一批里的其它任务
                 item["status"] = "失败"
@@ -3080,6 +3120,10 @@ class EndfieldModControllerApi:
                                    "建议检查 VPN 或加速器后重试。" + (f"（{detail}）" if detail else ""))
                 launcher._append_log(self.config, f"Mod 下载: 香蕉网 {banana_id} 访问失败：{exc}")
                 return
+            # 探测拿到结果后**立刻再查一次**：用户可能就是在探测期间点的暂停/终止
+            if cancelled():
+                finish_cancelled()
+                return
             files = profile["files"]
             # ⚠️⚠️ **按更新时间挑主包，并把配套小文件一起下**（2026-10-03 用户实测：
             #     「uimod 好像没生效」）。
@@ -3088,7 +3132,13 @@ class EndfieldModControllerApi:
             # 那个 Mod 的顺序是 1.3.1(86MB) / _core_2 / _core_ffd68 / 1.8.2(957MB)，
             # 于是下载到了 **1.3.1 旧版**；而真正的 `_Core.ini`（作者单独发的
             # `_core_2.zip`，275 B）**从来没被下载过** —— 主包缺它根本不工作。
-            picked, aux_files = moddl.split_mod_files(files)
+            # ⚠️⚠️ **先看"最新版需要下什么"，再决定下哪些**（用户 2026-10-04 要求：
+            # 「应该先去 gamebanana.com/mods/updates/<id>，看**最新版需要下什么资源**，
+            # 然后再去下载，而不是一上来就下最新的包」）。
+            # `required_ids` = 最新那条更新记录的 `_aFileRowIds`（实测 mod 690864 的 1.8.2
+            # 给出 [1813631, 1809855] ⇒ `changescreens_182.zip` + `_core_2.zip`）。
+            # 没有更新记录（老 Mod / 接口取不到）时才退回"按时间挑最新主包"。
+            picked, aux_files = moddl.split_mod_files(files, profile.get("required_ids"))
             if picked is None:
                 item["status"] = "失败"
                 item["message"] = "这个页面里没有可下载的文件"
@@ -3105,23 +3155,32 @@ class EndfieldModControllerApi:
                 notes.append(f"作者 {profile['author']}")
             if item["version"]:
                 notes.append(str(item["version"]))
-            if len(files) > 1:
-                notes.append(f"共 {len(files)} 个文件，已按更新时间取最新主包")
+            latest = profile.get("latest_update") or {}
+            if latest:
+                # 「按最新更新的资源清单下载」——这是用户 2026-10-04 要的口径。
+                label = f"最新更新 v{latest['version']}" if latest.get("version") else "最新更新"
+                notes.append(f"按{label}的资源清单下载 {1 + len(aux_files)} 个文件")
+                if latest.get("text"):
+                    notes.append(f"更新说明：{str(latest['text'])[:120]}")
+                if profile.get("required_missing"):
+                    notes.append(f"（清单里有 {len(profile['required_missing'])} 个文件已被作者删除，已跳过）")
+            elif len(files) > 1:
+                notes.append(f"共 {len(files)} 个文件，这个页面没有更新记录，按更新时间取最新主包")
             if aux_files:
-                notes.append(f"另有 {len(aux_files)} 个配套小文件会一并下载")
+                notes.append(f"另有 {len(aux_files)} 个配套文件会一并下载")
             item["note"] = " · ".join(notes)
             if profile["game"] and "endfield" not in profile["game"].lower():
                 item["message"] = f"⚠ 这个 Mod 属于「{profile['game']}」，不是终末地的"
             if profile["cover"]:
-                cover = moddl.download_cover(profile["cover"], dest_dir)
+                # 封面同样是网络请求（25 秒）—— 也要能被打断
+                cover = moddl.download_cover(profile["cover"], dest_dir, cancel=cancelled)
                 if cover is not None:
                     item["cover"] = str(cover)
+            if cancelled():
+                finish_cancelled()
+                return
             item["status"] = "下载中"
             url = item["url"]
-
-        def cancelled() -> bool:
-            with self._mod_dl_lock:
-                return bool(self._mod_dl.get("cancel") or self._mod_dl.get("pause"))
 
         path, error, slow = moddl.download(
             url, dest_dir, progress=progress, name=item.get("name") or "",

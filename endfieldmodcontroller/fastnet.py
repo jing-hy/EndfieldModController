@@ -412,11 +412,19 @@ def fetch(
     timeout: int = 25,
     headers: dict[str, str] | None = None,
     line_mode: str = "",
+    cancel: Callable[[], bool] | None = None,
 ) -> tuple[str, bytes]:
     """按线路取一小段内容（HTML/JSON 这类小请求），返回 ``(最终 URL, 内容)``。
 
     直连不通时会自动换镜像线路 —— 这是"**不消耗 GitHub API 额度**地读 release 页面"
     的关键：普通用户没有 token，API 只有 60 次/小时，靠网页路线才稳。
+
+    *cancel*（2026-10-04 加）：**读取期间也要能被叫停**。原来这里是 `response.read()`
+    一口气读完、中途没有任何检查点 —— 而「读取香蕉网信息」（读那坨 JSON，最长 25 秒）
+    走的正是这条路，于是用户点「暂停 / 终止」在探测期间**完全无效**（他的原话：
+    「**探测期间无法暂停**」「点了**终止也还是探测中**」）。
+    现在复用本项目已有那套"短超时轮询 + `select()` 可读探测"：每秒醒一次检查 `cancel()`，
+    被叫停就抛 `Cancelled`（**不是**线路故障，所以不要因此去换下一条线路）。
     """
     mode = (line_mode or get_line_mode() or "auto").lower()
     if mode not in LINE_MODES:
@@ -425,11 +433,30 @@ def fetch(
     last_error: Exception | None = None
     for line in lines:
         try:
+            chunks: list[bytes] = []
             with _open(line.apply(url), headers=headers, timeout=timeout) as response:
-                body = response.read()
                 final = response.geturl()
+                waited = 0.0
+                window = float(max(int(timeout), 1))
+                while True:
+                    if cancel and cancel():
+                        raise Cancelled("用户暂停/终止（读取期间）")
+                    # 用 `select()` 探测可读，**绝不重试 read()** —— http.client 的响应对象
+                    # 一旦超时就不能再读（`cannot read from timed out object`）。
+                    if not _readable(response, POLL_SECONDS):
+                        waited += POLL_SECONDS
+                        if waited >= window:
+                            raise TimeoutError(f"读取 {url} 超时（{waited:.0f}s 无数据）")
+                        continue
+                    chunk = response.read(1 << 16)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                    waited = 0.0
             _remember_line(line.name, True, 0.0)   # 成功只清失败标记，不覆盖速度成绩
-            return final, body
+            return final, b"".join(chunks)
+        except Cancelled:
+            raise                                   # 用户停的，别当线路故障去换下一条
         except (urllib.error.URLError, OSError, TimeoutError) as exc:
             last_error = exc
             _remember_line(line.name, False, 0.0)

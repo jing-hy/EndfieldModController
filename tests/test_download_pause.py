@@ -106,3 +106,67 @@ def test_cancel_before_start_is_immediate(tmp_path: Path, slow_server: str) -> N
             cancel=lambda: True, log=lambda m: None,
         )
     assert time.time() - started < 3.0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2026-10-04 用户实测补的两条：**探测阶段（「读取香蕉网信息」）也必须能停**。
+#
+# 他的原话：「mod下载过程中，**探测期间无法暂停**，然后到了下载又显示暂停……再点继续
+# 也会弹这个内容，**点了终止也还是探测中**」。
+# 根因：`cancelled()` 只在**下载循环**里被检查，而探测走的 `gamebanana_profile()`
+# （最长 25 秒）与 `download_cover()` 是完全独立的网络请求、**一点 cancel 都没接**。
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_probe_request_can_be_interrupted(tmp_path: Path, slow_server: str,
+                                          monkeypatch: pytest.MonkeyPatch) -> None:
+    """★ `fastnet.fetch`（读 JSON/HTML 那条路）读取期间也能被叫停。
+
+    这是「探测期间无法暂停」的**最底层**根因：`fetch()` 原来是一句 `response.read()`
+    一口气读完，中途没有任何检查点；而 `_http_get(dest=None)` 还额外把 `cancel` 丢了。
+    """
+    started = time.time()
+    with pytest.raises(fastnet.Cancelled):
+        fastnet.fetch(slow_server, timeout=30, cancel=lambda: True)
+    assert time.time() - started < 3.0, "点了暂停还卡在读 JSON 里"
+
+
+def test_probe_and_cover_pass_cancel_through(monkeypatch: pytest.MonkeyPatch,
+                                             tmp_path: Path) -> None:
+    """★ 探测与封面请求都必须把 `cancel` 交给网络层（接线正确，不依赖真网络）。"""
+    from endfieldmodcontroller import dependencies, moddl
+
+    seen: list[object] = []
+
+    def fake_get(url, dest=None, **kwargs):        # noqa: ANN001, ANN003
+        seen.append(kwargs.get("cancel"))
+        raise RuntimeError("到此为止（不再真发请求）")
+
+    monkeypatch.setattr(dependencies, "_http_get", fake_get)
+
+    with pytest.raises(moddl.GameBananaUnreachable):
+        moddl.gamebanana_profile(1, timeout=5, cancel=lambda: True)
+    assert callable(seen[-1]), "探测请求没接 cancel ⇒ 探测期间停不下来"
+
+    assert moddl.download_cover("http://x/cover.jpg", tmp_path, cancel=lambda: True) is None
+    assert callable(seen[-1]), "封面请求没接 cancel"
+
+
+def test_paused_before_probe_stops_without_requesting(tmp_path: Path) -> None:
+    """★ 已经点过暂停时：**不去探测**，直接把任务标成「已暂停」（秒级收手）。"""
+    from endfieldmodcontroller import api as api_mod
+
+    class _Stub:
+        """只做 `_mod_download_one` 在"暂停态"这条路径上会碰到的那些属性。"""
+
+        def __init__(self) -> None:
+            self._mod_dl_lock = threading.Lock()
+            self._mod_dl = {"items": [], "pause": True, "cancel": False, "done": False}
+
+    item = {"url": "https://gamebanana.com/mods/12345", "name": "", "status": "等待中"}
+    api_mod.EndfieldModControllerApi._mod_download_one(_Stub(), item, tmp_path)   # type: ignore[arg-type]
+
+    assert item["status"] == "已暂停"
+    assert "断点" in item["message"]
+    # 关键：**没有**停在「读取香蕉网信息」/「下载中」那种"还在干活"的状态上
+    assert item["status"] not in ("读取香蕉网信息", "下载中")

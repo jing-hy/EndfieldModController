@@ -161,19 +161,43 @@ def dlss5_supported(refresh: bool = False) -> tuple[bool, str, str]:
     gpu = "、".join(nvidia) or "未检测到 NVIDIA 显卡"
     if not nvidia:
         return False, gpu, "未检测到 NVIDIA 显卡 —— DLSS5 神经渲染无法启用"
-    generation = nvidia_generation(" / ".join(nvidia).lower())
-    if generation is None:
+    # ⚠️⚠️ **必须逐张卡判代次，取最高的一张**（2026-10-04 修，用户收到的反馈）：
+    # 「双显卡（一张 5080，一张 4060）会被 dlss5 的开关挡住，显示只支持 50 显卡」。
+    # 原来是把所有卡名**拼成一串**再 `re.search` 第一个 `rtx\d{4}` —— 取到哪张**完全看
+    # 适配器枚举顺序**，于是装了 5080 的机器被判成"只有 40 系"、开关直接被挡掉。
+    # 正确语义：**只要有一张满足就够了**（用户当然会用那张跑游戏）。
+    per_card = [(name, nvidia_generation(name.lower())) for name in nvidia]
+    known = [(name, gen) for name, gen in per_card if gen is not None]
+    if not known:
         return False, gpu, f"识别不出显卡代次（{gpu}）—— DLSS5 目前只支持 RTX 50 系"
-    if generation >= 50:
-        return True, gpu, f"RTX {generation} 系（满足 DLSS5 的硬件前提）"
+    best_name, best = max(known, key=lambda item: item[1])
+    if best >= 50:
+        if len(known) > 1:
+            listing = "、".join(f"{name}（RTX {gen} 系）" for name, gen in known)
+            return True, gpu, (
+                f"检测到多张显卡：{listing} —— 其中 **{best_name}** 满足 DLSS5 的硬件前提，"
+                f"**请让游戏用这张卡跑**（另一张不支持 DLSS5，不是装坏了）")
+        return True, gpu, f"RTX {best} 系（满足 DLSS5 的硬件前提）"
     return (
         False,
         gpu,
-        f"RTX {generation} 系 —— **DLSS5 神经渲染目前只支持 RTX 50 系**"
+        f"RTX {best} 系 —— **DLSS5 神经渲染目前只支持 RTX 50 系**"
         f"（官方已表态后续扩展到 40 系，但当前驱动/运行库尚未放开）。"
         f"这类机器上它一帧也出不来（面板会显示「成功NR帧 0」+ `最新NR NGX结果 0xBAD00001`），"
         f"所以默认帮你关掉、也不再让你白折腾。",
     )
+
+
+def nvidia_generations(names_lower: str) -> list[int]:
+    """从一段（**可能含多张卡**的）文字里认出**所有** RTX 代次，按出现顺序返回。
+
+    ⚠️ 判断"这台机器能不能用 DLSS5"必须用这个 / 或用逐卡结果（2026-10-04，用户收到的反馈：
+    双显卡机器「一张 5080 + 一张 4060」被开关挡掉）——`nvidia_generation()` 只取**第一个**
+    匹配，拼串时取到哪张完全看适配器枚举顺序。
+    """
+    import re
+
+    return [int(match.group(1)[:2]) for match in re.finditer(r"rtx\s*(\d{3,4})", names_lower)]
 
 
 def nvidia_generation(names_lower: str) -> int | None:
@@ -184,16 +208,12 @@ def nvidia_generation(names_lower: str) -> int | None:
     RTX 40 系要等 NVIDIA 放开（官方后来确认会扩展：[guru3d](https://www.guru3d.com/story/nvidia-reverses-course-dlss-5-is-now-officially-coming-to-rtx-40series-gpus/)）。
     实测印证：一台 RTX 5080 正常出帧，两台 RTX 40 系笔记本（4060 / 4070 Laptop）
     都是 `feature 18 create failed with 0xbad00001`（NGX FeatureNotSupported）。
-    """
-    import re
 
-    match = re.search(r"rtx\s*(\d{4})", names_lower)
-    if match:
-        return int(match.group(1)[:2])
-    match = re.search(r"rtx\s*(\d{3})", names_lower)
-    if match:
-        return int(match.group(1)[:2])
-    return None
+    ⚠️ 它**只认第一个匹配**，只适合"传进来的就是一张卡"的场合。判"支持与否"请用
+    `nvidia_generations()`（多卡）或 `dlss5_supported()`（逐卡取最高）。
+    """
+    found = nvidia_generations(names_lower)
+    return found[0] if found else None
 
 
 def _verdict(names_lower: str) -> str:
@@ -203,16 +223,22 @@ def _verdict(names_lower: str) -> str:
     （见诊断包的运行库指纹段）。判据按**代次**：DLSS5 首发只支持 RTX 50 系。
     """
     if "rtx" in names_lower:
-        gen = nvidia_generation(names_lower)
+        # ⚠️ **按"最高的那张卡"判断**（2026-10-04 修）：双显卡机器拼串时只取第一个匹配
+        # 会把 5080+4060 的机器说成 40 系，和 `dlss5_supported()` 的结论自相矛盾。
+        generations = nvidia_generations(names_lower)
+        gen = max(generations) if generations else None
+        multi = (f"（本机检测到 {len(generations)} 张 RTX 卡："
+                 f"{'、'.join(str(g) + ' 系' for g in generations)}，按最高代次判断）"
+                 if len(generations) > 1 else "")
         # ⚠️ 判据要与 `dlss5_supported()` 一致（2026-10-04 修）：那边是 `generation >= 50`
         # （为将来 60/70 系留门），这里原来写死 `gen == 50` ⇒ 未来更高代次的机器会被
         # 开关放行、却在诊断包里读到"首发仅支持 50 系…属于支持范围问题"这种互相矛盾的结论，
         # 看包的人会被同一份总结里的两句话带偏。
         if gen is not None and gen >= 50:
-            return f"检测到 RTX {gen} 系显卡 → 具备 DLSS5 神经渲染的硬件前提"
+            return f"检测到 RTX {gen} 系显卡{multi} → 具备 DLSS5 神经渲染的硬件前提"
         if gen is not None:
             return (
-                f"检测到 RTX {gen} 系显卡 → **DLSS5 神经渲染首发仅支持 RTX 50 系**（官方已表态"
+                f"检测到 RTX {gen} 系显卡{multi} → **DLSS5 神经渲染首发仅支持 RTX 50 系**（官方已表态"
                 f"后续扩展到 40 系，但当前驱动/运行库尚未放开）。这类机器进游戏后会看到面板"
                 f"「成功NR帧 0」+ `最新NR NGX结果 0xBAD00001`（NGX 明确回「不支持该特性」），"
                 f"`ReShade.log` 里是 `feature 18 create failed with 0xbad00001` —— "

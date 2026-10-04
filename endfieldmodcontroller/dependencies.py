@@ -143,7 +143,11 @@ def _http_get(
     from . import fastnet
 
     if dest is None:
-        _final, body = fastnet.fetch(url, timeout=timeout)
+        # ⚠️ **`cancel` 必须一路传下去**（2026-10-04 修）：这个"内存下载"分支原来把
+        # `cancel` **静默丢了** —— 而「探测香蕉网信息」（`gamebanana_profile` 读 JSON）
+        # 正是走这里，于是用户点「暂停 / 终止」在探测期间完全无效（他的原话：
+        # 「探测期间无法暂停」「点了终止也还是探测中」）。`fastnet.fetch` 现已支持中途叫停。
+        _final, body = fastnet.fetch(url, timeout=timeout, cancel=cancel)
         if expected_sha256:
             actual = hashlib.sha256(body).hexdigest()
             expected = fastnet.norm_sha256(expected_sha256)
