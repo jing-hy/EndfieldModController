@@ -4,13 +4,13 @@
 > 目的：让「当时为什么这么改、踩过什么坑」跟着源码一起留在仓库里。
 > 想改内容 → 改记忆库（用记忆工具），再跑一次本脚本；不要直接编辑本文件。
 
-- 生成时间：2026-10-04 11:53:27
+- 生成时间：2026-10-04 14:46:19
 - 来源：`.dsh-meow/memory.db`
-- 条目：504 条（已跳过 archived / 其它项目的条目）
+- 条目：519 条（已跳过 archived / 其它项目的条目）
 
 ---
 
-## 设计原则 / 行为准则（16 条）
+## 设计原则 / 行为准则（17 条）
 
 ### 用户准则（原话）：「不是，你直接去官网拉」—— **一手…
 *2026-09-27 18:53*
@@ -237,7 +237,14 @@
 
 `关键词：["启动页UI铁律","尽早展示加载页","不要cmd黑窗","CREATE_NO_WINDOW","日志框纯黑可复制","text_select True","滑块要真的有用","弹窗按钮自解释","一个弹窗只做一件事","推荐动作放右侧橙色主按钮","更多要出就地菜单","网址直接点开"]`
 
-## 项目记忆（结构 / 决策 / 部署 / 待办）（31 条）
+### 【modecontroller · Release 正文…
+*2026-10-04 11:53*
+
+【modecontroller · Release 正文口吻】**发布文案一律客观陈述**（改了什么、加了什么、根因、怎么验证），**不出现"你 / 您 / 用户 / 反馈者说 / 你的原话 / 你提的要求"这类对话痕迹**。用户 2026-10-04 原话：「改一下 release 的文本，**从客观角度写，不要说我提的，只要说改了什么加了什么**」。issue 编号与链接要**保留**（那是客观标注，另见发布规则的"Release notes 必须提 issue"）。自查手法：`Select-String -Path RELEASE_NOTES.md -Pattern '你|您|反馈者|原话|提的要求|用户'` 应为空。历史先例：v1.0.7 也做过同一次整改（commit `a4be0a1`）。改线上正文用 `gh release edit <tag> --notes-file RELEASE_NOTES.md`（**只改正文、不动附件**），改完顺手推 main 保持仓库里那份一致。
+
+`关键词：["Release 正文","客观口吻","对话痕迹","不要说我提的","只讲改了什么","RELEASE_NOTES","发版文案","issue 编号保留","gh release edit","发布规则"]`
+
+## 项目记忆（结构 / 决策 / 部署 / 待办）（33 条）
 
 ### 项目概述
 
@@ -367,6 +374,20 @@ runtime\dlss5                      38 字符  ❌ 崩
 
 `关键词：["clear_game_injections_on_launch","一键还原终末地","清除第三方注入","backup_and_clean","先净化后补齐","game_backup","backup_ok","System32 补齐","默认开","启动前净化","proxy"]`
 
+### 香蕉网网站分类已接入 Mod 库（2026-10-04，…
+*2026-10-04 12:38*
+
+香蕉网网站分类已接入 Mod 库（2026-10-04，commit 9652ff5，**未推送**）：`moddl.gamebanana_category()` 解析 ProfilePage 的 `_aCategory`/`_aSuperCategory` 判根分类（只硬编码 3 个根 id：Skins=35464/UI=42706/Other-Misc=42780）；入库时写 `download-info.json` 的"网站分类"行 + `mod.meta.json` 的 `site_category`/`site_category_root`/`source`/`source_id`/`source_page`（**只补来源字段，绝不碰 kind/group/character**）；`core.ModInfo` 带出并暴露给前端；Mod 卡片状态行显示徽章。**尚未做**：用分类自动填角色/类型（会影响同角色互斥，等用户拍板）。实测：终末地全量 695 个 Mod 100% 带分类；pytest 721 passed。
+
+`关键词：["香蕉网分类接入","gamebanana_category","site_category","网站分类徽章","download-info.json","mod.meta.json","9652ff5","未推送","Skins UI Other-Misc","637","待拍板自动归类"]`
+
+### 2026-10-04「杀毒线」落地（commit 19c…
+*2026-10-04 13:29*
+
+2026-10-04「杀毒线」落地（commit 19c2246，未推送）：① `filewatch` 监视范围从"runtime 里 11 个文件"扩到**游戏目录 proxy（d3dcompiler_47/vulkan-1）+ plugin/*.dll + System32 的两个转发目标**，`WatchedFile` 加 `base_kind`（game/system32），**算不出路径就整项跳过**（探测不到游戏目录时不能退回拼数据根，否则把不存在的路径算成"被删了"）；`_DISABLED_SUFFIXES` 补 `.endfieldmodcontroller.disabled`。② 新增 `antivirus` 模块：`recent_detections()` 读 Defender `Get-MpThreatDetection`（只留路径落在我们目录下的，"命令失败"与"没有记录"严格分开）、`apply_exclusions()` 幂等加白名单、`restore()` 用 MpCmdRun -Restore 还原；只处理 Defender，360/火绒只保留弹窗引导。③ 新配置 `defender_exclusions_enabled` **默认 True**，检测到缺白名单直接加（不再弹窗等用户点）；启动页 `antivirusGate()` 异步预热 + 一键启动前同步读，只有真查到隔离记录才弹窗。pytest 739 passed。
+
+`关键词：["杀毒线","antivirus","recent_detections","Get-MpThreatDetection","apply_exclusions","defender_exclusions_enabled","base_kind","System32 转发目标","filewatch 扩展","MpCmdRun 还原","19c2246","未推送"]`
+
 ### 用户原话
 
 ### 【用户会怎样问"审计屎山"这类活（2026-10-04 …
@@ -494,16 +515,17 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 `关键词：["MMD素材来源","v-idol组织","vidol-dance仓库","codeload取tar.gz","default_branch","lobe-vidol-market","r2.vidol.chat已失效","BowlRoll要登录","镜头可匿名下载","极乐净土已归档"]`
 
 ### **modecontroller 当前状态 · 唯一真源…
-*2026-10-04 11:52*
+*2026-10-04 12:02*
 
 **modecontroller 当前状态 · 唯一真源**（有变动请**更新本条**，别再另开新条目）
-**发布**：GitHub **Latest = v1.0.8**（2026-10-04）https://github.com/jing-hy/EndfieldModController/releases/tag/v1.0.8 ；远端 main = `540935e`（本地已推平）。附件两件：
-`EndfieldModController.exe` 29,935,240 B / sha256 `0ca55842d7686be166f76ab485f13e97762f231121be5bc525071f2d07c35411`；
-`assets-bundle.zip` 144,696,905 B / sha256 `b5acde37c91b61e4fc9871bd38cee71ac9e59f5e36d129fcdfd203531c9d5ed5`（83 文件 / 138 MB）。推送前快照：`D:\zmdmod\_snapshot_1.0.8-20261004-115139`。**issue #13 已回复并关闭**（#5 = 用户说"不要管"）。
-**v1.0.8 的内容**：① 诊断包「一次抓齐」（修 #13 三条缺陷；新增 `capture-manifest.txt`/`Player.log`/WER/`game-inventory.txt`/`environment.txt`/`xxmi` 脱敏配置+日志/`plugin` 文本/`SecondaryMotion` json/EFMI+3DMigoto 两侧日志）；② 设置页新开关「启动前清除游戏目录里的所有第三方注入」（`clear_game_injections_on_launch`，默认开，先净化后补齐、可还原）+ 两个手动按钮；③ **第一人称中文修复**（生效那份 `runtime\reshade\ReShade.ini` 从没被同步过 → 补段补键 + 顺序修好 + 字体写到生效那份），并且**随组件下载也写**（`api._sync_firstperson_ini_after_install`）；④ 自检补 `backup_ok`（缺 `.bak` 自动从 System32 补齐）；⑤ 发版流程新增 `scripts/check_component_versions.py`（联网核对随包组件版本表，本次把 XXMI→v2.4.1、Poser→0.5.18）。**707 passed**。modtest 里的 exe 已同步为 1.0.8 + 伪旧版 `0.1.9-from-1.0.8`。
-**流程**：改代码 → pytest → **自己 commit** → `build_release.py --modtest-both` → `prepare_release.py` → `push.py`（先快照 + 刷记忆日志/结构树）→ `gh release create <tag> --title <tag> --notes-file RELEASE_NOTES.md --latest`（**不带附件**）→ `upload_release_assets.py`（无参数，自己认 tag；同名资产 422）。⚠️ 前端重建用 `node node_modules/vite/bin/vite.js build`（`pnpm build` 会触发 install 并因 esbuild 构建脚本被忽略而失败）；⚠️ gh 未登录时注入 `$env:GH_TOKEN=[Environment]::GetEnvironmentVariable('GH_TOKEN','User')`。
-**遗留**：v1.0.5 的 Release 正文与标题不符（等他点头改）；normify 结构树待重跑四步（`docs\structure\` 是镜像，push 时会同步）。
-**Steam++ 调研（报告在 `_tmp/research/steampp-accelerator.md`）**：加速内核是 FastGithub 2.1.4 移植（本地反代 + 自签证书 HTTPS 中间人 + WinDivert/hosts）、GPL-3.0 不可内嵌；**它和我们 `fastnet.MIRRORABLE_HOSTS` 都漏了 `release-assets.githubusercontent.com`** —— 很可能是"大文件 20 秒超时"的根因，待验证镜像是否支持该主机。香蕉网走自有 nginx CDN、多节点择优只差 2.5 倍且都慢 ⇒ 无收益。
+**发布**：GitHub **Latest = v1.0.8**（2026-10-04）https://github.com/jing-hy/EndfieldModController/releases/tag/v1.0.8 ；附件 `EndfieldModController.exe` 29,935,240 B / sha256 `0ca55842d7686be166f7…` + `assets-bundle.zip` 144,696,905 B / sha256 `b5acde37c91b61e4fc98…`。远端 main = `ba02c1d`。
+**本地（未推送、未发版）**：main = `363ea34`，版本号 **1.0.9**（= 最新 Release + 1）。
+**v1.0.9 内容（本地）**：下载链路 —— ① 直连尝试前加 **TCP 预检**（5s、只连不读；连不上立刻换镜像，`line_mode=direct` 时不跳）；② `MIRRORABLE_HOSTS` 补 `release-assets.githubusercontent.com` / `github-releases.githubusercontent.com`；③ 可镜像主机与预检的 7 条回归测试。实测：端到端 13.8s / 2.07 MB/s / sha256 一致。**714 passed**。
+**v1.0.8（已发）内容**：① 诊断包「一次抓齐」（修 #13 三条缺陷；新增 `capture-manifest.txt`/`Player.log`/WER/`game-inventory.txt`/`environment.txt`/`xxmi` 脱敏配置+日志/`plugin` 文本/`SecondaryMotion` json/EFMI+3DMigoto 两侧日志）；② 设置页开关「启动前清除游戏目录里的所有第三方注入」（`clear_game_injections_on_launch`，默认开，先净化后补齐、可还原）；③ 第一人称中文修复（生效那份 `runtime\reshade\ReShade.ini` 补段补键 + 顺序修好 + 字体；并随组件下载写入）；④ 自检补 `backup_ok`；⑤ 发版流程加组件版本表核对（XXMI→v2.4.1、Poser→0.5.18）。modtest 已同步 1.0.8 + 伪旧版 `0.1.9-from-1.0.8`。
+**流程**：改代码 → pytest → **自己 commit** → `build_release.py --modtest-both` → `prepare_release.py` → `push.py`（先快照 + 刷记忆日志/结构树）→ `gh release create <tag> --title <tag> --notes-file RELEASE_NOTES.md --latest` → `upload_release_assets.py`（无参数）。⚠️ 前端重建用 `node node_modules/vite/bin/vite.js build`；⚠️ gh/上传要注入 `$env:GH_TOKEN`；⚠️ **Release 正文一律客观口吻**（见 rules 条）。
+**issue**：只剩 **#5**（用户说"不要管"）；#13 已回复并关闭。
+**遗留**：v1.0.5 的 Release 正文与标题不符（等他点头）；normify 结构树待重跑四步；**待用户实测**：addon 每进一次游戏会不会把生效那份 ini 写回 `Language=0`（若会，加"游戏进程出现后再钉一次"的兜底）。
+**Steam++ 结论（2026-10-04 实测）**：其加速内核是 FastGithub 2.1.4 移植（本地反代 + 自签证书 HTTPS 中间人 + WinDivert/hosts）、GPL-3.0 不可内嵌；**它没覆盖 `release-assets.githubusercontent.com`**，但该域名直连可用（0.55 MB/s），真正的超时点是 **`github.com` 直连连不上**（20s → WinError 10060）。香蕉网走自有 nginx CDN、多节点择优只差 2.5 倍且都慢 ⇒ 无收益。报告：`_tmp/research/steampp-accelerator.md`。
 
 `关键词：["modecontroller 当前状态","唯一真源","v1.0.8","Release v1.0.7","未推送","诊断包一次抓齐","clear_game_injections_on_launch","pytest 695","issue 13","前端重建 vite","Steam++ 调研","release-assets.githubusercontent.com"]`
 
@@ -662,7 +684,7 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 
 `关键词：["全项目审计","静态扫描脚本","并行subagent深读","逐条核实再改","审计报告","661 passed","未修清单","已实现却未被调用","未推送未发版","备份语义例外","前后端不匹配补齐","禁改也要审"]`
 
-## 经验教训（被纠正过的、踩过的坑）（357 条）
+## 经验教训（被纠正过的、踩过的坑）（365 条）
 
 ### XXMI/EFMI 启动终末地是 Endfield.ex…
 *2026-09-27 14:58*
@@ -3944,7 +3966,63 @@ tkinter 只留作源码模式兜底，且失败时给出**可照做的替代**�
 
 `关键词：["生效那份","RESHADE_BASE_PATH_OVERRIDE","runtime\\reshade","dlss5\\ReShade.ini","两份 ini 分叉","缺段补段","补键","同步顺序","第一人称中文","Language=1","中文字体 Font","addon 写出厂值","bak-before-enhancer-sync"]`
 
-## 事实（细碎的原子信息）（69 条）
+### 【Steam++ 环境下的下载真相（2026-10-04…
+*2026-10-04 12:02*
+
+【Steam++ 环境下的下载真相（2026-10-04 本机链路分层实测，纠正了我此前的初判）】① **`github.com` 在没有加速器时直连连不上**（用真实 IP 20.205.243.166 直连：20 秒后 WinError 10060）；它"看起来正常"是因为 Steam++（Watt Toolkit）的 hosts 把 `github.com` **和** `objects.githubusercontent.com` 指向 127.0.0.1 走本机反代。② `release-assets.githubusercontent.com`（`…/releases/download/…` 的 302 落点）**不在 Steam++ 的 hosts 里**（实测仍解析到真实 185.199.x）—— 它**直连是通的**（实测 0.55 MB/s），所以"落点没人管导致超时"这个初判**被实测否掉**；真正的超时发生在**第一步 github.com**。③ 镜像站对该落点多数返回 **403**（gh.nxnow.top / ghproxy.net），只有 gh-proxy.com 支持 ⇒ **不该把 URL 改成落点再镜像**；正确做法是"**初始 URL 套镜像前缀**"（镜像站在服务端自己跟随 302），实测三条镜像对初始 URL 全部 206。④ **修法**：`fastnet` 给直连加 **TCP 预检**（5 秒、只连不读）—— 只判"连不上"不判"慢"，连不上立刻换镜像（原来要先赔 15–20 秒）。实测端到端 13.8s/2.07 MB/s 下完 29.9 MB。
+
+`关键词：["Steam++","hosts 劫持","github.com 直连不通","release-assets.githubusercontent.com","302 落点","镜像 403","TCP 预检","fastnet","MIRRORABLE_HOSTS","WinError 10060","多线路抢块","链路分层实测"]`
+
+### 香蕉网分类是 mod 级的、作者自己选的（不是解析文件内…
+*2026-10-04 12:27*
+
+香蕉网分类是 mod 级的、作者自己选的（不是解析文件内容）；gamebanana.com/dl/<文件id> 只 302 跳 CDN，反查不到所属 mod 与分类；叶子分类 id 会随新角色增长（Arcane/Liino/Typhoeus 都是后加的），只能硬编码 3 个根 id（35464/42706/42780）。
+
+`关键词：["分类是 mod 级","作者自己选","文件级分类不存在","dl 文件id","302 跳 CDN","反查不到","叶子 id 会增长","别硬编码叶子","根 id 35464 42706 42780"]`
+
+### 反馈者 AST 诊断包（2026-10-04）的硬判据：…
+*2026-10-04 12:38*
+
+反馈者 AST 诊断包（2026-10-04）的硬判据：游戏进程退出码 exit_code=3221225781 = 0xC0000135 = **STATUS_DLL_NOT_FOUND**，两次复现（pid 22196 / 14332），每次都只活 ~38 秒；而 ReShade/poser/sbm/DLSS5 feed **都成功 attach 过**（ReShade 甚至走到渲染并"干净卸载"），Windows 事件里**没有** Application Error / WER / dump ⇒ 不是常规崩溃。⇒ 要定位"缺哪个 DLL"，最该有却**没被抓进包**的是**游戏自己的崩溃日志 `CrashSightLog\`**（游戏目录里有 16 项，本机也有）。
+
+`关键词：["0xC0000135","STATUS_DLL_NOT_FOUND","3221225781","闪退","游戏退出码","CrashSightLog","诊断包缺项","无 Application Error","WER 没有","38 秒","反馈者 AST"]`
+
+### poser/sbm 的 loader proxy（`d3…
+*2026-10-04 12:38*
+
+poser/sbm 的 loader proxy（`d3dcompiler_47.dll` / `vulkan-1.dll`，35~56 KB）在字符串表里写死了转发目标：`C:\Windows\System32\d3dcompiler_47.D3DCompile`、`C:\Windows\System32\vulkan-1.vkAcquireNextImage2KHR` 这种"路径.导出名"。⇒ **它只从 System32 加载真 DLL，游戏目录里的 `<name>.bak` 根本不参与转发** —— 所以"`.bak` 里是游戏自带原版还是 System32 版"对 proxy 行为**没有影响**，排查时别往这个方向猜（本次差点按它归因）。
+
+`关键词：["loader proxy","d3dcompiler_47","vulkan-1","转发目标","System32","bak 不参与","字符串表","路径.导出名","排除项","别猜 bak"]`
+
+### `secondary_motion.ensure_pro…
+*2026-10-04 12:38*
+
+`secondary_motion.ensure_proxy_backup()` 的备份语义缺口：`<name>.bak` 缺失时它**直接从 System32 复制一份**当"原版备份"，而不管游戏目录里那份**真原版**（`target` 很可能正是游戏自带的）。配合 `poser.ensure_loader()`（见 `.bak` 已存在就不再备份 target）⇒ 顺序一旦是"先补 .bak、后装 proxy"，**游戏自带的原版就被 proxy 覆盖且永久丢失**，之后"一键还原"只能还原成 System32 版。对照证据：本机(能正常玩) `d3dcompiler_47.dll.bak`=4,524,496 B 且 mtime=游戏安装日 2026-01-24；反馈者=4,669,440 B（System32 版）。注：此缺口**不是**本次闪退原因（proxy 只走 System32），但属"备份可还原性"红线。
+
+`关键词：["ensure_proxy_backup","备份语义","bak 补齐","System32 覆盖","游戏自带原版","不可逆","一键还原失真","ensure_loader","d3dcompiler_47.dll.bak","4","524","496","备份红线"]`
+
+### 诊断包扩充（2026-10-04，commit ab9c…
+*2026-10-04 12:51*
+
+诊断包扩充（2026-10-04，commit ab9c850，未推送）后本机实测：48 项 / 878 KB → **95 条目 / 1.01 MB**。新增：`game/CrashSightLog/`（游戏自己的崩溃日志，**最关键**）、`game/AntiCheatExpert/`、`describe_exit_code()`（3221225781 → "0xC0000135 STATUS_DLL_NOT_FOUND"）、SideBySide + AppModel-Runtime 事件、近 60 分钟全部错误事件、安全软件/Defender 隔离记录 + `Get-MpThreatDetection` 的文件路径、System32 关键模块存在性、AppInit_DLLs/IFEO 注入点、游戏目录"值得看的子目录内容"。⚠️ 踩坑：把 `LOADER_PROXY_MODULES` 全量报"缺失"会刷出 5 行假警报（dxgi/d3d11/d3d12/nvapi64/winmm 本来就不该在游戏目录）⇒ 只对 d3dcompiler_47/vulkan-1 报警。
+
+`关键词：["诊断包扩充","CrashSightLog","AntiCheatExpert","describe_exit_code","SideBySide","Get-MpThreatDetection","System32 模块清单","AppInit_DLLs","IFEO","95 条目","假警报","ab9c850"]`
+
+### "崩溃是不是反作弊或杀毒干的"排查结论（2026-10-…
+*2026-10-04 12:51*
+
+"崩溃是不是反作弊或杀毒干的"排查结论（2026-10-04，反馈者退出码 0xC0000135 STATUS_DLL_NOT_FOUND）：**杀毒方向机制最吻合**（隔离/删除文件 ⇒ 加载时 DLL_NOT_FOUND，且用户自己早就提过"文件老是被删要提示加白名单"），但当时判据不够定论 —— 旧诊断包没采 Defender 的检测/隔离记录。**反作弊方向可能性较低**：反馈者机器上 `AntiCheatExpert` 服务是 Stopped（游戏退出后 ACE 也退，正常），且 0xC0000135 不是典型反作弊退出码。**新发现的机器差异**：反馈者有一个 Running 的 `EisPassGuardXInputService`（本机没有），其驱动 `PassGuard_x64.sys` 被资料指为 "SysEnter Application"、与内存完整性（HVCI）不兼容，另有资料把它关联到"密码卫士安全控件"（银行类）；而反馈者的 Player.log 恰好断在 `Using XInput` 之后 —— **只是相关，不能当因果**。
+
+`关键词：["反作弊","杀毒","0xC0000135","STATUS_DLL_NOT_FOUND","EisPassGuardXInputService","PassGuard_x64.sys","SysEnter","内存完整性","密码卫士","Using XInput","AntiCheatExpert Stopped","相关不等于因果"]`
+
+### 一个"做了但没盖到现场"的守护最容易骗人：2026-10…
+*2026-10-04 13:29*
+
+一个"做了但没盖到现场"的守护最容易骗人：2026-10-01 做的反杀毒弹窗（`filewatch`）一直在跑，用户以为"没弹 = 不是杀毒"；实际它的范围只有 `runtime\` 里 11 个文件，而这次要查的缺口在**游戏目录 / System32**，`file_watch.json` 里 11 项全是 missing=0/scans=4 —— 一次都没看那儿。教训：① 判断"某个守护有没有查出来"之前，先核对**它的覆盖范围**是否包含出事的现场，否则会把"没查"读成"没事"；② 扩范围时最大的风险是**误报**（探测不到游戏目录时若退回拼数据根，会把根本不存在的路径算成"被删了"）⇒ 算不出路径就整项跳过、不计数。
+
+`关键词：["守护覆盖范围","没弹窗不等于没事","filewatch 范围","游戏目录 System32","误报风险","路径算不出就跳过","不计数","判据缺口","file_watch.json"]`
+
+## 事实（细碎的原子信息）（73 条）
 
 ### modecontroller：游戏目录 loader_l…
 *2026-09-27 14:58*
@@ -4706,6 +4784,34 @@ modecontroller 仓库可发现性：`jing-hy/EndfieldModController` **一直是 
 Steam++（Watt Toolkit）加速内核 = **FastGithub 2.1.4 的移植**：本地反向代理 + **自签根证书做 HTTPS 中间人** + WinDivert 内核驱动 / hosts 改写把流量引到本机 80/443；规则是**按域名表**（服务端下发），不是通用反代。仓库 `BeyondDimension/SteamTools` **GPL-3.0** ⇒ 内嵌会传染、且需管理员 + 装本机根证书 + 改 hosts + 装驱动 ⇒ **不可自带**（与"不要改系统、用完马上关"冲突）。香蕉网走**自有 nginx CDN（filecacheNN）**，实测 4 节点 3.8–9.7 KB/s、择优只差 2.5 倍 ⇒ 套同一套方案**无收益**。⚠️ **高价值发现**：它覆盖了 `objects.githubusercontent.com` 却**漏了 `release-assets.githubusercontent.com`**（Release 资产的真实落点），而我们的 `fastnet.MIRRORABLE_HOSTS` **同样漏了它** —— 很可能就是"大文件 20 秒超时（WinError 10060）"的根因，待验证镜像站是否代理该主机。完整报告：`_tmp/research/steampp-accelerator.md`。
 
 `关键词：["Steam++","Watt Toolkit","FastGithub","反向代理","HTTPS 中间人","WinDivert","GPL-3.0","release-assets.githubusercontent.com","MIRRORABLE_HOSTS","fastnet","香蕉网 CDN","WinError 10060"]`
+
+### 香蕉网 apiv11 每个 mod 都带网站分类（作者投…
+*2026-10-04 12:27*
+
+香蕉网 apiv11 每个 mod 都带网站分类（作者投稿时选的），终末地(game 21842)根分类只有三个：Skins=35464、UI=42706、Other/Misc=42780；实测全量 695 条 100% 有分类，无"未分类"。
+
+`关键词：["GameBanana","香蕉网","apiv11","mod 分类","Skins","UI","Other/Misc","35464","42706","42780","终末地","21842","皮肤识别"]`
+
+### 香蕉网 ProfilePage 的分类字段不能直接定根：…
+*2026-10-04 12:27*
+
+香蕉网 ProfilePage 的分类字段不能直接定根：UI/Other-Misc 类 mod 的 _aSuperCategory 为空，Skins 角色类 mod 的 super 是 Operators(42770) 而非 Skins；只有列表/搜索接口（Mod/Index、Util/Search/Results）直接给 _aRootCategory。
+
+`关键词：["GameBanana","ProfilePage","_aCategory","_aSuperCategory","_aRootCategory","根分类判定","Operators","42770","Skiterms","列表接口","搜索接口","分类字段坑"]`
+
+### 香蕉网按分类浏览：Mod/Index?_aFilters…
+*2026-10-04 12:27*
+
+香蕉网按分类浏览：Mod/Index?_aFilters[Generic_Category]=<分类id>（传根 id 会含其所有子孙；_nPerpage 上限 50，老写法 _idGameRow 不生效会返回全站 55 万条）；gamebanana.com/dl/<文件id> 是 302 跳 CDN 直链，反查不到所属 mod 与分类。
+
+`关键词：["_aFilters","Generic_Category","Generic_Game","_nPerpage 上限50","_idGameRow 失效","分类过滤","dl 直链","反查不到 mod","CDN 302","按分类浏览"]`
+
+### 读香蕉网单条 mod 的分类有个坑：ProfilePag…
+*2026-10-04 12:27*
+
+读香蕉网单条 mod 的分类有个坑：ProfilePage 只给 _aCategory（叶子）与 _aSuperCategory（直接父级，可为空）—— UI 与 Other-Misc 类 mod 的 super 是空，Skins 角色类 mod 的 super 是 Operators(42770) 而不是 Skins，靠它定不了根；要看根分类得用列表/搜索接口的 _aRootCategory。按分类浏览用 Mod/Index?_aFilters[Generic_Category]=<id>（传根 id 含子孙；_nPerpage 上限 50，_idGameRow 老写法不生效会返回全站 55 万条）。
+
+`关键词：["_aCategory","_aSuperCategory","_aRootCategory","叶子分类","父级为空","Operators 42770","定不了根","Mod/Index","_aFilters","Generic_Category","_nPerpage 上限50","分类过滤"]`
 
 ## 用户偏好与环境（**含个人信息，公开前请自行取舍**）（18 条）
 
