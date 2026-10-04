@@ -286,6 +286,7 @@ def write_download_info(
     game: str = "",
     page: str = "",
     site: str = "",
+    site_category: str = "",
 ) -> Path | None:
     """往**这个 Mod 自己的文件夹**里写一份「从哪下的、什么时候下的」。
 
@@ -322,6 +323,11 @@ def write_download_info(
         payload["所属游戏"] = game
     if page:
         payload["页面"] = page
+    if site_category:
+        # 香蕉网的网站分类（如 `Skins / Operators / Arcane`）—— 用户 2026-10-04 要求接进来。
+        # 这份文件是给人看的（中文键、值原样），所以只写这一行可读路径；
+        # 机器读的那份（含 root=皮肤/UI 判定）写在 `mod.meta.json` 里，见 api 的入库流程。
+        payload["网站分类"] = site_category
     target = mod_dir / DOWNLOAD_INFO_NAME
     try:
         target.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -396,6 +402,67 @@ AUX_FILE_MAX_BYTES = 2 * 1024 * 1024
 # https://gamebanana.com/mods/updates/690864 ，看**最新版需要下什么资源**，然后再去下载，
 # 而不是一上来就下最新的包」。
 GAMEBANANA_UPDATES_API = "https://gamebanana.com/apiv11/Mod/{mod_id}/Updates"
+
+# ── 网站分类（"这是皮肤还是 UI"）─────────────────────────────────────────────
+# 用户 2026-10-04 要求：「把 mod 在香蕉网中的分类接入管理器的分类」。
+#
+# 实测（2026-10-04，把终末地全部 **695** 个 Mod 拉下来逐条统计）：
+#   * `Mod/<id>/ProfilePage` 给 `_aCategory`（叶子 / 直接分类）与 `_aSuperCategory`
+#     （它的父级，**可以为空**）；列表与搜索接口反而直接给根分类 `_aRootCategory`。
+#   * 终末地只有三个**根**分类：Skins(35464) / UI(42706) / Other-Misc(42780)，
+#     而且 **100% 的 Mod 都带分类**（没有"未分类"漏网）。
+#   * ⚠️ **光看 `_aSuperCategory` 定不了根**：UI 与 Other/Misc 类 Mod 的 super 是空的，
+#     而 `Skins → Operators → 角色` 的 super 是 `Operators`(42770) 而不是 `Skins`。
+#   * ⚠️ **别硬编码叶子 id**：它们会随新角色增长（Arcane 47395 / Liino 48075 /
+#     Typhoeus 48868 都是后加的）。所以只硬编码 3 个根，其余靠"根的直接子分类"映射回去。
+GAMEBANANA_ROOT_CATEGORIES = {35464: "Skins", 42706: "UI", 42780: "Other/Misc"}
+GAMEBANANA_SKINS_CHILDREN = {42770, 42771, 42772, 42778, 42779}
+
+
+def _gb_category_entity(value) -> tuple[int, str]:
+    """把 API 里 `{_idRow, _sName, …}` 那种分类对象拆成 `(id, 名字)`。
+
+    不是对象（缺失 / null / 空字典）时返回 `(0, "")` —— 实测 UI 与 Other/Misc 类 Mod
+    的 `_aSuperCategory` 就是这种"有键但没内容"的形态，别把它当成名字为空的分区。
+    """
+    if not isinstance(value, dict):
+        return 0, ""
+    try:
+        ident = int(value.get("_idRow") or 0)
+    except (TypeError, ValueError):
+        ident = 0
+    return ident, str(value.get("_sName") or "").strip()
+
+
+def gamebanana_category(data: dict) -> dict:
+    """从 ProfilePage 数据里取**网站分类**，返回可直接展示与存档的结构。
+
+    返回 `{"id", "name", "super_id", "super_name", "root", "path"}`：
+      * `root` = `Skins` / `UI` / `Other/Misc`（定不了就是 `""`，不猜）；
+      * `path` = 给人看的完整路径，如 `Skins / Operators / Arcane`、`UI`。
+
+    ⚠️ 这是**作者投稿时自己选的**分类，是辅助判据 —— 不拿它覆盖文件内容/ini 解析的结论
+    （实例：RabbitFX 挂在 Other/Misc 里，但它其实是配套依赖）。
+    """
+    cat_id, cat_name = _gb_category_entity(data.get("_aCategory"))
+    sup_id, sup_name = _gb_category_entity(data.get("_aSuperCategory"))
+
+    root = GAMEBANANA_ROOT_CATEGORIES.get(cat_id) or GAMEBANANA_ROOT_CATEGORIES.get(sup_id) or ""
+    if not root and (cat_id in GAMEBANANA_SKINS_CHILDREN or sup_id in GAMEBANANA_SKINS_CHILDREN):
+        root = "Skins"
+
+    parts: list[str] = []
+    for value in (root, sup_name, cat_name):
+        if value and value not in parts:
+            parts.append(value)          # UI 类 Mod 的叶子名就是根名，这里天然去重
+    return {
+        "id": cat_id,
+        "name": cat_name,
+        "super_id": sup_id,
+        "super_name": sup_name,
+        "root": root,
+        "path": " / ".join(parts),
+    }
 
 
 def _plain_text(value: str, limit: int = 400) -> str:
@@ -590,6 +657,9 @@ def gamebanana_profile(mod_id: int, *, timeout: int = EXTRA_TIMEOUT, cancel=None
         "likes": int(data.get("_nLikeCount") or 0),
         "page": data.get("_sProfileUrl") or f"https://gamebanana.com/mods/{mod_id}",
         "cover": cover,
+        # 网站分类（作者投稿时选的："皮肤 / UI / 其它"，Skins 下还带角色名）——
+        # 就是这一个字段解析出来，**不需要多发任何请求**（ProfilePage 本来就带）。
+        "category": gamebanana_category(data),
         "files": files,
         # 最新更新（"这一版改了什么 + 要下哪些"）
         "latest_update": latest_update,

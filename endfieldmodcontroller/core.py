@@ -372,6 +372,15 @@ class ModInfo:
     requires: list[str] = field(default_factory=list)
     source: str = ""
     source_id: str = ""
+    # ── 网站分类（香蕉网：`Skins` / `UI` / `Other/Misc`，Skins 下还带角色名）──────────
+    # 2026-10-04 由「下载时写进 sidecar」接入（写入点在 `api._write_source_sidecar`，
+    # 解析在 `moddl.gamebanana_category`）。这里是**只读展示字段**：
+    # ⚠️ 它**不参与** `kind` / `group` 的自动判据 —— 那是"作者投稿时自己选的"分类，
+    # 拿它去改判定等于把用户库里的归属交给别人填的表单（实例：RabbitFX 挂在 Other/Misc，
+    # 但它确实是配套依赖）。要用它做归类，得由用户在界面上确认。
+    site_category: str = ""
+    site_category_root: str = ""
+    source_page: str = ""
     actions: list[Action] = field(default_factory=list)
     meta_path: Path | None = None
     cover_path: Path | None = None
@@ -399,6 +408,10 @@ class ModInfo:
             "requires": list(self.requires),
             "source": self.source,
             "source_id": self.source_id,
+            # 网站分类（卡片上的"皮肤 / UI / 其它"徽章用它）
+            "site_category": self.site_category,
+            "site_category_root": self.site_category_root,
+            "source_page": self.source_page,
             "cover": str(self.cover_path) if self.cover_path else "",
             "source_root": str(self.source_root) if self.source_root else "",
             "description": guess_mod_description(self.name, self.path),
@@ -1279,6 +1292,9 @@ def _make_mod_info(
         requires=[str(x) for x in requires],
         source=str(meta.get("source") or ""),
         source_id=str(meta.get("source_id") or ""),
+        site_category=str(meta.get("site_category") or ""),
+        site_category_root=str(meta.get("site_category_root") or ""),
+        source_page=str(meta.get("source_page") or ""),
         actions=actions,
         meta_path=meta_path,
         cover_path=cover.resolve() if cover else None,

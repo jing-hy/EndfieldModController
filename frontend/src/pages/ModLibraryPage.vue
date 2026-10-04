@@ -42,6 +42,17 @@ const keyword = ref("");          // 搜索（评审：Mod 一多，没搜索只
 const conflicts = ref(null);
 let timer = null, dlTimer = null;
 
+// ── 香蕉网**网站分类**（皮肤 / UI / 其它）────────────────────────────────────
+// 2026-10-04 接入：值来自后端 `mod.site_category` / `mod.site_category_root` ——
+// 下载香蕉网链接时解析 ProfilePage 的 `_aCategory` / `_aSuperCategory`（见
+// `moddl.gamebanana_category`），写进这个 Mod 自己的 `mod.meta.json`，扫描时带出来。
+// ⚠️ **只认实测到的三个根分类**（终末地全量 695 个 Mod 100% 都带分类，根只有这三个）；
+// 别的分类 id 原样显示 —— 宁可不翻译，也不能猜错。
+const SITE_ROOT_LABELS = { Skins: "皮肤", UI: "UI", "Other/Misc": "其它" };
+function siteRootLabel(root) {
+  return SITE_ROOT_LABELS[root] || String(root || "");
+}
+
 // ⚠️ 选中状态的真源是 **`config.selected_mods`**（后端 `get_state()` 顶层**没有**
 // `selected` 这个键）。这里原来读的是 `store.state.selected` ⇒ 永远是空集合，
 // 于是"点开关保存成功、界面却纹丝不动"（用户 2026-10-03 反馈「mod 的开关按了没反应」）。
@@ -520,9 +531,18 @@ watch(() => store.demoCovers, (val) => {
               <span class="min-w-0 flex-1 flex flex-col">
                 <span class="text-sm leading-5" style="display: -webkit-box; -webkit-line-clamp: 2;
                       -webkit-box-orient: vertical; overflow: hidden" :title="m.name">{{ m.name }}</span>
-                <span class="mt-1.5 text-xs"
+                <span class="mt-1.5 text-xs flex items-center gap-1.5 min-w-0"
                       :style="{ color: selected.has(String(m.id)) ? 'var(--accent)' : 'var(--text-muted)' }">
-                  {{ selected.has(String(m.id)) ? "已启用" : "未启用" }}
+                  <span class="shrink-0">{{ selected.has(String(m.id)) ? "已启用" : "未启用" }}</span>
+                  <!-- **香蕉网网站分类徽章**（2026-10-04 用户要求「把 mod 在香蕉网中的分类接入管理器的分类」）。
+                       皮肤 / UI / 其它三个根分类里，只有 `Skins` 用强调色（它才是这个页面的主角），
+                       其余用中性色。**只在有值时显示** —— 不是从香蕉网下来的 Mod 没有这个信息，
+                       不留空占位，免得每张卡片都多一截没用的东西。 -->
+                  <span v-if="m.site_category_root" class="badge shrink-0 truncate"
+                        :style="m.site_category_root === 'Skins'
+                                 ? 'background: var(--accent-soft); color: var(--accent)'
+                                 : 'background: var(--surface-2); color: var(--text-muted)'"
+                        :title="`香蕉网分类：${m.site_category}`">{{ siteRootLabel(m.site_category_root) }}</span>
                 </span>
                 <!-- ⚠️ 用户 2026-10-03：「现在没有之前那种**黄色的未识别的标记，可以点一下就切换的**」
                      —— 旧版在角色识别不确定（low/none）时会在卡片上打一个黄色标记，点它直接进选角色。

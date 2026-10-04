@@ -3004,6 +3004,59 @@ class EndfieldModControllerApi:
             except OSError:
                 pass
 
+    def _write_source_sidecar(self, mod_dir: Path, item: dict[str, Any]) -> None:
+        """把「从哪个页面来的 / 网站分类」写进 `mod.meta.json`（**只补来源类字段**）。
+
+        为什么需要它：`mod.meta.json` 是**程序读的**那份 sidecar —— `core.load_sidecar()`
+        读的就是它，而 `ModInfo.source` / `source_id` 一直留着字段却没人写（下载只写了给人看的
+        `download-info.json`）。用户 2026-10-04 要求「把 mod 在香蕉网中的分类接入管理器的分类」，
+        分类要能被扫描带出来，就得落在这一份里。
+
+        ⚠️⚠️ **绝不碰 `kind` / `group` / `character` 这三个键**：
+        `core.infer_kind_and_group()` 只要看到 `meta["kind"]` 有值就**整块跳过自动判据**
+        （那句"用户显式指定过"）。在这里写 `kind` 等于把自动识别永久冻住 ——
+        那正是"看着接了、其实把判据废了"的做法。这里只补来源类的只读信息。
+
+        写失败不影响入库结果（与 `write_download_info` 同一口径）；**读不动就整体跳过**，
+        绝不用空对象覆盖用户已经改过的 sidecar。
+        """
+        import json as _json
+
+        try:
+            directory = Path(str(mod_dir))
+            if not directory.is_dir():
+                return
+            meta_path = directory / "mod.meta.json"
+            payload: dict[str, Any] = {}
+            if meta_path.is_file():
+                try:
+                    loaded = _json.loads(meta_path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    # ⚠️ 文件在、但内容不是合法 JSON —— **绝不能覆盖**：那会把用户手工设过的
+                    # 角色/类型整份清掉（比不写这条来源信息严重得多）。
+                    launcher._append_log(
+                        self.config,
+                        "Mod 下载: mod.meta.json 读不动（不是合法 JSON），已跳过来源信息写入（没动它）")
+                    return
+                if isinstance(loaded, dict):
+                    payload = loaded
+            if item.get("mod_id"):
+                payload.setdefault("id", str(item["mod_id"]))
+            name = str(item.get("title") or item.get("name") or "")
+            if name:
+                payload.setdefault("name", name)
+            if item.get("site_category"):
+                payload["source"] = "gamebanana"
+                payload["source_id"] = str(item.get("site_id") or "")
+                payload["source_page"] = str(item.get("page") or "")
+                payload["site_category"] = str(item["site_category"])
+                payload["site_category_root"] = str(item.get("site_category_root") or "")
+            meta_path.write_text(
+                _json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError as exc:  # noqa: BLE001 —— 写不进去只是少一条元数据
+            launcher._append_log(
+                self.config, f"Mod 下载: 来源信息没写进 mod.meta.json（{exc}）")
+
     def _retire_same_source(self, dest_dir: Any, *, source_url: str, file_url: str) -> list[str]:
         """把库里**同一个来源**的旧版移出（进 `mod-trash`，可找回）。
 
@@ -3160,6 +3213,15 @@ class EndfieldModControllerApi:
             item["author"] = profile["author"]
             item["game"] = profile["game"]
             item["page"] = profile.get("page", "")
+            # 网站分类（`Skins` / `UI` / `Other/Misc`，Skins 下还带角色名）——
+            # 用户 2026-10-04：「把 mod 在香蕉网中的分类接入管理器的分类」。
+            # ProfilePage 本来就带这两个字段，所以**这一项不产生任何额外请求**；
+            # 先挂在任务项上，入库时写进这个 Mod 自己的 sidecar（见下面 write_download_info）。
+            category = profile.get("category") or {}
+            if category.get("path"):
+                item["site_category"] = str(category["path"])
+                item["site_category_root"] = str(category.get("root") or "")
+                item["site_id"] = str(banana_id)
             item["version"] = picked.get("version") or profile.get("version") or ""
             item["url"] = picked["url"]              # ← 换成真实下载直链
             item["name"] = picked.get("file") or item.get("name") or ""
@@ -3292,10 +3354,14 @@ class EndfieldModControllerApi:
                     game=item.get("game") or "",
                     page=item.get("page") or "",
                     site="GameBanana" if item.get("title") else "",
+                    site_category=item.get("site_category") or "",
                 )
                 if written is not None:
                     item["info_file"] = str(written)
                     launcher._append_log(self.config, f"Mod 下载: 已写入下载信息 {written.name}")
+                # 把「从哪个页面来的 / 网站分类」写进**程序读的**那份 sidecar（`mod.meta.json`），
+                # 这样扫描时就能带出来（`core.ModInfo.source` / `source_id` / `site_category`）。
+                self._write_source_sidecar(Path(dest_dir), item)
                 # ⚠️ **同来源的旧版自动移出**（2026-10-03 用户：
                 #     「对于确认下载地址一致的，要在入库的时候移出旧的」）。
                 # 场景：同一份 Mod 修好后重新下载（或换了新版），库里会同时躺着新旧两份 ——

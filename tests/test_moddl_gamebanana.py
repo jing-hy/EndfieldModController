@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
 from endfieldmodcontroller import moddl
 
@@ -142,6 +143,84 @@ class LatestUpdateResourceListTests(unittest.TestCase):
         self.assertEqual(records[0]["files"], ["x.zip"])
         self.assertNotIn("<", records[0]["text"])
         self.assertIn("_Core.ini", records[0]["text"])
+
+
+class SiteCategoryTests(unittest.TestCase):
+    """⭐ 2026-10-04：把香蕉网的**网站分类**（皮肤 / UI / 其它）接进管理器。
+
+    用户原话：「把 mod 在香蕉网中的分类接入管理器的分类」。
+    实测（终末地全量 695 个 Mod **100% 带分类**）：根只有三个 ——
+    `Skins`(35464) / `UI`(42706) / `Other-Misc`(42780)，Skins 下面还有一层 `Operators` → 角色名。
+
+    ⚠️ 这里钉住的核心是那条**容易搞反的填充规律**：`_aSuperCategory` 有时是根、
+    有时是中间层、有时是空的（见下面三个用例，都是真实页面抓下来的形态）。
+    """
+
+    @staticmethod
+    def _profile(cat_id: int, cat_name: str, sup: dict | None = None) -> dict:
+        return {
+            "_aCategory": {"_idRow": cat_id, "_sName": cat_name},
+            "_aSuperCategory": sup if sup is not None else {},
+        }
+
+    def test_operator_skin_keeps_full_path(self) -> None:
+        """Skins → Operators → 角色（mod 721442 的真实形态）：根是 Skins，角色名要留住。"""
+        got = moddl.gamebanana_category(
+            self._profile(47395, "Arcane", {"_idRow": 42770, "_sName": "Operators"}))
+        self.assertEqual(got["root"], "Skins",
+                         "super 是中间层 Operators 而不是 Skins，仍须判成皮肤")
+        self.assertEqual(got["path"], "Skins / Operators / Arcane")
+        self.assertEqual(got["name"], "Arcane")
+
+    def test_weapon_skin_root_is_in_super(self) -> None:
+        """Skins → Weapons（mod 714696 的形态）：这一类的根**在 super 里**，与角色类相反。"""
+        got = moddl.gamebanana_category(
+            self._profile(42772, "Weapons", {"_idRow": 35464, "_sName": "Skins"}))
+        self.assertEqual(got["root"], "Skins")
+        self.assertEqual(got["path"], "Skins / Weapons")
+
+    def test_ui_and_other_misc_have_empty_super(self) -> None:
+        """UI / Other-Misc 的 `_aSuperCategory` 是**空的** —— 根就在 `_aCategory` 里。"""
+        ui = moddl.gamebanana_category(self._profile(42706, "UI"))
+        self.assertEqual((ui["root"], ui["path"]), ("UI", "UI"))
+        other = moddl.gamebanana_category(self._profile(42780, "Other/Misc"))
+        self.assertEqual((other["root"], other["path"]), ("Other/Misc", "Other/Misc"))
+
+    def test_unknown_category_is_not_guessed(self) -> None:
+        """没见过的分类 id ⇒ 如实留空，**不猜**（宁可不显示，也不能显示错）。"""
+        got = moddl.gamebanana_category(self._profile(999999, "Weird Stuff"))
+        self.assertEqual(got["root"], "")
+        self.assertEqual(got["path"], "Weird Stuff")
+
+    def test_missing_fields_do_not_crash(self) -> None:
+        for data in ({}, {"_aCategory": None, "_aSuperCategory": None}, {"_aCategory": "x"}):
+            got = moddl.gamebanana_category(data)
+            self.assertEqual((got["root"], got["path"]), ("", ""), f"输入 {data!r}")
+
+    def test_download_info_records_the_category(self) -> None:
+        """入库时那份**给人看的** `download-info.json` 要有一行"网站分类"。"""
+        import json
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            written = moddl.write_download_info(
+                Path(tmp), title="X", site="GameBanana",
+                site_category="Skins / Operators / Arcane")
+            self.assertIsNotNone(written)
+            assert written is not None
+            data = json.loads(written.read_text(encoding="utf-8"))
+            self.assertEqual(data["网站分类"], "Skins / Operators / Arcane")
+
+    def test_download_info_omits_category_when_unknown(self) -> None:
+        """不是香蕉网来源（没分类）时**不要**写一个空的"网站分类"键。"""
+        import json
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            written = moddl.write_download_info(Path(tmp), title="X")
+            assert written is not None
+            data = json.loads(written.read_text(encoding="utf-8"))
+            self.assertNotIn("网站分类", data)
 
 
 if __name__ == "__main__":
