@@ -16,14 +16,14 @@ updated_at: "2026-10-03T15:48:42.317Z"
 fingerprint: 79ede51fc38bb72e15920536adcaba2411f2fbddeaff94ff12ac911b8e2eb95a
 source:
   - path: "endfieldmodcontroller/initialize.py"
-    line: 255
-    end_line: 613
+    line: 313
+    end_line: 853
   - path: "endfieldmodcontroller/initialize.py"
-    line: 592
-    end_line: 2953
+    line: 712
+    end_line: 3193
   - path: "endfieldmodcontroller/initialize.py"
-    line: 2445
-    end_line: 3572
+    line: 2565
+    end_line: 3812
 apis:
   - protocol: rpc
     path: "dlss5_dir"

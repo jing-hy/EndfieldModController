@@ -16,11 +16,11 @@ updated_at: "2026-10-03T15:48:42.301Z"
 fingerprint: ad5b646006992f0d19f8bf761564b13670e34daf86856b5f6385342d95fe516c
 source:
   - path: "endfieldmodcontroller/fsutil.py"
-    line: 20
-    end_line: 114
+    line: 22
+    end_line: 158
   - path: "endfieldmodcontroller/fsutil.py"
-    line: 114
-    end_line: 160
+    line: 136
+    end_line: 456
 apis:
   - protocol: rpc
     path: "fsutil.sha256_file"

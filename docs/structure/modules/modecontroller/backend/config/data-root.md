@@ -16,11 +16,11 @@ updated_at: "2026-10-03T15:48:42.301Z"
 fingerprint: 4c9b2749c47924fbecec4e148f639bcfd18dc8031f7dc659fdd6c5a7d906dd71
 source:
   - path: "endfieldmodcontroller/config.py"
-    line: 118
-    end_line: 284
+    line: 123
+    end_line: 294
   - path: "endfieldmodcontroller/config.py"
-    line: 919
-    end_line: 1038
+    line: 916
+    end_line: 1032
 apis:
   - protocol: rpc
     path: "config.store_path"

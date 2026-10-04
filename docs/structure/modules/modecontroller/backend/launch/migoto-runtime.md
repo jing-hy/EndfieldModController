@@ -19,11 +19,11 @@ source:
     line: 55
     end_line: 137
   - path: "endfieldmodcontroller/launcher.py"
-    line: 1875
-    end_line: 2344
+    line: 2028
+    end_line: 2748
   - path: "endfieldmodcontroller/launcher.py"
-    line: 2374
-    end_line: 2860
+    line: 2576
+    end_line: 3333
 apis:
   - protocol: rpc
     path: "launcher.ensure_migoto_runtime"

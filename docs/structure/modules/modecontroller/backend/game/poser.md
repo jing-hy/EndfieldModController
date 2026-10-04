@@ -23,7 +23,7 @@ source:
     end_line: 394
   - path: "endfieldmodcontroller/poser.py"
     line: 394
-    end_line: 586
+    end_line: 748
 apis:
   - protocol: rpc
     path: "poser.status"

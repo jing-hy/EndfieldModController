@@ -16,14 +16,14 @@ updated_at: "2026-10-03T15:48:42.300Z"
 fingerprint: bfcb825b881a4b04679b89fecf86391b243f78eb48972dabee55af9ba782bd8c
 source:
   - path: "endfieldmodcontroller/github.py"
-    line: 39
-    end_line: 125
+    line: 40
+    end_line: 167
   - path: "endfieldmodcontroller/github.py"
-    line: 125
-    end_line: 212
+    line: 146
+    end_line: 254
   - path: "endfieldmodcontroller/github.py"
-    line: 212
-    end_line: 380
+    line: 233
+    end_line: 422
 apis:
   - protocol: rpc
     path: "api_get"

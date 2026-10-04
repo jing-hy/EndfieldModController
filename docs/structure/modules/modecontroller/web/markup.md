@@ -17,7 +17,7 @@ fingerprint: cbae6ed6b5fe44aee4369e5396a15398c30e1e184539158eb8c548c7abd62b48
 source:
   - path: "frontend/src/App.vue"
     line: 1
-    end_line: 936
+    end_line: 944
   - path: "frontend/src/styles/tokens.css"
     line: 1
     end_line: 190

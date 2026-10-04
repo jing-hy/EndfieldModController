@@ -16,14 +16,14 @@ updated_at: "2026-10-03T15:48:42.318Z"
 fingerprint: 79ede51fc38bb72e15920536adcaba2411f2fbddeaff94ff12ac911b8e2eb95a
 source:
   - path: "endfieldmodcontroller/initialize.py"
-    line: 189
-    end_line: 276
+    line: 218
+    end_line: 419
   - path: "endfieldmodcontroller/initialize.py"
-    line: 1920
-    end_line: 3478
+    line: 2040
+    end_line: 3718
   - path: "endfieldmodcontroller/initialize.py"
-    line: 2482
-    end_line: 3572
+    line: 2602
+    end_line: 3812
 apis:
   - protocol: rpc
     path: "bundled_assets"

@@ -19,11 +19,11 @@ source:
     line: 82
     end_line: 126
   - path: "endfieldmodcontroller/crashwatch.py"
-    line: 606
-    end_line: 772
+    line: 613
+    end_line: 786
   - path: "endfieldmodcontroller/crashwatch.py"
-    line: 772
-    end_line: 823
+    line: 779
+    end_line: 837
 apis:
   - protocol: rpc
     path: "collect_evidence"

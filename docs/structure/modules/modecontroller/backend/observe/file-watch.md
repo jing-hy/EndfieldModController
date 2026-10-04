@@ -19,8 +19,8 @@ source:
     line: 48
     end_line: 118
   - path: "endfieldmodcontroller/filewatch.py"
-    line: 280
-    end_line: 365
+    line: 292
+    end_line: 389
 apis:
   - protocol: rpc
     path: "filewatch.scan"

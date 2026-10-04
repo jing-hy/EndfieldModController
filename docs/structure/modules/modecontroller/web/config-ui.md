@@ -17,7 +17,7 @@ fingerprint: f4092ecbc9202f5d8ffb038e589bab5dd137c6773b76706d625477cf951babed
 source:
   - path: "frontend/src/pages/SettingsPage.vue"
     line: 1
-    end_line: 1502
+    end_line: 1548
 apis:
   - protocol: rpc
     path: "web.refreshFromState"

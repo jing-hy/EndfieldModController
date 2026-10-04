@@ -17,7 +17,7 @@ fingerprint: fff3d4b86a1aec0b9c4a847349d811b34e768d039bf477953727e8ec8adddb62
 source:
   - path: "frontend/src/pages/DepsPage.vue"
     line: 1
-    end_line: 1256
+    end_line: 1342
 apis:
   - protocol: rpc
     path: "web.logLine"

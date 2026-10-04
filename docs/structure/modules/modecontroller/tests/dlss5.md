@@ -23,7 +23,7 @@ source:
     end_line: 140
   - path: "tests/test_reshade_integration.py"
     line: 1
-    end_line: 197
+    end_line: 203
   - path: "tests/test_optiscaler_and_clean.py"
     line: 1
     end_line: 131

@@ -17,7 +17,7 @@ fingerprint: e5f2d424efde324834e54e61fb7376a2c54ce446368bd7e8cf27fab7760b92fd
 source:
   - path: "scripts/snapshot.py"
     line: 1
-    end_line: 250
+    end_line: 272
 apis:
   - protocol: rpc
     path: "scripts.snapshot"

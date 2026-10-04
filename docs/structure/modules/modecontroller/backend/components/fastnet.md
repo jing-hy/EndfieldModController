@@ -17,13 +17,13 @@ fingerprint: 01ed974925eb80667de4f7cf8b3ccbfdb59e25fc8e27c57b925652d9607673d5
 source:
   - path: "endfieldmodcontroller/fastnet.py"
     line: 225
-    end_line: 854
+    end_line: 1328
   - path: "endfieldmodcontroller/fastnet.py"
-    line: 427
-    end_line: 1347
+    line: 471
+    end_line: 1946
   - path: "endfieldmodcontroller/fastnet.py"
-    line: 839
-    end_line: 1656
+    line: 1023
+    end_line: 2256
 apis:
   - protocol: rpc
     path: "download"

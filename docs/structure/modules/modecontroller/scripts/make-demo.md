@@ -17,7 +17,7 @@ fingerprint: 2591a7e8765962dc353dbd309f83726d24ce9465fff7e68c380f1ee16fe3ac8a
 source:
   - path: "scripts/make_demo.py"
     line: 1
-    end_line: 50
+    end_line: 104
 apis:
   - protocol: rpc
     path: "scripts.make_demo"

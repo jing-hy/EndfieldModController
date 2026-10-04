@@ -17,7 +17,7 @@ fingerprint: 421297ba7b7494ebe7d0d583c658539690ed6e9802ee2430ede206e5fcfe8fd5
 source:
   - path: "scripts/release_version.py"
     line: 1
-    end_line: 110
+    end_line: 182
 apis:
   - protocol: rpc
     path: "scripts.release_version.check"

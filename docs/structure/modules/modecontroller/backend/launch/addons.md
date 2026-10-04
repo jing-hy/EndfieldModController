@@ -19,8 +19,8 @@ source:
     line: 51
     end_line: 68
   - path: "endfieldmodcontroller/launcher.py"
-    line: 997
-    end_line: 1534
+    line: 1092
+    end_line: 1744
 apis:
   - protocol: rpc
     path: "set_component_addons"

@@ -16,7 +16,7 @@ updated_at: "2026-10-03T15:48:42.328Z"
 fingerprint: 3c7ed9ad0b54ec96cbf1f54ce5f369db4fc76601570a81f9e678edda3b0b3740
 source:
   - path: "tests/test_frontend_components.py"
-    line: 1
-    end_line: 110
+    line: 113
+    end_line: 334
 apis: []
 ---

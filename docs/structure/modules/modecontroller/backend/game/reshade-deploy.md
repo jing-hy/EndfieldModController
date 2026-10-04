@@ -16,14 +16,14 @@ updated_at: "2026-10-03T15:48:42.305Z"
 fingerprint: e91e0c625160d3b0cb5d81abfc73c0b53876898d4bdd7e83a086c129f409b689
 source:
   - path: "endfieldmodcontroller/reshade_integration.py"
-    line: 640
-    end_line: 845
+    line: 674
+    end_line: 987
   - path: "endfieldmodcontroller/reshade_integration.py"
     line: 400
     end_line: 512
   - path: "endfieldmodcontroller/reshade_integration.py"
-    line: 829
-    end_line: 924
+    line: 902
+    end_line: 1062
   - path: "endfieldmodcontroller/reshade.py"
     line: 26
     end_line: 45

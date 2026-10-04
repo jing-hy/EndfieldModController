@@ -17,7 +17,7 @@ fingerprint: 1689206f8e78e0781867cf1eccc98ca2892d4557202f41d0f88a08257eb91600
 source:
   - path: "scripts/push.py"
     line: 1
-    end_line: 125
+    end_line: 347
 apis:
   - protocol: rpc
     path: "scripts.push"

@@ -16,11 +16,11 @@ updated_at: "2026-10-03T15:48:42.316Z"
 fingerprint: 3fb420114abfd292c11af3fd53ecc5032baa6def0a6f6eb915c7cd237bf5a000
 source:
   - path: "endfieldmodcontroller/crashwatch.py"
-    line: 1292
-    end_line: 1351
+    line: 1316
+    end_line: 1399
   - path: "endfieldmodcontroller/crashwatch.py"
-    line: 1389
-    end_line: 1420
+    line: 1413
+    end_line: 1468
 apis:
   - protocol: rpc
     path: "start_watch"

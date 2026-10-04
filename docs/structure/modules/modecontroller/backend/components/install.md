@@ -16,11 +16,11 @@ updated_at: "2026-10-03T15:48:42.300Z"
 fingerprint: c5a6bc8c96ea19c3ce68250b0a79b8b549942c7450c986a8b6e1f5f9ec8e1883
 source:
   - path: "endfieldmodcontroller/dependencies.py"
-    line: 441
-    end_line: 496
+    line: 466
+    end_line: 546
   - path: "endfieldmodcontroller/dependencies.py"
-    line: 491
-    end_line: 642
+    line: 516
+    end_line: 692
 apis:
   - protocol: rpc
     path: "install_from_archive"

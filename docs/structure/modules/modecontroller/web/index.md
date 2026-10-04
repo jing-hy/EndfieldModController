@@ -17,7 +17,7 @@ fingerprint: 83cda12b0aed97e5a4b3f723099f81a11589e8437a4c6c57bc34854751bc5978
 source:
   - path: "frontend/src/App.vue"
     line: 1
-    end_line: 936
+    end_line: 944
 deps:
   - kind: call
     to: modecontroller.backend

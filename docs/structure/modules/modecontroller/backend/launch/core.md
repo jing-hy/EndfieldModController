@@ -16,14 +16,14 @@ updated_at: "2026-10-03T15:48:42.306Z"
 fingerprint: 625d41711e2451a0f8a305d04dd8a75624112aefc037c331b8863d1d6749bd2d
 source:
   - path: "endfieldmodcontroller/launcher.py"
-    line: 1907
-    end_line: 2372
+    line: 2060
+    end_line: 2776
   - path: "endfieldmodcontroller/launcher.py"
-    line: 2117
-    end_line: 2618
+    line: 2319
+    end_line: 3036
   - path: "endfieldmodcontroller/launcher.py"
-    line: 2198
-    end_line: 2811
+    line: 2400
+    end_line: 3264
 apis:
   - protocol: rpc
     path: "launcher.launch"

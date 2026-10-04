@@ -19,11 +19,11 @@ source:
     line: 43
     end_line: 133
   - path: "endfieldmodcontroller/updates.py"
-    line: 166
-    end_line: 339
+    line: 167
+    end_line: 341
   - path: "endfieldmodcontroller/updates.py"
-    line: 312
-    end_line: 614
+    line: 313
+    end_line: 616
 apis:
   - protocol: rpc
     path: "updates.file_version"

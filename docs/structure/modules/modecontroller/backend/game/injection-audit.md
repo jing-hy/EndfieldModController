@@ -16,11 +16,11 @@ updated_at: "2026-10-03T15:48:42.304Z"
 fingerprint: 61efb3f6cee6f0fb07be25de7cacec91b96852d3e1ce17a05bc74d2b78e5bf3e
 source:
   - path: "endfieldmodcontroller/reshade_integration.py"
-    line: 1207
-    end_line: 1425
+    line: 1294
+    end_line: 1651
   - path: "endfieldmodcontroller/reshade_integration.py"
-    line: 1362
-    end_line: 1626
+    line: 1449
+    end_line: 1900
 apis:
   - protocol: rpc
     path: "reshade_integration.audit_game_dir_injections"

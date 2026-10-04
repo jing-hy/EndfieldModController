@@ -16,11 +16,11 @@ updated_at: "2026-10-03T15:48:42.303Z"
 fingerprint: a730800fe2a312071ed684fc45c5e9db457699320fffb0694be3ed502397692a
 source:
   - path: "endfieldmodcontroller/ini_lint.py"
-    line: 61
-    end_line: 261
+    line: 79
+    end_line: 361
   - path: "endfieldmodcontroller/ini_lint.py"
-    line: 206
-    end_line: 280
+    line: 256
+    end_line: 380
 apis:
   - protocol: rpc
     path: "ini_lint.lint_text"

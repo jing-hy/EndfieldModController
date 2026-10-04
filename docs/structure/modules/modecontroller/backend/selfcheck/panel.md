@@ -16,8 +16,8 @@ updated_at: "2026-10-03T15:48:42.318Z"
 fingerprint: 79ede51fc38bb72e15920536adcaba2411f2fbddeaff94ff12ac911b8e2eb95a
 source:
   - path: "endfieldmodcontroller/initialize.py"
-    line: 1672
-    end_line: 2794
+    line: 1792
+    end_line: 3034
 apis:
   - protocol: rpc
     path: "panel:hotkey_conflicts"

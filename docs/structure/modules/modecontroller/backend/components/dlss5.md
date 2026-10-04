@@ -17,13 +17,13 @@ fingerprint: fc2e801c72fff0bfb1b9cf6e615b7b2c8fea23c46600a72b04cb9fae9b8f5b5a
 source:
   - path: "endfieldmodcontroller/dlss5_fetcher.py"
     line: 44
-    end_line: 104
+    end_line: 142
   - path: "endfieldmodcontroller/dlss5_fetcher.py"
-    line: 137
-    end_line: 262
+    line: 156
+    end_line: 300
   - path: "endfieldmodcontroller/dlss5_fetcher.py"
-    line: 262
-    end_line: 461
+    line: 281
+    end_line: 499
 apis:
   - protocol: rpc
     path: "component_report"

@@ -17,10 +17,10 @@ fingerprint: a6396b5e305e53b7f4806fbd7626415fe70330acd1379d706b48e6d9b4e4a5a0
 source:
   - path: "endfieldmodcontroller/game_clean.py"
     line: 75
-    end_line: 144
+    end_line: 154
   - path: "endfieldmodcontroller/game_clean.py"
-    line: 144
-    end_line: 284
+    line: 149
+    end_line: 294
 apis:
   - protocol: rpc
     path: "game_clean.audit"

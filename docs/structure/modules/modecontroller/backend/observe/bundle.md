@@ -16,11 +16,11 @@ updated_at: "2026-10-03T15:48:42.314Z"
 fingerprint: 3fb420114abfd292c11af3fd53ecc5032baa6def0a6f6eb915c7cd237bf5a000
 source:
   - path: "endfieldmodcontroller/crashwatch.py"
-    line: 838
-    end_line: 1115
+    line: 845
+    end_line: 1134
   - path: "endfieldmodcontroller/crashwatch.py"
-    line: 1115
-    end_line: 1292
+    line: 1122
+    end_line: 1340
 apis:
   - protocol: rpc
     path: "make_bundle"

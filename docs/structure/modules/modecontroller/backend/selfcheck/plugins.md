@@ -16,8 +16,8 @@ updated_at: "2026-10-03T15:48:42.318Z"
 fingerprint: 79ede51fc38bb72e15920536adcaba2411f2fbddeaff94ff12ac911b8e2eb95a
 source:
   - path: "endfieldmodcontroller/initialize.py"
-    line: 2633
-    end_line: 3764
+    line: 2753
+    end_line: 4004
 apis:
   - protocol: rpc
     path: "poser"

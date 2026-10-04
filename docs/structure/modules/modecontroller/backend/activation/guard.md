@@ -20,7 +20,7 @@ source:
     end_line: 143
   - path: "endfieldmodcontroller/activation.py"
     line: 712
-    end_line: 818
+    end_line: 835
 apis:
   - protocol: rpc
     path: "LibraryGuardError"

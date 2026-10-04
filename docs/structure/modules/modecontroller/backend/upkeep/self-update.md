@@ -20,10 +20,10 @@ source:
     end_line: 115
   - path: "endfieldmodcontroller/selfupdate.py"
     line: 115
-    end_line: 403
+    end_line: 449
   - path: "endfieldmodcontroller/selfupdate.py"
-    line: 403
-    end_line: 600
+    line: 426
+    end_line: 646
 apis:
   - protocol: rpc
     path: "selfupdate.check_update"

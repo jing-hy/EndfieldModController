@@ -20,7 +20,7 @@ source:
     end_line: 757
   - path: "endfieldmodcontroller/activation.py"
     line: 693
-    end_line: 1071
+    end_line: 1089
 apis:
   - protocol: rpc
     path: "stage_and_prepare"

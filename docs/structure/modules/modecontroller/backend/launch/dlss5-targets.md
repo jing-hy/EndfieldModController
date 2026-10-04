@@ -17,13 +17,13 @@ fingerprint: 625d41711e2451a0f8a305d04dd8a75624112aefc037c331b8863d1d6749bd2d
 source:
   - path: "endfieldmodcontroller/launcher.py"
     line: 249
-    end_line: 286
+    end_line: 322
   - path: "endfieldmodcontroller/launcher.py"
-    line: 710
-    end_line: 1159
+    line: 728
+    end_line: 1349
   - path: "endfieldmodcontroller/launcher.py"
-    line: 1123
-    end_line: 1642
+    line: 1218
+    end_line: 1895
 apis:
   - protocol: rpc
     path: "dlss5_injection_targets"
