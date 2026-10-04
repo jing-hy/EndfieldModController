@@ -4,9 +4,9 @@
 > 目的：让「当时为什么这么改、踩过什么坑」跟着源码一起留在仓库里。
 > 想改内容 → 改记忆库（用记忆工具），再跑一次本脚本；不要直接编辑本文件。
 
-- 生成时间：2026-10-04 23:11:21
+- 生成时间：2026-10-04 23:14:35
 - 来源：`.dsh-meow/memory.db`
-- 条目：525 条（已跳过 archived / 其它项目的条目）
+- 条目：529 条（已跳过 archived / 其它项目的条目）
 
 ---
 
@@ -251,7 +251,7 @@
 
 `关键词：["版本号约定","beta 后缀","1.0.10-beta","预发布语义","正式版更新","release 不带 beta","parse_version","strip_prerelease","is_newer","release_version.py","版本比较退化口径"]`
 
-## 项目记忆（结构 / 决策 / 部署 / 待办）（33 条）
+## 项目记忆（结构 / 决策 / 部署 / 待办）（34 条）
 
 ### 项目概述
 
@@ -536,6 +536,13 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 
 `关键词：["modecontroller 当前状态","唯一真源","v1.0.8","Release v1.0.7","未推送","诊断包一次抓齐","clear_game_injections_on_launch","pytest 695","issue 13","前端重建 vite","Steam++ 调研","release-assets.githubusercontent.com"]`
 
+### **v1.0.10 已发布（当前 Latest）**：t…
+*2026-10-04 23:13*
+
+**v1.0.10 已发布（当前 Latest）**：tag `v1.0.10`、`isDraft=false`/`isPrerelease=false`，发布时刻 2026-10-04 15:12 UTC。两个资产（digest 与本地逐字节一致）：`EndfieldModController.exe` 30,004,044 B / `sha256:80434924e99c2acba076b2094213c960e0d5a84299ece83630c45cf949b4c2a6`；`assets-bundle.zip` 144,699,465 B / `sha256:2c6c7df13382a1b5b5722b8afe4e9b8bc454af0fdb3ab9a5d63c6f34615510d0`。发布流程照旧：draft（不带附件）→ `prepare_release.py` → `upload_release_assets.py --tag` → `gh release edit --draft=false --latest`；核对远端必须按 **release id** 查（draft 阶段 `releases/tags/vX` 返回 404）。**本地 `version.py` 现在 = `1.0.10`，与 Release 同号 ⇒ 下次攒到改动时要升成 `1.0.11-beta`。**
+
+`关键词：["v1.0.10 发布","release latest","assets-bundle.zip","sha256 核对","draft 转正","release id 查询","prepare_release","upload_release_assets","gh release edit latest","1.0.11-beta 下一个号"]`
+
 ### 待办
 
 ### **B站宣传片（EndfieldModControlle…
@@ -717,7 +724,7 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 
 `关键词：["EFMI 加载失败","DLL 注入失败","extra_libraries","注入顺序","ReShade 先注入","active_efmi_loader","importer_folder","d3d11.dll 重复注入","efmi_dll_order_applied","外部 XXMI","游戏起不来 25 秒"]`
 
-## 经验教训（被纠正过的、踩过的坑）（367 条）
+## 经验教训（被纠正过的、踩过的坑）（369 条）
 
 ### XXMI/EFMI 启动终末地是 Endfield.ex…
 *2026-09-27 14:58*
@@ -4069,7 +4076,24 @@ poser/sbm 的 loader proxy（`d3dcompiler_47.dll` / `vulkan-1.dll`，35~56 KB）
 
 `关键词：["ReShade addon 加载失败","ctypes WinDLL","WinError 1114","DllMain 返回 FALSE","already registered","addon 复现","ReShade.log","d3d12.dll","错误码 4551","addon 回归测试"]`
 
-## 事实（细碎的原子信息）（73 条）
+### 【热重载"看着全绿却没生效"的真因：**热重载没重铺 s…
+*2026-10-04 23:13*
+
+【热重载"看着全绿却没生效"的真因：**热重载没重铺 staging**】2026-10-04 连查四轮才定案。用户需求原话：「就是能在终末地运行的时候，我切换 Mod，比如关掉一个，打开一个，然后点热重载，能在游戏生效」。
+**根因**：管理器里勾选/取消勾选 Mod **只走 `save_config` 改 `selected_mods`**，真正把 Mod 铺进 `Mods\` 的是 `activation.stage_and_prepare`，而它**只在 `api._prune_missing_selection()` 里被调用** —— 那条路只有「一键启动」「完整性检查」会走。所以热重载以前**压根没动 `Mods\`**：它重载了配置、也重扫了 `Mods\`，可目录里什么都没变 ⇒ 游戏里毫无变化。**修法**：`api.hot_reload()` 里先调 `self._prune_missing_selection()`，再 `prepare_launch()`，最后发 F10。
+**另两个已修的前置坑**（都在 `hot_reload.py`）：① **窗口判据**——按标题找会把**浏览器标签**（标题含 Endfield）和 **Poser 的 `EndfieldPoserOverlay`**（属于 `Endfield.exe` 进程！）当成游戏窗口，F10 打给覆盖层 ⇒ 必须"进程名 = Endfield.exe + 剔除 overlay/poser/reshade/imgui/debug/console + 优先 `UnityWndClass` + 比窗口面积"；② **按键保持时长**——`down`/`up` 之间 0 延时时，每帧轮询 `GetAsyncKeyState` 的 3DMigoto 会**整帧错过**，改成保持 **180ms + 补发一次**。日志现在写明"候选窗口/选中项/是否拿到前台/`d3dx_user.ini` 有没有被更新"这四条判据。
+
+`关键词：["热重载没生效","切换 Mod 不生效","_prune_missing_selection","stage_and_prepare","selected_mods 只是勾选","EndfieldPoserOverlay","UnityWndClass","按键保持 180ms","GetAsyncKeyState 整帧错过","d3dx_user.ini 判据"]`
+
+### 【把 exe 交付给用户前，必须核对"他手里那份"的哈希…
+*2026-10-04 23:13*
+
+【把 exe 交付给用户前，必须核对"他手里那份"的哈希/时间 —— 构建脚本遇到控制器在跑会**故意跳过**同步 modtest】2026-10-04 白耗半小时的教训：`build_release.py` 的 `sync_to_modtest()` 在检测到 `EndfieldModController` 进程运行时**不替换、不杀进程**（这是**正确设计**），只打印一句"跳过：… 正在运行 —— 等他退出后重跑本脚本即可"。**我没看到那句、误判成"脚本静默失败"**，于是用户一直拿着**两小时前**的旧版测我新改的功能，报告"还是没效果"。而且他用的是 `D:\zmdmod\modtest\EndfieldModController.exe`，**exe 被运行中的进程占着，覆盖也不可能成功**（`Copy-Item` 报 The process cannot access the file）。
+**定式**：① 每次构建完，**主动核对 `modtest` 那份 exe 的 mtime 与 sha256**，别假设同步成功；② 要替换 modtest 的 exe **必须先让用户关掉控制器**；③ 已把提示改成"① 重跑本脚本；② **不用重新构建**，直接把 `dist\EndfieldModController.exe` 复制到 modtest"。
+
+`关键词：["modtest 同步被跳过","build_release sync_to_modtest","exe 被占用","核对用户手里那份","拿旧版测新功能","先关控制器再替换","_running_processes","交付前核对哈希"]`
+
+## 事实（细碎的原子信息）（74 条）
 
 ### modecontroller：游戏目录 loader_l…
 *2026-09-27 14:58*
@@ -4859,6 +4883,15 @@ Steam++（Watt Toolkit）加速内核 = **FastGithub 2.1.4 的移植**：本地�
 读香蕉网单条 mod 的分类有个坑：ProfilePage 只给 _aCategory（叶子）与 _aSuperCategory（直接父级，可为空）—— UI 与 Other-Misc 类 mod 的 super 是空，Skins 角色类 mod 的 super 是 Operators(42770) 而不是 Skins，靠它定不了根；要看根分类得用列表/搜索接口的 _aRootCategory。按分类浏览用 Mod/Index?_aFilters[Generic_Category]=<id>（传根 id 含子孙；_nPerpage 上限 50，_idGameRow 老写法不生效会返回全站 55 万条）。
 
 `关键词：["_aCategory","_aSuperCategory","_aRootCategory","叶子分类","父级为空","Operators 42770","定不了根","Mod/Index","_aFilters","Generic_Category","_nPerpage 上限50","分类过滤"]`
+
+### **3DMigoto 的 `reload_config`…
+*2026-10-04 23:13*
+
+**3DMigoto 的 `reload_config`（F10）到底重载了什么 —— 源码级结论（bo3b/3Dmigoto，DirectX11）**：
+`FlagConfigReload` 只设标志 `gReloadConfigPending`；真正的动作在 `HackerDXGI.cpp` 的 Present 里 `if (gReloadConfigPending) ReloadConfig(device)`。`ReloadConfig()` 顺序是：① `WipeUserConfig()`（仅 `wipe_user_config` = Ctrl+Alt+F10）；② **`SavePersistentSettings()`** —— **只在 `user_config_dirty` 为真时写**，一写就是**全量重写** `d3dx_user.ini`（`fopen "w"` + 遍历全部 persist 变量），文件头自带 `DO NOT EDIT`；③ `ClearKeyBindings()`；④ **`LoadConfigFile()`** —— 内部会重跑 `ParseIncludedIniFiles()`，因此 **`include_recursive = Mods` 会被重新扫描**（`ParseIniFilesRecursive`），且**`d3dx_user.ini` 在最后加载、用来覆盖其它 ini**；⑤ `optimise_command_lists` + `MarkAllShadersDeferredUnprocessed()`（所以重载时游戏会"卡一下"）。
+**推论**：外部改 `d3dx_user.ini` 后发 F10 是可行的（会被重新读），**但若游戏内刚改过变量（dirty）⇒ 第②步会用内存旧值覆盖我们的修改** ⇒ 必须先发一次 F10 让它落盘、再改文件、再发一次（EMOPM 就是这么做的）。判定"F10 有没有被真的处理"最省事的办法：看 `d3dx_user.ini` 的 mtime 有没有变。
+
+`关键词：["ReloadConfig 源码","F10 重载了什么","SavePersistentSettings","user_config_dirty","d3dx_user.ini 全量重写","include_recursive Mods","ParseIncludedIniFiles","user config 最后加载","MarkAllShadersDeferredUnprocessed","F10 卡一下"]`
 
 ## 用户偏好与环境（**含个人信息，公开前请自行取舍**）（18 条）
 
