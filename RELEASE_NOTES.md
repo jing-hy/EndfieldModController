@@ -72,7 +72,19 @@
 `CameraEFMICompatibility=0 → 1`、`ShortcutFirstPerson → 112`、`Font=` 补成中文字体。
 顺带修掉"文件末尾那一段缺 `TextureSearchPaths` / `PresetPath` 永远补不上"的老毛病。
 
-## 五、验证
+## 五、发版流程新增：组件版本表核对 + 第一人称设置随下载写入
+
+- **「每次 release 检查内置的依赖版本表是否最新」**（你提的要求）：新增
+  `scripts/check_component_versions.py`，发版流程（`build_release.py`）会联网把
+  `component_versions.json` 里的 6 个组件与上游最新版逐项比对，对不上就打出**该改成什么**
+  （不阻断构建；离线用 `--skip-version-table-check` 跳过）。
+  **本次核对结果**：XXMI `v2.3.8 → v2.4.1`、Poser `0.5.2 → 0.5.18` 两项已过期，**已更新进表**。
+- **「每次下载第一人称 mod 时都要改」**（你提的要求）：依赖页「一键安装/更新全部组件」、
+  单项安装、以及后台的 `start_full_update` 三处，装完**立刻**把 `[endfield-enhancer]`
+  （中文 + 与 EFMI 共存必需项）与中文字体写进**生效那份** ReShade.ini ——
+  装完直接进游戏也是中文，不必先点一键启动。
+
+## 六、验证
 
 - `python -m pytest tests -q` → **全部通过**（本轮新增回归：
   `tests/test_diagnostics_capture.py`、`tests/test_game_clean_auto.py`，

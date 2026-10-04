@@ -1927,6 +1927,19 @@ class EndfieldModControllerApi:
                     self._dep_task["log"].append(
                         f"一键更新完成：实际 {done_items} 项，预估 {estimated} 项（预估公式待校准）"
                     )
+                # 「每次下载第一人称 mod 时都要改」（用户 2026-10-04）：这一整轮装完，
+                # 立刻把第一人称的 `[endfield-enhancer]`（中文 + 与 EFMI 共存必需项）
+                # 与中文字体写进**生效那份** ReShade.ini —— 用户装完组件常常直接进游戏，
+                # 不走一键启动。幂等；失败只记一行日志，不影响"已完成 N 项"的结论。
+                try:
+                    synced = self._sync_firstperson_ini_after_install()
+                    if synced.get("enhancer") or synced.get("style") or synced.get("created"):
+                        self._dep_task["log"].append(
+                            "第一人称设置已写入生效那份 ReShade.ini"
+                            f"（{synced.get('enhancer', 0)} 项 + 字体 {synced.get('style', 0)} 项）"
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    self._dep_task["log"].append(f"第一人称设置同步失败（忽略）: {exc}")
             except Exception as exc:  # noqa: BLE001
                 self._dep_task["message"] = f"失败: {exc}"
                 self._dep_task["log"].append(f"失败: {exc}")
@@ -4229,6 +4242,34 @@ class EndfieldModControllerApi:
             report.setdefault("errors", []).append(f"DLSS5 组件检查失败: {exc}")
         return report
 
+    def _sync_firstperson_ini_after_install(self) -> dict[str, Any]:
+        """组件装完后**立刻**把第一人称的设置写进"生效那份" ReShade.ini。
+
+        用户 2026-10-04 原话：「这个要加进一键下载流程里，**每次下载第一人称 mod 时都要改**」。
+
+        为什么不能只靠一键启动：依赖页点「一键安装/更新全部组件」之后，用户完全可能
+        **直接进游戏**（不走一键启动）—— 而那时生效那份（`runtime\\reshade\\ReShade.ini`，
+        由 `RESHADE_BASE_PATH_OVERRIDE` 决定）里还可能是插件写的出厂值
+        （`Language=0` 英文、`Font=` 空 ⇒ 中文画方块），第一人称就成了英文。
+        下载/安装完组件就写一次，等于"装好即中文"。
+
+        幂等：只补差异（缺段补段、缺键补键），改前留 `.bak-before-enhancer-sync`，
+        已设过的非空字体不会被覆盖。
+        """
+        try:
+            result = launcher.sync_effective_reshade_ini(
+                self.config, log=lambda message: launcher._append_log(self.config, message))
+        except Exception as exc:  # noqa: BLE001 —— 写 ini 失败不该让"安装成功"变成失败
+            launcher._append_log(self.config, f"WARN 第一人称设置同步失败（忽略）: {exc}")
+            return {}
+        if result.get("enhancer") or result.get("style") or result.get("created"):
+            launcher._append_log(
+                self.config,
+                f"第一人称设置已随组件安装写入生效那份 ReShade.ini"
+                f"（第一人称 {result.get('enhancer', 0)} 项、字体 {result.get('style', 0)} 项）",
+            )
+        return result
+
     def install_dlss5_component(self, key: str, force: bool = False) -> dict[str, Any]:
         """单项安装/更新一个 DLSS5 组件（依赖页与更新页共用）。"""
         launcher._append_log(self.config, f"安装 DLSS5 组件 {key} requested from UI")
@@ -4242,6 +4283,10 @@ class EndfieldModControllerApi:
             launcher._append_log(self.config, f"安装 {key} 失败: {exc}")
             return {"ok": False, "changed": False, "key": key, "message": str(exc)}
         launcher._append_log(self.config, f"安装 {key}: {result.get('message', '')}")
+        # 「每次下载第一人称 mod 时都要改」（用户 2026-10-04）：装完立刻把
+        # `[endfield-enhancer]`（中文 + 与 EFMI 共存必需项）写进**生效那份** ini，
+        # 这样不点一键启动、直接进游戏也是中文。幂等，且失败不影响安装结果。
+        self._sync_firstperson_ini_after_install()
         return result
 
     def install_all_new_components(self) -> list[dict[str, Any]]:
@@ -4258,6 +4303,7 @@ class EndfieldModControllerApi:
                     results.append({"key": item.key, "status": item.status, "message": item.message})
             except Exception as exc:  # noqa: BLE001
                 results.append({"key": "builtin", "status": "失败", "message": str(exc)})
+        self._sync_firstperson_ini_after_install()
         return results
 
     def update_component(self, name: str, url: str = "") -> dict[str, Any]:

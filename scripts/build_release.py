@@ -397,6 +397,37 @@ def sync_to_modtest(source: Path, *, artifact: str = "latest") -> None:
     print(f"      现在测试目录里的 exe：{', '.join(remaining) or '(无)'}", flush=True)
 
 
+def check_component_version_table(args: list[str]) -> None:
+    """发版前核对「随包组件版本表」是不是上游最新（用户 2026-10-04 要求）。
+
+    用户原话：「**另外每次 release 要检查内置的依赖版本表是否最新**」。
+
+    为什么要查：`endfieldmodcontroller/component_versions.json` 是"随包快照"，一键启动前的
+    更新提示**只读它、不联网**（用户 2026-10-03 定的，联网要干等 6.1 秒）。所以它过期就会
+    误导用户 —— 提示了并不存在的新版，或漏掉真正的新版。发版是它唯一的刷新时机。
+
+    **联网**（几秒），而且**只提示、不中止**（离线/限流不该卡住构建）；
+    想彻底跳过用 `--skip-version-table-check`。
+    """
+    if "--skip-version-table-check" in args:
+        print("[组件版本表] 已按 --skip-version-table-check 跳过核对", flush=True)
+        return
+    print("[组件版本表] 核对随包快照 vs 上游最新（联网）…", flush=True)
+    try:
+        result = subprocess.run(
+            [sys.executable, "scripts/check_component_versions.py"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"[组件版本表] 检查没跑起来（忽略，不阻断构建）: {exc}", flush=True)
+        return
+    for line in (result.stdout or "").strip().splitlines():
+        print("  " + line, flush=True)
+    if result.returncode != 0:
+        print("[组件版本表] ⚠ 有组件对不上 —— 请先更新 "
+              "`endfieldmodcontroller/component_versions.json`（本步不阻断构建）", flush=True)
+
+
 def main() -> int:
     _fix_console()
     args = sys.argv[1:]
@@ -406,6 +437,9 @@ def main() -> int:
     # 版本号规则核对（用户 2026-10-02）：**只跟"最新 Release"比** —— 本地应为「最新 Release + 1」；
     # 只推了源码没发 Release 时不动号。查不到只提示、不中止（这条是软约束）。
     report_version_rule()
+    # 随包组件版本表核对（用户 2026-10-04：「每次 release 要检查内置的依赖版本表是否最新」）：
+    # 联网比一遍上游最新版，对不上就打出"该改成什么"（不阻断；--skip-version-table-check 跳过）。
+    check_component_version_table(args)
 
     # [0] 先编译统一控制面板（ReShade addon）：它要随进 exe，构建晚于它就等于带了旧面板。
     if "--skip-addon" in args:
