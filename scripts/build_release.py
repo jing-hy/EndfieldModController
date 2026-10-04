@@ -435,7 +435,12 @@ def main() -> int:
     # 只是把 version.py 临时改成 0.1.9 再打一次 —— 实测整整 **19.3 秒**，
     # 而绝大多数构建根本不需要它（只有要测自更新时才要）。
     # 需要时用 `--with-fake-old`（或 `--modtest-fake-old`，它隐含需要伪旧版）。
-    need_fake_old = ("--with-fake-old" in args) or ("--modtest-fake-old" in args)
+    # ⚠️ **`--modtest-both` 也必须触发伪旧版构建**（2026-10-04 修）：它的语义就是
+    # "最新版 + 伪旧版**各放一份**进 modtest"（见第 6 步），而原来这里的判据漏了它 ——
+    # 结果传了 `--modtest-both` 却只构建最新版，第 6 步打印一句"找不到伪旧版"就过去了，
+    # **用户想测自更新时 modtest 里根本没有那个伪旧版**（表面成功、实际少做一半）。
+    need_fake_old = (("--with-fake-old" in args) or ("--modtest-fake-old" in args)
+                     or ("--modtest-both" in args))
     if need_fake_old:
         print("[4/7] 构建伪旧版", flush=True)
         build_fake_old(version)
