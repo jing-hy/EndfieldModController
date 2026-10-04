@@ -4,13 +4,13 @@
 > 目的：让「当时为什么这么改、踩过什么坑」跟着源码一起留在仓库里。
 > 想改内容 → 改记忆库（用记忆工具），再跑一次本脚本；不要直接编辑本文件。
 
-- 生成时间：2026-10-04 01:29:43
+- 生成时间：2026-10-04 10:50:14
 - 来源：`.dsh-meow/memory.db`
-- 条目：491 条（已跳过 archived / 其它项目的条目）
+- 条目：499 条（已跳过 archived / 其它项目的条目）
 
 ---
 
-## 设计原则 / 行为准则（15 条）
+## 设计原则 / 行为准则（16 条）
 
 ### 用户准则（原话）：「不是，你直接去官网拉」—— **一手…
 *2026-09-27 18:53*
@@ -101,54 +101,6 @@
 
 `关键词：["能自动处理就别提示","正常用户不看日志","fixed=True","自动备份移走","不要让别人改名","判据的错在判据里修","is_dependency_package","滑块要真的有用","不要拿绕过当解法","三问判据"]`
 
-### 【modecontroller · 诊断与归因：**判据…
-*2026-10-02 18:16*
-
-【modecontroller · 诊断与归因：**判据不够就明说、一次抓全、实测能撤回推测、别让用户当测试员、复用现成通道**】
-**① 不确定时明说"判据不够"**（原话「**我要你们明确说是不是判据不够**，…**你最好能让日志包一次抓全所有数据，不要搞好几轮**」）：无法定论时**正面回答"判据不够"并列出缺哪几项**，不要用"可能是…/建议再试…"含混过去。**诊断/崩溃包的设计目标 = 一次抓齐定位所需的全部数据**；自问「如果这次的数据只够我排除一种可能，我还需要再来一轮吗？」需要就说明没抓全。
-**② 实测成功要能撤回"静态/历史推测"**（原话「**如果某一组之前报崩溃的，后面终末地成功启动没崩就从记忆里移出**」「**报了独享标识可能冲突的，只要能进，都记忆不再报**」）：推测性预警（静态资源冲突、历史崩溃记忆）必须配**自动撤回**通道；判据是"**确实跑通**"（正常退出流程 **或存活 ≥ 120 秒**），**静默闪退（30 秒进程就没了）不算成功**；撤回要**精确**（只清匹配当前组合的那条）且**透明**（自检如实写"另有 N 条以前跑通过、已忽略"）。
-**③ 别让用户当测试员**（原话「**启动过了，你不要老是让我测，你自己根据探针的数据全数看看整个执行链，有源代码还找不出来？**」）：他已经启动/操作过、数据也拿到时，下一步应该是"**我读源码 + 我分析数据 + 我修**"；开源组件的机制问题**源码就是第一手判据**；"让用户测"要有价值密度（**一轮测试排掉一个岔**，不是"我改一处你试一次"）；能自己写体检脚本/自己 diff 配置的**都不要外包给用户**。自查：「我现在缺的这个信息，能不能从源码/已落盘数据/我自己写的检查器里拿到？」
-**④ 复用对方已有的东西，比自造一套协议更省事**（原话「**不是，我是说让面板走mod的按键**」）：先问"现成的通道是什么"——Mod 自带的按键用户手按能用，面板发这些键就行（`actions.tsv` 的 `original_keys` 一直存在）。自造协议的每一层都引入新失败点；代价要主动说清（发原键就不能锁原键）。**F1..F12 不能用**（用户在游戏内有用途）。
-
-`关键词：["判据不够要明说","诊断包一次抓全","不要搞好几轮","实测成功撤回推测","存活120秒才算成功","静默闪退不算成功","不要老是让我测","读源码是第一手判据","一轮测试排掉一个岔","复用mod自己的按键","F1到F12不能用"]`
-
-### 【modecontroller · 项目形态与文档规范】…
-*2026-10-02 18:16*
-
-【modecontroller · 项目形态与文档规范】
-**① 文档读者分层**（原话「**现在太详细了，正常使用根本用不到这些**，你现在这个作为详细版，在简略版开头做个指向它的链接，简略版只要简单讲工作原理那些就行，**不要说具体位置那些的**」）：面向用户的入口文档（GitHub README）**只写"正常使用够用"的** —— 定位、工作原理、能做什么、怎么用、出问题去哪；细节（安装步骤、目录/路径、逐项排查、开发与发布）全进 `docs/README.detailed.md`，简略版开头给显眼链接、详细版顶部反向链接。**简略版不写具体位置**（唯一例外："不说清就会让用户丢数据"的提醒，如"别把 exe 放进 Program Files"）。**不能省的**：第三方署名与许可、免责声明。**"与上一版的变动"只写 Release notes，README 不写**。
-**② README 外观**（原话「**我想居中readme标题，然后挂几个勋章**」）：头部 `<div align="center">` hero 区（**HTML 块内 markdown 不渲染**，一律用 `<h1>/<p>/<b>/<a>/<img>`），挂 shields.io 勋章（语言/系统/Release/License）。⚠️ 他曾因"图片对首屏太重"撤掉过应用图标 → **大图别上**。
-**③ 能用远端文件配置的，别写死在代码里**（原话「强制用户停留一定秒数（**可在仓库配置**，默认 10s）」「情况能通过 **github 仓库修改**」）：临时可调的参数（秒数/文案/阈值/开关）做成**仓库里的数据文件**（如 `alerts.json`），改完 push 即生效、**不用发版**；字段说明写进文件自身 `_readme` 与详细文档；这类远程内容**失败必须静默**并回退缓存。⚠️ **测试通道不能进正式版**（原话「正式的版本不要包含测试的文件和读本地文件这个过程」）—— 保护性功能尤其不能留"放个本地文件就能挡掉"的后门。
-**④ 面向用户的产物都要问一句**："这是给使用者看的还是给排查/开发看的" —— 前者要短、讲原理；后者才放位置与命令。
-
-`关键词：["文档读者分层","README简略版不写位置","详细版README.detailed","README居中挂勋章","改动只写Release notes","远端文件配置","alerts.json可仓库改","失败静默回退缓存","测试通道不进正式版","署名与免责不能省"]`
-
-### 【modecontroller · 界面与交互体验】用户…
-*2026-10-02 18:17*
-
-【modecontroller · 界面与交互体验】用户定过的一整套 UI 硬要求（给这个项目加功能的定式：**启动页 = 滑块 + 主流程按钮；诊断/日志/状态/更新入口一律进设置页**）
-① **尽早出加载页**（原话「从零启动的第一次出加载页面的时间太长了，**所有情况都要尽早展示加载页面**」）—— 窗口尽早创建，全盘探测/扫描/清理/安装一律移到窗口出现之后的后台线程；首屏是**不依赖后端数据的静态加载页**，分步说人话，慢操作要有可见进度，绝不出现黑屏/空白。
-② **全程不允许 cmd/控制台黑窗**（所有 subprocess 带 `CREATE_NO_WINDOW`，启动脚本走 pythonw/vbs）；加载页主色要在 `<head>` 内联读 `localStorage('mc-theme')` 应用，**不许先闪默认色**。
-③ **日志框任何情况都是纯黑 `#000000` + 亮字**（只为与深色主题 `#0a0e13` 区分边界），且**必须可复制** —— pywebview 要显式 `text_select=True`（默认 False 在 WebView2 层就禁掉了选择，CSS 压不住）。
-④ **滑块/开关必须与后端真实动作一一对应并实测验证**（原话「**那些滑块要真的有用，不要就做表面功夫**」）。
-⑤ **弹窗按钮文字必须自解释**（不用"确定/取消"，同一流程里连续两个框都要写动作本身），破坏性动作写清后果、默认聚焦安全项。
-⑥ **一个弹窗只做一件事**；多个同类对象**各给各的控件**（有几组冲突就几个下拉框）；危险动作**不能放主位**：「**发现 mod 冲突风险应该先去清理才是右边的橙色主选项**」—— 推荐动作 = 最右橙色 primary + 默认聚焦，"仍然继续" = 最左侧次要项。
-⑦ **「⋯/更多」要就地弹小菜单，不要弹窗**承载"选一项动作"；**能点的东西不要再配一个按钮**（网址做成可点链接，原话「程序内所有给网址做了打开键的，全部去掉，点击网址就可以直接打开了」）；浮层（拖放提示）**释放即消失**。
-⑧ 要改 UI 观感时**先读现有组件与 CSS 变量**，确认是不是已经能满足（`button.primary` 本来两个主题下就是橙色），别急着加新样式/新类。
-
-═══ 同族准则 · 批量任务 / 日志 / 数据安全 ═══
-**A. 批量不要 fail-fast**：先把所有项都尝试一遍（单项失败不中断其它项），最后集中处理失败项；失败项**自动重试、上限 3 次**；**"缺失"（`missing`/`missing_source`）同样算失败项**进重试队列（通常是分卷没解开或上次中断，重跑常能补上），重试完仍缺才如实报缺失；重试过程算**进度信息不是错误**；只有重试完仍失败才报错，并**列出到底是哪几项**。统计口径：`missing`/`skipped` = 缺失/跳过，`error`/`failed` 才算失败。适用于下载/安装/更新/解压/展开等一切批处理。
-**B. 失败原因必须落进日志文件**（`runtime\logs\launch.log`），不能只写在内存里的任务状态 —— 曾因自更新失败只写内存、程序随即退出，事后完全查不出哪一项失败；界面汇总（"完成，但有 N 项失败"）要能点开看到**具体哪一项、什么原因**。
-**C. 【数据安全红线】**用户 2026-10-01 原话：「**任何情况（除用户手动点击移出库外）都不要动用户的 mod 库（包括换位置）**」—— `library\` 只读，不删/不移/不重命名/不换位置/不"整理"；唯一允许的删除入口是用户在卡片菜单点「移出 Mod 库」（移到 `runtime\backups\mod-trash\`，可找回）。触发原因是一条真实反馈「重装的时候还把我 mod 都删完了」：`stage_and_prepare` 曾无条件清空 staging，而库目录与 staging 目录一旦相同/嵌套，清理 staging 就等于删库。护栏见「关键机制速查」。
-**D. 皮肤 Mod 归档**：用户要求「**以后你只要看到皮肤 mod 就塞进 `D:\zmdmod\mod集合`**」（解压后的目录形式、保留可读命名）—— 那是他的 Mod 总仓库、不参与任何自动清理；`modtest\library` 只是测试用的一份，两边都放是常态。
-
-═══ 同族准则 · 交付：能自动做掉的就别用"提示"；不许拿"改名/绕过"当解法 ═══
-**E. 原话**：「**不是提示的问题，正常用户不会看日志，需要自动检测处理**」—— 我提议"在自检里加一条提示，说明 OptiScaler 接管了 NGX、面板 hook 计数为 0 属正常"被直接否掉。**判据（三问）**：这件事**能不能由程序自己安全地做掉**（备份 + 可还原 + 只动确定的目标）？能 → **做掉**，并把动作写成自检里的一条 `fixed=True`（而不是 `manual=True`/说明项）；只有"需要用户做决策"或"程序确实做不了"才提示；提示必须出现在**用户一定会看到的位置**（启动前弹窗、卡片标记），不要只写日志。**范例**：OptiScaler 截获 NGX → `game_clean.quarantine_injector()` **自动备份移走**，自检只报 `dlss5:ngx_conflict`（`fixed=True`）。
-**F. 不许让用户改名绕过**（原话：「还有要自动化处理，**不要让别人改名**」）：反馈者的皮肤包只因**目录名**带 `rabbitfx` 就被判成依赖、界面看不见；我给的"把 zip 改名再导入"被当场否掉 —— **判据的错要在判据里修**（落成 `core.is_dependency_package` = 名字像依赖 **且** 自己不带换装资源）。给外部反馈者的回复里也不该出现"你把文件改个名试试"。
-**G. 同族**：「那些滑块要真的有用」「能自动补齐的就别让他手动」——**"我告诉你了" ≠ "我处理了"**。
-
-`关键词：["启动页UI铁律","尽早展示加载页","不要cmd黑窗","CREATE_NO_WINDOW","日志框纯黑可复制","text_select True","滑块要真的有用","弹窗按钮自解释","一个弹窗只做一件事","推荐动作放右侧橙色主按钮","更多要出就地菜单","网址直接点开"]`
-
 ### 【modecontroller · 对外节奏：修 → 我…
 *2026-10-02 18:17*
 
@@ -220,21 +172,72 @@
 
 `关键词：["自动更新依赖","auto_update_dependencies","update_available","ensure_xxmi","ok_status","弹窗跳转依赖页","xxmi 拉不起来","check_component_updates","开关没生效","启动前拦阻"]`
 
+### 【备份语义判据（从 2026-10-04 全项目审计抽象…
+*2026-10-04 05:18*
+
+【备份语义判据（从 2026-10-04 全项目审计抽象，用户明确把"备份问题"划为**允许修**的范围）】凡"先备份再改动"的流程，必须同时满足三条，缺一条就不算做对：
+① **备份可被找到** —— 索引/清单要在**破坏性动作之前**落盘（先写 `status=in_progress`、搬完再改 `complete`），并且"**没有清单但已经存了文件**"的备份也要能被列出来（半途中断的现场最容易变成"用户以为没有备份"从而彻底丢数据）；
+② **备份可被还原** —— "备份存在" ≠ "还原得回去"：还原入口必须真的存在、被接到 UI、且**失败时不许报成功**（缺备份却 `return ok=True` 是假还原）；
+③ **失败保留原状** —— "先删后拷 / 先删后移 / 先 unlink 旧备份再 rename"一律改成"**确认可还原才删**"；清理既有文件时用唯一名（备份只增不删），不要覆盖上一次的备份。
+本次实测到的反例（每一条都是真 bug）：只删工作文件不删 sidecar ⇒ 重试跳过"已完成块"、落位空洞坏包却报成功；`DisabledAddons` 整行覆盖 ⇒ 静默删掉用户原有项；`.bak` 固定名只建一次 ⇒ 还原得到**更早那份**（还原失真）；还原时"先无条件删系统模块再看 proxy 能否回来" ⇒ 游戏目录永久缺 `d3dcompiler_47.dll`；同一秒两次备份/打包同名 ⇒ 互相覆盖。
+
+`关键词：["备份语义","备份可被找到","备份可被还原","失败保留原状","先删后拷","假还原","还原失真","唯一备份名","清单先落盘","in_progress","sidecar 残留","删除前确认可还原"]`
+
+### 【modecontroller · 诊断与归因：**判据…
+*2026-10-04 05:21*
+
+【modecontroller · 诊断与归因：**判据不够就明说、一次抓全、实测能撤回推测、别让用户当测试员、复用现成通道**】
+**① 不确定时明说"判据不够"**（原话「**我要你们明确说是不是判据不够**，…**你最好能让日志包一次抓全所有数据，不要搞好几轮**」）：无法定论时**正面回答"判据不够"并列出缺哪几项**，不要用"可能是…/建议再试…"含混过去。**诊断/崩溃包的设计目标 = 一次抓齐定位所需的全部数据**；自问「如果这次的数据只够我排除一种可能，我还需要再来一轮吗？」需要就说明没抓全。
+**② 实测成功要能撤回"静态/历史推测"**（原话「**如果某一组之前报崩溃的，后面终末地成功启动没崩就从记忆里移出**」「**报了独享标识可能冲突的，只要能进，都记忆不再报**」）：推测性预警（静态资源冲突、历史崩溃记忆）必须配**自动撤回**通道；判据是"**确实跑通**"（正常退出流程 **或存活 ≥ 120 秒**），**静默闪退（30 秒进程就没了）不算成功**；撤回要**精确**（只清匹配当前组合的那条）且**透明**（自检如实写"另有 N 条以前跑通过、已忽略"）。
+**③ 别让用户当测试员**（原话「**启动过了，你不要老是让我测，你自己根据探针的数据全数看看整个执行链，有源代码还找不出来？**」）：他已经启动/操作过、数据也拿到时，下一步应该是"**我读源码 + 我分析数据 + 我修**"；开源组件的机制问题**源码就是第一手判据**；"让用户测"要有价值密度（**一轮测试排掉一个岔**，不是"我改一处你试一次"）；能自己写体检脚本/自己 diff 配置的**都不要外包给用户**。自查：「我现在缺的这个信息，能不能从源码/已落盘数据/我自己写的检查器里拿到？」
+**④ 复用对方已有的东西，比自造一套协议更省事**（原话「**不是，我是说让面板走mod的按键**」）：先问"现成的通道是什么"——Mod 自带的按键用户手按能用，面板发这些键就行（`actions.tsv` 的 `original_keys` 一直存在）。自造协议的每一层都引入新失败点；代价要主动说清（发原键就不能锁原键）。**F1..F12 不能用**（用户在游戏内有用途）。
+（同族的批量任务/日志/数据安全、交付准则、发布规则、文档规范、UI 准则各自成条，此处不重复。）
+
+`关键词：["判据不够要明说","诊断包一次抓全","不要搞好几轮","实测成功撤回推测","存活120秒才算成功","静默闪退不算成功","不要老是让我测","读源码是第一手判据","一轮测试排掉一个岔","复用mod自己的按键","F1到F12不能用"]`
+
 ### 【modecontroller · 发布规则与收尾固定动…
-*2026-10-04 01:13*
+*2026-10-04 05:21*
 
 【modecontroller · 发布规则与收尾固定动作】
-**① 版本号 = 「最新 Release + 1」，改动了就要领先一个**（2026-10-04 原话：「**不发release，但是本地和源码如果有改动要领先release一个版本**」）。含义：最新 Release = v1.0.5 时，只要本地/源码有**未发布**的改动，`version.py` + 两份 README 就该是 **1.0.6**；发过 Release 之后、又攒了新改动，就继续 +1。**反面**是「每改一次就 +1」——他曾纠正「**你都没推github你为什么又变版本号**」：一整批改动只挂**一个**号，别吃号（2026-10-02 原话「如果github只推了源码没推版本，版本号也不用改，只比release领先一个版本」）。已落成 `scripts\release_version.py`，`build_release.py` / `prepare_release.py` / `push.py` 三个入口各跑一遍（查不到 Release 只提示不阻断）。⚠️ **改完 `version.py` 后、构建前要再读一次确认实际值**（伪旧版构建会临时改它，edit 可能失败后用旧号白跑一遍）。
-**② 未经他明确说"推"绝不推送**；**发 Release 同样要等他明确说**（原话「**Releases还是保持我说了你再发吧**」）—— **push main ≠ 发版**。他一句「Releases 没更新啊」只是确认事实，**不算授权**（我曾误判擅自发了 v0.7.0）。发完要主动说清"Release 要不要发、由你定"。
-**③ 推送前必须做状态快照**（原话「你在推送脚本改一下，**每次推 github 都要做快照**」）：`scripts\snapshot.py` 记 git 状态、exe/addon sha256、数据根关键文件、游戏目录清单（小文件复制、大文件只记 hash）；`push.py` 先快照再推，**快照失败就不推**。落 `D:\zmdmod\_snapshot_<标签>-<时间戳>\`（工作区外、不进 git）。
-**④ 每修好一个 bug 的固定收尾**（原话「**以后改好一个bug就更新一次结构树退一次main（一定是我明确说明可以的）**」）：更新 normify 结构树（改了哪些模块就刷新那些模块的 description/source/fingerprint，再 validate → build → render）+ 顺手推 main（**推送前必须等他明确说"可以"**）。
-**⑤ 交付形态**：「你全弄好一起打包再让我测」；交付必须给**可辨识的硬指标**（文件大小 / 修改时间 / sha256）；改动多的版本给编号测试清单 `TESTING.md`（连续编号 +「操作」+「预期结果」，★ 标本次改动项，**新增项一律接在末尾、老编号不动**，他按编号回话）；**"与上一版的变动"只写 Release notes，README 不写**。
+**① 版本号 = 「最新 Release + 1」，改动了就要领先一个**（2026-10-04 原话：「**不发release，但是本地和源码如果有改动要领先release一个版本**」）。含义：只要本地/源码有**未发布**的改动，`version.py` + 两份 README 就该比最新 Release 领先一个号；**一整批改动只挂一个号，别每改一次就 +1**（他曾纠正「**你都没推github你为什么又变版本号**」；2026-10-02 原话「如果github只推了源码没推版本，版本号也不用改，只比release领先一个版本」）。已落成 `scripts\release_version.py`，`build_release.py` / `prepare_release.py` / `push.py` 三个入口各跑一遍（查不到 Release 只提示不阻断；它现在会用 `git rev-list --count <tag>..HEAD` 判"本地==Release 但之后还有提交"⇒ 报错提醒升号）。⚠️ **改完 `version.py` 后、构建前要再读一次确认实际值**（伪旧版构建会临时改它，edit 可能失败后用旧号白跑一遍）。
+**② 未经他明确说"推"绝不推送**；**发 Release 同样要等他明确说**（原话「**Releases还是保持我说了你再发吧**」）—— **push main ≠ 发版**。他一句「Releases 没更新啊」只是确认事实、**不算授权**（我曾误判擅自发了 v0.7.0）。发完要主动说清"Release 要不要发、由你定"。
+**③ 推送前必须做状态快照**（原话「你在推送脚本改一下，**每次推 github 都要做快照**」）：`scripts\snapshot.py` 记 git 状态、exe/addon sha256、数据根关键文件、游戏目录清单；`push.py` 先快照再推、**快照失败就不推**；落 `D:\zmdmod\_snapshot_<标签>-<时间戳>\`（工作区外、不进 git）。快照里 `complete=false` 时 push 会给醒目警告（"数据根不存在/没定位到游戏目录"这类空快照）。
+**④ 每修好一个 bug 的固定收尾**（原话「**以后改好一个bug就更新一次结构树退一次main（一定是我明确说明可以的）**」）：更新 normify 结构树（改哪些模块就刷新那些模块，再 validate → build → render）+ 顺手推 main（**推送前必须等他明确说"可以"**）。顺序：修 → 自己回测 → 更新结构树 → 他确认 → 才推 main。
+**⑤ 交付形态**：「你全弄好一起打包再让我测」；必须给**可辨识的硬指标**（文件大小 / 修改时间 / sha256）；改动多的版本给编号测试清单 `TESTING.md`（连续编号 +「操作」+「预期结果」，★ 标本次改动项，**新增项一律接在末尾、老编号不动**，他按编号回话）；**"与上一版的变动"只写 Release notes，README 不写**。
 **⑥ 公告只发"大事"**：「公告只是大事才发，更新这种不用发，记一下」——**版本更新、功能上新默认不发公告**。
-**⑦ ⚠️ 发版正文必须来自"给这一版准备好的" RELEASE_NOTES.md**（2026-10-04 我的疏漏）：发 v1.0.5 时 `RELEASE_NOTES.md` 里还是**上一版（v1.0.4）的主题内容**，我却拿它当了正文 ⇒ **Release 标题与正文不符**。发版前**先读一遍 RELEASE_NOTES.md 的首行与主题**，确认它写的就是这个 tag。
+**⑦ ⚠️ 发版正文必须来自"给这一版准备好的" RELEASE_NOTES.md**（2026-10-04 我的疏漏）：发 v1.0.5 时 `RELEASE_NOTES.md` 里还是**上一版（v1.0.4）的内容**，我却拿它当正文 ⇒ **Release 标题与正文不符**。发版前**先读一遍 RELEASE_NOTES.md 的首行与主题**，确认它写的就是这个 tag。
 
 `关键词：["版本号只跟Release比","没推只领先一个","未经说推绝不推送","发Release要明确说","push main不等于发版","推送前必须快照","每修好bug更新结构树并推main","交付给硬指标sha256","TESTING编号清单","公告只发大事"]`
 
-## 项目记忆（结构 / 决策 / 部署 / 待办）（31 条）
+### 【modecontroller · 项目形态与文档规范】…
+*2026-10-04 05:21*
+
+【modecontroller · 项目形态与文档规范】
+**① 文档读者分层**（原话「**现在太详细了，正常使用根本用不到这些**，你现在这个作为详细版，在简略版开头做个指向它的链接，简略版只要简单讲工作原理那些就行，**不要说具体位置那些的**」）：面向用户的入口文档（GitHub README）**只写"正常使用够用"的** —— 定位、工作原理、能做什么、怎么用、出问题去哪；细节（安装步骤、目录/路径、逐项排查、开发与发布）全进 `docs\README.detailed.md`，简略版开头给显眼链接、详细版顶部反向链接。**简略版不写具体位置**（唯一例外："不说清就会让用户丢数据"的提醒，如"别把 exe 放进 Program Files"）。**不能省的**：第三方署名与许可、免责声明。**"与上一版的变动"只写 Release notes，README 不写**。
+**② README 外观**（原话「**我想居中readme标题，然后挂几个勋章**」）：头部 `<div align="center">` hero 区（**HTML 块内 markdown 不渲染**，一律用 `<h1>/<p>/<b>/<a>/<img>`），挂 shields.io 勋章（语言/系统/Release/License）。⚠️ 他曾因"图片对首屏太重"撤掉过应用图标 ⇒ **大图别上**。
+**③ 能用远端文件配置的，别写死在代码里**（原话「强制用户停留一定秒数（**可在仓库配置**，默认 10s）」「情况能通过 **github 仓库修改**」）：临时可调参数（秒数/文案/阈值/开关）做成**仓库里的数据文件**（如 `alerts.json`），改完 push 即生效、**不用发版**；字段说明写进文件自身 `_readme` 与详细文档；这类远程内容**失败必须静默**并回退缓存。⚠️ **测试通道不能进正式版**（原话「正式的版本不要包含测试的文件和读本地文件这个过程」）—— 保护性功能尤其不能留"放个本地文件就能挡掉"的后门。
+**④ 面向用户的产物都要问一句**："这是给使用者看的还是给排查/开发看的" —— 前者要短、讲原理；后者才放位置与命令。
+（同族的批量任务/日志/数据安全、交付准则、诊断归因、发布规则、UI 准则各自成条，此处不重复。）
+
+`关键词：["文档读者分层","README简略版不写位置","详细版README.detailed","README居中挂勋章","改动只写Release notes","远端文件配置","alerts.json可仓库改","失败静默回退缓存","测试通道不进正式版","署名与免责不能省"]`
+
+### 【modecontroller · 界面与交互体验】用户…
+*2026-10-04 05:21*
+
+【modecontroller · 界面与交互体验】用户定过的一整套 UI 硬要求（给这个项目加功能的定式：**启动页 = 滑块 + 主流程按钮；诊断/日志/状态/更新入口一律进设置页**）
+① **尽早出加载页**（原话「从零启动的第一次出加载页面的时间太长了，**所有情况都要尽早展示加载页面**」）—— 窗口尽早创建，全盘探测/扫描/清理/安装一律移到窗口出现之后的后台线程；首屏是**不依赖后端数据的静态加载页**，分步说人话，慢操作要有可见进度，绝不出现黑屏/空白。
+② **全程不允许 cmd/控制台黑窗**（所有 subprocess 带 `CREATE_NO_WINDOW`，启动脚本走 pythonw/vbs）；加载页主色要在 `<head>` 内联读 `localStorage('mc-theme')` 应用，**不许先闪默认色**。
+③ **日志框任何情况都是纯黑 `#000000` + 亮字**（只为与深色主题 `#0a0e13` 区分边界），且**必须可复制** —— pywebview 要显式 `text_select=True`（默认 False 在 WebView2 层就禁掉了选择，CSS 压不住）。
+④ **滑块/开关必须与后端真实动作一一对应并实测验证**（原话「**那些滑块要真的有用，不要就做表面功夫**」）。
+⑤ **弹窗按钮文字必须自解释**（不用"确定/取消"，同一流程里连续两个框都要写动作本身），破坏性动作写清后果、默认聚焦安全项（`focusCancel: true`）。
+⑥ **一个弹窗只做一件事**；多个同类对象**各给各的控件**（有几组冲突就几个下拉框）；危险动作**不能放主位**：「**发现 mod 冲突风险应该先去清理才是右边的橙色主选项**」—— 推荐动作 = 最右橙色 primary + 默认聚焦，"仍然继续" = 最左侧次要项。
+⑦ **「⋯/更多」要就地弹小菜单，不要弹窗**承载"选一项动作"；**能点的东西不要再配一个按钮**（网址做成可点链接，原话「程序内所有给网址做了打开键的，全部去掉，点击网址就可以直接打开了」）；浮层（拖放提示）**释放即消失**。
+⑧ 要改 UI 观感时**先读现有组件与 CSS 变量**，确认是不是已经能满足（`button.primary` 本来两个主题下就是橙色），别急着加新样式/新类。主题 6 套（light/dark/amber/cyan/violet/emerald）**前后端必须同一份白名单**（`config.THEMES` ↔ `store.js` 的 `THEMES`），否则用户选的主题存不住。
+（同族的批量任务/日志/数据安全、交付准则、诊断归因、发布规则、文档规范各自成条，此处不重复。）
+
+`关键词：["启动页UI铁律","尽早展示加载页","不要cmd黑窗","CREATE_NO_WINDOW","日志框纯黑可复制","text_select True","滑块要真的有用","弹窗按钮自解释","一个弹窗只做一件事","推荐动作放右侧橙色主按钮","更多要出就地菜单","网址直接点开"]`
+
+## 项目记忆（结构 / 决策 / 部署 / 待办）（29 条）
 
 ### 项目概述
 
@@ -255,17 +258,15 @@
 
 `关键词：["SecondaryMotion","SBM","乳摇插件","自己维护","fork 上游仓库","PR #4 相位对齐","1.5 适配","提弗洛斯","Arknights-Endfield-Plugin-Secondary-bodyphysics","GPL-3.0"]`
 
-### EndfieldModController（原名 Mod…
-*2026-10-02 18:16*
+### EndfieldModController =《明日方舟…
+*2026-10-04 05:20*
 
-EndfieldModController（原名 ModeController，2026-09-27 全项目改名）=《明日方舟：终末地》的 **Mod 一站式管理器**：把 **DLSS5 神经渲染 + 第一人称视角 + 服装 Mod（EFMI）+ 物理效果（SecondaryMotion 乳摇）+ 摆姿与 MMD 播放（Endfield Poser）** 统一到一次「一键启动」，自动下载安装 XXMI Launcher / XXMI Libraries / EFMI / Endfield Poser，并维护注入与启动自检。
-**技术形态**：Python + pywebview(WebView2)，单文件 exe（PyInstaller onefile、`--noconsole`、`--uac-admin`）。核心理念 **零配置启动即用**。
-**边界**：只做编排与自检 —— 注入交给 XXMI，**不改游戏本体/资源/存档**，游戏目录改动一律先备份、可一键还原；不内置任何 Mod（Endfield Poser 是 AGPL-3.0、二进制不随包分发；Mod 修复工具是 B站 up 主**可可HXL** 的闭源作品，随包分发并在 README 标注版权归属）。
-**位置**：工作区 `D:\zmdmod\modecontroller`（用户明确不改文件夹名）；**数据根 = exe 所在目录**（`config.json` / `runtime\` / `library\`）；仓库 `jing-hy/EndfieldModController`。
-**文档形态**：`README.md` = 面向用户的简略版（只讲工作原理与怎么用、**不写具体位置**）；细节全在 `docs/README.detailed.md`，两版开头互链。
-⚠️ **版本/进展一律看 ops 那条，本条不写死**（写死必过时）。
+EndfieldModController =《明日方舟：终末地》的 **Mod 一站式管理器**：把 **DLSS5 神经渲染 + 第一人称 + 服装 Mod（EFMI）+ 物理效果（SecondaryMotion 乳摇）+ 摆姿与 MMD 播放（Endfield Poser）** 统一到一次「一键启动」，自动下载安装 XXMI Launcher / Libraries / EFMI / Poser 并维护注入与启动自检。
+**技术形态**：Python + pywebview(WebView2)，单文件 exe（PyInstaller onefile、`--noconsole`、`--uac-admin`）；**前端是 Vue 3 + Vite**（源码 `frontend\src`、单文件产物 `web\dist\index.html` 随 exe 打包，`web\index.html` 只是"产物缺失"兜底页）。核心理念 **零配置启动即用**。
+**边界**：只做编排与自检 —— 注入交给 XXMI，不改游戏本体/资源/存档；游戏目录改动一律先备份、可一键还原；不内置任何 Mod（Poser 是 AGPL-3.0 不随包分发）。
+**位置**：工作区 `D:\zmdmod\modecontroller`（用户明确不改文件夹名）；**数据根 = exe 所在目录**（`config.json` / `runtime\` / `library\`）；仓库 `jing-hy/EndfieldModController`。文档：`README.md` 面向用户简略版 + `docs\README.detailed.md` 详细版，两版开头互链。⚠️ 版本/进展看 ops 条，本条不写死。
 
-`关键词：["项目是什么","一站式Mod管理器","一键启动","DLSS5与第一人称","EFMI服装Mod","Endfield Poser摆姿MMD","零配置启动即用","pywebview单文件exe","数据根在exe旁","仓库jing-hy","不改游戏本体"]`
+`关键词：["项目概述","DLSS5神经渲染","EFMI服装Mod","SecondaryMotion乳摇","Endfield Poser","pywebview","Vue3+Vite前端","单文件exe","零配置启动即用","数据根等于exe目录","只做编排与自检","uac-admin默认提权"]`
 
 ### 项目结构
 
@@ -276,30 +277,40 @@ EndfieldModController（原名 ModeController，2026-09-27 全项目改名）=�
 
 `关键词：["官网角色表33位","operator页面HTML结构","data-key美术代号","index自标总数","characters.json","match_character位置优先","小羊是艾尔黛拉不是昼雪","译名变体别名"]`
 
-### modecontroller 架构与 path 索引（工…
-*2026-10-02 18:16*
+### 工作区 `D:\zmdmod\modecontrolle…
+*2026-10-04 05:20*
 
-modecontroller 架构与 path 索引（工作区 `D:\zmdmod\modecontroller`）
-**包 `endfieldmodcontroller\`**：`config.py`（配置原子写/损坏隔离/路径推导/内嵌组件探测）、`core.py`（Mod 库扫描、角色识别、ini 解析、控制器产物、`d3dx_user.ini`）、`activation.py`（选择解析、同角色互斥、staging、依赖计划）、`launcher.py`（一键启动、注入库维护、XXMI 配置读写、进程收尾）、`api.py`（pywebview `js_api` 接口层，构造必须快、重活后台预热）、`initialize.py`（启动自检）、`dependencies.py`/`runtime_deps.py`（下载解压与安装）、`poser.py`、`secondary_motion.py`、`dlss5_fetcher.py`、`reshade_integration.py`、`game_clean.py`（净化/还原）、`modfix.py`、`fastnet.py`、`github.py`、`fsutil.py`、`alerts.py`、`diagnostics.py`、`crashwatch.py`、`updates.py`、`integrity.py`、`ini_lint.py`、`deviceinfo.py`、`filewatch.py`、`character_sync.py`、`sbm_data_sync.py`、`runtime_assets.py`、`version.py`。
-**前端 `web\`**：index.html + style.css + app.js（原生 JS，5 页签：Mod 库 / 依赖 / 启动 / 设置 / 说明）。
-**运行时目录**：`runtime\builtin\XXMI`（XXMI + Libraries + EFMI）、`runtime\dlss5`（d3d12.dll 是唯一 ReShade 底座 + `*.addon64` + reshade-shaders）、`runtime\secondary_motion`、`runtime\poser`、`runtime\game_backup\<时间戳>`、`runtime\logs`、`runtime\_state`、`library\`（**用户的 Mod 库，任何自动清理都不碰**）、`assets\`（随包资产：dlss5 / nvngx / secondary_motion / modfix / addon）。
-**脚本 `scripts\`**：build_exe / build_release / build_assets_bundle / prepare_release / push / snapshot / upload_release_assets / release_version / normify_realign / fetch_characters / gen_character_pinyin / fetch_…
+工作区 `D:\zmdmod\modecontroller`。
+**后端包 `endfieldmodcontroller\`（约 2.8 万行）**：`config.py`（配置原子写/损坏隔离/路径推导/探测缓存）、`core.py`（Mod 库扫描、角色识别、ini 解析、控制器产物、`d3dx_user.ini`）、`activation.py`（选择解析、同角色互斥、staging、依赖计划）、`launcher.py`（一键启动、注入库维护、XXMI 配置读写、进程收尾）、`api.py`（pywebview `js_api` 层，构造必须快、重活丢后台预热）、`initialize.py`（启动自检）、`dependencies.py`/`runtime_deps.py`（下载解压安装）/`runtime_assets.py`（随包资产）、`poser.py`/`secondary_motion.py`/`dlss5_fetcher.py`/`reshade_integration.py`/`game_clean.py`（净化还原）、`modfix.py`/`modbackup.py`/`moddl.py`、`fastnet.py`（多线路下载引擎）/`github.py`、`fsutil.py`（**公共工具：原子写+退避重试 / sha256 / 路径包含判定 / JSON 读写 / 编码容错**）、`alerts.py`/`diagnostics.py`/`crashwatch.py`/`filewatch.py`/`updates.py`/`selfupdate.py`/`integrity.py`/`ini_lint.py`/`deviceinfo.py`/`character_sync.py`/`sbm_data_sync.py`/`version.py`。
+**前端**：源码 `frontend\src`（Vue 3 + Vite）—— `pages\` 六个页签（Mod 库 / 辅助 / 依赖 / 启动 / 设置 / 说明）、`components\`（含 `ui\` 通用件）、`lib\bridge.js` 是**唯一**桥接点（`call("后端方法")`）、`store.js` 存 `get_state()` 快照；构建产物 `web\dist\index.html`（单文件）。
+**运行时目录**：`runtime\builtin\XXMI`（XXMI+Libraries+EFMI）、`runtime\dlss5`、`runtime\secondary_motion`、`runtime\poser`、`runtime\game_backup\<时间戳>`、`runtime\logs`、`runtime\_state`、`library\`（**用户的 Mod 库，任何自动清理都不碰**）、`assets\`（随包资产）。
+**脚本 `scripts\`**：build_exe / build_release / build_assets_bundle / prepare_release / push / snapshot / upload_release_assets / release_version / normify_realign / fetch_characters / gen_character_pinyin / make_demo / self_check。
 **测试**：`python -m pytest tests -q`（**不要**在仓库根全量跑，`_tmp\` 会污染）。
-**硬约定**：内嵌组件一律用**相对 PROJECT_ROOT 的相对路径**、config.json 里不出现任何盘符；外部组件用 `available_drives()` 动态枚举，「内置优先、外部兜底」；游戏本体用 `auto_detect_game_dir()` 自动搜索。
+**硬约定**：内嵌组件一律用**相对 PROJECT_ROOT 的相对路径**、config.json 里不出现盘符；外部组件用 `available_drives()` 动态枚举，「内置优先、外部兜底」；游戏本体用 `auto_detect_game_dir()` 自动搜索。
 
-`关键词：["架构","包结构","模块清单","path索引","runtime目录","library不碰","web前端5页签","scripts脚本清单","测试命令pytest","相对PROJECT_ROOT","内置优先外部兜底","auto_detect_game_dir"]`
+`关键词：["项目结构","模块清单","api.py接口层","fsutil公共工具","fastnet下载引擎","frontend Vue源码","web/dist单文件产物","六个页签","bridge.js唯一桥接","runtime目录布局","library用户库只读","scripts脚本清单"]`
 
-### modecontroller 关键机制速查（改动前先看这…
-*2026-10-02 18:16*
+### **① 新增内置组件的唯一枢纽 = `runtime_d…
+*2026-10-04 05:20*
 
-modecontroller 关键机制速查（改动前先看这条）
-① **新增内置组件的唯一枢纽 = `runtime_deps.ensure_all()` 的 steps 列表** —— 加一项自动进四条链路：一键启动补齐、依赖页显示（要在 `builtin_report()` 加字段，照 `display/present/status/required/needed/source/install_dir/version/enabled`）、「一键安装/更新全部组件」（含 `_estimate_update_total()` 分母）、完整性检查（`integrity.py`）。配套还要动 `updates.check_updates()` 与 `api.get_state()`。⚠️ `_latest_release_asset(..., include_prerelease=True)` 是**唯一能拿到预发布版**的接口（Poser 上游全是预发布，`/releases/latest` 永远取不到）。
-② **Poser 注入 = 与乳摇 sbm 同源的 proxy 机制**：游戏目录 proxy（`d3dcompiler_47.dll` 必需、`vulkan-1.dll` 包内有才装）+ `plugin\poser.dll`；上游 `src/core/proxy_loader.h` 用 `FindFirstFileW("*.dll")` 加载 plugin 下**全部** dll ⇒ **两个 loader 会互相加载对方插件，共存成立**。安装/卸载一律调上游向导（`安全安装.bat` → `tools\deploy.ps1 -Action Install|Uninstall`），状态唯一真源 = `plugin\poser-install.json`；用户数据都在游戏目录 `plugin\`（poser_config.txt / poser_layout.ini / poses\ / mmd\character-faces\ / poser_log.txt）；Poser 内置只读 HTTP API 在 `127.0.0.1:18923`。
-③ **依赖机制**：清单 = 仓库根 `dependencies.json`（可被用户改）；只允许装进 `<Mod 库>\_deps\<名>`（`_safe_install_dir` 硬闸）；判据唯一入口 `core.collect_required_dependency_names()`（读 `requires` + 扫 ini 全文），**下载侧与激活侧必须共用同一判据**（历史 bug：激活侧只读 sidecar 导致"下得来、进不去"）。
-④ **Mod 库保护护栏**：`fsutil.library_conflict(library_root, target)` + `activation.LibraryGuardError`，在 staging/清理/收编四处前置拒绝、逐项 rmtree 前再查一次。
-⑤ **公告/预警**：只从仓库根 `alerts.json` 读，**没有任何"本地文件优先"通道**（保护通道不能留后门）；失败静默回退上次缓存。
+**① 新增内置组件的唯一枢纽 = `runtime_deps.ensure_all()` 的 steps 列表** —— 加一项会自动进四条链路：一键启动补齐 / 依赖页显示（要在 `builtin_report()` 加字段，照 `display/present/status/required/needed/source/install_dir/version/enabled`）/ 「一键更新全部组件」（含 `_estimate_update_total()` 分母）/ 完整性检查 `integrity.py`；配套还要动 `updates.check_updates()` 与 `api.get_state()`。⚠️ `_latest_release_asset(..., include_prerelease=True)` 是**唯一能拿到预发布版**的接口（Poser 上游全是预发布，`/releases/latest` 永远取不到）。
+**② 依赖机制**：清单 = 仓库根 `dependencies.json`（可被用户改）；只允许装进 `<Mod 库>\_deps\<名>`（`_safe_install_dir` 硬闸）；判据唯一入口 `core.collect_required_dependency_names()`（读 `requires` + 扫 ini 全文），**下载侧与激活侧必须共用同一判据**（历史 bug：激活侧只读 sidecar ⇒ "下得来、进不去"）。
+**③ Mod 库保护护栏**：`fsutil.library_conflict(library_root, target)` + `activation.LibraryGuardError`，在 staging / 清理 / 收编四处**前置拒绝**、逐项 rmtree 前再查一次。
+**④ 两个 proxy 插件共存成立**：Poser 与乳摇 sbm 同源（游戏目录 proxy + `plugin\*.dll`），上游 `src/core/proxy_loader.h` 用 `FindFirstFileW("*.dll")` 加载 plugin 下**全部** dll ⇒ 两个 loader 互相加载对方插件不是 bug。Poser 状态唯一真源 = `plugin\poser-install.json`；用户数据都在游戏目录 `plugin\`；Poser 自带只读 HTTP API 在 `127.0.0.1:18923`。
+**⑤ 公告/预警**只从仓库根 `alerts.json` 读，**没有任何"本地文件优先"通道**（保护性功能不留后门）；远程内容失败静默回退缓存。
 
-`关键词：["新增组件落点","ensure_all","builtin_report字段","预发布只能releases_list","Poser proxy共存","poser-install.json","Poser只读HTTP API","依赖判据统一","_deps目录","library_conflict护栏","alerts.json只读仓库"]`
+`关键词：["ensure_all枢纽","builtin_report字段","预发布版接口","依赖清单dependencies.json","_deps安装目录","collect_required_dependency_names","library_conflict护栏","proxy_loader加载全部dll","poser-install.json","公告只读alerts.json","无本地后门","一键更新分母"]`
+
+### **normify 结构树**（2026-10-02 建…
+*2026-10-04 05:20*
+
+**normify 结构树**（2026-10-02 建立）—— 用户原话：「帮我建本项目结构树并渲染架构图，**粒度到单一功能单元**」+「**以后改好一个bug就更新一次结构树退一次main**（一定是我明确说明可以的）」。
+**落点**：`C:\Users\<user>\.dsh\profiles\desktop\normify-modecontroller\`（插件 profile 目录，**不进仓库、不污染 git**）—— `modules\**\*.md`（frontmatter 机器读）、`renders\**\*.json`（每层渲染数据）、编译产物 `tree.json` / `outline.md` / `api-index.json` / `receipt.json`、交互图 `normify.html`。仓库里另存一份镜像 **`docs\structure\`**（`push.py` 每次推送前刷新并单独提交）。
+**更新流程（固化成四步，别手工改行号）**：① `python scripts\normify_realign.py --apply`（按 `git diff <结构树快照>` 把模块 source 的**行号整体平移**）② `normify_module_refresh(all=true, repoRoot=…, activate=true)` 重算 fingerprint/revision ③ `normify_validate` 必须 **0 error** ④ `normify_build` → `normify_render`。
+**新增模块范例**：先 `state=planned` 建，再 `refresh(activate=true)` 转 active。
+⚠️ **2026-10-04 那批 46 个文件的改动让所有行号变了，这四步待重跑**。
+
+`关键词：["normify结构树","粒度到单一功能单元","docstructure镜像","normify_realign平移行号","module_refresh","normify_validate","tree.json产物","改完bug更新结构树","profile目录不进仓库","行号全变待重跑"]`
 
 ### 技术决策
 
@@ -338,6 +349,26 @@ runtime\dlss5                      38 字符  ❌ 崩
 
 `关键词：["游戏内推荐设置","启用超分WIP","NR风格电影","强度拉满","Camera页顺序","打boss不退出第一人称","FOV 60到90","Home打开ReShade","F6神经渲染开关","F11Mod显示","第一人称快捷键"]`
 
+### 【面板最终形态：**发 Mod 自己的按键**（F13.…
+*2026-10-04 05:20*
+
+【面板最终形态：**发 Mod 自己的按键**（F13..F24 内部通道那条路实测走不通）】
+**实测证据**：面板走 F13..F24 时 `mc_action_seen` 从 8 涨到 15（数字位 F13..F22 与提交键 F24 **都被 EFMI 读到并执行**），但 Mod 变量（`$\mods\mc_xxx\0.ini\coat` 等）**全是 0** ⇒ **不是键位问题**（也因此不必再试 F1..F12）。
+**根因**：3DMigoto 的 `[CommandList]` 里变量赋值**只认本 ini 声明过的 `$name`**；带路径的跨命名空间引用会被**静默丢弃**（同一段里本命名空间的 `$mc_action_seen = $mc_action_seen + 1` 生效，11 个 Mod 变量引用全部无效）。
+**收尾**：面板 `press_action()` 改回 `vkey::press_all(action.vks)`（发 `actions.tsv` 的 `original_keys` —— **用户实测可用**）；F13..F24 的序列代码 `[[maybe_unused]]` 保留（"键能送到 EFMI"这半已验证）；`controller.ini` 顶部注释写明这套**当前不生效、别以为它在工作**。
+**顺带**：`hotkey_hints.json` 补了 `panties`=内裤、`creditinfo`=内部标记（Mod 源码注释 `; This acts as the "lock" for the UI notification`，是个**非 persist 的内部锁**，不该当用户开关看）。
+
+`关键词：["面板发Mod原键","F13到F24走不通","mc_action_seen涨到15","跨命名空间变量被丢弃","CommandList只认本ini变量","press_all original_keys","controller.ini注释停用","creditinfo内部锁","不必再试F1到F12"]`
+
+### 用户原话
+
+### 【用户会怎样问"审计屎山"这类活（2026-10-04 …
+*2026-10-04 05:18*
+
+【用户会怎样问"审计屎山"这类活（2026-10-04 原话）】：「我需要你审计这个项目中的屎山，bug，漏洞，能复用不复用，逻辑不合理，前后端不匹配等问题。除了要与其他依赖交互且不是备份问题以外，都修一下，能复用的复用，前后端不匹配以补齐为主。我划定不让你改的也要审计，但先不改，用goal，todo」。含义：① 他点名的**六类**都要覆盖；② 修复范围 = 除"与外部依赖交互且非备份语义"之外全部修，**备份语义类是例外（允许修，即使涉及外部对象）**；③ 前后端不匹配要他定的方向是"**补齐**"（补缺失那一侧，不是删字段）；④ 禁改的部分**也要审、要报告**，只是不动手；⑤ 用 goal + todo 组织。落地成果见 `docs\审计报告-2026-10-04.md`（两轮共 46 文件 +1749/-494、外加 2 个新测试文件；pytest 661 passed；前端已重建）。
+
+`关键词：["审计","屎山","漏洞","前后端不匹配","补齐","备份语义","改动边界","审计报告","goal","todo","用户指令","禁改也要审"]`
+
 ### 部署与数据
 
 ### 乳摇插件（SecondaryMotion / Shaki…
@@ -368,43 +399,12 @@ runtime\dlss5                      38 字符  ❌ 崩
 
 `关键词：["乳摇注入方式","proxy方式","secondary_motion_dll留空","撤回插件崩溃结论","sbm零次崩溃","注入完整性三要素","sbm_log更新时间","READY不等于生效","mode off"]`
 
-### **XXMI 签名机制的完整版**（2026-09-29…
-*2026-09-29 08:53*
-
-**XXMI 签名机制的完整版**（2026-09-29 读 `SpectrumQT/XXMI-Launcher` 源码确认；**更正此前"自签一对密钥即可"的说法**）：`xxmi_launcher/core/config_manager.py` 的 `AppConfigSecurity.__init__` 逻辑是
-
-    if public_key is None or not verify(Config.Security.user_signature, <login>, ...):
-        generate_key_pair()
-        write_key_pair(keys_path)
-        Config.Security.user_signature = sign(os.getlogin())
-
-**所以光有 `Resources/Security/{private,public}_key.der` 还不够** —— **只要 `Security.user_signature` 校验不过，XXMI 一启动就会重新生成一对密钥**，我们写下的所有 `*_signature`（含 `extra_libraries_signature`）随之全部作废，接着弹「Failed to validate unsecure settings!」，用户一点 Reset 就把 `extra_libraries` / `extra_libraries_enabled` / `game_folder` 全清空 —— **这才是空环境「注入失败」的真相**（实测破绽：生成密钥后 `user_signature 长度: 0`）。
-**正确做法**：生成密钥对时**连同 `Security.user_signature` 一起写**（用新私钥签 `os.getlogin()`，必须与 XXMI 用同一个取值）。密钥格式与它一致：**ECDSA(P-384)**、base64 文本包装的 **DER**、签名算法 **SHA-256**。
-**另一个坑**：补密钥必须放在**所有配置改写之前** —— 否则上层函数拿着旧配置副本写回，会把刚写好的 `user_signature` 盖回空值（实测又变 0）。现在统一在 `ensure_injections()` 开头先确保密钥 + `user_signature`，并顺带调 `ensure_xxmi_game_folder()`。实测：`user_signature` 140 字符验签通过、`extra_libraries_enabled=True`、`game_folder` 与 `active_importer=EFMI` 都在、`enabled=True`。
-**附带**：XXMI Launcher 的 exe **要求管理员权限**（非管理员启动报 `WinError 740 请求的操作需要提升`）—— 不影响注入（密钥现在由控制器自己生成），但"点按钮启动 XXMI 界面"需要管理员。
-
-`关键词：["XXMI签名完整版","user_signature必须写","否则XXMI重新生成密钥","AppConfigSecurity","Failed to validate","Reset清空配置","ECDSA P-384","签os.getlogin","密钥放所有改写之前","更正自签即可的说法"]`
-
-### modecontroller **运行时关键机制（注入链…
-*2026-09-29 20:59*
-
-modecontroller **运行时关键机制（注入链 / 就绪顺序 / 自更新）**：**XXMI 就绪顺序** ① `bootstrap_xxmi_config()`（配置缺失时 runas 拉起一次生成，提示「请再点一次一键启动」）② 签名密钥 + `user_signature` ③ `game_folder` + `active_importer` + `enabled_importers` 含 EFMI ④ `extra_libraries` 两条 + 签名。**游戏目录定位**：`game_exe` → 从 `official_launcher` 推断 `<根>/games|Games/<含 Endfield.exe 的目录>` → XXMI 的 `game_folder` → `auto_detect_game_dir()`（只在成功时缓存）。**sbm（乳摇）**：注入最小集随包在 `assets/secondary_motion/`；`_source_candidates()` + `_pick()` 逐文件挑选部署源（assets 优先、工具目录回退）；装 proxy×2 + `plugin/sbm.dll` + `SecondaryMotion/{data/characters.default.json, presets/Default.json, runtime/config.json}`，缺则 `DISABLED_SAFE`。**自更新**：VBS 纯 ASCII（改完必须跑 `_tmp/test_vbs_template.py`）、原子换入、启动新 exe 后轮询等它出现再多留 15 秒（PyInstaller onefile 父进程校验，pyinstaller#9513）。发版流程见另一条「发版与本地测试」。
-
-`关键词：["XXMI就绪顺序","bootstrap_xxmi_config","再点一次一键启动","enabled_importers","extra_libraries","game_folder定位","auto_detect_game_dir","sbm注入最小集","DISABLED_SAFE","自更新VBS原子换入","多留15秒","pyinstaller9513"]`
-
 ### 终末地**游戏目录注入基线与运行库事实**（2026-0…
 *2026-09-29 21:01*
 
 终末地**游戏目录注入基线与运行库事实**（2026-09-27 核实，排障必备）：① 原生基线 = `d3dcompiler_47.dll` 4,524,496 B、`vulkan-1.dll` 831,488 B、`nvngx_dlss.dll` 54,779,504 B；游戏目录**不放** `d3d11.dll`/`dxgi.dll`/`d3d12.dll`（EFMI 由 XXMI Launcher 注入）。② 乳摇（SecondaryMotion / ShakingBreastManager **v2.3.5**）注入 = 把 `d3dcompiler_47.dll`(14,336 B proxy) + `vulkan-1.dll`(35,328 B proxy) 替换进游戏目录（原版存同名 `.bak`）并加载 `plugin\sbm.dll`(108,032 B)；proxy 内是 loader，用 MinHook hook Unity IL2CPP 的 `AnimatorMono.PreLateTick` / `NPCCPUAnimator.LateTick`，直接读写骨骼 Transform；数据目录 = 游戏目录 `\SecondaryMotion`；日志在 `plugin\sbm_log.txt` 与 `plugin\breast_probe_log.txt`；**支持 19 个角色**（endminf/pelica/chen/ikut/azrila/seraph/avywen/aglina/aurora/laevat/yvonne/karin/whiten 埃特拉/bounda/lastrite/zhuangfy/mifu/lizhiyan/liino），不在表内 fail-closed 不干预；按角色开关写 `SecondaryMotion\presets\User.json`，Apply 后 Manager 重写 `runtime\config.json` 的 revision。③ **`nvngx_dlssnr.dll`(165,840,496 B) 是 DLSS5 专属、游戏原版没有**；把方案的新版 `nvngx_dlss.dll`(58,977,904 B) 放进游戏目录**会让游戏起不来**（实测），所以代码策略 = `initialize.GAME_LIBS_OPTIONAL = ("nvngx_dlssnr.dll",)` 默认不部署、`_check_game_libs` 对已存在文件一律不动、config `deploy_new_nvngx` 默认 False；游戏原版备份为 `*.game_original`。④ 故障第一嫌疑：`d3dcompiler_47.dll` proxy（用「卸载乳摇注入」排除）。
 
 `关键词：["游戏目录注入基线","乳摇proxy替换两个dll","sbm.dll","nvngx_dlssnr游戏原版没有","新版nvngx_dlss会崩","deploy_new_nvngx默认False","19个角色支持","User.json按角色开关","sbm_log.txt","game_original备份"]`
-
-### modecontroller 的"离线从零端到端"测试环…
-*2026-10-01 08:07*
-
-modecontroller 的"离线从零端到端"测试环境（2026-10-01 建立，可复用）：① 本地 GitHub 模拟源 = `D:\zmdmod\_mcassets\serve.py`（端口 8791），提供 `/repos/<owner>/<repo>/releases/latest` 的 JSON（含 assets 与**动态计算的 sha256 digest**）与 `/dl/<name>`（支持 Range）；设 `SERVE_BAD_DIGEST=1` 时故意返回错误 digest，用于负向测试。② 素材包（同目录）：`XXMI-Launcher-Portable.zip`（62.4 MB，含 `Resources/`、`Locale/`、`Themes/`，**故意排除 Packages** 让 libs 走第二次下载）、`XXMI-PACKAGE-libs.zip`、`EFMI-PACKAGE.zip`、`Manifest.json`；源可取自 `modecontroller\runtime\backups\builtin_XXMI_before_mirror_*` 或 `_tmp\xxmi_msi\extracted`（MSI 解包，最完整）。③ 测试副本 = `D:\zmdmod\modtest`（robocopy 源码，排除 .git/assets/runtime/build/dist/_tmp/library/*.exe），再把副本里 `https://api.github.com` 与 `https://github.com` 全量替换为 `http://127.0.0.1:8791`。④ 跑法：删掉副本的 `runtime` 与 `config.json` 得到"从零"，再调 `runtime_deps.ensure_all()`；DLSS5 组件（`runtime/dlss5`，343 MB）**没有上游可下载**，按约定从工作区整份复制。⑤ 提权：普通权限会被"XXMI 需要管理员"拦住（本机 ConsentPromptBehaviorAdmin=0，不弹 UAC）。**⚠ 写法要注意**：内联 `Start-Process cmd.exe -ArgumentList '/c "… > out.txt"' -Verb RunAs` 实测**捕获不到输出**（out.txt 根本不生成），必须先写成 `.cmd` 批处理文件（`@echo off` + `cd /d` + `"x.exe" … > out.txt 2>&1`）再 `Start-Process <bat> -Verb RunAs -WindowStyle Hidden -Wait`。⑥ 重装前必须先杀掉正在运行的 XXMI，否则它占用 `Resources\Bin` 会让解压覆盖报 `shutil.Error`。
-
-`关键词：["离线测试环境","serve.py","8791端口","本地GitHub模拟","sha256 digest","SERVE_BAD_DIGEST","XXMI-Portable.zip","modtest副本","URL替换127.0.0.1","ensure_all从零","robocopy源码","RunAs提权","dlss5无上游"]`
 
 ### 【已完结 · 被 `0mum028fy` 取代】**空环…
 *2026-10-01 08:12*
@@ -437,18 +437,6 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 
 `关键词：["0.7.5 本地构建","29","534","595 B","238d80c1","辅助 Mod 页已打包","217 passed","X 段 128-132","modtest 仍 0.7.3","Hide UI＆UID 已入 modtest"]`
 
-### **modecontroller 的 normify 结…
-*2026-10-02 16:21*
-
-**modecontroller 的 normify 结构树**（2026-10-02 建立，同日晚随 0.9.5 更新过一次）
-**用户原话**：「帮我建本项目结构树并渲染架构图，**粒度到单一功能单元**」；2026-10-02 追加：「**以后改好一个bug就更新一次结构树退一次main**（一定是我明确说明可以的）」。
-**落点**：`C:\Users\<user>\.dsh\profiles\desktop\normify-modecontroller\`（插件 profile 目录，**不进仓库、不污染 git**）—— `modules/**/*.md`（frontmatter 机器读）、`renders/**/*.json`（每层渲染数据）、编译产物 `tree.json` / `outline.md` / `api-index.json` / `receipt.json`、交互图 `normify.html`。
-**现状（2026-10-02 16:2x）**：**151 模块 / 134 叶子 / 355 API / 72 依赖 / 17 层渲染数据，`validate` = 0 error**（27 warning 全是历史遗留：叶子过粗 15 个（api.mods 跨 593 行最大）、51 条箭头未锚定 API、7 个 tests 组无 apis、根模块无 source）。一级 4 个（backend / web / scripts / tests），backend 下 12 个领域。
-**更新流程（固化成四步，别再手工改行号）**：① `python scripts\normify_realign.py --apply` —— 按 `git diff <结构树快照>` 把模块 source 的**行号整体平移**（0.9.5 那次 31 个模块 / 165 个行号）；② `normify_module_refresh(all=true, repoRoot=..., activate=true)` 重算 fingerprint 与 revision；③ `normify_validate` 必须 0 error；④ `normify_build` → `normify_render`。
-**新增模块范例**：`backend.config.data-root`（数据根自愈）、`tests.config`；新模块先 state=planned 建、再 refresh(activate=true) 转 active。
-
-`关键词：["normify","结构树","架构图","modules","renders","normify.html","realign","行号平移","更新流程","151模块","tree.json","validate 0 error"]`
-
 ### 【已了结 · 2026-10-02】控制面板（自研 Re…
 *2026-10-02 16:41*
 
@@ -456,78 +444,51 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 
 `关键词：["exe 构建产物","sha256","modtest 同步","未发版","测试通过数","test_import_archive","verify_import_archive","TESTING.md P 段","rar 样本","0.7.2"]`
 
-### 【面板改回「发 Mod 自己的按键」—— F13..F2…
-*2026-10-02 17:14*
+### **XXMI 签名机制**（读 `SpectrumQT/…
+*2026-10-04 05:20*
 
-【面板改回「发 Mod 自己的按键」—— F13..F24 内部通道那条路实测走不通】（2026-10-02 晚）
-* **实测证据**：面板走 F13..F24 时，`mc_action_seen` 从 8 涨到 15（说明数字位 F13..F22 与提交键 F24 **都被 EFMI 读到并执行了**），但 Mod 变量（`$\mods\mc_xxx\0.ini\coat` 等）**全是 0**。⇒ **不是键位问题**（也因此不必去试 F1..F12）。
-* **根因**：`[CommandList]` 里的变量赋值**只认本 ini 声明过的 `$name`**；带路径的跨命名空间引用会被静默丢弃。同一段里本命名空间的 `$mc_action_seen = $mc_action_seen + 1` 生效、**11 个 Mod 变量引用全部无效**。
-* **收尾**：面板 `press_action()` 改回 `vkey::press_all(action.vks)`（发 `actions.tsv` 的 `original_keys`，用户实测可用）；F13..F24 的序列代码 `[[maybe_unused]]` 保留（键能送到 EFMI 这半已验证）；`controller.ini` 顶部注释写明这套**当前不生效、别以为它在工作**。
-* **顺带**：`hotkey_hints.json` 补了 `panties`=内裤、`creditinfo`=内部标记（Mod 源码注释：`; This acts as the "lock" for the UI notification`，是个**非 persist** 的内部锁，不该当用户开关看）。
-* 产物：exe **29,871,997 B** / sha256 `AFD42417B7EF96D4B1D56C64E59ABD94FF109C4039C347888BB4FAE795EE387F`（已手工同步进 modtest，构建脚本那次因控制器在跑跳过了）；面板 addon **344,576 B** / `8E801053620B0DA6C57004592AD9EE975C37883F6B697B12E905BEC7B10729E3`。
+**XXMI 签名机制**（读 `SpectrumQT/XXMI-Launcher` 源码确认）：`xxmi_launcher/core/config_manager.py` 的 `AppConfigSecurity.__init__` 只要 `verify(Config.Security.user_signature, os.getlogin())` 不过，XXMI 一启动就**重新生成密钥对** ⇒ 我们写下的所有 `*_signature`（含 `extra_libraries_signature`）随之作废 ⇒ 弹「Failed to validate unsecure settings!」⇒ 用户一点 Reset 就把 `extra_libraries` / `extra_libraries_enabled` / `game_folder` 全清空 —— **这才是空环境"注入失败"的真相**（实测破绽：生成密钥后 `user_signature` 长度为 0）。
+**正确做法**：生成密钥对时**连同 `Security.user_signature` 一起写**（用新私钥签 `os.getlogin()`，必须与 XXMI 用同一取值）；格式一致：**ECDSA P-384** + base64 文本包装的 **DER** + **SHA-256**。⚠️ 补密钥必须放在**所有配置改写之前**，否则上层拿旧配置副本写回会把刚写好的 `user_signature` 盖回空值。现统一在 `ensure_injections()` 开头做。
+**XXMI 就绪顺序**：① `bootstrap_xxmi_config()`（配置缺失时 runas 拉起一次生成，提示「请再点一次一键启动」）② 密钥 + `user_signature` ③ `game_folder` + `active_importer` + `enabled_importers` 含 EFMI ④ `extra_libraries` 两条 + 签名。
+**游戏目录定位**：`game_exe` → 从 `official_launcher` 推断 `<根>/games|Games/<含 Endfield.exe 的目录>` → XXMI 的 `game_folder` → `auto_detect_game_dir()`（只在成功时缓存）。
+**sbm（乳摇）**：注入最小集随包在 `assets/secondary_motion/`；装 proxy×2 + `plugin/sbm.dll` + `SecondaryMotion/{data/characters.default.json, presets/Default.json, runtime/config.json}`，缺则 `DISABLED_SAFE`。
+**自更新**：VBS 模板**必须纯 ASCII**（WSH 按 ANSI 读 .vbs，带 BOM 会报 `0x800A0408`）、原子换入、启动新 exe 后轮询等它出现再多留 15 秒（PyInstaller onefile 父进程校验，pyinstaller#9513）。回滚必须"`CopyFile` 保留 backup + 复核 target 真在"（**不许先删 target 再 MoveFile** —— 失败会让 exe 凭空消失）。
 
-`关键词：["面板改造产物","addon64 343552","exe 29860238","sha256","modtest 同步","test_addon_hook","443 passed","结构树 157 模块","addon 一级树","交付硬指标"]`
+`关键词：["XXMI签名机制","user_signature","ECDSA P-384","密钥对重生成","extra_libraries签名","ensure_injections前置","就绪顺序","游戏目录定位","sbm部署DISABLED_SAFE","自更新VBS纯ASCII","pyinstaller父进程校验","回滚CopyFile"]`
 
-### 2026-10-02 为测 MMD 播放，已把**极乐浄…
-*2026-10-02 18:14*
+### **离线"从零端到端"测试环境**（2026-10-01…
+*2026-10-04 05:20*
 
-2026-10-02 为测 MMD 播放，已把**极乐浄土 MMD 素材**下载到 `D:\zmdmod\mmd素材\极乐净土\`（13 文件 / 8.0 MB）：
-* **主素材**：`动作(yurie)\極楽浄土_动作_yurie.vmd` = 1,983,225 B，sha256 `51CF9840C58440B871B5C48DD0A1CCFC8EED2141082BEFA471D16EDDBDD063A8`，骨骼帧 17486 / 表情帧 1835（身体动作），内嵌模型名「しまかぜ」；配套 `極楽浄土_Gokuraku jodo.mp3` = 5,245,739 B
-* **镜头两套**：`镜头\camera.vmd` + `camera_2.0.vmd`（作者 HAKI，配布说明**明写是「極楽浄土（yurie）一人用カメラ」——与上面动作本来就是配套一对**）；`镜头(bowlroll-108199-中文)\...三妈式miku.vmd`（B站 BV18s411y72K 的中文配布）
-* **附加**：`局部动作-扇子右指\極楽浄土扇子用右指モーション01.vmd`（只含手指骨骼，单独播不会跳舞）
-**来源**：GitHub `v-idol/vidol-dance-gokuraku`（lobe-vidol 生态，原 CDN r2.vidol.chat 已失效）；动作与音乐作者 **yurie**（nicovideo sm29180863），曲 GARNiDELiA 極楽浄土。
-目录内 `README.md` 已写清来源、作者规约（禁商用/禁二配/禁 R18/须署名）与游戏内用法。
-**注意**：BowlRoll 上更常见的原版配布（343534 おんぞ、109096 まいてぃ）**需登录账号**才能下；131136 只需配布者的下载键密码。
+**离线"从零端到端"测试环境**（2026-10-01 建立，可复用）：
+① **本地 GitHub 模拟源** = `D:\zmdmod\_mcassets\serve.py`（端口 **8791**）：提供 `/repos/<owner>/<repo>/releases/latest` 的 JSON（含 assets 与**动态计算的 sha256 digest**）与 `/dl/<name>`（支持 Range）；设 `SERVE_BAD_DIGEST=1` 时故意返回错误 digest，用于负向测试。素材包在同目录（`XXMI-Launcher-Portable.zip` 62.4 MB、`XXMI-PACKAGE-libs.zip`、`EFMI-PACKAGE.zip`、`Manifest.json`）。
+② **测试副本** = `D:\zmdmod\modtest`：robocopy 源码（排除 `.git/assets/runtime/build/dist/_tmp/library/*.exe`），再把副本里 `https://api.github.com` 与 `https://github.com` **全量替换**为 `http://127.0.0.1:8791`。
+③ **跑法**：删掉副本的 `runtime` 与 `config.json` 得到"从零"，再调 `runtime_deps.ensure_all()`；DLSS5 组件（343 MB）**没有上游可下载**，按约定从工作区整份复制。
+④ **三个实测坑**：普通权限会被"XXMI 需要管理员"拦住（本机 `ConsentPromptBehaviorAdmin=0`，不弹 UAC）；**内联 `Start-Process cmd.exe -Verb RunAs` 捕获不到输出**（out.txt 根本不生成）⇒ 必须先写成 `.cmd` 批处理（`@echo off` + `cd /d` + `> out.txt 2>&1`）再 `Start-Process <bat> -Verb RunAs -WindowStyle Hidden -Wait`；重装前**必须先杀掉正在跑的 XXMI**（占着 `Resources\Bin` 会让解压覆盖报 `shutil.Error`）。
+⚠️ modtest 里的 exe **删不掉时先问他**（他澄清过"大概率是因为我在用"，不是杀软）。
 
-`关键词：["极乐净土","極楽浄土","MMD素材","vmd","mmdmod","测MMD播放","mmd素材目录","yurie","gokuraku.vmd","镜头vmd","素材落点","bowlroll需登录"]`
+`关键词：["离线端到端测试环境","本地GitHub模拟源","serve.py 8791","SERVE_BAD_DIGEST","modtest测试副本","URL全量替换","从零跑ensure_all","DLSS5无上游","RunAs捕获不到输出","先杀XXMI再重装","exe删不掉先问用户"]`
 
-### **MMD 舞蹈素材的可得来源盘点**（2026-10-…
-*2026-10-03 13:33*
+### **MMD 舞蹈素材来源盘点**（2026-10-03 …
+*2026-10-04 05:20*
 
-**MMD 舞蹈素材的可得来源盘点**（2026-10-03 确认；用于 Endfield Poser 的 MMD 播放测试）
-**① 最好用的免费直连来源 = GitHub `v-idol` 组织**：每个 dance 一个仓库，仓内**直接含** `*.vmd`(动作) + `*.mp3`(音乐) + cover/meta/readme。已知 5 个：
-`vidol-dance-gokuraku`（极乐净土，**已归档** `D:\zmdmod\mmd素材\极乐净土\`）、`vidol-dance-shujiwu`（书记舞）、`vidol-dance-last-surprise`（Last Surprise/P5）、`vidol-dance-dingdingdangdhang`（叮叮当当）、`vidol-dance-sample`（KX-YAO）。**是否还有更多要用 `https://api.github.com/orgs/v-idol/repos?per_page=100` 现查**。
-取法：`codeload.github.com/v-idol/<repo>/tar.gz/refs/heads/<default_branch>`（**分支名必须取自 API 的 default_branch**，写错会 404）。
-**② 舞蹈清单的第二个来源 = `lobehub/lobe-vidol-market` 的 `src/dances/*.json`**（15 个）：abracadabra / bon-bon-chocolate / bunny-style / chocolate-cream / evo-addiction / galaxias / kara-lupin-full / kiss-me-aishiteru / like-ooh-ahh / magic-of-xyz / number-9 / qsx / suki-yuki-maji-magic / tomboy / vidol-dance-dingdingdangdhang。每个 json 有 `src`(动作) / `audio`(音乐) / `camera`(镜头) 三个直链 —— ⚠️ 域名 `r2.vidol.chat` **已失效**，但**文件名可用于去 GitHub 搜镜像仓**（极乐净土就是这么找到的）。
-⚠️ **别把这 15 个 danceId 当成 15 首流行歌**：能较有把握对上曲名的**只有 2 个** —— `like-ooh-ahh`（疑 TWICE「Like OOH-AHH」）、`tomboy`（疑 (G)I-DLE「TOMBOY」）；其余 13 个没有可靠的中/日文映射。**权威映射在各自 json 的 `readme` 字段**（内含歌曲与动作作者署名），得有网拉下来才准。
-**③ 镜头 vs 动作的门槛**：BowlRoll 上流行舞蹈的**镜头（カメラ）绝大多数可匿名下载**（`permission` + `key=false`）；**完整身体动作的原版配布基本都要登录 BowlRoll**（`login` 类）。国内站（44mmd.com）是 200 元付费墙，别再当免费渠道。
-**④ 已知拿不到免费的**：恋爱循环 / 千本樱 / 桃源恋歌 / 芒种 / 学猫叫 这类国内最火宅舞，未确认到免费直连源。
+**MMD 舞蹈素材来源盘点**（2026-10-03 确认，用于 Endfield Poser 的 MMD 播放测试）
+① **最好用的免费直连来源 = GitHub `v-idol` 组织**：每个 dance 一个仓库，仓内**直接含** `*.vmd`(动作) + `*.mp3`(音乐) + cover/meta/readme。已知 5 个：`vidol-dance-gokuraku`（极乐净土，**已归档** `D:\zmdmod\mmd素材\极乐净土\`，13 文件 / 8 MB）、`-shujiwu`（书记舞）、`-last-surprise`、`-dingdingdangdhang`、`-sample`（KX-YAO）；还有更多用 `https://api.github.com/orgs/v-idol/repos?per_page=100` 现查。取法：`codeload.github.com/v-idol/<repo>/tar.gz/refs/heads/<default_branch>`（**分支名必须取自 API 的 default_branch**，写错 404）。
+② **第二来源 = `lobehub/lobe-vidol-market` 的 `src/dances/*.json`**（15 个，各有 `src`/`audio`/`camera` 直链）—— ⚠️ 域名 `r2.vidol.chat` **已失效**，但**文件名可用于去 GitHub 搜镜像仓**（极乐净土就是这么找到的）。⚠️ **别把这 15 个 danceId 当 15 首流行歌**：能较有把握对上曲名的只有 `like-ooh-ahh`（疑 TWICE）与 `tomboy`（疑 (G)I-DLE），其余 13 个没有可靠映射（权威映射在各 json 的 `readme` 字段）。
+③ **门槛**：BowlRoll 上流行舞蹈的**镜头（カメラ）多数可匿名下载**；**完整身体动作的原版配布基本要登录 BowlRoll**。国内 44mmd.com 是付费墙。
+④ 已知拿不到免费直连的：恋爱循环 / 千本樱 / 桃源恋歌 / 芒种 / 学猫叫。
 
-`关键词：["MMD舞蹈素材","v-idol组织","vidol-dance仓库","书记舞","Last Surprise","叮叮当当","lobe-vidol-market","dance清单曲名待核","BowlRoll镜头可匿名下","免费直连来源","codeload整仓下载"]`
-
-### 【**modecontroller v1.0.3 已发布…
-*2026-10-03 21:44*
-
-【**modecontroller v1.0.3 已发布**】（2026-10-03 21:44Z）
-* **内容**：① **Windows 长路径导入**（issue #12「mod无法解压」的真因 = 那条路径 **264 字符** > 上限 259，
-  用 Win32 `\\?\` 扩展前缀解决，实测 316 字符也能解开；解不开则给「哪条超了/超多少/三条对策」）；
-  ② **修下载「每块都超时」**（见另一条 lesson）；③ **辅助 Mod 新增「贴图替换类」分组**
-  （`ASSIST_GROUP_TEXTURE`，判据 = 有贴图、无网格；用 `GARMENT_HINTS` 排除泳装/旗袍类角色服装）。
-* **Release**：https://github.com/jing-hy/EndfieldModController/releases/tag/v1.0.3
-  exe **29,826,819 B** / `d9a5d2c971b9fd3c8dc583c9e9c73ca9a6b0a43212c5c1153c33d75c4343623f`；
-  assets-bundle.zip 144,696,905 B / `855c7da1…`。commit `1d82309` 已推。
-* **issue #12 已回复并关闭**（2026-10-03T13:44:16Z），仓库当前**打开 issue = 0 个**。
-* **测试环境**：`modtest` 里放了**两份** —— `EndfieldModController.exe`（v1.0.3）+
-  `EndfieldModController-0.1.9-from-1.0.3.exe`（伪旧版，**基于 1.0.3 代码构建**）。
-  **测自更新前已清** `runtime\_update\last_check.json`、`runtime\_net\github_cache.json`、
-  以及 `runtime\_update\EndfieldModController.exe`（旧更新包）。
-* **构建脚本新增**：`--modtest-both`（最新版与伪旧版**各放一份**进 modtest）。
-* ⚠️ **modtest 里的 exe 删不掉时先问用户** —— 2026-10-03 他澄清「**删不掉大概率是因为我在用**」，
-  不是杀毒软件；**以后等他说"关了"再动**。
-
-`关键词：["v1.0.3","长路径导入","issue 12 已关闭","贴图替换类","ASSIST_GROUP_TEXTURE","--modtest-both","伪旧版","自更新缓存","last_check.json","github_cache.json","删不掉是因为在用"]`
+`关键词：["MMD素材来源","v-idol组织","vidol-dance仓库","codeload取tar.gz","default_branch","lobe-vidol-market","r2.vidol.chat已失效","BowlRoll要登录","镜头可匿名下载","极乐净土已归档"]`
 
 ### **modecontroller 当前状态 · 唯一真源…
-*2026-10-04 00:01*
+*2026-10-04 05:20*
 
 **modecontroller 当前状态 · 唯一真源**（有变动请**更新本条**，别再另开新条目）
-**发布**：GitHub **Latest = v1.0.5**（2026-10-03T15:54Z）—— https://github.com/jing-hy/EndfieldModController/releases/tag/v1.0.5 ；v1.0.4 是当天 14:49Z 发的（**别再说"v1.0.4 只推了源码"**）。远端 main = `f542ea0`（含"维护者指南"那次推送）。
-**v1.0.5 附件（Release 上的那一份）**：`EndfieldModController.exe` **29,848,022 B / sha256 `953BABFC9785AB0DD4D043F3C43E19CBBC6B50920C0C6813DBE6AA1B29F7D90D`**；`assets-bundle.zip` **144,696,905 B / `910CF2E6AED50484FB7F2D90575E763FB102E02D3B72DBE8D660062A330BBFB1`**。
-⚠️ **本地 dist 里的 exe 与 Release 附件字节不同**（29,847,586 B / `5EB4B041…`）：那是发完之后为了补伪旧版又跑了一次 `build_release --with-fake-old` 重建的（**同一份源码、PyInstaller 非确定性**）。要"逐字节核对"就只能以 **Release 附件**为准；想还原本地可 `gh release download v1.0.5 --pattern EndfieldModController.exe`（curl `--resolve` 直连**会失败** —— 资产重定向到 objects.githubusercontent.com）。
-**v1.0.5 修的东西**：① 乳摇/Poser 开关关不掉（`_persist_injection_switch` 落配置）② 关闭后再打开「弹完 UAC 没反应」（单实例锁 PID+进程指纹+窗口存在性）③「更改角色归属」没反应（真因 `<CharacterAssignDialog>` **没 import**，用 WebView2 CDP 抓到 `openFor is not a function`；同页 `<Badge>` 也漏）④ Poser 关了开不回来（包在位不下载 + 缺 loader 由 `poser.ensure_loader()` 自己补 proxy，不跑会拒绝的上游向导）⑤ 关乳摇不再拆 Poser 底座（`_other_plugin_dlls` 认 `.disabled`）⑥ **一键启动 62 秒 → 秒级**（关着「自动更新依赖」+本地已就位 ⇒ 一个请求都不发；此前 Libs/EFMI/Poser 都没尊重那个开关，Poser 一步静默下载 54 秒）⑦ 归类弹窗两个入口打通。
-**仓库新增（用户要求"随源码一起上传"）**：`CONTRIBUTING.md`（**维护者指南**：改动边界、提交前必做检查、该一并更新的产出、发布流程、自动生成产物清单）；`docs/AI-记忆日志.md`（记忆库导出，本机路径已脱敏，**不传 memory.db**）；`docs/structure/`（normify 结构树整份镜像 187 文件 / 1.4 MB）。后两样由 **`push.py` 每次推送前自动刷新并单独提交**（脚本 `scripts/memory_log.py` / `scripts/sync_structure.py`）。
-**测试**：`tests` **630 passed**。**结构树**：163 模块 / 145 叶子 / 369 API / validate 0 error（源目录 `~/.dsh/profiles/desktop/normify-modecontroller`）。
-**发版流程（本次实走）**：改代码 → `pytest` → **自己 commit** → `build_release.py`（卡 version.py 与两份 README 一致）→ `prepare_release.py` → `push.py`（先快照；顺带刷记忆日志+结构树）→ `gh release create <tag> --notes-file RELEASE_NOTES.md --latest`（⚠️ 不带附件）→ `upload_release_assets.py --tag <tag>`（DoH + curl 直连；**同名资产已存在会 HTTP 422**，别指望覆盖）。附件只推**不带版本号**的 exe + `assets-bundle.zip`。
+**发布**：GitHub **Latest = v1.0.6**（2026-10-03T17:29Z）—— https://github.com/jing-hy/EndfieldModController/releases/tag/v1.0.6 ；远端 main = `fa38b03`。附件：`EndfieldModController.exe` **29,852,594 B / sha256 `F869D32B6A774472207B08BDD357696712B331A80D51BD473F86ABAA1330C7EB`**；`assets-bundle.zip` 144,696,905 B / `6638bf9b…1cd17`。附件只推**不带版本号**的 exe + assets-bundle。
+**本地领先情况（2026-10-04）**：**已有 46 个文件（+1749/-494，含 2 个新测试文件）尚未 commit/push**；`version.py` 仍是 1.0.6，按规则"有改动要领先 Release 一个" ⇒ **这批推送前应升到 1.0.7**（一整批只挂一个号，别每改一次就 +1）。`pytest` 现在 **661 passed**；`web\dist\index.html` 已重建（前端已从原生 JS 换成 Vue+Vite）。
+**v1.0.6 修的东西**（来自"下载慢/下不下来"两条反馈）：gh.xmly.dev 死域名；"DNS 故障不计失败"的豁免让死线路永远排第一（改 `_DNS_DEAD` 短冷却）；raw/codeload/objects 接入镜像；**多线路动态抢块**（实测 3.423 MB/s）；速度卡改由 `fastnet.global_speed()` 统一采样（一键启动那条路径原先没传 `byte_progress`）；撤回"静态等分"造成的 5.1 倍减速。
+**发版流程（两次实走）**：改代码 → `pytest` → **自己 commit**（`push.py`/`build_release.py` 都不替你 commit）→ `build_release.py`（第 0 步卡 version.py 与两份 README 一致；程序运行时第 6 步会**静默跳过** modtest 同步，构建完务必回看）→ `prepare_release.py` → `push.py`（先快照，顺带刷记忆日志 + 结构树）→ `gh release create <tag> --notes-file RELEASE_NOTES.md --latest`（⚠️ 建出来**不带附件**）→ `upload_release_assets.py --tag <tag>`（同名资产会 HTTP 422）。
+**仓库里随源码走的产出**：`CONTRIBUTING.md`、`docs\AI-记忆日志.md`（记忆导出，路径已脱敏，**不传 memory.db**）、`docs\structure\`（结构树镜像）。
+⚠️ **遗留**：**v1.0.5 的 Release 正文与标题不符**（发它时 `RELEASE_NOTES.md` 装的还是上一版 v1.0.4 内容）—— 要修就 `gh release edit v1.0.5 --notes-file …`（只改正文、不动附件），**等他点头**。
 
 `关键词：["当前状态唯一真源","Latest v0.9.4","0.9.5未发Release","远端main","版本号只跟Release比","发版流程","必须自己commit","build_release第0步校验版本号","推送前自动快照","只推不带版本号exe","modtest只放最新exe"]`
 
@@ -543,26 +504,29 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 
 `关键词：["B站宣传片","BGM 选曲","Elektronomia Sky High","TheFatRat Xenogenesis","B站音频库按使用量","视频简介 A版","置顶评论文案","DLSS5 无需额外设置","物理效果中性表述","宣传视频脚本待更新"]`
 
-### 【已完成 → 0.5.0】Endfield Poser …
-*2026-09-30 12:05*
+### 【modecontroller · 全项目审计后的**剩…
+*2026-10-04 05:18*
 
-【已完成 → 0.5.0】Endfield Poser 集成**已实施并本地打包完成**（2026-10-01，未推送）。改动落点：新模块 `endfieldmodcontroller/poser.py`；`runtime_deps.py`（`ensure_poser` 进 `ensure_all` 第 4 项 + `builtin_report` 加 Poser 段）；`github.py`（新增 `releases_list()`，唯一能拿预发布版的接口）；`config.py`（`poser_dir` 默认空=runtime/poser、`poser_injection` 默认 True）；`initialize.py`（`_check_poser` 排在 `_check_secondary_motion` **之前**）；`api.py`（`poser_status/poser_install/poser_uninstall/set_poser_enabled/open_poser_web_ui/poser_log_tail` + `get_state` + 更新分母）；`updates.py`（`component_versions/check_updates/update_poser`）；`reshade_integration.py`（`loader_kind()` + 认两套 loader 标记）；`secondary_motion.py`（plugin 里还有别的插件时卸载**保留 loader**）；`game_clean.py`（`poser_data` 分类）；`web/index.html` + `web/app.js`（启动页第 5 个滑块 + 设置页状态窗 + 「打开摆姿页」「打开 Poser 日志」按钮）；`tests/test_poser.py`（15 例，77 passed）。真机验收（下载→游戏内按 L→与 DLSS5/EFMI/乳摇共存）尚未做，列在 `TESTING.md` H 段 41–50。
+【modecontroller · 全项目审计后的**剩余待办**（2026-10-04；报告在 `docs\审计报告-2026-10-04.md`）】
+两轮审计**已完成**：46 文件 +1749/-494（另加 2 个新测试文件），pytest **661 passed**，`web/dist/index.html` 已重建，`_tmp\audit\verify_fixes.py` 29/29 全绿；**未推送、未发版**。已修/未修的完整条目都在报告里（第四节未修清单、第五节"已实现却未被调用"清单），本条只记**还没做掉的**。
+**① 三件待他拍板**：(a) 诊断包要不要把 `runtime\*.json` 与 `_state\*.json`（安全模式/注入/崩溃记忆/文件守护状态）收进去 —— 与"一次抓齐"冲突、会改包结构；(b) 主题"侧栏菜单 vs 设置页下拉"两套状态统一（只修好了"存不住"那一半）；(c) `web/dist/index.html` 是否随源码入库 / 随发布走。
+**② 收尾未做**：normify 结构树未更新（改动后行号全变）、TESTING.md 未出、未推送。
+**③ 边界外只报不改的 9 条**（"与外部依赖交互且非备份语义"）：提权运行可配置路径的 exe 无签名校验、bootstrap 的 `taskkill /IM` 会误杀用户自己开的 XXMI、`_run_loader.cmd` 的 300 秒轮询且抹掉用户 `ReShadeApps.ini` 里其它条目、还原后把 `reshade_injection` 硬写成 `external`、全局 ReShade 三套实现待收敛、`d3dx_user.ini` 与运行中的 3DMigoto 并发写、`core.PathGuard` 未接管写入护栏、`initialize` 里 preset/extractall 无护栏、一批后端能力缺前端入口。
 
-`关键词：["Poser集成待实施","poser.py","_check_poser","runtime_deps ensure_poser","releases_list","test_poser.py","TESTING H段","端到端验收","计划未批准","第五个滑块"]`
+`关键词：["审计完成","两轮修复","备份语义","B1-B5","prepare_runtime库只读","前端防线入库","661 passed","verify_fixes","待拍板","结构树未更新","TESTING未出","未推送"]`
 
-### **modecontroller 待办清单**（做完即更…
-*2026-10-02 18:16*
+### **modecontroller 待办（2026-10-…
+*2026-10-04 05:20*
 
-**modecontroller 待办清单**（做完即更新本条；细节以 project ops 条为准）
-🔨 **正在做：normify 结构树** —— 落点 `C:\Users\<user>\.dsh\profiles\desktop\normify-modecontroller\`（不进仓库、不脏 git）。用户要求「**粒度到单一功能单元**」。流程已固化成四步：① `python scripts\normify_realign.py --apply`（按 git diff 平移模块 source **行号**，别手工改）② `normify_module_refresh(all=true, repoRoot=…, activate=true)` ③ `normify_validate` 必须 0 error ④ `normify_build` → `normify_render`。**还差**：给叶子补 `apis`、补齐各层渲染数据、拆超粗叶子。
-⏳ **等用户实测/结论**：① **面板按键通不通**（TESTING.md 232–240：进游戏按 `Home` → ModeController 页 → 点「后裙摆」，看模型是否当场切换 + 顶部「**EFMI 命中 N**」是否上涨；不涨要 `runtime\dlss5\modecontroller.addon.log`）；② **"进去之后感觉好卡"** 的对照结论（先移出 RabbitFX 试，还卡再关 DLSS5）；③ **MMD 播放测试** —— 极乐净土素材已备好（`D:\zmdmod\mmd素材\极乐净土\`），但 `poser_injection=false`、`plugin\poser.dll` 仍是 `.disabled`，**要测必须先开 Poser**。
-**收尾待办（下一版）**：崩溃包补 `Mods` 清单 + 主链路 stage 后打日志；其余诊断代码清理；`[Key*]` 协议退役；`hotkey_takeover` 语义与 UI 文案；TESTING 与详细文档的 DLSS5 节；「移出 Mod 库」清理 `d3dx_user.ini` 残留；依赖项缺界面入口；`load_library_redirect` 待验证；湿润效果 `match_index_count` 与换 mesh 皮肤匹配问题未深挖。
-**issue**：仓库只剩 **#5（问题合集）** —— 用户说过"**5 不要管**"，要动必须等他说。
-**sbm 自维护**：提弗洛斯运动数值三选一；含 PR #4 的 `sbm.dll` 与 Manager 未部署；「1.5 适配」PR 未提。
+**modecontroller 待办（2026-10-04 整理；做完即更新本条）**
+🔨 **该做**：① **2026-10-04 审计批次（46 文件 +1749/-494，含 2 个新测试文件）尚未 commit / 推送 / 发版** —— 未修项已按编号列在 `docs\审计报告-2026-10-04.md` 第四节等他挑；② normify 结构树待重跑四步（行号全变，见"normify 结构树"条）；③ 该批次改动多，`TESTING.md` 编号测试清单未出。
+⏳ **等用户实测/结论**：① **"进去之后感觉好卡"** 的对照结论（先移出 RabbitFX 试，还卡再关 DLSS5）；② **MMD 播放测试** —— 极乐净土素材已备好（`D:\zmdmod\mmd素材\极乐净土\`），但 `poser_injection=false`、`plugin\poser.dll` 仍是 `.disabled`，**要测必须先开 Poser**。
+**收尾待办（下一版）**：崩溃包补 `Mods` 清单 + 主链路 stage 后打日志；`[Key*]` 协议退役；`hotkey_takeover` 语义与 UI 文案；TESTING 与详细文档的 DLSS5 节；「移出 Mod 库」清理 `d3dx_user.ini` 残留；依赖项缺界面入口；`load_library_redirect` 待验证；湿润效果 `match_index_count` 与换 mesh 皮肤匹配未深挖。
+**别忘的其他线**：**issue** 仓库只剩 **#5（问题合集）** —— 用户说过"**5 不要管**"，要动必须等他说；**sbm 自维护** 提弗洛斯运动数值三选一、含 PR #4 的 `sbm.dll` 与 Manager 未部署、「1.5 适配」PR 未提；**宣传片** BGM 与简介方案已定但**还没写进 `docs\宣传视频脚本-2分钟.md`**（那份脚本的简介模板仍停在 v0.3.2）。
 
-`关键词：["待办清单","normify结构树","面板按键实测","EFMI命中N","感觉好卡","MMD播放测试","崩溃包补Mods清单","Key协议退役","issue5不要管","sbm提弗洛斯三选一"]`
+`关键词：["待办清单","审计批次未推送","结构树待重跑","TESTING未出","好卡对照结论","MMD播放测试要开Poser","崩溃包补Mods清单","Key协议退役","issue5不要管","sbm自维护","宣传片脚本未落盘","d3dx_user残留"]`
 
-## 话题（一件事的前因后果）（9 条）
+## 话题（一件事的前因后果）（13 条）
 
 ### 诊断并稳定终末地换装 Mod 的 DX11/EFMI 路线
 *2026-09-27 18:24*
@@ -654,7 +618,35 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 
 `关键词：["极乐净土","MMD素材","mmdmod","Endfield Poser","vmd","BowlRoll需登录","vidol-dance-gokuraku","gokuraku.vmd","yurie","mmd素材目录","Poser停用","待用户确认"]`
 
-## 经验教训（被纠正过的、踩过的坑）（353 条）
+### 把 modecontroller 里"有备份却还原不回去"的问题查清并修掉
+*2026-10-04 05:19*
+
+用户把"备份问题"明确划为**允许修**的范围（即使涉及外部对象）。审计查出三类：① **假备份/看不见**——净化清单在破坏性动作**之后**才写，中途断电 ⇒ 真实备份躺在 files\ 里却被 `list_backups` 当"没清单"跳过（用户以为没备份，游戏目录已被切一半）；② **假还原/失真**——`restore_global_reshade_apps` 备份丢了仍 `return ok=True`；`_install_file` 的 `.bak` 固定名只建一次 ⇒ 目标后来被更新时还原到**更早那份**；③ **备份名互覆**——同秒备份/包名覆盖三处、`.disabled` "先 unlink 再 rename" 会删掉很可能就是游戏原件的副本。修法：清单先落 `in_progress` 再改 `complete`、`list_backups` 认"无清单但 files\ 非空"、备份名带 sha256、统一 `fsutil.unique_sibling`、新增 `launcher.restore_ini_backups` 接「回滚」、还原路径强制在游戏目录内。另有一个 P0：`reset_dependencies_and_redownload` 还原失败仍 `rmtree(runtime)` 会删掉**唯一**还原点 → 改为失败即中止。
+
+`关键词：["备份语义","假还原","还原失真","净化清单写入时机","in_progress","无清单备份不可见","备份名互相覆盖","unique_sibling","mc.bak还原入口","还原点被删","先删后拷","游戏目录还原"]`
+
+### 让"前端引用了不存在的名字"这类静默失效不再发生
+*2026-10-04 05:19*
+
+2026-10-04 审计一次扫出 **6 处同型事故**（与历史 `modDownloadFinished is not defined` 完全同型：控制台报一句、界面上看起来只是"操作没做成"）：`ConflictDialog` 缺 `computed`（冲突弹窗必炸、可能白屏）、`SettingPathBrowse` 缺 `showAlert`（设置页所有「浏览…」按钮点了没反应）、`LaunchPage` 缺 `showProgressToast/showToast/hideProgressToast`（**「自动修复完整性」根本不执行**）、`DepsPage` 缺同三个 + `sleep` 从未定义（抛错被 catch 吞成"操作失败"）、`SettingsPage` 调不存在的 `store.refreshState()`（「自动检测」永远没有任何提示）。**为什么会漏**：`test_frontend_components.py` 只看"模板里的组件有没有 import"，而 `npm run build` 对未声明的标识符**不报错**（打包器当成全局变量，运行时才炸）。落地防线：`tests/test_frontend_freevars.py` + 唯一实现 `tests/_frontend_freevars.py`（扫 script 块里"被当函数调用但未声明"的名字 + `store.xxx(`，带自检用例），并加 `.gitignore` 例外 `!tests/_*.py`（否则被 `_*.py` 吃掉）。同一轮还把后端 4 处字段名补齐（`flagged/files/watch_dir`、`risky/crashed`、崩溃包的 `path/reason/mods`、`injections/multi_instance`），否则"文件守护提醒""启动前风险弹窗""崩溃包路径"全都静默失效。
+
+`关键词：["未导入就调用","ReferenceError","静默失效","computed未导入","showAlert未导入","showProgressToast","sleep未定义","store.refreshState不存在","前端自由标识符检查","test_frontend_freevars","gitignore下划线例外","字段名不匹配补齐"]`
+
+### 查清"下载完成的 Mod 其实是坏的"这个数据损坏坑
+*2026-10-04 05:19*
+
+**机理**：fastnet 的并发分块下载有两份产物 —— 工作文件 `<名>.mcdownload` 与"哪些块已完成"的 `<名>.mcdownload.mcparts.json`（sidecar）。失败清理只删了前者；重试时 sidecar 还在、里面记着"这些块已下好" ⇒ **跳过它们**，而工作文件是新建的空文件 ⇒ 那些区间是空洞；又因为块是 seek 写的、文件长度照样能到总大小 ⇒ 上层"大小相等"判据通过 ⇒ **报成功并落位一个坏包**（rar/7z 只查 8 字节头，坏包静默进 Mod 库）。**修法**：新增 `fastnet.discard_partial()`（唯一入口，一次删掉目标+工作文件+两份 sidecar 命名）供 `moddl._cleanup_partial` 复用；`_download_parallel` 另做交叉校验 —— **块必须完全落在文件当前长度之内**才算"真有这些字节"（正常续传不受影响，空洞场景全部作废重下）。同轮加固：依赖包下载补 `expected_sha256`（GitHub asset 的 digest），且**缓存命中也要校验**（否则一个被截断的缓存会被无限复用）。
+
+`关键词：["断点续传","sidecar残留","mcparts.json","空洞文件","坏包报成功","discard_partial","块交叉校验","mcdownload","sha256校验","缓存命中也要校验","rar 7z只查文件头","下载数据损坏"]`
+
+### 把 modecontroller 的屎山/bug/漏洞/未复用/逻辑不合理/前后端不匹配做一次彻底审计并尽量修掉
+*2026-10-04 05:19*
+
+用户 2026-10-04（原话）：「审计…屎山，bug，漏洞，能复用不复用，逻辑不合理，前后端不匹配…除了要与其他依赖交互且不是备份问题以外，都修一下，能复用的复用，前后端不匹配以补齐为主。我划定不让你改的也要审计，但先不改，用goal，todo」。做法：先测基线，再跑三份静态扫描（重复定义/定义未引用/相似函数/安全模式）+ 4 个并行 subagent 深读 + 自读 api.py（4473 行），每条**核实后**再改。两轮共 46 文件 +1749/-494、新增 2 个测试文件；pytest 658→**661 passed**，前端 `npm run build` 通过并重建产物。产出 `docs\审计报告-2026-10-04.md`（总体结论/已修 68 条/边界声明/未修清单/已实现却未被调用清单/验证证据/总结）。**未推送未发版**；余三件待拍板（诊断包是否收状态 json、主题双真相、web/dist 是否入库）与收尾（结构树行号全变待更新、TESTING 未出）。
+
+`关键词：["全项目审计","静态扫描脚本","并行subagent深读","逐条核实再改","审计报告","661 passed","未修清单","已实现却未被调用","未推送未发版","备份语义例外","前后端不匹配补齐","禁改也要审"]`
+
+## 经验教训（被纠正过的、踩过的坑）（355 条）
 
 ### XXMI/EFMI 启动终末地是 Endfield.ex…
 *2026-09-27 14:58*
@@ -3908,7 +3900,21 @@ tkinter 只留作源码模式兜底，且失败时给出**可照做的替代**�
 
 `关键词：["镜像并发实测","单连接0.71","16连接3.96","多线路混合负优化","木桶效应","只加连接不铺线路","recommended_threads","MAX_THREADS20","并发是提速主力"]`
 
-## 事实（细碎的原子信息）（65 条）
+### 【能解码 ≠ 解对了：多编码容错必须按用户分布排顺序】（…
+*2026-10-04 02:17*
+
+【能解码 ≠ 解对了：多编码容错必须按用户分布排顺序】（2026-10-04 实测）GBK 的「暗色」（字节 B0 B5 C9 AB）在 cp932 眼里**能成功解码**，但结果是错的：半角片假名 `ｰｵﾉｫ` —— 于是"读 config.json 时依次试 utf-8/cp932/gbk"这种写法会让中文配置值静默变乱码（JSON 结构照样解析得动，所以不会报错）。cp932 与 GBK 互相都会误判，唯一可用的判据是**用户分布**：这个项目面向中文 Windows 用户，所以顺序必须是 `utf-8-sig → utf-8 → gbk → cp932 → latin-1`（已落在 `fsutil._ENCODINGS`）。同类判据：凡是"候选方案都能'成功'但结果不同"的场景（编码、模糊匹配、镜像线路），**必须有明确的取舍依据并写进注释**，不能靠"先试哪个"。验证方式：构造真实字节（`json.dumps(...).encode("gbk")`）跑一遍，别只看代码。
+
+`关键词：["编码容错","GBK","cp932","UnicodeDecodeError","乱码","能解码不等于解对","read_text_tolerant","config.json","中文Windows","候选顺序","实测字节"]`
+
+### 【"某个操作能不能被中断"必须一路查到**最底层**：`…
+*2026-10-04 10:37*
+
+【"某个操作能不能被中断"必须一路查到**最底层**：`fastnet.fetch()` 曾把 cancel 丢掉】（2026-10-04 用户实测）他报「mod下载**探测期间无法暂停**」「到了下载又显示暂停，但是暂停显示已下载并入库 1 个」「点了**终止也还是探测中**」。追下去是**三层都断**：① `api._mod_download_one` 的 `cancelled()` 只在**下载循环**里被检查，探测段（`gamebanana_profile` 读 JSON + 下封面，各 25 秒超时）一个检查点都没有；② `dependencies._http_get(dest=None)`（"内存下载"分支）**根本没把 cancel 传给底层**（静默丢弃）；③ `fastnet.fetch()` 本身是一句 `response.read()` 一口气读完、中途无法检查。**判据**：做"暂停/取消/超时"这类能力时，从 UI 一路跟到**最底层的读循环**，每一层都要能收到并检查那个标志 —— 任何一层"只传了一半"都等于没做（用户看到的就是"点了没反应"）。**配套坑**：`http.client` 的响应对象一旦超时就不能再读（`cannot read from timed out object`）⇒ 必须用 `select()`（本项目 `_readable()`）探测可读，**绝不重试 `read()`**；socket 超时用"轮询粒度"（1 秒），真正"多久算断流"由累计等待量判断。另：暂停被叫停时抛的 `Cancelled` **不要**被当成线路故障去换镜像线路。
+
+`关键词：["暂停无效","cancel 被丢掉","探测期间无法暂停","fastnet.fetch 一次性 read","_http_get 内存分支","一路查到最底层","_readable select 探测","cannot read from timed out object","轮询粒度","Cancelled 不是线路故障","点了终止没反应"]`
+
+## 事实（细碎的原子信息）（68 条）
 
 ### modecontroller：游戏目录 loader_l…
 *2026-09-27 14:58*
@@ -4642,6 +4648,27 @@ DSH 官方 feedback 通道 = **GitHub Discussions**：`https://github.com/deepse
 modecontroller 仓库可发现性：`jing-hy/EndfieldModController` **一直是 public**（匿名 API/网页 HTTP 200，站内按名字搜索 total_count=1 命中）。2026-10-04 用户问"为啥我查不到"，实测原因是三点：① **topics 原本是空的**（已补 14 个：endfield / arknights-endfield / mod-manager / game-mod / dlss / reshade / 3dmigoto / efmi / xxmi / python / pywebview / windows / mods / tool，匿名按 `topic:endfield` 等三个标签复测均命中）；② description 是**纯中文**，GitHub 搜索对中文分词差，搜"终末地 mod 管理器"这类词命中不了，必须搜精确仓库名；③ 新仓库 + 4 stars + 无外链 ⇒ Google/Bing/百度**尚未收录**（要几天到几周，百度对 GitHub 尤其慢）。要修可发现性：加 topics ✓、description 加英文（例如 `Endfield Mod Manager — …`）、README 顶部加英文摘要、去社区发带链接的帖子（外链收录最快）。
 
 `关键词：["仓库公开","查不到","GitHub搜索","topics","可发现性","description英文","搜索引擎收录","jing-hy","EndfieldModController","topic标签"]`
+
+### 【"引用了不存在的东西"已有两道自动化防线（2026-1…
+*2026-10-04 05:18*
+
+【"引用了不存在的东西"已有两道自动化防线（2026-10-04，前端那道已入库）】① **后端**：`tests\test_undefined_names.py` 用 pyflakes 对整个包**零容忍** `undefined name`（历史事故：`fastnet.CHUNK_GAP_SECONDS` 不存在却引用 4 处 ⇒ 并发下载线程当场死、日志写着"用 20 连接补齐"实际一条连接都没下）。② **前端**：`tests\test_frontend_freevars.py` + 唯一实现 `tests\_frontend_freevars.py`（**已入库**，并在 `.gitignore` 加了 `!tests/_*.py` 例外 —— 否则它会被 `_*.py` 那条规则吃掉，clone 后 pytest 直接 ModuleNotFoundError）。扫每个 `.vue`/`.js` 的 script 块，报「被当函数调用但未声明」的标识符 + `store.xxx(` 这种"store 上不存在的方法"，带自检用例（人造坏代码必须被抓、正常写法不许误报）。2026-10-04 一次扫出 **6 处真事故**：ConflictDialog 缺 `computed`（冲突弹窗必炸/白屏）、SettingPathBrowse 缺 `showAlert`（浏览按钮点了没反应）、LaunchPage 缺 `showProgressToast/showToast/hideProgressToast`（自动修复不执行）、DepsPage 缺同三个 + `sleep` 从未定义、SettingsPage 的 `store.refreshState()` 不存在。**写法要点**：必须先剥掉注释与字符串（否则 `// 与后端 get_state() 的返回同构` 和 CSS 的 `var(--x)` 全是误报）；箭头函数参数用 `\(([^()]*)\)\s*(?:=>|\{)` 禁嵌套匹配。另可配 `_tmp\audit\verify_fixes.py`（29 条函数级判据）做修复后的硬证据。
+
+`关键词：["undefined name","pyflakes","前端自由标识符","未导入","ReferenceError","check_frontend_freevars","test_undefined_names","store.refreshState","ConflictDialog","设置PathBrowse","静态防线","module not found"]`
+
+### 【香蕉网"最新版需要下什么资源"的**权威口径** = …
+*2026-10-04 10:37*
+
+【香蕉网"最新版需要下什么资源"的**权威口径** = `apiv11/Mod/<id>/Updates` 最新一条的 `_aFileRowIds`】（2026-10-04 用户要求 + 实测确认）用户原话：「应该先去 `gamebanana.com/mods/updates/690864`，看**最新版需要下什么资源**，然后再去下载，而不是一上来就下最新的包」。实测 mod 690864：最新更新（1.8.2，`_idRow=455020`）的 `_aFileRowIds = [1813631, 1809855]`，精确对应 `changescreens_182.zip`(957MB 主包) + `_core_2.zip`(275B 补丁) —— 而 `ProfilePage._aFiles` 里还混着同页面**别的模块**的 `characterchange_131.zip`(86MB)，按"最新/最大"猜就会下错或多下。接口返回 `{_aMetadata, _aRecords}`（`_nPerpage=5`、最新在前、`_bIsComplete` 可判断是否还有更多页）。字段：`_idRow`/`_sVersion`/`_sName`/`_tsDateAdded`/`_sText`(HTML 说明)/`_aFileRowIds`/`_aFiles`。落地：`moddl.gamebanana_updates()` + `split_mod_files(files, required_ids)`（没有更新记录的老 Mod 才退回"按时间挑最新主包"）。
+
+`关键词：["香蕉网","GameBanana","Updates 接口","_aFileRowIds","最新版需要什么资源","ProfilePage _aFiles","apiv11","主包与补丁","required_ids","gamebanana_updates","别按大小猜主包"]`
+
+### 【DLSS5 支持判据必须**逐张显卡**判代次并取最高…
+*2026-10-04 10:37*
+
+【DLSS5 支持判据必须**逐张显卡**判代次并取最高 —— 双显卡机器曾被开关挡住】（2026-10-04 用户转来的反馈）反馈原话：「双显卡（**一张 5080，一张 4060**）会被 dlss5 的开关挡住，显示只支持 50 显卡」。根因：`deviceinfo.dlss5_supported()` 把**所有** NVIDIA 卡名拼成一串，再 `re.search` **第一个** `rtx\d{4}` 当代次 ⇒ 取到哪张**完全看适配器枚举顺序**，于是装了 5080 的机器被判成 40 系、开关直接被拒（`rejected=dlss5_unsupported_gpu`）。修法：新增 `nvidia_generations()`（列出全部代次）；`dlss5_supported()` **逐张卡判 + 取最高**，多卡时提示写明「哪张满足前提、请让游戏用那张跑」；`_verdict()`（诊断包那段结论）同样按最高代次并标注多卡；`nvidia_generation()` 保留原语义但注明"只取第一个、判支持别用它"。**通用判据**：凡"从多个同类对象里取一个代表"的判据（显卡、磁盘、进程、网络线路、同名文件），只要**结果取决于枚举顺序**就是 bug —— 必须显式定义聚合规则（取最优 / 取全部 / 明确报错），并在多实例机器上验证。
+
+`关键词：["双显卡","DLSS5 开关被挡","只支持50系","nvidia_generations","逐卡判代次取最高","枚举顺序决定结论","dlss5_unsupported_gpu","多卡提示用哪张","设备判据聚合规则","适配器顺序"]`
 
 ## 用户偏好与环境（**含个人信息，公开前请自行取舍**）（18 条）
 
