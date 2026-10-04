@@ -4211,8 +4211,24 @@ class EndfieldModControllerApi:
         launcher._append_log(self.config, "已清除下载线路记录")
         return self.get_download_settings()
 
-    def check_app_update(self, use_cache: bool = True) -> dict[str, Any]:
-        """对比 GitHub release 的 tag 与本机版本号。"""
+    def check_app_update(self, use_cache: bool = False) -> dict[str, Any]:
+        """对比 GitHub release 的 tag 与本机版本号。
+
+        ⚠️ **默认改成"强制查"（`use_cache=False`）**（2026-10-04 用户实测踩到的坑）：
+
+        `selfupdate.CHECK_CACHE_SECONDS` 是 **6 小时**，而且这份缓存是**落盘**的
+        （`runtime\\_update\\last_check.json`）。只要落盘那一刻新版本**还没发布**，
+        之后整整 6 小时内、所有走缓存的检查都会一口咬定"已是最新" ——
+        用户那次的现象正是如此：缓存写于 11:32（`latest=v1.0.7`），而 **v1.0.8 是 11:51
+        才发布的**，于是伪旧版一路"更新"到的还是 1.0.7。而设置页那个「检查程序更新」
+        按钮走的**恰好是不传参的默认值** ⇒ 用户点了也白点，看到的仍是缓存里的旧结论。
+
+        所以分工现在是明确的、并且由签名固定住：
+          * **启动时的自动检查**（`UpdateBadge.autoCheck`）**显式传 `True`** ——
+            省 API 额度、离线时静默，这条本来就不该每次打网络；
+          * **任何"用户主动点"的入口**（角标、设置页按钮）走这个默认值 `False` ——
+            点了就真的打一次网络。
+        """
         return selfupdate.check_update(
             self.config,
             log=lambda message: launcher._append_log(self.config, message),
