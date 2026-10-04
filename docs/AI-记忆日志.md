@@ -4,9 +4,9 @@
 > 目的：让「当时为什么这么改、踩过什么坑」跟着源码一起留在仓库里。
 > 想改内容 → 改记忆库（用记忆工具），再跑一次本脚本；不要直接编辑本文件。
 
-- 生成时间：2026-10-04 14:46:19
+- 生成时间：2026-10-04 18:18:06
 - 来源：`.dsh-meow/memory.db`
-- 条目：519 条（已跳过 archived / 其它项目的条目）
+- 条目：520 条（已跳过 archived / 其它项目的条目）
 
 ---
 
@@ -515,17 +515,19 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 `关键词：["MMD素材来源","v-idol组织","vidol-dance仓库","codeload取tar.gz","default_branch","lobe-vidol-market","r2.vidol.chat已失效","BowlRoll要登录","镜头可匿名下载","极乐净土已归档"]`
 
 ### **modecontroller 当前状态 · 唯一真源…
-*2026-10-04 12:02*
+*2026-10-04 18:07*
 
 **modecontroller 当前状态 · 唯一真源**（有变动请**更新本条**，别再另开新条目）
-**发布**：GitHub **Latest = v1.0.8**（2026-10-04）https://github.com/jing-hy/EndfieldModController/releases/tag/v1.0.8 ；附件 `EndfieldModController.exe` 29,935,240 B / sha256 `0ca55842d7686be166f7…` + `assets-bundle.zip` 144,696,905 B / sha256 `b5acde37c91b61e4fc98…`。远端 main = `ba02c1d`。
-**本地（未推送、未发版）**：main = `363ea34`，版本号 **1.0.9**（= 最新 Release + 1）。
-**v1.0.9 内容（本地）**：下载链路 —— ① 直连尝试前加 **TCP 预检**（5s、只连不读；连不上立刻换镜像，`line_mode=direct` 时不跳）；② `MIRRORABLE_HOSTS` 补 `release-assets.githubusercontent.com` / `github-releases.githubusercontent.com`；③ 可镜像主机与预检的 7 条回归测试。实测：端到端 13.8s / 2.07 MB/s / sha256 一致。**714 passed**。
-**v1.0.8（已发）内容**：① 诊断包「一次抓齐」（修 #13 三条缺陷；新增 `capture-manifest.txt`/`Player.log`/WER/`game-inventory.txt`/`environment.txt`/`xxmi` 脱敏配置+日志/`plugin` 文本/`SecondaryMotion` json/EFMI+3DMigoto 两侧日志）；② 设置页开关「启动前清除游戏目录里的所有第三方注入」（`clear_game_injections_on_launch`，默认开，先净化后补齐、可还原）；③ 第一人称中文修复（生效那份 `runtime\reshade\ReShade.ini` 补段补键 + 顺序修好 + 字体；并随组件下载写入）；④ 自检补 `backup_ok`；⑤ 发版流程加组件版本表核对（XXMI→v2.4.1、Poser→0.5.18）。modtest 已同步 1.0.8 + 伪旧版 `0.1.9-from-1.0.8`。
-**流程**：改代码 → pytest → **自己 commit** → `build_release.py --modtest-both` → `prepare_release.py` → `push.py`（先快照 + 刷记忆日志/结构树）→ `gh release create <tag> --title <tag> --notes-file RELEASE_NOTES.md --latest` → `upload_release_assets.py`（无参数）。⚠️ 前端重建用 `node node_modules/vite/bin/vite.js build`；⚠️ gh/上传要注入 `$env:GH_TOKEN`；⚠️ **Release 正文一律客观口吻**（见 rules 条）。
-**issue**：只剩 **#5**（用户说"不要管"）；#13 已回复并关闭。
-**遗留**：v1.0.5 的 Release 正文与标题不符（等他点头）；normify 结构树待重跑四步；**待用户实测**：addon 每进一次游戏会不会把生效那份 ini 写回 `Language=0`（若会，加"游戏进程出现后再钉一次"的兜底）。
-**Steam++ 结论（2026-10-04 实测）**：其加速内核是 FastGithub 2.1.4 移植（本地反代 + 自签证书 HTTPS 中间人 + WinDivert/hosts）、GPL-3.0 不可内嵌；**它没覆盖 `release-assets.githubusercontent.com`**，但该域名直连可用（0.55 MB/s），真正的超时点是 **`github.com` 直连连不上**（20s → WinError 10060）。香蕉网走自有 nginx CDN、多节点择优只差 2.5 倍且都慢 ⇒ 无收益。报告：`_tmp/research/steampp-accelerator.md`。
+**发布**：GitHub **Latest = v1.0.8**（2026-10-04）https://github.com/jing-hy/EndfieldModController/releases/tag/v1.0.8 ；附件 `EndfieldModController.exe` 29,935,240 B / sha256 `0ca55842d7686be166f7…` + `assets-bundle.zip` 144,696,905 B / sha256 `b5acde37c91b61e4fc98…`。
+**远端 main = `fb86ea9`**（2026-10-04 推的，含记忆日志刷新）。
+**本地（未推送）**：HEAD = `b6677c8`，版本号 **1.0.9**（= 最新 Release + 1）。
+**v1.0.9 累积内容（本地，未发版）**：① 下载链路 —— 直连前 TCP 预检 + `MIRRORABLE_HOSTS` 补两个 githubusercontent 域名；② **香蕉网网站分类接入 Mod 库**（`moddl.gamebanana_category` 解析 `_aCategory`/`_aSuperCategory`，入库写 `download-info.json` 的"网站分类" + `mod.meta.json` 的 `site_category*`，卡片显示徽章；并用分类兜底填角色/类型，本地证据优先）；③ **诊断包大幅扩充**（`game/CrashSightLog/` 游戏自己的崩溃日志、`game/AntiCheatExpert/`、`describe_exit_code()` 退出码人话、SideBySide/AppModel-Runtime、近 60 分钟全部错误、杀毒产品+Defender 隔离记录+`Get-MpThreatDetection` 文件路径、System32 关键模块、AppInit_DLLs/IFEO、子目录内容）；④ **杀毒线**（`filewatch` 范围扩到游戏目录 proxy + System32 转发目标；新增 `antivirus` 模块查隔离/加白名单/还原；`defender_exclusions_enabled` **默认开** + 设置页开关 + 启动页弹窗一键还原）；⑤ 修 proxy 备份语义（`ensure_proxy_backup` 优先备份游戏目录真原版；`ensure_loader` 另存 `.bak.game-original`）；⑥ 修「用户主动点检查更新被 6 小时缓存挡住」（`check_app_update` 默认改 `use_cache=False`）。pytest **743 passed**。
+**v1.0.9 构建产物（2026-10-04 18:02）**：`dist\EndfieldModController.exe` **29,965,759 B** / sha256 `d2b883310f572a864044…`；伪旧版 `dist\EndfieldModController-0.1.9-from-1.0.9.exe` **29,966,348 B** / sha256 `2ba3bb7817986c1f3057…`。modtest 已同步这两个（旧的已清）。⚠️ **伪旧版自更新只会走到 v1.0.8**（Latest 还没到 1.0.9）⇒ 要测到 1.0.9 必须先发 Release。
+**v1.0.8（已发）内容**：① 诊断包「一次抓齐」；② 设置页开关「启动前清除游戏目录里的所有第三方注入」；③ 第一人称中文修复；④ 自检补 `backup_ok`；⑤ 发版流程加组件版本表核对（XXMI→v2.4.1、Poser→0.5.18）。
+**流程**：改代码 → pytest → **自己 commit** → `build_release.py --modtest-both` → `prepare_release.py` → `push.py`（先快照）→ `gh release create <tag> --notes-file RELEASE_NOTES.md --latest` → `upload_release_assets.py`。⚠️ 前端重建 `node node_modules/vite/bin/vite.js build`；⚠️ gh 要注入 `$env:GH_TOKEN`；⚠️ Release 正文客观口吻。⚠️ **构建里的 pytest 用 `-n 4` 并行**，`tests/test_missing_library_prune.py` 等有**约 1/3 概率的并行 flaky**（串行全过）—— 2026-10-04 那次连挂 3 次导致构建中止、白跑一轮，重跑即过。
+**issue**：只剩 **#5**（用户说"不要管"）。
+**遗留**：v1.0.5 的 Release 正文与标题不符（等他点头）；normify 结构树待重跑四步；**待用户实测**：addon 每进一次游戏会不会把生效那份 ini 写回 `Language=0`。
+**Steam++ 结论**：其加速内核是 FastGithub 2.1.4 移植、GPL-3.0 不可内嵌；没覆盖 `release-assets.githubusercontent.com`，真正超时点是 `github.com` 直连（20s → WinError 10060）。报告：`_tmp/research/steampp-accelerator.md`。
 
 `关键词：["modecontroller 当前状态","唯一真源","v1.0.8","Release v1.0.7","未推送","诊断包一次抓齐","clear_game_injections_on_launch","pytest 695","issue 13","前端重建 vite","Steam++ 调研","release-assets.githubusercontent.com"]`
 
@@ -684,7 +686,7 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 
 `关键词：["全项目审计","静态扫描脚本","并行subagent深读","逐条核实再改","审计报告","661 passed","未修清单","已实现却未被调用","未推送未发版","备份语义例外","前后端不匹配补齐","禁改也要审"]`
 
-## 经验教训（被纠正过的、踩过的坑）（365 条）
+## 经验教训（被纠正过的、踩过的坑）（366 条）
 
 ### XXMI/EFMI 启动终末地是 Endfield.ex…
 *2026-09-27 14:58*
@@ -4021,6 +4023,13 @@ poser/sbm 的 loader proxy（`d3dcompiler_47.dll` / `vulkan-1.dll`，35~56 KB）
 一个"做了但没盖到现场"的守护最容易骗人：2026-10-01 做的反杀毒弹窗（`filewatch`）一直在跑，用户以为"没弹 = 不是杀毒"；实际它的范围只有 `runtime\` 里 11 个文件，而这次要查的缺口在**游戏目录 / System32**，`file_watch.json` 里 11 项全是 missing=0/scans=4 —— 一次都没看那儿。教训：① 判断"某个守护有没有查出来"之前，先核对**它的覆盖范围**是否包含出事的现场，否则会把"没查"读成"没事"；② 扩范围时最大的风险是**误报**（探测不到游戏目录时若退回拼数据根，会把根本不存在的路径算成"被删了"）⇒ 算不出路径就整项跳过、不计数。
 
 `关键词：["守护覆盖范围","没弹窗不等于没事","filewatch 范围","游戏目录 System32","误报风险","路径算不出就跳过","不计数","判据缺口","file_watch.json"]`
+
+### 构建入口 `build_release.py` 的 py…
+*2026-10-04 18:07*
+
+构建入口 `build_release.py` 的 pytest 用 `-n 4` 并行跑，而 `tests/test_missing_library_prune.py` 这类测试有**约 1/3 概率的并行 flaky**（我实测并行 3 次挂 1 次，且每次挂的方法不同；串行跑两次都 743 passed）。2026-10-04 那次构建**连挂 3 次**（脚本 `attempts=3`）⇒ 直接中止、不产出任何产物，白跑一轮。教训：① 构建失败先看 `FAILED` 行**是不是并行 flaky** —— 判据是"串行跑同一个文件全过"；② 遇到它直接重跑构建即可，别去改业务代码；③ 提高重试次数或降并行度是可行的加固方向（脚本注释里已记 `-n auto` 更糟）。
+
+`关键词：["构建 flaky","pytest -n 4","并行偶发失败","test_missing_library_prune","attempts=3","构建中止","串行全过","白跑一轮","build_release.py"]`
 
 ## 事实（细碎的原子信息）（73 条）
 
