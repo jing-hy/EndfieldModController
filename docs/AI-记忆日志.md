@@ -4,7 +4,7 @@
 > 目的：让「当时为什么这么改、踩过什么坑」跟着源码一起留在仓库里。
 > 想改内容 → 改记忆库（用记忆工具），再跑一次本脚本；不要直接编辑本文件。
 
-- 生成时间：2026-10-04 11:51:39
+- 生成时间：2026-10-04 11:53:27
 - 来源：`.dsh-meow/memory.db`
 - 条目：504 条（已跳过 archived / 其它项目的条目）
 
@@ -494,16 +494,16 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 `关键词：["MMD素材来源","v-idol组织","vidol-dance仓库","codeload取tar.gz","default_branch","lobe-vidol-market","r2.vidol.chat已失效","BowlRoll要登录","镜头可匿名下载","极乐净土已归档"]`
 
 ### **modecontroller 当前状态 · 唯一真源…
-*2026-10-04 11:41*
+*2026-10-04 11:52*
 
 **modecontroller 当前状态 · 唯一真源**（有变动请**更新本条**，别再另开新条目）
-**发布**：GitHub **Latest = v1.0.7**（2026-10-04T02:50:24Z）https://github.com/jing-hy/EndfieldModController/releases/tag/v1.0.7 。
-**本地**：main = `0b847ff`（前一个 `cbb25b0`），版本号 **1.0.8**（= 最新 Release + 1），**未推送、未发版**。
-**v1.0.8（未发）内容**：① 诊断包「一次抓齐」（修 issue #13 三条缺陷；新增 `capture-manifest.txt`/`Player.log`/WER/`game-inventory.txt`/`environment.txt`/`xxmi`/`plugin` 文本/`SecondaryMotion` json/EFMI+3DMigoto 两侧日志）；② 新开关「启动前清除游戏目录里的所有第三方注入」（`clear_game_injections_on_launch`，默认开，先净化后补齐、可还原）；③ 自检补 `backup_ok`（缺 `.bak` 自动从 System32 补齐）；④ **第一人称中文修复**（生效那份 `runtime\reshade\ReShade.ini` 从没被同步过 → 补段补键 + 顺序修好 + 字体写到生效那份）。**pytest 701 passed**。⚠️ **未构建新 exe** —— 用户那份实例（`D:\zmdmod\modtest`）的 ini 已用源码热修好，但 exe 里还是老逻辑。
-**流程**：改代码 → pytest → **自己 commit** → `build_release.py --modtest-both`（检测到 Endfield/管理器在跑就跳过 modtest 同步）→ `prepare_release.py` → `push.py`（先快照 + 刷记忆日志/结构树）→ `gh release create <tag> --notes-file RELEASE_NOTES.md --latest` → `upload_release_assets.py --tag <tag>`。⚠️ **前端重建**：`pnpm build` 会触发 install 并因 esbuild 构建脚本被忽略而失败 —— 用 `node node_modules/vite/bin/vite.js build`（在 `frontend\` 下）。
-**issue**：仓库只剩 **#5**（用户说"不要管"）与 **#13**（已修，**等用户确认后再回复/关闭**）。
-**遗留**：v1.0.5 的 Release 正文与标题不符（等他点头改）；normify 结构树待重跑四步；**待用户实测**：addon 每进一次游戏会不会又把生效那份 ini 写回 `Language=0`（若会，需要加"游戏进程出现后再钉一次"的兜底）。
-**Steam++ 调研（2026-10-04，报告在 `_tmp/research/steampp-accelerator.md`）**：加速内核是 FastGithub 2.1.4 移植（本地反代 + 自签证书 HTTPS 中间人 + WinDivert/hosts）、GPL-3.0 不可内嵌；**它和我们 `fastnet.MIRRORABLE_HOSTS` 都漏了 `release-assets.githubusercontent.com`** —— 很可能是"大文件 20 秒超时"的根因，待验证镜像是否支持该主机。香蕉网走自有 nginx CDN、多节点择优只差 2.5 倍且都慢 ⇒ 无收益。
+**发布**：GitHub **Latest = v1.0.8**（2026-10-04）https://github.com/jing-hy/EndfieldModController/releases/tag/v1.0.8 ；远端 main = `540935e`（本地已推平）。附件两件：
+`EndfieldModController.exe` 29,935,240 B / sha256 `0ca55842d7686be166f76ab485f13e97762f231121be5bc525071f2d07c35411`；
+`assets-bundle.zip` 144,696,905 B / sha256 `b5acde37c91b61e4fc9871bd38cee71ac9e59f5e36d129fcdfd203531c9d5ed5`（83 文件 / 138 MB）。推送前快照：`D:\zmdmod\_snapshot_1.0.8-20261004-115139`。**issue #13 已回复并关闭**（#5 = 用户说"不要管"）。
+**v1.0.8 的内容**：① 诊断包「一次抓齐」（修 #13 三条缺陷；新增 `capture-manifest.txt`/`Player.log`/WER/`game-inventory.txt`/`environment.txt`/`xxmi` 脱敏配置+日志/`plugin` 文本/`SecondaryMotion` json/EFMI+3DMigoto 两侧日志）；② 设置页新开关「启动前清除游戏目录里的所有第三方注入」（`clear_game_injections_on_launch`，默认开，先净化后补齐、可还原）+ 两个手动按钮；③ **第一人称中文修复**（生效那份 `runtime\reshade\ReShade.ini` 从没被同步过 → 补段补键 + 顺序修好 + 字体写到生效那份），并且**随组件下载也写**（`api._sync_firstperson_ini_after_install`）；④ 自检补 `backup_ok`（缺 `.bak` 自动从 System32 补齐）；⑤ 发版流程新增 `scripts/check_component_versions.py`（联网核对随包组件版本表，本次把 XXMI→v2.4.1、Poser→0.5.18）。**707 passed**。modtest 里的 exe 已同步为 1.0.8 + 伪旧版 `0.1.9-from-1.0.8`。
+**流程**：改代码 → pytest → **自己 commit** → `build_release.py --modtest-both` → `prepare_release.py` → `push.py`（先快照 + 刷记忆日志/结构树）→ `gh release create <tag> --title <tag> --notes-file RELEASE_NOTES.md --latest`（**不带附件**）→ `upload_release_assets.py`（无参数，自己认 tag；同名资产 422）。⚠️ 前端重建用 `node node_modules/vite/bin/vite.js build`（`pnpm build` 会触发 install 并因 esbuild 构建脚本被忽略而失败）；⚠️ gh 未登录时注入 `$env:GH_TOKEN=[Environment]::GetEnvironmentVariable('GH_TOKEN','User')`。
+**遗留**：v1.0.5 的 Release 正文与标题不符（等他点头改）；normify 结构树待重跑四步（`docs\structure\` 是镜像，push 时会同步）。
+**Steam++ 调研（报告在 `_tmp/research/steampp-accelerator.md`）**：加速内核是 FastGithub 2.1.4 移植（本地反代 + 自签证书 HTTPS 中间人 + WinDivert/hosts）、GPL-3.0 不可内嵌；**它和我们 `fastnet.MIRRORABLE_HOSTS` 都漏了 `release-assets.githubusercontent.com`** —— 很可能是"大文件 20 秒超时"的根因，待验证镜像是否支持该主机。香蕉网走自有 nginx CDN、多节点择优只差 2.5 倍且都慢 ⇒ 无收益。
 
 `关键词：["modecontroller 当前状态","唯一真源","v1.0.8","Release v1.0.7","未推送","诊断包一次抓齐","clear_game_injections_on_launch","pytest 695","issue 13","前端重建 vite","Steam++ 调研","release-assets.githubusercontent.com"]`
 
