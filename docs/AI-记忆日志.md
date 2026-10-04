@@ -4,13 +4,13 @@
 > 目的：让「当时为什么这么改、踩过什么坑」跟着源码一起留在仓库里。
 > 想改内容 → 改记忆库（用记忆工具），再跑一次本脚本；不要直接编辑本文件。
 
-- 生成时间：2026-10-04 18:19:43
+- 生成时间：2026-10-04 23:11:21
 - 来源：`.dsh-meow/memory.db`
-- 条目：520 条（已跳过 archived / 其它项目的条目）
+- 条目：525 条（已跳过 archived / 其它项目的条目）
 
 ---
 
-## 设计原则 / 行为准则（17 条）
+## 设计原则 / 行为准则（18 条）
 
 ### 用户准则（原话）：「不是，你直接去官网拉」—— **一手…
 *2026-09-27 18:53*
@@ -243,6 +243,13 @@
 【modecontroller · Release 正文口吻】**发布文案一律客观陈述**（改了什么、加了什么、根因、怎么验证），**不出现"你 / 您 / 用户 / 反馈者说 / 你的原话 / 你提的要求"这类对话痕迹**。用户 2026-10-04 原话：「改一下 release 的文本，**从客观角度写，不要说我提的，只要说改了什么加了什么**」。issue 编号与链接要**保留**（那是客观标注，另见发布规则的"Release notes 必须提 issue"）。自查手法：`Select-String -Path RELEASE_NOTES.md -Pattern '你|您|反馈者|原话|提的要求|用户'` 应为空。历史先例：v1.0.7 也做过同一次整改（commit `a4be0a1`）。改线上正文用 `gh release edit <tag> --notes-file RELEASE_NOTES.md`（**只改正文、不动附件**），改完顺手推 main 保持仓库里那份一致。
 
 `关键词：["Release 正文","客观口吻","对话痕迹","不要说我提的","只讲改了什么","RELEASE_NOTES","发版文案","issue 编号保留","gh release edit","发布规则"]`
+
+### 【版本号 beta 约定（2026-10-04 用户定的…
+*2026-10-04 20:01*
+
+【版本号 beta 约定（2026-10-04 用户定的新规则，**取代**原来的"本地=Release+1"单一写法）】用户原话：「**在正式推版本之前，都采用比 release 多一，但是加 -beta，检测到 github 正式版要跳更新，比如 1.0.9 比 1.0.9-beta 新**」+「**推 release 的都不带 beta**」。落地：① 未发版时 `version.py` 写 **`1.0.10-beta`**（= 最新 Release + 1 + `-beta`）；② **同号时正式版更新** —— `1.0.9` 比 `1.0.9-beta` 新（beta 是预发布语义）；③ 发 Release 时 tag/标题/正文**去掉 beta**（`1.0.10`）。实现：`endfieldmodcontroller/version.py` 成为**全项目唯一版本口径** —— `parse_version()` 把"是否预发布"编码进比较键最后一维（正式=1、beta=0），另有 `strip_prerelease()` / `is_newer()` / `same_release()`；原来散在 `updates` / `selfupdate` / `github` / `alerts` / `dlss5_fetcher` 的 **5 份同款 `_version_tuple`** 全部改成委托它（加维度时漏一处就会"更新检测时灵时不灵"）。配套：`scripts/release_version.py` 比对时先剥后缀（否则 `1.0.10-beta` vs Release `1.0.9` 会被误判"不是+1"）、发版提示改成"未发版写成 `<号>-beta`"；`scripts/prepare_release.py` 的 `tag = f"v{_release_version(version)}"` 自动去 beta。⚠️ 版本比较的退化口径要保住：**一个数字都取不出来时返回 `(0,)`**（`alerts.version_applies` 靠"取不出数字"判"未知版本 ⇒ 不挡"，返回 `(0,0)` 会让它失效 —— 实测弄红 1 个既有测试）。
+
+`关键词：["版本号约定","beta 后缀","1.0.10-beta","预发布语义","正式版更新","release 不带 beta","parse_version","strip_prerelease","is_newer","release_version.py","版本比较退化口径"]`
 
 ## 项目记忆（结构 / 决策 / 部署 / 待办）（33 条）
 
@@ -515,17 +522,15 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 `关键词：["MMD素材来源","v-idol组织","vidol-dance仓库","codeload取tar.gz","default_branch","lobe-vidol-market","r2.vidol.chat已失效","BowlRoll要登录","镜头可匿名下载","极乐净土已归档"]`
 
 ### **modecontroller 当前状态 · 唯一真源…
-*2026-10-04 18:07*
+*2026-10-04 18:20*
 
 **modecontroller 当前状态 · 唯一真源**（有变动请**更新本条**，别再另开新条目）
-**发布**：GitHub **Latest = v1.0.8**（2026-10-04）https://github.com/jing-hy/EndfieldModController/releases/tag/v1.0.8 ；附件 `EndfieldModController.exe` 29,935,240 B / sha256 `0ca55842d7686be166f7…` + `assets-bundle.zip` 144,696,905 B / sha256 `b5acde37c91b61e4fc98…`。
-**远端 main = `fb86ea9`**（2026-10-04 推的，含记忆日志刷新）。
-**本地（未推送）**：HEAD = `b6677c8`，版本号 **1.0.9**（= 最新 Release + 1）。
-**v1.0.9 累积内容（本地，未发版）**：① 下载链路 —— 直连前 TCP 预检 + `MIRRORABLE_HOSTS` 补两个 githubusercontent 域名；② **香蕉网网站分类接入 Mod 库**（`moddl.gamebanana_category` 解析 `_aCategory`/`_aSuperCategory`，入库写 `download-info.json` 的"网站分类" + `mod.meta.json` 的 `site_category*`，卡片显示徽章；并用分类兜底填角色/类型，本地证据优先）；③ **诊断包大幅扩充**（`game/CrashSightLog/` 游戏自己的崩溃日志、`game/AntiCheatExpert/`、`describe_exit_code()` 退出码人话、SideBySide/AppModel-Runtime、近 60 分钟全部错误、杀毒产品+Defender 隔离记录+`Get-MpThreatDetection` 文件路径、System32 关键模块、AppInit_DLLs/IFEO、子目录内容）；④ **杀毒线**（`filewatch` 范围扩到游戏目录 proxy + System32 转发目标；新增 `antivirus` 模块查隔离/加白名单/还原；`defender_exclusions_enabled` **默认开** + 设置页开关 + 启动页弹窗一键还原）；⑤ 修 proxy 备份语义（`ensure_proxy_backup` 优先备份游戏目录真原版；`ensure_loader` 另存 `.bak.game-original`）；⑥ 修「用户主动点检查更新被 6 小时缓存挡住」（`check_app_update` 默认改 `use_cache=False`）。pytest **743 passed**。
-**v1.0.9 构建产物（2026-10-04 18:02）**：`dist\EndfieldModController.exe` **29,965,759 B** / sha256 `d2b883310f572a864044…`；伪旧版 `dist\EndfieldModController-0.1.9-from-1.0.9.exe` **29,966,348 B** / sha256 `2ba3bb7817986c1f3057…`。modtest 已同步这两个（旧的已清）。⚠️ **伪旧版自更新只会走到 v1.0.8**（Latest 还没到 1.0.9）⇒ 要测到 1.0.9 必须先发 Release。
-**v1.0.8（已发）内容**：① 诊断包「一次抓齐」；② 设置页开关「启动前清除游戏目录里的所有第三方注入」；③ 第一人称中文修复；④ 自检补 `backup_ok`；⑤ 发版流程加组件版本表核对（XXMI→v2.4.1、Poser→0.5.18）。
-**流程**：改代码 → pytest → **自己 commit** → `build_release.py --modtest-both` → `prepare_release.py` → `push.py`（先快照）→ `gh release create <tag> --notes-file RELEASE_NOTES.md --latest` → `upload_release_assets.py`。⚠️ 前端重建 `node node_modules/vite/bin/vite.js build`；⚠️ gh 要注入 `$env:GH_TOKEN`；⚠️ Release 正文客观口吻。⚠️ **构建里的 pytest 用 `-n 4` 并行**，`tests/test_missing_library_prune.py` 等有**约 1/3 概率的并行 flaky**（串行全过）—— 2026-10-04 那次连挂 3 次导致构建中止、白跑一轮，重跑即过。
-**issue**：只剩 **#5**（用户说"不要管"）。
+**发布**：GitHub **Latest = v1.0.9**（2026-10-04 发布）https://github.com/jing-hy/EndfieldModController/releases/tag/v1.0.9 ；附件 `EndfieldModController.exe` 29,965,759 B / sha256 `d2b883310f572a864044e72ebb0895977c753ea21ba151dade9a973efe6bab03` + `assets-bundle.zip` 144,696,905 B / sha256 `b6e86aab049043baf5f425b7c85a8fc278b62afae46ac7974d608d9ffc022631`（两者 sha256 与本地逐个核对一致）。上一版 v1.0.8 的附件为 exe 29,935,240 B / `0ca55842d7686be166f7…` + bundle `b5acde37c91b61e4fc98…`。
+**远端 main = 本地 HEAD = `6b2969a`**（一致；Release tag 打在 `9e43af2`，之后还有 2 个纯文档提交 ⇒ `release_version.py` 会 WARN「应升 1.0.10」，属正常）。
+**版本号**：本地 = 最新 Release = **1.0.9**。⚠️ 下次有**实质改动**时升 **1.0.10**。
+**v1.0.9 内容（已发）**：① 下载链路 —— 直连前 TCP 预检（连不上立刻换镜像，`line_mode=direct` 不跳）+ `MIRRORABLE_HOSTS` 补 `release-assets.githubusercontent.com`；② **香蕉网网站分类接入 Mod 库**（`moddl.gamebanana_category` 解析 `_aCategory`/`_aSuperCategory` 判根 Skins=35464/UI=42706/Other-Misc=42780，入库写 `download-info.json`「网站分类」+ `mod.meta.json` 的 `site_category*`，卡片显示徽章；分类还作**兜底**参与角色/类型识别，本地证据优先）；③ **诊断包大幅扩充**（`game/CrashSightLog/`、`game/AntiCheatExpert/`、`describe_exit_code()` 退出码人话、SideBySide/AppModel-Runtime、近 60 分钟全部错误、杀毒产品+Defender 隔离记录+`Get-MpThreatDetection` 文件路径、System32 关键模块、AppInit_DLLs/IFEO、子目录内容；实测 48 项/878 KB → 95 条目/1.01 MB）；④ **杀毒线**（`filewatch` 范围扩到游戏目录 proxy+plugin+System32 转发目标，算不出路径整项跳过；新增 `antivirus` 模块：查隔离/加白名单/`MpCmdRun -Restore` 还原；`defender_exclusions_enabled` **默认开** + 设置页开关 + 启动页弹窗一键还原）；⑤ 修 proxy 备份语义（`ensure_proxy_backup` 优先备份游戏目录真原版、`ensure_loader` 另存 `.bak.game-original`）；⑥ `check_app_update` 默认 `use_cache=False`（主动点检查不再被 6 小时缓存挡住）。pytest **743 passed**。**构建产物**：`dist\EndfieldModController.exe`（= 本次发布的那个）+ 伪旧版 `dist\EndfieldModController-0.1.9-from-1.0.9.exe` 29,966,348 B / `2ba3bb7817986c1f3057…`；`modtest` 已同步这两个。**⇒ 伪旧版现在能更新到 v1.0.9**（Latest 已升）。
+**流程**：改代码 → pytest → **自己 commit** → `build_release.py --modtest-both` → `prepare_release.py` → `push.py`（先快照）→ `gh release create <tag> --title <tag> --notes-file RELEASE_NOTES.md --latest` → `upload_release_assets.py`。⚠️ 前端重建 `node node_modules/vite/bin/vite.js build`；⚠️ gh/上传要注入 `$env:GH_TOKEN`（上传脚本会用 DoH 拿真实 IP 绕 hosts 反代）；⚠️ Release 正文客观口吻 + **发前先确认 RELEASE_NOTES.md 写的就是这一版**；⚠️ 构建的 pytest 用 `-n 4`，有约 1/3 概率的并行 flaky，连挂 3 次会中止（重跑即过）。
+**issue**：只剩 **#5**（说"不要管"）。
 **遗留**：v1.0.5 的 Release 正文与标题不符（等他点头）；normify 结构树待重跑四步；**待用户实测**：addon 每进一次游戏会不会把生效那份 ini 写回 `Language=0`。
 **Steam++ 结论**：其加速内核是 FastGithub 2.1.4 移植、GPL-3.0 不可内嵌；没覆盖 `release-assets.githubusercontent.com`，真正超时点是 `github.com` 直连（20s → WinError 10060）。报告：`_tmp/research/steampp-accelerator.md`。
 
@@ -566,7 +571,7 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 
 `关键词：["待办清单","审计批次未推送","结构树待重跑","TESTING未出","好卡对照结论","MMD播放测试要开Poser","崩溃包补Mods清单","Key协议退役","issue5不要管","sbm自维护","宣传片脚本未落盘","d3dx_user残留"]`
 
-## 话题（一件事的前因后果）（13 条）
+## 话题（一件事的前因后果）（16 条）
 
 ### 诊断并稳定终末地换装 Mod 的 DX11/EFMI 路线
 *2026-09-27 18:24*
@@ -686,7 +691,33 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 
 `关键词：["全项目审计","静态扫描脚本","并行subagent深读","逐条核实再改","审计报告","661 passed","未修清单","已实现却未被调用","未推送未发版","备份语义例外","前后端不匹配补齐","禁改也要审"]`
 
-## 经验教训（被纠正过的、踩过的坑）（366 条）
+### 定位「反馈者说 ReShade 没注入」的真实根因
+*2026-10-04 19:21*
+
+2026-10-04 反馈者（C:\Users\<user> v1.0.8）报「ReShade 没注入」。诊断包（diagnostics-20261004-190046）证明 ReShade 其实注入了 3 次（18:31 从 runtime\dlss5\d3d12.dll、18:42 同、18:52 从 E:\新建文件夹\d3d12.dll），宿主都是 E:\新建文件夹\Arknights Endfield\Endfield.exe；上午 11:11 那次 D 盘游戏里 DLSS5 还正常出帧（nr[evals=428]）。真正的三个问题：① 他把设置页「DLSS5 / 第一人称目录」填成了**游戏目录** E:\新建文件夹\Arknights Endfield，而 d3d12.dll / dlss5-feed.addon64 在那个目录**从未存在**（file_watch present=0），底座实际在**上一级** E:\新建文件夹 ⇒ 程序写不进 XXMI 注入库、自检全红；② 程序认的游戏目录是 D:\Hypergryph Launcher\games\Arknights Endfield，而他实际玩的是 E:\新建文件夹\Arknights Endfield（XXMI game_folder=E:/，进程命令行也是 E 盘）⇒ 净化/备份/文件守护/运行库全打在 D 盘那份上；③ 面板 endfieldmodcontroller.addon64 与第一人称 renodx-endfield-enhancer.addon64 在他机器上加载失败（ReShade 报 error code 4551），而 dlss5-feed / renodx-dlss5-4.7_汉化 / trans-zh 正常。我用真实 ReShade 6.8 复现：随包那份 addon（387,584 B、sha256 1c35e9cc…，与他机器上那份一致）**在本机能加载成功** ⇒ 文件无问题，4551 疑为其本机安全软件（装了金山毒霸，Defender 白名单只有 Downloads / DuoDuoWallpaper / D 盘游戏目录，**没有 E:\新建文件夹**）在 LoadLibrary 阶段拦截。诊断包最大缺口：没抓 dlss5_dir 与实际游戏目录的文件清单。另：他机器上至少有 3 份游戏安装（D 盘官方、D:\...\AntiCheatExpert\Arknights Endfield、E:\新建文件夹\Arknights Endfield）与 4 处 ReShade。
+
+`关键词：["反馈者诊断","ReShade 没注入","错误码 4551","DLSS5 目录填错","game_folder E:/","金山毒霸","Defender 白名单","addon 加载失败","多份游戏安装","file_watch","dlss5_dir 语义"]`
+
+### 定位「反馈者说 ReShade 没注入」的真实根因
+*2026-10-04 19:32*
+
+【4551 的定性（2026-10-04 第二个诊断包 diagnostics-20261004-192739 定案）】**同一个文件、同一路径 `E:\新建文件夹\Arknights Endfield\endfieldmodcontroller.addon64`：19:17:45 失败、19:18:46 失败（耗时 6.6 秒）、19:21:38 失败，而 19:26/19:27:34 五次全部注册成功**（`Registered add-on "endfieldmodcontroller" v0.0.0.0 using ReShade API version 20` + 同批 dlss5-feed / renodx-dlss5 / renodx-endfield-enhancer / trans-zh 全绿，dlss5-feed.log 显示 feed attached、OptiScaler not present）。⇒ **4551 不是文件坏、不是版本不匹配（API 20 与 ImGui 1.92.5 都对得上），而是"时序/环境"性质**；两次失败的恰好是"在 DllMain 里做重活的两个大 addon"（自研面板 + 上游第一人称），三个轻量 addon 一直成功 ⇒ 指向**在 loader lock（DllMain）里做重活**这个共病（读清单/装 EFMI 读键 hook/写日志全挤在注册之前）。**当时"ReShade 没注入"的观感在 19:27 已经自愈**：反馈者自己把 DLSS5 组件补齐了（`dlss5_dir` 仍是游戏目录 `E:\新建文件夹\Arknights Endfield`，但该目录里 shader/纹理/nvngx 运行库/d3d12.dll 全齐，注入库也指向存在的 d3d12.dll）。**我这轮的修复**：① addon 的 DllMain 只留 `register_addon`+`register_overlay` 与裸 Win32 自证日志（`early_log`，CreateFileW/WriteFile/wsprintfA），读清单/装 hook/读设置全部延后到首帧 `ensure_setup()`（渲染线程）并包异常；注册失败会写 `register_addon FAILED (api=… last_error=…)` ⇒ 下次能直接区分"我们内部失败"与"LoadLibrary 阶段被外部拦下"。② `build_msvc.bat` 与 `scripts/build_addon.py` 参数对齐（/MT /O2 /utf-8 /Brepro）。③ 诊断包一次补齐：解析 ReShade.log 的 add-on 结果、addon 日志（**文件名以前写错成 endfieldmodcontroller.addon.log，真实是 modecontroller.addon.log**）多候选、dlss5/base/游戏目录清单+同名 addon 重复检测、"游戏目录 vs 实际跑的"对照、"没有 WER"留痕、退出码表补 0xC000013A 与 Runtime Error 说明、修正"没有事件⇒不是自己崩的"那句不完整判据。pytest 743 passed。**仍未做（需他拍板）**：dlss5_dir 填错时自动找底座、游戏目录以 XXMI game_folder 为准、XXMI 注入结果解析。
+
+`关键词：["错误码 4551","addon 加载失败","时序性失败","loader lock","DllMain 重活","early_log","ensure_setup","modecontroller.addon.log","诊断包补齐","19:27 自愈","DLSS5 目录补齐"]`
+
+### 修掉「EFMI 加载失败：注入额外库 d3d11.dll 失败」并整批构建
+*2026-10-04 20:13*
+
+【注入库里那条 EFMI `d3d11.dll`：**必须列、必须排在 `d3d12.dll` 之后、而且只能列"当前生效 XXMI 自己那份"**（2026-10-04 三版定案）】
+**机理（两份 XXMI 日志 + 用户实测一起定出来的）**：XXMI 的注入列表 = **它自己的 EFMI loader** + 我们写的 `extra_libraries`；**但只要我们的列表里已经有 `d3d11.dll`，它就不再自己补那一份 ⇒ 顺序完全由我们决定**。
+* **不列它** ⇒ XXMI 把自带那份**补到最前面** ⇒ 变成「EFMI 先、ReShade 后」⇒ **游戏起不来**。用户 2026-10-04 实测：改动前 `Inject('d3d12.dll, d3d11.dll')` 能玩 **122 秒**；我把这条去掉后变成 `Inject('d3d11.dll, d3d12.dll')` ⇒ 存活掉到 **25 秒**（游戏起来了但进不去）。这与 2026-09-27 那条"**ReShade 先注入才修好崩溃**"是同一条机理 —— **ReShade 必须先于 EFMI 进进程**。
+* **列错的那一份** ⇒ XXMI 去重不掉（它按**路径**去重）⇒ `Inject('d3d11.dll, d3d12.dll, d3d11.dll')` ⇒ 第二次注入必然失败 ⇒ 用户看到
+  「**EFMI 加载失败：注入额外库 …\Packages\XXMI\d3d11.dll 失败：DLL 注入失败！请检查高级设置 → 注入库。**」**并中断整个启动**（2026-10-04 第二个用户：用 `%APPDATA%\XXMI Launcher` 的外部 XXMI，而我们列的是内置那份）。
+**⇒ 最终实现**：`launcher.active_efmi_loader(config)` 从 XXMI 配置的 `Importers.<active_importer>.Importer.importer_folder` 解析 loader 路径 —— **绝对路径**（外部 XXMI 实测 `E:/ENDFIELD/EFMI`）直接用；**相对路径**（内置 XXMI 实测 `EFMI/`）相对 **XXMI 根**（`<根>\Resources\Bin\XXMI Launcher.exe` 往上三层）；取不到再退回 `<根>\EFMI\d3d11.dll`、最后 `config.efmi_dll_path`。`dlss5_injection_targets()` 把它 append 在 `d3d12.dll` **之后**。配置项 `extra_libraries_include_efmi_dll` 默认 **True**，另有一次性迁移标记 `efmi_dll_order_applied`（把它从上一版误设的 False 迁回 True）。实测：你的机器 ⇒ `[…\dlss5\d3d12.dll, …\runtime\builtin\XXMI\EFMI\d3d11.dll]`；外部 XXMI 布局 ⇒ 第二条自动换成那个 XXMI 的 loader。
+
+`关键词：["EFMI 加载失败","DLL 注入失败","extra_libraries","注入顺序","ReShade 先注入","active_efmi_loader","importer_folder","d3d11.dll 重复注入","efmi_dll_order_applied","外部 XXMI","游戏起不来 25 秒"]`
+
+## 经验教训（被纠正过的、踩过的坑）（367 条）
 
 ### XXMI/EFMI 启动终末地是 Endfield.ex…
 *2026-09-27 14:58*
@@ -4030,6 +4061,13 @@ poser/sbm 的 loader proxy（`d3dcompiler_47.dll` / `vulkan-1.dll`，35~56 KB）
 构建入口 `build_release.py` 的 pytest 用 `-n 4` 并行跑，而 `tests/test_missing_library_prune.py` 这类测试有**约 1/3 概率的并行 flaky**（我实测并行 3 次挂 1 次，且每次挂的方法不同；串行跑两次都 743 passed）。2026-10-04 那次构建**连挂 3 次**（脚本 `attempts=3`）⇒ 直接中止、不产出任何产物，白跑一轮。教训：① 构建失败先看 `FAILED` 行**是不是并行 flaky** —— 判据是"串行跑同一个文件全过"；② 遇到它直接重跑构建即可，别去改业务代码；③ 提高重试次数或降并行度是可行的加固方向（脚本注释里已记 `-n auto` 更糟）。
 
 `关键词：["构建 flaky","pytest -n 4","并行偶发失败","test_missing_library_prune","attempts=3","构建中止","串行全过","白跑一轮","build_release.py"]`
+
+### 复现 ReShade addon 加载失败的手法（202…
+*2026-10-04 19:21*
+
+复现 ReShade addon 加载失败的手法（2026-10-04 定位反馈者 4551 时摸出来）：ctypes.WinDLL 先加载真实 ReShade 本体（如 runtime\dlss5\d3d12.dll，会执行它的 DllMain 初始化 addon 管理器），再 WinDLL 目标 addon —— addon 的 DllMain 若返回 FALSE，ctypes 会抛 WinError 1114（ERROR_DLL_INIT_FAILED），ReShade 同步在 base path 写 ReShade.log 记「Registered add-on … / Failed to register add-on …」。两个坑：① **必须一份 addon 一个进程** —— 同进程连测两份同名 addon 会命中 ReShade 的「already registered」分支（文案与「Failed to load add-on … with error code N」完全不同），极易把结论带偏；② 文件名必须以 .dll 结尾，ctypes 拒绝加载 .bin。
+
+`关键词：["ReShade addon 加载失败","ctypes WinDLL","WinError 1114","DllMain 返回 FALSE","already registered","addon 复现","ReShade.log","d3d12.dll","错误码 4551","addon 回归测试"]`
 
 ## 事实（细碎的原子信息）（73 条）
 
