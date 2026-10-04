@@ -25,6 +25,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import socket
 import threading
 import time
 import urllib.error
@@ -432,6 +433,13 @@ def fetch(
     lines = resolve_lines(url, mode)
     last_error: Exception | None = None
     for line in lines:
+        # ⚠️ 直连先做一次 TCP 预检（2026-10-04）：连不上就立刻换镜像，别白赔十几秒。
+        # 与 `download()` 里那条同一判据（只判"连不上"、不误杀"慢"）。
+        if line is DIRECT and len(lines) > 1 and not _tcp_reachable(url):
+            _log(None, f"直连不可达（{DIRECT_TCP_TIMEOUT:g}s 内连不上 {_host_of(url)}）→ 直接换镜像线路")
+            _remember_line(line.name, False, 0.0)
+            last_error = urllib.error.URLError(f"直连不可达: {_host_of(url)}")
+            continue
         try:
             chunks: list[bytes] = []
             with _open(line.apply(url), headers=headers, timeout=timeout) as response:
@@ -1131,6 +1139,45 @@ def _line_blocked(name: str, cache: dict[str, Any]) -> bool:
     return bool(fail_at) and (time.time() - fail_at) < ttl
 
 
+# ⚠️ **直连的 TCP 预检**（2026-10-04 实测后加）。
+#
+# 现场：`github.com` 在**没有加速器**的网络下直连是**连不上**的（实测用真实 IP 直连，
+# 20 秒后 `WinError 10060`），而 `github.com` 的页面请求之所以"看起来正常",
+# 是因为那台机器开着 Steam++（hosts 把 github.com 指向 127.0.0.1 走它的反代）。
+# 关掉加速器后，`DEFAULT_LINES` 里排第一的**直连**每次都要先赔掉十几秒才轮到镜像
+# —— 用户看到的就是"下载一直卡着 / 20 秒超时"。
+#
+# 这条预检把"**连不上**"与"**连得上但慢**"分开：只做一次 TCP 连接（不读数据），
+# 连不上就**立刻跳到镜像**，连得上就完全按原来的逻辑走（慢线路照样会被探测到、不会被误杀
+# —— 记忆里"最快的镜像反被判死"就是这么来的，不能重蹈）。
+DIRECT_TCP_TIMEOUT = 5.0
+
+
+def _tcp_reachable(url: str, *, timeout: float = DIRECT_TCP_TIMEOUT) -> bool:
+    """目标（或本地代理）能在 `timeout` 秒内建立 TCP 连接吗？
+
+    只判"连得上/连不上"，**不读任何数据**，所以不会把"慢"误判成"不可用"。
+    有代理时检代理地址 —— 那才是真正要连的对端（否则会在直连被墙的机器上误跳）。
+    任何异常都保守返回 True（宁可让原来的流程去试，也不要因为预检自己出错而跳过一条线路）。
+    """
+    host = _host_of(url)
+    port = 443
+    if urlsplit(url).scheme.lower() == "http":
+        port = 80
+    proxy = get_proxy()
+    if proxy:
+        parsed = urlsplit(proxy if "://" in proxy else f"http://{proxy}")
+        host = parsed.hostname or host
+        port = parsed.port or (443 if (parsed.scheme or "http").lower() == "https" else 80)
+    if not host:
+        return True
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
 # 镜像能代理的主机：`github.com`（Release 资产 / 仓库页）与 **`raw.githubusercontent.com`**（raw 文件）。
 # ⚠️ 2026-10-04 补（用户：「看看是不是所有下载都接上去了」）：原先只认 `github.com`，
 # 于是"角色表 / 乳摇参数 / 公告"这些**走 raw 的请求永远不会换线路** —— 直连一断就整块失败，
@@ -1143,6 +1190,19 @@ MIRRORABLE_HOSTS = (
     "raw.githubusercontent.com",
     "codeload.github.com",
     "objects.githubusercontent.com",
+    # ⚠️ **2026-10-04 补：`release-assets.githubusercontent.com` —— Release 资产的真实落点。**
+    #
+    # 实测（本机 hosts + DNS）：Steam++（Watt Toolkit）的 hosts 覆盖了
+    # `objects.githubusercontent.com`，**却没有覆盖 `release-assets.githubusercontent.com`**
+    # （前者解析成 127.0.0.1 走它的反代，后者仍是真实的 185.199.x.x）。而 GitHub 现在把
+    # `…/releases/download/…` **302 到这里** —— 于是链路是：
+    #   github.com 拿到 302（有加速/镜像时能通）→ 落点这个域名**不在加速规则里**
+    #   → 直连 185.199.x → **20 秒连接超时（WinError 10060）**。
+    # 这正是"Release 大文件总是超时、而页面请求正常"的机制。
+    # 补进来之后，302 之后的 URL 才能被 `_mirrorable()` 认出来、**也去尝试镜像前缀**。
+    "release-assets.githubusercontent.com",
+    # 老式/备用落点（早期 Release 资产曾走它，留着不吃亏）
+    "github-releases.githubusercontent.com",
 )
 
 
@@ -1325,6 +1385,15 @@ def download(
     for index, line in enumerate(lines):
         if len(lines) > 1:
             _log(log, f"尝试线路：{line.name}")
+        # ⚠️ **直连先做一次 TCP 预检**（2026-10-04 实测后加）：连不上就立刻换镜像，
+        # 不要白赔十几秒。只在多线路时做 —— `mode=direct` 是用户明确要直连，不许替他跳。
+        # 判据是"连不上"，不是"慢"，所以不会误杀可用的慢直连（见 `_tcp_reachable` 的说明）。
+        if line is DIRECT and len(lines) > 1 and not _tcp_reachable(url):
+            message = f"直连不可达（{DIRECT_TCP_TIMEOUT:g}s 内连不上 {_host_of(url)}）"
+            _log(log, f"{message} → 直接换镜像线路，不再等超时")
+            _remember_line(line.name, False, 0.0)
+            errors.append(f"{line.name}: {message}")
+            continue
         # 多线路时单条线路的等待要短，坏线路要快速跳过
         line_timeout = timeout if len(lines) == 1 else min(timeout, LINE_TIMEOUT_MULTI)
         report = _attempt_line(

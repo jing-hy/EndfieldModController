@@ -15,7 +15,7 @@ GitHub 上只推了源码（main 更新）但没发 Release 时，版本号不�
 from __future__ import annotations
 
 APP_NAME = "EndfieldModController"
-__version__ = "1.0.8"
+__version__ = "1.0.9"
 
 # 自我更新与"检查更新"指向的仓库
 REPO = "jing-hy/EndfieldModController"
