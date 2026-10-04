@@ -1564,16 +1564,26 @@ def bootstrap_xxmi_config(config: AppConfig, *, wait_seconds: int = 40,
         import ctypes
 
         cwd = str(Path(launcher_path).parent)
-        started = _image_pids(image_name) - pids_before
+        started: set[int] = set()
+        # XXMI 是**提权启动**的，进程可能要几秒才出现在列表里 —— 先给它一点时间再下结论
+        for _ in range(6):                     # 最多约 3 秒
+            started = _image_pids(image_name) - pids_before
+            if started:
+                break
+            time.sleep(0.5)
         if started:
             for pid in sorted(started):
                 ctypes.windll.shell32.ShellExecuteW(
                     None, "runas", "taskkill", f"/PID {pid} /F", cwd, 0,
                 )
-        elif not pids_before:
-            ctypes.windll.shell32.ShellExecuteW(
-                None, "runas", "taskkill", f'/IM "{image_name}" /F', cwd, 0,
-            )
+        else:
+            # ⚠️⚠️ **绝不回退到 `taskkill /IM <映像名>`**（2026-10-04 修的 U2）。
+            # 那个写法会把**用户自己刚打开的** XXMI 一起杀掉（可能丢掉它还没落盘的配置），
+            # 而这里的注释一直写着"只杀我们自己拉起的那一个" —— 实现与承诺正好相反。
+            # 抓不到就如实说明、让用户自己关：误杀别人的进程比"多开着一个窗口"严重得多。
+            if log:
+                log(f"没能抓到自己拉起的 {image_name}（可能启动较慢）—— "
+                    f"若 XXMI 窗口还开着，请手动关掉它，配置已经写好了。")
         time.sleep(2.0)
     except Exception:  # noqa: BLE001
         pass
@@ -1769,6 +1779,8 @@ def enable_anti_cheat_safe_mode(config: AppConfig) -> dict[str, Any]:
         except Exception as exc:  # noqa: BLE001
             warnings.append(f"下载 ReShade 6.8 Addon 失败: {exc}")
 
+    # 记下"进安全模式之前的注入方式"（U4：还原时恢复它，而不是硬写 external）
+    _remember_injection(config)
     config.reshade_injection = "xxmi_extra"
     config.save()
     try:
@@ -1807,9 +1819,49 @@ def restore_global_reshade_elevated(config: AppConfig) -> dict[str, Any]:
     return {"ok": True, "restored": [str(apps)]}
 
 
+# ⚠️ 「进安全模式 / d3d12 代理模式**之前**用的注入方式」记在各自的 manifest 里，
+# 还原时**恢复原值** —— 不许硬写成 `external`（2026-10-04 修的 U4）。
+# 用户原本可能是 `xxmi_extra`（推荐）或 `none`；硬写 `external` 会让设置页显示的注入方式
+# 与他自己的选择不符，后续 `panel_base_dirs` / 接管判断也跟着偏（状态机残留）。
+# 存的是**第一次**进模式之前的值（`setdefault`），重复进模式不会把"我们改过的值"当成原值。
+_INJECTION_PREV_KEY = "prev_reshade_injection"
+
+
+def _remember_injection(config: AppConfig) -> None:
+    """把当前的 `reshade_injection` 记进 safe_mode / d3d12 两份 manifest（存在哪份就记哪份）。"""
+    current = str(getattr(config, "reshade_injection", "") or "")
+    for reader, writer in (
+        (reshade_integration._read_safe_mode_manifest, reshade_integration._write_safe_mode_manifest),
+        (reshade_integration._read_d3d12_swap_manifest, reshade_integration._write_d3d12_swap_manifest),
+    ):
+        try:
+            data = reader(config)
+            if not data:
+                continue          # 这份 manifest 还没建（这次不是走那条路）
+            data.setdefault(_INJECTION_PREV_KEY, current)
+            writer(config, data)
+        except Exception:  # noqa: BLE001 —— 记录失败不该挡住安全模式本身
+            pass
+
+
+def _recall_injection(config: AppConfig, *, default: str) -> str:
+    """读回"进模式之前的注入方式"；没有记录就返回 `default`（与旧行为一致）。"""
+    for reader in (reshade_integration._read_safe_mode_manifest,
+                   reshade_integration._read_d3d12_swap_manifest):
+        try:
+            value = str((reader(config) or {}).get(_INJECTION_PREV_KEY) or "").strip()
+        except Exception:  # noqa: BLE001
+            value = ""
+        if value:
+            return value
+    return default
+
+
 def restore_anti_cheat_safe_mode(config: AppConfig) -> dict[str, Any]:
     actions: list[str] = []
     warnings: list[str] = []
+    # ⚠️ **必须在 `clear_safe_mode_manifest` 之前读**（它会把 manifest 删掉）
+    prev_injection = _recall_injection(config, default="external")
     restored = reshade_integration.restore_game_reshade_proxies(config)
     actions.extend(f"restored {item}" for item in restored.get("restored", []))
     warnings.extend(restored.get("errors", []))
@@ -1823,8 +1875,9 @@ def restore_anti_cheat_safe_mode(config: AppConfig) -> dict[str, Any]:
     actions.extend(f"restored global ReShade apps: {item}" for item in global_restore.get("restored", []))
     if not global_restore.get("ok", True):
         warnings.append(str(global_restore.get("message") or "restore global ReShade apps failed"))
-    config.reshade_injection = "external"
+    config.reshade_injection = prev_injection
     config.save()
+    actions.append(f"注入方式恢复为 {prev_injection}")
     return {"ok": not warnings, "actions": actions, "warnings": warnings}
 
 
@@ -1853,6 +1906,8 @@ def enable_d3d12_proxy_mode(config: AppConfig) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001
         raise LaunchError(f"切换 dxgi→d3d12 失败: {exc}") from exc
 
+    # 同上（U4）：切 d3d12 代理模式之前先把原注入方式记下来
+    _remember_injection(config)
     config.reshade_injection = "none"
     config.save()
 
@@ -1874,6 +1929,8 @@ def enable_d3d12_proxy_mode(config: AppConfig) -> dict[str, Any]:
 def restore_d3d12_proxy_mode(config: AppConfig) -> dict[str, Any]:
     actions: list[str] = []
     warnings: list[str] = []
+    # 同 U4：读回"进这个模式之前的注入方式"（在 dxgi 还原把 manifest 用掉之前读）
+    prev_injection = _recall_injection(config, default="external")
     restored = reshade_integration.restore_dxgi_from_d3d12(config)
     actions.extend(restored.get("actions", []))
     warnings.extend(restored.get("errors", []))
@@ -1889,8 +1946,9 @@ def restore_d3d12_proxy_mode(config: AppConfig) -> dict[str, Any]:
     actions.extend(f"restored global ReShade apps: {item}" for item in global_restore.get("restored", []))
     if not global_restore.get("ok", True):
         warnings.append(str(global_restore.get("message") or "restore global ReShade apps failed"))
-    config.reshade_injection = "external"
+    config.reshade_injection = prev_injection
     config.save()
+    actions.append(f"注入方式恢复为 {prev_injection}")
     return {"ok": not warnings, "actions": actions, "warnings": warnings}
 
 
@@ -2173,11 +2231,60 @@ def _spawn_command(config: AppConfig, command: list[str], cwd: str, env: dict[st
             ) from exc
         raise
 
+def _elevated_target_is_trusted(config: AppConfig, exe: Path) -> str:
+    """提权执行前的白名单校验：返回空串 = 放行，否则返回拒绝原因（2026-10-04 修的 U1）。
+
+    **为什么必须有**：`_spawn_elevated()` 会以**管理员身份**把它拿到的路径执行起来
+    （`ShellExecuteW("runas", …)`），而那个路径来自 `config.xxmi_launcher_path`
+    —— 用户手填、或我们自动下载解压出来的。触发它的也不只是「点按钮启动 XXMI」：
+    `repair_integrity` → `bootstrap_xxmi_config` 这条**常规修复路径**同样会走这里。
+    只要那个路径被换成别的东西，就等于**以管理员执行任意程序**。
+
+    允许的两类（覆盖所有正常用法）：
+      ① 内置 runtime 里的 XXMI（我们自己下载解压、随包分发的那份）；
+      ② 恰好等于 `config.xxmi_launcher_path` 的路径（用户显式选择的安装位置）。
+    其它一律拒绝并说清原因 —— 我们要的是"提权只针对用户自己选定的那个启动器"。
+    """
+    from . import fsutil
+
+    if not exe.is_file():
+        return f"目标不存在：{exe}"
+    if exe.suffix.lower() != ".exe":
+        return f"只允许管理员启动 .exe，收到的是 {exe.name}"
+    try:
+        if fsutil.is_within(config.builtin_runtime_path, exe):
+            return ""
+    except Exception:  # noqa: BLE001
+        pass
+    configured = config.xxmi_launcher_path
+    try:
+        if configured is not None and Path(configured).resolve() == exe.resolve():
+            return ""
+    except OSError:
+        pass
+    return (f"这个路径既不是内置 XXMI、也不是你配置里的启动器：{exe}\n"
+            f"（配置的是：{configured}）—— 出于安全，未以管理员身份启动它。")
+
+
 def _spawn_elevated(config: AppConfig, exe: str, cwd: str, show_window: int = 0) -> None:
-    """Run an executable elevated without a console window via ShellExecuteW."""
+    """Run an executable elevated without a console window via ShellExecuteW.
+
+    ⚠️ 执行前先过 `_elevated_target_is_trusted()` 的白名单（见那边的说明）。
+    """
     if os.name != "nt":
         subprocess.Popen([exe], cwd=cwd)
         return
+    target = Path(str(exe))
+    # 我们自己生成的辅助脚本（固定名字、固定内容，见各自的生成处）天然落在白名单外
+    # —— 尤其是 `_run_loader.cmd`，它在**loader 目录**里（可能是外部 XXMI 的位置）。
+    # 所以按**文件名**放行，而不是按目录。
+    _OUR_SCRIPTS = {"stop_migoto_processes.cmd", "restore_global_reshade.cmd", "_run_loader.cmd"}
+    is_our_script = target.suffix.lower() in {".cmd", ".bat"} and target.name in _OUR_SCRIPTS
+    if not is_our_script:
+        reason = _elevated_target_is_trusted(config, target)
+        if reason:
+            _append_log(config, f"拒绝以管理员身份启动：{reason}")
+            raise LaunchError(f"拒绝以管理员身份启动 —— {reason}")
     import ctypes
     _append_log(config, f"正在以管理员权限启动: {exe}")
     result = ctypes.windll.shell32.ShellExecuteW(None, "runas", exe, None, cwd, show_window)
@@ -2861,6 +2968,20 @@ def launch_migoto_loader(
                 conflict.rename(backup)
         reshade_dll = config.reshade_dll_path
         if reshade_dll is not None and reshade_dll.is_file():
+            # ⚠️⚠️ **写入前必须备份游戏目录原有的 `d3d12.dll`**（2026-10-04 修的 U7）。
+            # 它可能是**游戏自带**的、也可能是第三方注入器放的；而同一个函数对
+            # `dxgi.dll` / `d3d11.dll` 都做了唯一备份，唯独真正被我们覆盖的这一个没做
+            # ⇒ 还原链路里缺这一份，用户**回不到"注入之前"**（不可逆）。
+            # 备份名用 `_unique_backup_path`（只增不删），与上面两处保持一致。
+            existing_d3d12 = game_dir / "d3d12.dll"
+            if existing_d3d12.is_file():
+                try:
+                    saved = _unique_backup_path(
+                        existing_d3d12.with_name("d3d12.dll.endfieldmodcontroller.disabled"))
+                    shutil.copy2(existing_d3d12, saved)
+                    actions.append(f"已备份游戏目录原有 d3d12.dll → {saved.name}")
+                except OSError as exc:                       # noqa: BLE001
+                    warnings.append(f"备份游戏目录原有 d3d12.dll 失败（仍继续写入）: {exc}")
             _copy_file_atomic(reshade_dll, game_dir / "d3d12.dll")
             _ensure_reshade_disabled_addons(game_dir)
             try:
@@ -2924,15 +3045,33 @@ def launch_migoto_loader(
             warnings.append(f"更新 d3dx.ini target 失败: {exc}")
 
     env = os.environ.copy()
+    # ⚠️⚠️ **全局 ReShade 的 Apps 改写收敛到 Python 这一套**（2026-10-04 修的 U10）。
+    #
+    # 原来改 `%ProgramData%\ReShade\ReShadeApps.ini` 有**三套**实现、语义还不一致：
+    #   ① `reshade_integration.disable_global_reshade_for_game()` —— 按名剔除终末地、
+    #      **保留用户其它 Apps**、第一次动之前留备份、把原值写进 manifest（可完整还原）；**全库零调用**；
+    #   ② `restore_global_reshade_apps()` —— 同样零调用，`global_reshade_apps.json` 从来没产生过；
+    #   ③ 下面那段 batch：`> "%APPS%" echo Apps=…\disabled.exe` —— **把整行覆盖成只有我们这一项**，
+    #      用户其它游戏/程序的 Apps 条目被**静默抹掉**（那是全局配置，别的游戏也读它）。
+    # 现在只留 ①，并接到「回滚」上；batch 里那段 echo 删除（它既丢用户数据，又让"还原"没有依据）。
+    try:
+        global_apps = reshade_integration.disable_global_reshade_for_game(config)
+        if global_apps.get("changed"):
+            actions.append("已从全局 ReShade 注入列表移除终末地（保留其它 Apps）："
+                           + (", ".join(global_apps.get("removed") or []) or "（无）"))
+        elif global_apps.get("ok"):
+            actions.append("全局 ReShade 注入列表里没有终末地，无需改动")
+        else:
+            warnings.append(f"改写全局 ReShade 注入列表失败：{global_apps.get('message')}")
+    except Exception as exc:  # noqa: BLE001 —— 失败只记警告，不挡住启动
+        warnings.append(f"改写全局 ReShade 注入列表失败: {exc}")
     run_script = loader_dir / "_run_loader.cmd"
     batch_template = r'''@echo off
 setlocal
 set "GAME=__GAME__"
-set "APPS=%ProgramData%\ReShade\ReShadeApps.ini"
-if exist "%APPS%" (
-  if not exist "%APPS%.endfieldmodcontroller.bak" copy /Y "%APPS%" "%APPS%.endfieldmodcontroller.bak" >nul
-  > "%APPS%" echo Apps=%ProgramData%\ReShade\disabled.exe
-)
+rem NOTE: the global ReShade Apps list is rewritten on the Python side
+rem (reshade_integration.disable_global_reshade_for_game) so that the user's
+rem other Apps entries survive. Do NOT echo over it here.
 taskkill /F /IM loader.exe >nul 2>&1
 
 taskkill /F /IM migoto_loader.exe >nul 2>&1
@@ -2940,15 +3079,17 @@ taskkill /F /IM migoto_loader.exe >nul 2>&1
 taskkill /F /IM migoto_loader2.exe >nul 2>&1
 
 start "" /B "%~dp0migoto_loader2.exe"
-rem Keep killing stray legacy 3DMigoto loaders so only the EFMI proxy injects.
-for /L %%i in (1,1,300) do (
-  taskkill /F /IM loader.exe >nul 2>&1
-  taskkill /F /IM loader_new.exe >nul 2>&1
-  taskkill /F /IM 3dmloader.exe >nul 2>&1
-  taskkill /F /IM "3DMigoto Loader.exe" >nul 2>&1
-  taskkill /F /IM "3DMigotoLoader.exe" >nul 2>&1
-  ping -n 2 -w 200 127.0.0.1 >nul
-)
+rem NOTE: this used to be `for /L %%i in (1,1,300)` -- killing a batch of loader
+rem image names every 2 seconds for FIVE MINUTES. That also killed loaders the
+rem USER opened in the meantime. Now we only clean up twice (just before start,
+rem and 5 seconds after) so the window for killing someone else's process is a
+rem few seconds instead of five minutes.
+ping -n 5 -w 1000 127.0.0.1 >nul
+taskkill /F /IM loader.exe >nul 2>&1
+taskkill /F /IM loader_new.exe >nul 2>&1
+taskkill /F /IM 3dmloader.exe >nul 2>&1
+taskkill /F /IM "3DMigoto Loader.exe" >nul 2>&1
+taskkill /F /IM "3DMigotoLoader.exe" >nul 2>&1
 endlocal
 '''
     run_script.write_text(batch_template.replace("__GAME__", game_path), encoding="utf-8")
@@ -2959,7 +3100,9 @@ endlocal
         warnings.append("请勿同时运行旧版 3DMigoto 的 loader.exe；双注入会导致 EFMI 不生效或游戏卡在黑屏。")
     actions.append("已通过管理员脚本关闭全局 ReShade 注入并启动 3DMigoto loader")
     actions.append("已启用 mc_bootstrap 桥：进程内等待 d3d11/dxgi 后再加载 EFMI")
-    loader_pid = None
+    # ⚠️ 原来这里有一行 `loader_pid = None` 并把它塞进返回值 —— **恒为 None 的死字段**
+    #（loader 是通过 `ShellExecuteW runas` → cmd → `start /B` 拉起来的，我们拿不到它的 PID；
+    #  前端也从来没读过这个字段）。2026-10-04 清掉，免得调用方以为它有意义。
 
     launcher_path = config.official_launcher_path
     launcher_opened = False
@@ -2988,7 +3131,6 @@ endlocal
     return {
         "ok": True,
         "loader": str(loader),
-        "loader_pid": loader_pid,
         "staging_root": result["staging_root"],
         "controller_dir": result["controller_dir"],
         "official_launcher": str(launcher_path) if launcher_opened else "",

@@ -531,7 +531,10 @@ onMounted(() => {
   // 下载流程，包括那些日志什么的」）。日志靠下面的 pollProgress 轮询同一个后端进度。
   if (store.autoStartDeps) {
     store.autoStartDeps = false;
-    logLines.value = ["已清空 runtime 与 assets，开始重新下载依赖…"];
+    // 第一行日志按"是谁把我送过来的"写（缺省是「依赖清空并重新下载」那条路径；
+    // 从启动页「完整性检查」跳过来时它会写明"缺了几项、开始下载补齐"）
+    logLines.value = [store.autoStartDepsNote || "已清空 runtime 与 assets，开始重新下载依赖…"];
+    store.autoStartDepsNote = "";
     start();
   }
   // ⚠️⚠️ **`autoStartModDownload` 的消费端**（2026-10-03 补，用户报「点了下载还是没跳转」）。

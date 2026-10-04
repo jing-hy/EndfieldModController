@@ -110,6 +110,24 @@ def _log(log: Callable[[str], None] | None, message: str) -> None:
         log(message)
 
 
+def _downloadable_names() -> set[str]:
+    """**有公开上游、能联网下载补齐**的文件名（小写）—— 判据委托给 `dlss5_fetcher`。
+
+    为什么需要它（用户 2026-10-04 实测）：「自动修复还是有一个修不好」—— 日志里
+    `dlss5:d3d12.dll / dlss5:dlss5-feed.addon64 缺失且找不到素材来源`，看着像"修不好"，
+    其实这两个文件上游都有（ReShade 官网 / DLSS5-Feeder），只是修复这条路**只找本地素材**。
+    用户的要求：「**要是缺下载，应该跳转到依赖进行下载**」。
+    所以这里要先能识别"这是缺下载"，再由 `integrity` 把它标成 `needs_download`、
+    前端据此跳依赖页。
+    """
+    try:
+        from . import dlss5_fetcher
+
+        return dlss5_fetcher.downloadable_file_names()
+    except Exception:  # noqa: BLE001 —— 判据拿不到时按"不可下载"处理（退回原来的 manual 文案）
+        return set()
+
+
 def source_dirs(config: AppConfig) -> list[Path]:
     """可用的素材来源目录（按优先级）。"""
     candidates: list[Path] = []
@@ -263,6 +281,35 @@ def _check_bundled_assets(config: AppConfig, report: Report, log: Callable[[str]
         _log(log, f"RabbitFX 随包展开出错（忽略，依赖下载会兜底）：{exc}")
 
 
+def _extractall_with_backup(archive: "zipfile.ZipFile", dest: Path) -> list[str]:
+    """把 zip 解到 `dest`，**但同名文件先留一份 `.mc.bak`**（2026-10-04 修的 U6）。
+
+    为什么：`extractall` 会**无条件覆盖**同名文件 —— 而随包资产包里恰好有
+    `ReShade.ini` 与 `d3d12.dll`（用户可能手改过、或换过别的版本）。
+    这**不是** zip-slip（Python 自己会剔除 `..` 与绝对路径），而是"覆盖无备份 ⇒ 回不去"。
+    备份只留第一份（最早那份才代表"我们动手之前"）。
+    """
+    from . import fsutil
+
+    backed: list[str] = []
+    for info in archive.infolist():
+        if info.is_dir():
+            continue
+        target = fsutil.safe_join(dest, info.filename)
+        if target is None or not target.is_file():
+            continue
+        backup = target.with_name(target.name + ".mc.bak")
+        if backup.is_file():
+            continue
+        try:
+            shutil.copy2(target, backup)
+            backed.append(str(backup))
+        except OSError:
+            continue
+    archive.extractall(dest)
+    return backed
+
+
 def _check_dlss5_dir(config: AppConfig, report: Report, log: Callable[[str], None] | None) -> None:
     dlss5 = config.dlss5_path
     if not dlss5.is_dir():
@@ -280,7 +327,18 @@ def _check_dlss5_dir(config: AppConfig, report: Report, log: Callable[[str], Non
             continue
         source = _find_file(config, name)
         if source is None:
-            report.add(f"dlss5:{name}", False, f"缺失且找不到素材来源: {name}", manual=True)
+            # ⚠️ 说清"这是**缺下载**，不是坏了"（2026-10-04 用户实测）：
+            # 他点「自动修复」后依然报 `dlss5:d3d12.dll / dlss5:dlss5-feed.addon64 缺失且找不到
+            # 素材来源`，看起来像"修不好"。其实这两个文件上游都有（ReShade 官网 / DLSS5-Feeder），
+            # 只是**修复这条路只找本地随包素材、不联网**。文案要点明这一点，好让前端/用户
+            # 知道该去依赖页下载（判据 `dlss5_fetcher.downloadable_file_names()`）。
+            downloadable = name.lower() in _downloadable_names()
+            report.add(
+                f"dlss5:{name}", False,
+                (f"缺失（有公开上游，**可到「依赖」页联网下载补齐**）: {name}" if downloadable
+                 else f"缺失且找不到素材来源: {name}"),
+                manual=True,
+            )
             continue
         try:
             shutil.copy2(source, target)
@@ -316,8 +374,13 @@ def _check_dlss5_dir(config: AppConfig, report: Report, log: Callable[[str], Non
         else:
             try:
                 with zipfile.ZipFile(source_zip) as archive:
-                    archive.extractall(dlss5)
-                report.add("dlss5:shader_deps", True, f"已从 {source_zip.name} 解压恢复", fixed=True)
+                    # 同名文件先留备份（U6）：这个包里含 ReShade.ini / d3d12.dll，
+                    # 用户可能手改过、或换过别的版本
+                    backed = _extractall_with_backup(archive, dlss5)
+                note = f"已从 {source_zip.name} 解压恢复"
+                if backed:
+                    note += f"（{len(backed)} 个同名文件已备份为 .mc.bak）"
+                report.add("dlss5:shader_deps", True, note, fixed=True)
                 report.action("解压恢复 reshade-shaders")
             except (OSError, zipfile.BadZipFile) as exc:
                 report.add("dlss5:shader_deps", False, f"解压失败: {exc}", manual=True)
@@ -610,6 +673,21 @@ def _check_dlss5_preset(config: AppConfig, report: Report, log: Callable[[str], 
                                  [launchpad_name, feed_name], front=True)
     updated = _merge_preset_line(updated, "EffectSorting",
                                  [DLSS5_PROVIDER_EFFECT, DLSS5_FEED_EFFECT], front=True)
+    # ⚠️⚠️ **写入前先确认目标在我们自己的地盘里**（2026-10-04 修的 U5）。
+    # `preset_path` 来自 `ReShade.ini` 的 `PresetPath`，而它**可以是任意绝对路径** ——
+    # 那份 ini 被第三方整合包改歪、或用户手工填了别处的路径时，这里就会往**游戏目录外面**写
+    # （原来没有任何护栏，`core.PathGuard` 在生产代码里零调用）。
+    # 允许的只有两处：DLSS5 目录（我们自己的 ReShade 底座）与游戏目录。
+    from . import fsutil, reshade_integration as _reshade
+
+    allowed_roots = [dlss5]
+    game_dir = _reshade.detect_game_dir(config)
+    if game_dir is not None:
+        allowed_roots.append(Path(game_dir))
+    if not any(fsutil.is_within(root, preset_path) for root in allowed_roots):
+        report.add("dlss5:preset", False,
+                   f"preset 路径不在 DLSS5/游戏目录内，已拒绝写入: {preset_path}", manual=True)
+        return
     try:
         if body:
             backup = preset_path.with_name(f"{preset_path.name}.bak-before-fix")

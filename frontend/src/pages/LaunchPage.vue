@@ -292,6 +292,23 @@ async function preflightGate() {
   return true;
 }
 
+/**
+ * 跳到「依赖」页并让它**自动开始下载**（用户 2026-10-04 要求：
+ * 「**要是缺下载，应该跳转到依赖进行下载**」）。
+ *
+ * 复用现成机制（`store.autoStartDeps`）：依赖页 `onMounted` 看到标志就自己跑
+ * 「一键下载依赖」—— 那条链路有线路切换、实时进度、可暂停、失败重试，
+ * 比在启动页里静默下几十 MB 好得多（「修复」只负责本地能做的部分）。
+ */
+function goToDepsDownload(keys) {
+  const list = Array.isArray(keys) ? keys.filter(Boolean) : [];
+  appendLog(`有 ${list.length} 项需要联网下载：${list.join("、")} —— 已跳到「依赖」页开始下载`);
+  store.autoStartDepsNote = `完整性检查发现 ${list.length} 项缺失，开始联网下载补齐…`;
+  store.autoStartDeps = true;
+  store.tab = "dependencies";
+  showToast("已跳到「依赖」页，正在开始下载…", "info");
+}
+
 // ⚠️ **B1：完整性检查要显示结果、并能一键修复**（2026-10-03 补回归）。
 // 0.9.5（app.js:1957-1980）：`check_integrity` → 有缺失就弹「是否自动修复？」→
 // `repair_integrity()` + 打开日志窗看进度。
@@ -324,24 +341,57 @@ async function checkIntegrity() {
     });
     return r;
   }
+  // ⚠️ **区分"本地能修"和"要联网下载"**（2026-10-04 用户实测后要求）：
+  // 他点「自动修复」后日志里是 `dlss5:d3d12.dll / dlss5:dlss5-feed.addon64 缺失且找不到素材来源`
+  // —— 那两个文件上游都有（ReShade 官网 / DLSS5-Feeder），只是"修复"这条路**只找本地素材、
+  // 不联网**（而且刻意不在启动页静默下载几十 MB）。他的要求是：
+  // 「**要是缺下载，应该跳转到依赖进行下载**」⇒ 这里先告诉他哪些要下载，再把他送过去。
+  const needDl = Array.isArray(r.needs_download) ? r.needs_download : [];
+  const head = needDl.length
+    ? `\n\n其中 **${needDl.length} 项需要联网下载**才能补齐：\n    ` + needDl.join("、")
+    : "";
   const go = await showModalDialog({
     title: `完整性检查：${bad.length} 项缺失`,
-    message: lines.join("\n") + "\n\n要不要现在自动修复？（会重新下载/补齐缺失的组件文件）",
-    okText: "自动修复", cancelText: "先不修",
+    message: lines.join("\n") + head
+      + "\n\n要不要现在自动修复？（**只做本地能做的**：补文件、写配置、重建 staging；需要下载的部分会引导你去「依赖」页）",
+    okText: needDl.length ? "去依赖页下载" : "自动修复",
+    cancelText: needDl.length ? "先本地修复" : "先不修",
   });
-  if (!go) return r;
-  showProgressToast("integrity-repair", "正在修复完整性…（缺什么补什么，可能要下载）");
+  // 主按钮 = 去依赖页开始「一键下载依赖」（那条链路有进度、线路切换、可暂停）
+  if (go && needDl.length) {
+    goToDepsDownload(needDl);
+    return r;
+  }
+  if (!go && needDl.length) {
+    // 次要按钮：先只跑本地修复（补完再回来看还缺什么）
+    // 落到下面的 repair 流程
+  } else if (!go) {
+    return r;
+  }
+  showProgressToast("integrity-repair", "正在修复完整性…（只做本地能做的部分）");
   try {
     const fixed = await call("repair_integrity");
     const after = (fixed && fixed.integrity && fixed.integrity.checks) || [];
     const stillBad = after.filter((c) => c.ok === false);
-    await showModalDialog({
-      title: stillBad.length ? `修复完成，还有 ${stillBad.length} 项没修好` : "完整性已修复",
-      message: stillBad.length
-        ? stillBad.map((c) => `✗ ${c.message || c.key}\n    ${c.path}`).join("\n")
-        : "所有缺失项都已补齐。",
-      okText: "知道了", showCancel: false,
-    });
+    const stillDl = (fixed && fixed.integrity && fixed.integrity.needs_download) || [];
+    if (stillDl.length) {
+      // 还有"要下载"的项 ⇒ 直接把用户送去依赖页（这就是他说的"跳转到依赖进行下载"）
+      const again = await showModalDialog({
+        title: `还有 ${stillDl.length} 项要联网下载`,
+        message: "本地能做的都做完了；下面这些需要从网上取：\n    " + stillDl.join("、")
+          + "\n\n要现在跳到「依赖」页下载吗？（那边会显示线路与进度，可暂停）",
+        okText: "去依赖页下载", cancelText: "稍后自己弄",
+      });
+      if (again) goToDepsDownload(stillDl);
+    } else {
+      await showModalDialog({
+        title: stillBad.length ? `修复完成，还有 ${stillBad.length} 项没修好` : "完整性已修复",
+        message: stillBad.length
+          ? stillBad.map((c) => `✗ ${c.message || c.key}\n    ${c.path}`).join("\n")
+          : "所有缺失项都已补齐。",
+        okText: "知道了", showCancel: false,
+      });
+    }
     await refreshState();
   } catch (e) {
     showToast(String((e && e.message) || "修复失败"), "danger");

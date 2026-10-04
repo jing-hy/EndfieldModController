@@ -72,6 +72,25 @@ COMPONENTS: tuple[Component, ...] = (
 _BY_KEY = {component.key: component for component in COMPONENTS}
 
 
+def downloadable_file_names() -> set[str]:
+    """**有公开上游、能联网下载补齐**的那些文件名（小写 basename）。
+
+    用途：判断"某个缺失文件是不是能靠下载补上"。用户 2026-10-04 实测「自动修复
+    还是有一个修不好」，日志里是：
+        `repair: WARN 初始化: dlss5:d3d12.dll: 缺失且找不到素材来源: d3d12.dll`
+        `repair: WARN 初始化: dlss5:dlss5-feed.addon64: 缺失且找不到素材来源: dlss5-feed.addon64`
+    而这两个文件**上游都有**（ReShade 官网 / DLSS5-Feeder 仓库）——
+    只是"自动修复"这条路只找本地随包素材、不联网。用户的要求是：
+    「**要是缺下载，应该跳转到依赖进行下载**」⇒ 需要先能**识别**出"这是缺下载"，
+    再引导到依赖页（那边有完整的下载链路 + 进度 + 线路切换）。
+    """
+    names: set[str] = set()
+    for component in COMPONENTS:
+        for relative in component.required:
+            names.add(relative.replace("\\", "/").rsplit("/", 1)[-1].lower())
+    return names
+
+
 def _log(log: Callable[[str], None] | None, message: str) -> None:
     if log:
         log(message)

@@ -40,6 +40,9 @@ export const store = reactive({
   demoPending: null,
   // 设置页点「依赖清空并重新下载」→ 清完跳到依赖页，由依赖页读这个标志自动开跑
   autoStartDeps: false,
+  // 跳过去时在依赖页日志框里写的第一行（缺省用"已清空 runtime 与 assets…"那套文案；
+  // 从「完整性检查」跳过来时写明"是缺哪一类"，用户一眼知道这次为什么在下）
+  autoStartDepsNote: "",
   // Mod 下载开始后跳到依赖页（那儿的日志框显示下载过程）
   autoStartModDownload: false,
 });

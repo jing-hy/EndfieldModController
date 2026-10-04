@@ -16,6 +16,26 @@ class Check:
     path: str
     message: str
     critical: bool = True
+    # 「缺下载」标记（2026-10-04 加）：这一项缺失，但**有公开上游/依赖页能联网补上**。
+    # 前端据此引导用户去「依赖」页下载，而不是显示一句"修不好"就没下文（用户原话：
+    # 「**要是缺下载，应该跳转到依赖进行下载**」）。
+    downloadable: bool = False
+
+
+# 这些 key 前缀对应的缺失项，**依赖页的「一键下载依赖」能补**
+# （内置 XXMI / XXMI Libraries / EFMI —— 与 dlss5 那些有公开上游的组件一起构成
+#  `needs_download` 的判据）。
+_DEP_DOWNLOADABLE_PREFIXES = ("xxmi_launcher", "xxmi_root", "xxmi_libs_", "efmi_")
+
+
+def _downloadable_names() -> set[str]:
+    """有公开上游的文件名（小写），判据委托给 `dlss5_fetcher.COMPONENTS`。"""
+    try:
+        from . import dlss5_fetcher
+
+        return dlss5_fetcher.downloadable_file_names()
+    except Exception:  # noqa: BLE001 —— 拿不到判据就当"不可下载"，退回原来的行为
+        return set()
 
 
 def _first_existing(paths: list[Path]) -> Path | None:
@@ -44,9 +64,16 @@ def xxmi_root(config: AppConfig) -> Path | None:
 
 def check_integrity(config: AppConfig) -> dict:
     checks: list[Check] = []
+    downloadable_names = _downloadable_names()
 
     def add(key: str, path: Path, ok: bool, message: str, critical: bool = True) -> None:
-        checks.append(Check(key, bool(ok), str(path), message, critical))
+        # 「缺下载」判据（两条取并集）：① key 属于依赖页能补的内置组件；
+        # ② 文件名落在有公开上游的组件清单里（ReShade 底座 / dlss5-feed / iMMERSE…）。
+        downloadable = bool(not ok) and (
+            key.startswith(_DEP_DOWNLOADABLE_PREFIXES)
+            or Path(str(path)).name.lower() in downloadable_names
+        )
+        checks.append(Check(key, bool(ok), str(path), message, critical, downloadable))
 
     launcher = config.xxmi_launcher_path
     add("xxmi_launcher", launcher or Path("<unset>"), launcher is not None and launcher.is_file(), "XXMI Launcher.exe")
@@ -117,10 +144,14 @@ def check_integrity(config: AppConfig) -> dict:
                 "统一 Mod 控制面板 —— 当前注入方式用不上面板，已保持 Mod 自带快捷键不被锁")
 
     critical_failures = [check for check in checks if check.critical and not check.ok]
+    # 「要联网下载才能补齐」的那些项（缺内置组件 / 缺有公开上游的 DLSS5 组件）——
+    # 前端拿它决定要不要把用户**引导到依赖页**（用户 2026-10-04 的要求）。
+    needs_download = [check.key for check in checks if (not check.ok) and check.downloadable]
     return {
         "ok": not critical_failures,
         "checks": [check.__dict__ for check in checks],
         "failures": [check.__dict__ for check in critical_failures],
+        "needs_download": needs_download,
         "existing_reshade": existing_reshade,
     }
 
@@ -135,6 +166,12 @@ def repair_integrity(config: AppConfig, log: Callable[[str], None] | None = None
 
     if config.use_builtin_runtime:
         note("重新检查/安装内置 XXMI + XXMI Libraries + EFMI")
+        # ⚠️ **这里刻意不传 `force=True`**（2026-10-04 明确）：`force` 会在这一条路径上
+        # **当场联网下载**几十 MB，而「修复」是在启动页点的一个按钮、旁边没有任何下载进度/日志
+        # 可看 —— 用户的原话是「**要是缺下载，应该跳转到依赖进行下载**」。
+        # 所以职责这样分：**「修复」只做本地自愈**（补文件、写配置、重建 staging），
+        # 真正需要联网的项由 `needs_download` 标出来、由前端引导去依赖页下载
+        #（那边有完整链路：线路切换、进度、可暂停、失败重试）。
         for result in runtime_deps.ensure_all(config):
             note(f"{result.key}: {result.status} {result.message}")
     else:
