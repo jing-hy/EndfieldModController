@@ -56,6 +56,15 @@ def read_version() -> str:
     return match.group(1)
 
 
+def _release_version(version: str) -> str:
+    """发 Release 用的版本号 —— **去掉 `-beta` 后缀**（用户 2026-10-04：「推 release 的都不带 beta」）。
+
+    本地未发版时 `version.py` 写的是 `1.0.10-beta`（= 最新 Release + 1 且加 beta），
+    而线上 tag / 标题一律是 `v1.0.10`。
+    """
+    return re.split(r"[-+]", str(version or "").strip().lstrip("vV"))[0].strip() or "0"
+
+
 def main() -> int:
     _fix_console()
     version = read_version()
@@ -95,7 +104,12 @@ def main() -> int:
     for item in (versioned, DIST / f"{APP_NAME}-0.1.9-from-{version}.exe"):
         print(f"   {item.name}{'' if item.is_file() else '（不存在）'}", flush=True)
 
-    tag = f"v{version}"
+    # ⚠️ **发 Release 不带 beta**（用户 2026-10-04）：
+    # 本地未发版时是 `1.0.10-beta`，线上 tag / 标题都用 `v1.0.10`。
+    tag = f"v{_release_version(version)}"
+    if tag != f"v{version}":
+        print(f"   （本地版本是 {version}，发布用 {tag} —— beta 只存在于未发版的本地/源码里）",
+              flush=True)
     print("\n[3/3] 上传指引（我没有替你上传，命令供你确认后自己执行）", flush=True)
     print(f"""
    gh release create {tag} ^

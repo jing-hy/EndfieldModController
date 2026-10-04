@@ -937,8 +937,11 @@ def collect_environment_report(config: Any, game_dir: Path | None = None) -> tup
         notes.append(f"事件日志抓取失败：{err}")
         lines.append(f"（抓取失败：{err}）")
     elif not events:
-        lines.append("（近 60 分钟内没有任何 Application Error / Hang / WER 事件 —— "
-                     "**进程不是自己崩的**这条判据成立；被 TerminateProcess 结束不会留事件）")
+        lines.append("（近 60 分钟内没有任何 Application Error / Hang / WER 事件。**⚠️ 这条判据"
+                     "不完整**：① 被 TerminateProcess 结束不会留事件；② **CRT 的「Runtime Error!」"
+                     "对话框会把进程卡在弹窗上 —— 既不写事件、也不退出**，所以「没有事件」≠「没出过事」。"
+                     "要分清请看游戏进程退出码（0xC0000409 / 0x40000015 = CRT fail-fast / abort）"
+                     "以及面板 addon 自己的日志（见 summary 的 addon 段））")
     else:
         lines.append(events)
 
@@ -1427,6 +1430,8 @@ _EXIT_CODE_NAMES: dict[int, tuple[str, str]] = {
     0xC0000094: ("STATUS_INTEGER_DIVIDE_BY_ZERO", "整数除零"),
     0xC0000096: ("STATUS_PRIVILEGED_INSTRUCTION", "执行了特权指令"),
     0xC00000FD: ("STATUS_STACK_OVERFLOW", "栈溢出"),
+    0xC000013A: ("STATUS_CONTROL_C_EXIT",
+                 "进程被结束（Ctrl+C / 被别的程序 TerminateProcess）—— **不是自己崩的**"),
     0xC0000135: ("STATUS_DLL_NOT_FOUND",
                  "**有 DLL 加载失败** —— 被杀毒隔离 / 缺 VC 运行库 / 注入的 proxy 没有转发成功"),
     0xC0000139: ("STATUS_ENTRYPOINT_NOT_FOUND",
@@ -1434,10 +1439,13 @@ _EXIT_CODE_NAMES: dict[int, tuple[str, str]] = {
     0xC0000142: ("STATUS_DLL_INIT_FAILED", "DLL 找到了、但初始化失败"),
     0xC0000374: ("STATUS_HEAP_CORRUPTION", "堆被写坏"),
     0xC0000409: ("STATUS_STACK_BUFFER_OVERRUN",
-                 "栈保护触发（/GS）—— 缓冲区越界，或注入器写坏了内存"),
+                 "栈保护触发（/GS），或 **CRT 的 fail-fast**：C++ 异常逃出 DllMain / "
+                 "std::terminate() 也走这里 —— 现场常常是游戏里弹一个"
+                 "「Microsoft Visual C++ Runtime Library / Runtime Error!」对话框"),
     0xC0000417: ("STATUS_INVALID_CRUNTIME_PARAMETER", "传给 CRT 的参数非法"),
     0xC0000602: ("STATUS_FAIL_FAST_EXCEPTION", "主动 fail-fast（断言/完整性检查没过）"),
-    0x40000015: ("FATAL_APP_EXIT", "CRT 致命退出"),
+    0x40000015: ("FATAL_APP_EXIT",
+                 "CRT 致命退出（abort() 被调用 —— 同样会弹 Runtime Error 对话框）"),
 }
 
 
@@ -1857,6 +1865,77 @@ def _xxmi_summary(config: Any) -> list[str]:
     return lines
 
 
+_XXMI_EXE_PATH = re.compile(r"exe_path=WindowsPath\('([^']+)'\)")
+_XXMI_WORK_DIR = re.compile(r"work_dir=WindowsPath\('([^']*)'\)")
+_XXMI_INJECTED = re.compile(r"Successfully injected DLL to process (\S+) \(PID: (\d+)\): (.+)")
+_XXMI_INJECT_FAILED = re.compile(r"注入额外库 (.+?) 失败")
+_XXMI_STOPPED = re.compile(r"Stopping process:")
+
+
+def _xxmi_injection_summary(config: Any, *, tail_lines: int = 4000, keep: int = 6) -> list[str]:
+    """XXMI 自己的注入现场（**解析成字段**，不是把 200 KB 日志原样塞进包）。
+
+    为什么要有（2026-10-04 反馈者现场）：他报"ReShade 没注入"，而 XXMI 的日志里明明白白写着
+    `Successfully injected DLL to process Endfield.exe (PID: 2632): E:\\新建文件夹\\d3d12.dll`
+    —— 注入**确实发生了**，只是注入的是"另一个目录的那份 d3d12.dll"；同一份日志还记了
+    `work_dir=E:/新建文件夹/Arknights Endfield`（游戏目录的真相）和一连串 `Stopping process`
+    （"游戏被反复结束"）。这几条以前全靠人肉翻 208 KB 原始日志，等于没有判据。
+    """
+    lines = ["", "-- XXMI 注入现场（它才是真正启动游戏、注入 dll 的那一环）--"]
+    launcher = config.xxmi_launcher_path
+    if launcher is None:
+        lines.append("（未配置 XXMI Launcher）")
+        return lines
+    root = Path(launcher).parent.parent.parent
+    log = root / "XXMI Launcher Log.txt"
+    if not log.is_file():
+        lines.append(f"（没有 {log}）")
+        return lines
+    try:
+        text = log.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        lines.append(f"读取失败 {log}: {exc}")
+        return lines
+    rows = text.splitlines()[-tail_lines:]
+    starts: list[tuple[str, str]] = []
+    injected: list[str] = []
+    failures: list[str] = []
+    stops = 0
+    errors: list[str] = []
+    for row in rows:
+        if "Starting process:" in row:
+            exe = _XXMI_EXE_PATH.search(row)
+            work = _XXMI_WORK_DIR.search(row)
+            starts.append((exe.group(1) if exe else "?", work.group(1) if work else "?"))
+        match = _XXMI_INJECTED.search(row)
+        if match:
+            injected.append(f"{match.group(1)} (PID {match.group(2)}) ← {match.group(3).strip()}")
+            continue
+        if _XXMI_STOPPED.search(row):
+            stops += 1
+        failed = _XXMI_INJECT_FAILED.search(row)
+        if failed:
+            failures.append(failed.group(1).strip())
+        if " ERROR " in row:
+            message = row.split(" ERROR ", 1)[1].strip()
+            if message and message not in errors:
+                errors.append(message[:200])
+    lines.append(f"日志: {log}（解析尾部 {len(rows)} 行）")
+    lines.append(f"窗口内统计：启动 {len(starts)} 次 / 成功注入 {len(injected)} 次 / "
+                 f"Stopping process {stops} 次 / 注入失败 {len(failures)} 次")
+    for exe, work in starts[-keep:]:
+        lines.append(f"    启动 : exe={exe}  work_dir={work}")
+    for row in injected[-keep * 2:]:
+        lines.append(f"    注入 : {row}")
+    for row in failures[-keep:]:
+        lines.append(f"    !! 注入失败: {row}")
+    if errors:
+        lines.append("    XXMI 自己报的错（去重，最多 5 条）:")
+        for row in errors[:5]:
+            lines.append(f"      {row}")
+    return lines
+
+
 def _shader_summary(config: Any) -> list[str]:
     """DLSS5 shader 文件清单（关键几个）+ ReShade 的搜索路径与 preset 启用状态。
 
@@ -1905,6 +1984,296 @@ def _shader_summary(config: Any) -> list[str]:
             if line.startswith(("Techniques=", "TechniqueSorting=", "EffectSorting=")):
                 lines.append(f"Preset {line[:180]}")
     return lines
+
+
+# ---------------------------------------------------------------------------
+# 2026-10-04：反馈者「ReShade 没注入」那次暴露的判据缺口（用户原话：「为什么你修了这么多轮，
+# 还是判据不够，你能不能一次加完」）。这一批全部是"数据其实已经在现场、只是没人解析/没人列"。
+# ---------------------------------------------------------------------------
+
+# 面板 addon 自己写的日志名（**不是** `endfieldmodcontroller.addon.log`，见 addon 的 addon_log_path()）
+ADDON_LOG_NAME = "modecontroller.addon.log"
+ADDON_LOG_LEGACY_NAMES = ("endfieldmodcontroller.addon.log",)
+# ReShade 扫描 add-on 的两个后缀（同名同时存在 ⇒ 第二次注册必失败）
+ADDON_SCAN_SUFFIXES = (".addon", ".addon64")
+_ADDON_SCAN_DIR = re.compile(r"Searching for add-ons \(\*\.addon, \*\.addon64\) in '([^']+)'")
+_ADDON_REGISTERED = re.compile(
+    r'Registered add-on "([^"]+)"[^ ]* ?([^ ]*) using ReShade API version (\d+)')
+_ADDON_LOAD_FAILED = re.compile(r"Failed to load add-on from '([^']+)' with error code (\d+)")
+_ADDON_DUPLICATE = re.compile(
+    r'Failed to register add-on, because another one with the same name \("([^"]+)"\)')
+_RESHADE_HOST = re.compile(r"loaded from '([^']+)' into '([^']+)'")
+
+
+def addon_log_candidates(config: Any, game_dir: Path | None = None) -> list[tuple[str, Path]]:
+    """面板 addon 自己写的那份日志可能落在哪几处。
+
+    ⚠️ **2026-10-04 修**：这里以前只有 `endfieldmodcontroller.addon.log` —— **文件名根本不对**。
+    addon 真实写的是 **`modecontroller.addon.log`**（`reshade_addon/src/endfieldmodcontroller_addon.cpp`
+    的 `addon_log_path()`），于是每次诊断包里那两条都是 missing。而这次"面板为什么没加载"的
+    一手证据恰恰只在这份文件里：addon 从 DllMain 第一行就开始写，**加载失败也会留下"走到哪一步"**
+    （2026-10-04 起还会写 `register_addon FAILED (api=… last_error=…)`）。
+    老名字保留是为了还能读懂以前导出的包。
+    """
+    bases: list[tuple[str, Path]] = [
+        ("dlss5", Path(config.dlss5_path)),
+        ("reshade", Path(config.reshade_runtime_path)),
+    ]
+    if game_dir is not None:
+        bases.append(("game", Path(game_dir)))
+    temp = os.environ.get("TEMP") or os.environ.get("TMP")
+    if temp:
+        bases.append(("temp", Path(temp)))
+
+    out: list[tuple[str, Path]] = []
+    seen: set[str] = set()
+    for name in (ADDON_LOG_NAME, *ADDON_LOG_LEGACY_NAMES):
+        for label, base in bases:
+            path = base / name
+            key = str(path).lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append((label if name == ADDON_LOG_NAME else f"{label}-{name}", path))
+    return out
+
+
+def _reshade_addon_summary(config: Any, game_dir: Path | None) -> list[str]:
+    """把每份 ReShade.log 里的**插件加载结果**提炼成几行。
+
+    为什么单列（2026-10-04 反馈者现场）：他报"ReShade 没注入"，而包里其实躺着决定性的一行
+    —— `ERROR Failed to load add-on from '…\\endfieldmodcontroller.addon64' with error code 4551!`
+    —— 但**没有任何代码解析它**，于是"面板没加载"这件事在摘要里完全看不见，只能靠人肉翻
+    36 KB 的日志（还得先知道该翻哪一份）。
+
+    判据本身很直白：
+      * `Registered add-on "X" …` = 加载成功；
+      * `Failed to load add-on from 'P' with error code N` = **DLL 加载失败**（**不是**"文件不存在"，
+        文件在不在由文件快照/目录清单回答）；
+      * `Failed to register add-on … same name` = 被 ReShade 拒（同名重复，通常是 `.addon` 与
+        `.addon64` 同时存在）。
+    ⚠️ 这里**故意不翻译 error code 的含义** —— 它不是标准 Win32 码时乱给结论只会误导
+    （同族教训：「下结论之前先找对照」）。
+    """
+    lines = ["", "-- ReShade 插件（add-on）加载结果（面板没出来 / DLSS5 菜单缺失时先看这里）--"]
+    candidates = _try_capture(config, "ReShade 候选", reshade_log_candidates, config, game_dir) or []
+    if not candidates:
+        lines.append("（没有可读的 ReShade.log —— 采集失败，或 ReShade 从未在本机加载过）")
+        return lines
+    parsed_any = False
+    for label, path in candidates:
+        path = Path(path)
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            lines.append(f"[{label}] 读取失败: {exc}")
+            continue
+        host = _RESHADE_HOST.findall(text)
+        scan_dirs = sorted(set(_ADDON_SCAN_DIR.findall(text)))
+        registered = _ADDON_REGISTERED.findall(text)
+        failed = _ADDON_LOAD_FAILED.findall(text)
+        duplicate = sorted(set(_ADDON_DUPLICATE.findall(text)))
+        lines.append(f"[{label}] {path}")
+        if host:
+            lines.append(f"    ReShade 底座 : {host[0][0]}")
+            lines.append(f"    注入进进程   : {host[0][1]}")
+        for base in scan_dirs:
+            lines.append(f"    扫描插件目录 : {base}")
+        for name, _version, api in registered:
+            parsed_any = True
+            lines.append(f"    OK  已注册   : {name}（API {api}）")
+        for target, code in failed:
+            parsed_any = True
+            lines.append(f"    !! **加载失败**: {target}  （error code {code}）")
+        for name in duplicate:
+            parsed_any = True
+            lines.append(f"    !! 同名重复  : {name}（`.addon` 与 `.addon64` 同时存在会被拒）")
+    if not parsed_any:
+        lines.append("（日志里没有任何 add-on 加载记录：ReShade 多半还没走到扫描插件那一步）")
+    return lines
+
+
+def dir_listing(config: Any, root: Path, *, limit: int = 120, subdirs: int = 10) -> list[str]:
+    """一个目录的顶层清单（名字/字节/时间）+ 子目录一层摘要。
+
+    为什么要有（2026-10-04）：包里对 `dlss5_dir` 只有 8 条固定文件名的探测，**没有目录枚举**，
+    于是"这个目录里到底有什么、有几份同名 addon、ReShade.ini 在不在"全都回答不了 ——
+    而反馈者正是把 `dlss5_dir` 填成了游戏目录，目录内容就是判据本身。
+    """
+    root = Path(root)
+    if not root.is_dir():
+        return [f"**目录不存在**  {root}"]
+    try:
+        entries = sorted(root.iterdir(), key=lambda p: (p.is_dir(), p.name.lower()))
+    except OSError as exc:
+        return [f"读取失败 {root}: {exc}"]
+    files = [p for p in entries if p.is_file()]
+    dirs = [p for p in entries if p.is_dir()]
+    lines = [f"{root}  （{len(files)} 个文件 / {len(dirs)} 个子目录）"]
+    for path in files[:limit]:
+        try:
+            info = path.stat()
+        except OSError:
+            lines.append(f"    ?  {path.name}")
+            continue
+        stamp = datetime.fromtimestamp(info.st_mtime).strftime("%Y-%m-%d %H:%M")
+        lines.append(f"    {info.st_size:>12,} B  {stamp}  {path.name}")
+    if len(files) > limit:
+        lines.append(f"    …另有 {len(files) - limit} 个文件")
+    for path in dirs[:subdirs]:
+        try:
+            count = sum(1 for _ in path.iterdir())
+        except OSError:
+            count = -1
+        lines.append(f"    [目录] {path.name}/  （{count if count >= 0 else '?'} 项）")
+    if len(dirs) > subdirs:
+        lines.append(f"    …另有 {len(dirs) - subdirs} 个子目录")
+    return lines
+
+
+def addon_duplicate_report(bases: list[Path]) -> list[str]:
+    """同名 `.addon` 与 `.addon64` 同时存在 = 必有一次注册失败（ReShade 两种后缀都扫）。"""
+    lines: list[str] = []
+    for base in bases:
+        base = Path(base)
+        if not base.is_dir():
+            continue
+        try:
+            names = {p.name.lower() for p in base.iterdir() if p.is_file()}
+        except OSError:
+            continue
+        for name in sorted(names):
+            if not name.endswith(".addon64"):
+                continue
+            twin = name[: -len(".addon64")] + ".addon"
+            if twin in names:
+                lines.append(f"    !! {base} 里 {name} 与 {twin} **同时存在**"
+                             "（会被加载两次，第二次注册必失败）")
+    return lines
+
+
+def _xxmi_importer_fields(config: Any) -> dict[str, Any]:
+    """XXMI 配置里 EFMI 段的**关键字段**（`game_folder` 一族决定"XXMI 认为游戏在哪"）。"""
+    from . import reshade_integration
+
+    launcher = config.xxmi_launcher_path
+    if launcher is None:
+        return {}
+    config_path = reshade_integration.xxmi_config_path(launcher)
+    if config_path is None or not Path(config_path).is_file():
+        return {}
+    try:
+        data = json.loads(Path(config_path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    importer = ((data.get("Importers") or {}).get("EFMI") or {}).get("Importer") or {}
+    return dict(importer)
+
+
+def _game_dir_reality_summary(config: Any, game_dir: Path | None) -> list[str]:
+    """把"我们以为的游戏目录"与"实际跑的那个"摆在一起。
+
+    2026-10-04 反馈者现场：`config.game_exe` 指向官方启动器推断出来的
+    `D:\\Hypergryph Launcher\\games\\Arknights Endfield`，而游戏实际跑在
+    `E:\\新建文件夹\\Arknights Endfield`（XXMI 的 `EFMI.Importer.game_folder == "E:/"`，
+    进程命令行也是 E 盘）。于是 `game-inventory.txt`、proxy 归属、`plugin\\` 清单**整段都在看一个
+    他根本不玩的安装**，真目录一份清单都没有 —— 这类"目录错位"会让后面每一条结论都失效，
+    所以必须并列摆出来，而不是默认 `game_exe` 就是游戏。
+    """
+    lines = ["", "-- 游戏目录：我们以为的 vs 实际跑的（错位时下面所有“游戏目录”结论都失效）--"]
+    lines.append(f"config.game_exe         : {config.game_exe or '(未配置)'}")
+    lines.append(f"config.official_launcher: {config.official_launcher or '(未配置)'}")
+    lines.append(f"本次采集用的 game_dir   : {game_dir or '(没有)'}")
+    fields = _try_capture(config, "XXMI importer 字段", _xxmi_importer_fields, config) or {}
+    if fields:
+        lines.append(f"XXMI EFMI.game_folder   : {fields.get('game_folder')!r}")
+        lines.append(f"XXMI game_folder_names  : {fields.get('game_folder_names')!r}")
+        lines.append(f"XXMI game_folder_children: {fields.get('game_folder_children')!r}")
+        for lib in [x.strip() for x in str(fields.get("extra_libraries") or "").splitlines() if x.strip()]:
+            lines.append(f"XXMI 注入库             : {lib}")
+    else:
+        lines.append("XXMI EFMI 段            : （读不到 —— 没配 XXMI 或配置还没生成）")
+    try:
+        ids = _find_process_ids("Endfield.exe")
+    except Exception:  # noqa: BLE001
+        ids = []
+    if ids:
+        for pid in ids[:3]:
+            lines.append(f"正在运行的 Endfield.exe : pid={pid} 命令行={_process_command_line(pid)}")
+    else:
+        lines.append("正在运行的 Endfield.exe : （当前没有在跑）")
+    lines.append("注：`game_exe` 只是“我们按官方启动器推断出来的”一个候选；真正在跑的那个以上面的"
+                 "XXMI game_folder / 进程命令行为准。")
+    return lines
+
+
+def _dlss5_dir_summary(config: Any, game_dir: Path | None) -> list[str]:
+    """`dlss5_dir`（DLSS5 / 第一人称目录）+ ReShade 底座所在目录的**完整清单**与重名检查。
+
+    这是 2026-10-04 那次最直接的判据：反馈者把设置页的「DLSS5 / 第一人称目录」填成了**游戏目录**
+    （`E:\\新建文件夹\\Arknights Endfield`），而底座 `d3d12.dll` 在**上一级** `E:\\新建文件夹` ——
+    两边各有什么文件，包内原本一个字都没有，只能靠猜。
+    """
+    lines = ["", "-- DLSS5 目录 / ReShade 底座目录的内容（“填错目录”只能靠这里看）--"]
+    bases: list[Path] = [Path(config.dlss5_path)]
+    dll = config.reshade_dll_path
+    if dll is not None:
+        bases.append(Path(dll).parent)
+    bases.append(Path(config.reshade_runtime_path))
+    if game_dir is not None:
+        bases.append(Path(game_dir))
+    seen: set[str] = set()
+    for base in bases:
+        key = str(base).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        lines.append("")
+        lines.extend(_try_capture(config, f"目录清单 {base}", dir_listing, config, base) or [])
+        dll_marker = base / "d3d12.dll"
+        lines.append(f"    → d3d12.dll（ReShade 底座）: "
+                     + ("在" if dll_marker.is_file() else "**不在**"))
+    dupes = _try_capture(config, "同名 addon 检查", addon_duplicate_report, bases) or []
+    lines.append("")
+    if dupes:
+        lines.append("同名 addon 重复检查：")
+        lines.extend(dupes)
+    else:
+        lines.append("同名 addon 重复检查：没有发现 `.addon` / `.addon64` 同名并存")
+    return lines
+
+
+def _addon_log_summary(config: Any, game_dir: Path | None) -> list[str]:
+    """面板 addon 自己的日志（`modecontroller.addon.log`）最后若干行 + 落点候选。
+
+    加载失败时它就是唯一的"走到哪一步"记录（DllMain 第一行就开始写），所以**平铺所有候选路径**，
+    包括"哪里没有"，并明确说明"没有"意味着什么。
+    """
+    lines = ["", "-- 面板 addon 自己的日志（加载失败时唯一能回答“走到哪一步”的东西）--"]
+    found = 0
+    for label, path in addon_log_candidates(config, game_dir):
+        path = Path(path)
+        if not path.is_file():
+            continue
+        found += 1
+        try:
+            info = path.stat()
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            lines.append(f"[{label}] 读取失败 {path}: {exc}")
+            continue
+        stamp = datetime.fromtimestamp(info.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+        rows = [row for row in text.splitlines() if row.strip()]
+        lines.append(f"[{label}] {path}  （{info.st_size:,} B，最后写于 {stamp}，{len(rows)} 行）")
+        for row in rows[-12:]:
+            lines.append(f"    {row[:200]}")
+    if not found:
+        lines.append(f"（一条都没找到：{ADDON_LOG_NAME} 在这些候选路径里都不存在 —— "
+                     "要么 addon 从未被加载过，要么它的 base path 在别处）")
+    return lines
+
 
 
 def create_diagnostic_bundle(
@@ -1957,8 +2326,20 @@ def create_diagnostic_bundle(
     summary.extend(_game_injection_summary(config, game_path))
     summary.extend(_nvngx_fingerprint(config))
     summary.extend(_xxmi_summary(config))
+    # XXMI 自己的注入现场（启动参数 / work_dir / 每个 dll 的注入结果 / 它报的错）—— 2026-10-04 加
+    summary.extend(_xxmi_injection_summary(config))
     summary.extend(_ngx_consumer_summary(game_path))
     summary.extend(_shader_summary(config))
+    # ⚠️ 2026-10-04 补的四段（用户原话：「你能不能一次加完」）。
+    #    这四段全是"数据本来就在现场、只是没人解析/没人列"，不是新采集：
+    #      * `_reshade_addon_summary` —— ReShade.log 里的 add-on 成功/失败行（本次事故的直接答案）；
+    #      * `_addon_log_summary`     —— 面板 addon 自己的日志（加载失败时的"走到哪一步"）；
+    #      * `_game_dir_reality_summary` —— "我们以为的游戏目录 vs 实际跑的"；
+    #      * `_dlss5_dir_summary`     —— DLSS5/base 目录里到底有什么 + 同名 addon 重复检查。
+    summary.extend(_reshade_addon_summary(config, game_path))
+    summary.extend(_addon_log_summary(config, game_path))
+    summary.extend(_game_dir_reality_summary(config, game_path))
+    summary.extend(_dlss5_dir_summary(config, game_path))
     # 运行时组件清单（2026-10-02 加）：文件名 / 字节 / sha256 / 是否偏离随包基线。
     # 那天用户遇到"配套损坏 ⇒ 游戏启动几十秒后崩"，包里却没有这份清单，
     # 事后连"装的是哪一版组件"都回答不了（详见 runtime_assets.inventory_text）。
@@ -1997,6 +2378,10 @@ def create_diagnostic_bundle(
 
             for name in ("ReShade.ini", "ReShade.log", "actions.tsv", "user_ini_path.txt",
                          "loader_debug.log", "d3d11_log.txt", "endfieldmodcontroller.addon.log",
+                         # ⚠️ `modecontroller.addon.log` 才是面板 addon **真实**写的名字；
+                         #    `panel_info.txt` 是它读的面板状态（2026-10-04 补：以前只找错名那个，
+                         #    于是"面板为什么没加载"的一手证据每次都整份 missing）
+                         ADDON_LOG_NAME, "panel_info.txt",
                          "d3dx.ini", "d3dx_user.ini", "inject_order.txt", "version.txt", "app.info"):
                 _zip_tracked(archive, game_path / name, f"game/{name}", manifest,
                              required=name in ("d3dx.ini", "d3dx_user.ini"))
@@ -2007,6 +2392,7 @@ def create_diagnostic_bundle(
                 if label == "game":
                     continue                      # 上面那条已按原名收过
                 _zip_tracked(archive, source, f"reshade/{label}-ReShade.log", manifest)
+
             # ①b plugin 目录下的文本（`sbm_log.txt` 是"插件到底起没起来"的一手材料）
             plugin = game_path / reshade_integration.PLUGIN_DIR_NAME
             if plugin.is_dir():
@@ -2060,6 +2446,38 @@ def create_diagnostic_bundle(
                     arc = "game/AntiCheatExpert/" + entry.relative_to(anticheat).as_posix()
                     _zip_tracked(archive, entry, arc, manifest, max_bytes=1024 * 1024)
 
+        # ①g 面板 addon 自己的日志（**多候选**：dlss5 目录 / runtime\reshade / 游戏目录 / %TEMP%）
+        #     与**目录枚举**。两者都是 2026-10-04「ReShade 没注入」那次最缺的判据：
+        #     addon 的日志文件名原本写错（永远 missing），而"那个目录里到底有什么"从来没人列过。
+        #     ⚠️ 刻意放在 `game_path is not None` 之外 —— 这两件事与"有没有配游戏目录"无关。
+        for label, source in _try_capture(config, "addon 日志候选", addon_log_candidates,
+                                          config, game_path) or []:
+            source = Path(source)
+            if source.is_file():
+                _zip_tracked(archive, source, f"addon-log/{label}-{ADDON_LOG_NAME}", manifest)
+        listings: list[str] = []
+        for title, root in (
+            ("dlss5_dir（设置里的「DLSS5 / 第一人称目录」）", Path(config.dlss5_path)),
+            ("reshade_runtime（我们设的 RESHADE_BASE_PATH_OVERRIDE 目录）",
+             Path(config.reshade_runtime_path)),
+        ):
+            listings.append(f"===== {title} =====")
+            listings.extend(_try_capture(config, f"目录清单 {title}", dir_listing, config, root) or [])
+            listings.append("")
+        if game_path is not None:
+            listings.append("===== game_dir（我们以为的游戏目录）=====")
+            listings.extend(_try_capture(config, "目录清单 game_dir", dir_listing,
+                                         config, game_path) or [])
+            listings.append("")
+        listings.append("===== 同名 addon 重复检查（`.addon` 与 `.addon64` 并存会被加载两次）=====")
+        dupes = _try_capture(config, "同名 addon 检查", addon_duplicate_report,
+                             [Path(config.dlss5_path), Path(config.reshade_runtime_path)]) or []
+        listings.extend(dupes or ["（没有发现同名并存）"])
+        archive.writestr("dir-listings.txt", "\n".join(listings) + "\n")
+        _manifest_add(manifest, arcname="dir-listings.txt",
+                      source="(目录枚举：dlss5 目录 / ReShade override 目录 / 游戏目录)",
+                      status="ok", note=f"{len(listings)} 行")
+
         # ② EFMI / 3DMigoto 两侧的 ini 与日志（**两侧都收**，谁是谁写清楚）
         for label, source in _try_capture(config, "EFMI 日志候选", efmi_log_candidates, config) or []:
             if source.is_file():
@@ -2076,10 +2494,22 @@ def create_diagnostic_bundle(
                          required=path.name.lower() == "player.log")
 
         # ④ WER 报告 + Unity / 官方崩溃目录里的文本日志
-        for path in _try_capture(config, "WER 报告", wer_report_paths) or []:
+        #    ⚠️ **“没有”也必须留一条**（2026-10-04 补）：以前空结果不留任何 manifest 条目，
+        #    于是"没有 WER 记录"这个判据**无法与"根本没去抓"区分** —— 正是"判据不够"的典型。
+        wer_reports = _try_capture(config, "WER 报告", wer_report_paths) or []
+        for path in wer_reports:
             _zip_tracked(archive, path, f"wer/{path.parent.name}-{path.name}", manifest)
-        for path in _try_capture(config, "Unity 崩溃日志", unity_crash_logs) or []:
+        if not wer_reports:
+            _manifest_add(manifest, arcname="wer/", source="WER ReportArchive/ReportQueue",
+                          status="missing",
+                          note="没有本机 WER 报告（**已查过**）。注意：CRT 的 abort 对话框会把进程"
+                               "卡住且不产生事件 ⇒「没有 WER」≠「没出过事」")
+        unity_crashes = _try_capture(config, "Unity 崩溃日志", unity_crash_logs) or []
+        for path in unity_crashes:
             _zip_tracked(archive, path, f"unity-crash/{path.parent.name}-{path.name}", manifest)
+        if not unity_crashes:
+            _manifest_add(manifest, arcname="unity-crash/", source="Unity 崩溃目录",
+                          status="missing", note="没有 Unity 崩溃日志（**已查过**）")
 
         # ⑤ XXMI 侧：脱敏配置 + 它自己的日志（注入参数与注入结果的一手记录）
         xxmi_text, xxmi_note = sanitized_xxmi_config(config)

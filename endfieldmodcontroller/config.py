@@ -435,9 +435,28 @@ class AppConfig:
     # （= 我改动之前的写法）。用户实测"开 DLSS5 或第一人称就崩"，需要一次判定
     # 是不是"我把绝对路径改成相对路径"造成的；默认 True = 回到改动前。
     reshade_use_absolute_paths: bool = True
-    # ⚠️ 2026-10-03 回滚开关：`extra_libraries` 里**是否也列 EFMI 的 d3d11.dll**。
-    # 默认 True = 我改动之前的两条写法（用户当时能跑）。
+    # ⚠️ **2026-10-04 定案：这条 `d3d11.dll` 必须列，而且必须排在 `d3d12.dll` 之后**。
+    #
+    # 机理（两个用户现场 + XXMI 自己的日志一起定出来的）：
+    #   * XXMI 的注入列表 = **它自己的 EFMI loader** + 我们写的 `extra_libraries`；
+    #   * 但只要我们的列表里**已经有** `d3d11.dll`，它就**不再自己补**那一份 ⇒ **顺序完全由我们决定**；
+    #   * 不列它 ⇒ XXMI 把自带那份**补到最前面** ⇒ 变成「EFMI 先、ReShade 后」——
+    #     **顺序反了游戏起不来**（用户 2026-10-04 实测：改动前 122 秒能玩、改动后 25 秒就退；
+    #     这与 2026-09-27 那条"ReShade 先注入才修好崩溃"是同一条机理）；
+    #   * 列**错的那一份**（用户装外部 XXMI 时列了内置那份）⇒ XXMI 去重不掉
+    #     ⇒ `Inject('d3d11.dll, d3d12.dll, d3d11.dll')` ⇒ 第二次注入必然失败
+    #     ⇒ 「注入额外库 … 失败：DLL 注入失败！」**并中断整个启动**（2026-10-04 第二个用户）。
+    #
+    # ⇒ 所以：**列，但只列"当前生效 XXMI 自己的那份 loader"** —— 由 `launcher.active_efmi_loader()`
+    #   从 XXMI 配置的 `Importers.<active>.Importer.importer_folder` 解析出来。
     extra_libraries_include_efmi_dll: bool = True
+    # 这条策略改过两版（True → False → True），老配置里躺着显式值 ⇒ 需要**一次性迁移**到新策略
+    # （同 `hotkey_default_applied` 的做法：迁过一次就不再动用户后来的选择）。
+    efmi_dll_order_applied: bool = False
+    # **热重载**（2026-10-04 用户要求）找游戏窗口用的标题关键字（逗号分隔；留空 = 用默认那组）。
+    # 终末地的窗口标题随语言/启动方式变化，所以做成可配置 + 一组宽松默认值；
+    # 命中不了就会明确报"没找到游戏窗口"，而不是静默什么都不做。
+    game_window_keywords: str = ""
     # ⚠️ **一键启动前自动净化游戏目录**（2026-10-04 用户要求，**默认开**）。
     #
     # 原话：「在设置做个开关，一键还原终末地清除所有第三方注入，**默认开**，
@@ -540,6 +559,14 @@ class AppConfig:
         if not cfg.hotkey_default_applied:
             cfg.hotkey_takeover = True
             cfg.hotkey_default_applied = True
+            migrated = True
+        # 同族的第二次一次性默认值迁移（2026-10-04）：`extra_libraries_include_efmi_dll`
+        # 的策略定案为"**列，但只列当前生效 XXMI 自己那份 loader**"（理由见字段定义处）。
+        # 这条中间被改成过 False（那会让 XXMI 把自带那份补到最前面 ⇒ EFMI 先、ReShade 后
+        # ⇒ **游戏起不来**，用户实测 122 秒 → 25 秒），所以老配置必须迁回 True。
+        if not cfg.efmi_dll_order_applied:
+            cfg.extra_libraries_include_efmi_dll = True
+            cfg.efmi_dll_order_applied = True
             migrated = True
         # 同一次加载里顺手按显卡代次定 DLSS5 的默认（非 50 系 → 关）
         if _apply_gpu_defaults(cfg):

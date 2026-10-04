@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import activation, core, dependencies, diagnostics, dlss5_fetcher, fsutil, integrity, launcher, moddl, reshade, reshade_integration, runtime_assets, runtime_deps, selfupdate
+from . import activation, core, dependencies, diagnostics, dlss5_fetcher, fsutil, hot_reload, integrity, launcher, moddl, reshade, reshade_integration, runtime_assets, runtime_deps, selfupdate
 from .config import AppConfig, auto_detect_migoto_loader, auto_detect_official_launcher, auto_detect_xxmi, cached_detect
 
 # 拖进 Mod 库页面的压缩包格式（用户 2026-10-01：「需要增加支持拖入 7z」「rar 也要」）。
@@ -2721,6 +2721,54 @@ class EndfieldModControllerApi:
             # 弹「再次启动 / 先不启动」
             "xxmi_bootstrapped": bool(report.get("xxmi_bootstrapped", False)),
         }
+
+    def hot_reload(self) -> dict[str, Any]:
+        """**游戏正在运行时**的热重载：改配置 + 发 F10，不用重启游戏。
+
+        用户 2026-10-04 原话：「加一个热重载，如果终末地在运行，现在一键启动那个位置左右切成
+        两个按钮，左边一键启动，右边热重载，点了热重载能包括改配置按 f10 等等」。
+
+        做两件事：
+          ① **改配置** —— 直接复用 `prepare_launch()`（收编手动 Mod + 同步 XXMI 注入库 + 初始化自检），
+             与「一键启动」改的是同一套东西，**不另造一份判据**；
+          ② **发 F10** —— `hot_reload.send_f10()`：3DMigoto 收到后才会重新加载配置 / 重扫 Mod
+             （机制与两条硬约束见该模块的模块级说明：必须 SendInput、必须游戏在前台）。
+
+        游戏没在跑就直接回明确原因、**不做任何动作** —— 免得用户以为"点了没反应"。
+        """
+        if not bool(self.game_running().get("running")):
+            return {"ok": False,
+                    "message": "终末地当前没有运行 —— 先点「一键启动」；热重载只对运行中的游戏生效"}
+        launcher._append_log(self.config, "热重载 requested from UI")
+
+        def log(message: str) -> None:
+            launcher._append_log(self.config, message)
+
+        # ① **先按当前勾选重建 staging**（2026-10-04 补，这是"运行中切换 Mod 能不能生效"的关键）：
+        #    前端勾选/取消勾选 Mod 只走 `save_config`（改 `selected_mods`），真正把 Mod 铺进
+        #    `Mods\` 的是 `activation.stage_and_prepare`，而它只在 `_prune_missing_selection()`
+        #    里被调用 —— 那条路**只有一键启动/完整性检查会走**。所以热重载以前**根本没动 `Mods\`**，
+        #    用户「关掉一个、打开一个、点热重载」在游戏里自然看不出任何变化
+        #    （用户 2026-10-04 原话：「就是能在终末地运行的时候，我切换 Mod，比如关掉一个，
+        #      打开一个，然后点热重载，能在游戏生效」）。
+        try:
+            self._prune_missing_selection()
+        except Exception as exc:  # noqa: BLE001 - 重铺失败不该拦住后面的重载
+            log(f"热重载: 重铺 staging 失败（继续尝试重载）: {exc}")
+
+        try:
+            prepared: dict[str, Any] = self.prepare_launch()
+        except Exception as exc:  # noqa: BLE001 - 改配置失败也要继续试着发 F10，并如实报告
+            log(f"热重载: 改配置失败（仍会尝试发 F10）: {exc}")
+            prepared = {"ok": False, "message": str(exc)}
+        sent = hot_reload.send_f10(self.config, log=log)
+        if sent.get("ok"):
+            message = f"已热重载：配置已重铺 + 已向 {sent.get('window')!r} 发送 F10"
+        else:
+            message = str(sent.get("message") or "热重载失败")
+        launcher._append_log(self.config, f"热重载结果: {message}")
+        return {"ok": bool(sent.get("ok")), "message": message,
+                "prepare": prepared, "f10": sent}
 
     def _ensure_components_for_launch(self) -> dict[str, Any]:
         """启动前的组件自愈：先补随包资产，再补缺失的在线组件。"""

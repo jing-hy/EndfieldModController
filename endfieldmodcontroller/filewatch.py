@@ -186,7 +186,10 @@ def _path_for(config: AppConfig, item: WatchedFile) -> Path | None:
         try:
             from . import reshade_integration
 
-            game = reshade_integration.detect_game_dir(config)
+            # ⚠️ `prefer_actual=True`（2026-10-04）：盯错目录等于没盯。反馈者那台
+            #    `config.game_exe` 指向 D 盘、游戏实际跑 E 盘 —— 那些"文件缺失"的告警
+            #    全是在另一个安装上读出来的。
+            game = reshade_integration.detect_game_dir(config, prefer_actual=True)
         except Exception:  # noqa: BLE001 —— 探测失败等同于"没定位到"
             game = None
         return (Path(game) / item.relative) if game else None

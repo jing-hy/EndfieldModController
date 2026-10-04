@@ -27,8 +27,13 @@ def _newer_than_current() -> str:
     这个测试原先写死 `latest="0.9.9"`，假设"当前版本 < 0.9.9"——2026-10-03 版本号跳到
     1.0.0 之后这个前提就失效了（"发现新版"变成"没有新版"），三个用例一起挂。
     以后一律按当前版本动态推导，升版本号不会再坏。
+
+    ⚠️ 2026-10-04：版本号带上了 `-beta` 后缀（`1.0.10-beta`），原来的
+    `split(".") + isdigit()` 会把 `10-beta` 整段丢掉 ⇒ 推出 `1.0.1`（比当前**小**），
+    场景又反过来失效。所以先剥后缀再推导。
     """
-    parts = [int(x) for x in str(version_mod.__version__).split(".") if x.isdigit()]
+    base = version_mod.strip_prerelease(version_mod.__version__)
+    parts = [int(x) for x in base.split(".") if x.strip().isdigit()]
     while len(parts) < 3:
         parts.append(0)
     parts[-1] += 1

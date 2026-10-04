@@ -100,6 +100,7 @@ static bool g_cjk_ok = false;
 static DWORD g_hook_retry_tick = 0;              // hook 未装上时的重试节流
 
 static void addon_log(const std::string &message);
+static void early_log(const char *message);
 static fs::path addon_log_path();
 static int collect_virtual_keys(const std::string &spec, int *out, int max_out);
 
@@ -164,6 +165,64 @@ static void addon_log(const std::string &message)
     if (!file.is_open())
         return;
     file << timestamp << " [addon] " << message << "\r\n";
+}
+
+// ⚠️ DllMain 阶段专用日志：**只用 kernel32/user32**（GetEnvironmentVariableW / CreateFileW /
+// WriteFile / wsprintfA / lstrcatW）—— 不碰 C++ 文件流、std::mutex、std::filesystem、异常。
+//
+// 为什么值得单独写一份：`addon_log()` 用的是 `std::ofstream` + `std::mutex`，而 DllMain 运行在
+// **loader lock** 之下，CRT 的流/锁在那一层是已知的雷区（2026-10-04 反馈者现场：addon 加载
+// 失败 + 游戏进程弹 CRT 的 "Runtime Error!"，而包里连一条 addon 日志都没抓到 —— 因为诊断包
+// 找的文件名也写错了）。加载路径上必须有一段"即使我下一秒就失败，也已经把证据写进磁盘"的
+// 代码，这一段的存活概率直接决定下次能不能定案。
+//
+// 落点与 `addon_log()` 一致（`RESHADE_BASE_PATH_OVERRIDE` → ReShade base path → %TEMP%），
+// 同一份 `modecontroller.addon.log`，只是每行前缀是 `[addon-early]`。
+static void early_log(const char *message)
+{
+    wchar_t path[32768] = {};
+    DWORD len = GetEnvironmentVariableW(L"RESHADE_BASE_PATH_OVERRIDE", path, ARRAYSIZE(path));
+    if (len == 0 || len >= ARRAYSIZE(path))
+    {
+        char buf[32768] = {};
+        size_t size = ARRAYSIZE(buf);
+        reshade::get_reshade_base_path(buf, &size);
+        const int wide = (size > 0) ? MultiByteToWideChar(CP_UTF8, 0, buf, -1, path, ARRAYSIZE(path)) : 0;
+        if (wide > 0)
+            len = static_cast<DWORD>(wide - 1);
+        else
+        {
+            path[0] = L'\0';
+            len = GetTempPathW(ARRAYSIZE(path), path);
+        }
+    }
+    if (len == 0 || len >= ARRAYSIZE(path))
+        return;
+    if (path[len - 1] != L'\\' && path[len - 1] != L'/')
+        lstrcatW(path, L"\\");
+    lstrcatW(path, L"modecontroller.addon.log");
+
+    const HANDLE handle = CreateFileW(
+        path, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE,
+        nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (handle == INVALID_HANDLE_VALUE)
+        return;
+
+    SYSTEMTIME now = {};
+    GetLocalTime(&now);
+    char line[1000] = {};
+    // wsprintfA 在 user32 里（不依赖 CRT），正是这里需要的"最小依赖"写法。
+    const int count = wsprintfA(
+        line,
+        "%04d-%02d-%02d %02d:%02d:%02d.%03d [addon-early] %s\r\n",
+        now.wYear, now.wMonth, now.wDay,
+        now.wHour, now.wMinute, now.wSecond, now.wMilliseconds, message);
+    if (count > 0)
+    {
+        DWORD written = 0;
+        WriteFile(handle, line, static_cast<DWORD>(count), &written, nullptr);
+    }
+    CloseHandle(handle);
 }
 
 static std::string trim(std::string value)
@@ -896,8 +955,49 @@ static bool reset_overlay_layout()
     return true;
 }
 
+// 面板的"重活"（读清单、写日志、挂 EFMI 读键 hook）**一律不在 DllMain 里做**。
+// DllMain 处在 loader lock 之下：在那里读文件、抓 std::mutex、改别人模块的导入表，
+// 轻则加载失败（ReShade 打 "Failed to load add-on ... with error code"），
+// 重则让 CRT 在 DllMain 里抛异常 → terminate() → abort() → 游戏进程弹
+// "Microsoft Visual C++ Runtime Library / Runtime Error!"（2026-10-04 反馈者截图）。
+// 现在改成"第一次绘制 overlay 时"做一次（渲染线程、没有 loader lock），并整体包异常：
+// 任何异常都只写日志、绝不放出去。
+static void ensure_setup()
+{
+    static std::once_flag once;
+    std::call_once(once, [] {
+        try
+        {
+            try
+            {
+                addon_log("setup begin: base=" + g_base_path.string());
+            }
+            catch (...)
+            {
+                addon_log("setup begin: base 转换失败（非 ASCII 路径）");
+            }
+            vkey::set_logger([](const char *message) { addon_log(message); });
+            load_actions();
+            addon_log("actions loaded: " + std::to_string(g_actions.size()));
+            load_paths();
+            load_ui_scale();      // 界面大小（用户上次调的）
+            // 接上 EFMI 的读键路径（失败也不影响面板显示；draw_overlay 会每 2 秒重试）
+            vkey::install();
+        }
+        catch (const std::exception &exc)
+        {
+            addon_log(std::string("setup 异常（已忽略，面板继续）: ") + exc.what());
+        }
+        catch (...)
+        {
+            addon_log("setup 异常（已忽略，面板继续）: 未知类型");
+        }
+    });
+}
+
 static void draw_overlay(reshade::api::effect_runtime *runtime)
 {
+    ensure_setup();            // 重活只做一次（说明见上）
     runtime->block_input_next_frame();
     check_cjk_font();
     apply_ui_scale();          // 界面大小（用户可在面板里调）
@@ -1035,31 +1135,63 @@ static void draw_overlay(reshade::api::effect_runtime *runtime)
     }
 }
 
+// ⚠️ DllMain 里**只做两件事**：写一行自证日志（裸 Win32）、注册 addon 与 overlay。
+// 其余（读清单、装 hook、读界面设置）全部延后到 `ensure_setup()`（渲染线程），理由见其上方。
+//
+// 注册失败必须留下**明确的一行**（含返回值与 GetLastError）。反馈者那边的现场是：ReShade
+// 日志只有一句 "Failed to load add-on ... with error code 4551"，而 addon 自己的日志里连
+// "走到哪一步"都没有。这一行就是给下一次定案准备的判据。
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
 {
     switch (reason)
     {
     case DLL_PROCESS_ATTACH:
-        g_base_path = get_base_path();
-        addon_log("DllMain attach: base=" + g_base_path.string());
-        // 键注入的日志并进同一份 addon 日志，排查时一个文件看全。
-        vkey::set_logger([](const char *message) { addon_log(message); });
-        load_actions();
-        addon_log("actions loaded: " + std::to_string(g_actions.size()));
-        load_paths();
-        load_ui_scale();      // 界面大小（用户上次调的）
-        // 接上 EFMI 的读键路径（失败也不影响面板显示；draw_overlay 会每 2 秒重试）
-        vkey::install();
+    {
+        SetLastError(0);
+        early_log("DllMain attach: begin");
+        // base path 只读一个环境变量 / 一次 ReShade 查询，安全；异常一律吞掉。
+        try
+        {
+            g_base_path = get_base_path();
+        }
+        catch (...)
+        {
+            early_log("get_base_path 抛异常（已忽略）");
+        }
         if (!reshade::register_addon(hModule))
+        {
+            char detail[256] = {};
+            wsprintfA(detail,
+                      "register_addon FAILED (api=%d last_error=%lu) -> addon 不会加载",
+                      RESHADE_API_VERSION, GetLastError());
+            early_log(detail);
             return FALSE;
+        }
+        early_log("register_addon OK");
         reshade::register_overlay("ModeController", draw_overlay);
+        early_log("register_overlay OK; 重活延后到首帧（ensure_setup）");
         break;
+    }
     case DLL_PROCESS_DETACH:
-        addon_log("DllMain detach");
-        // 先拆 hook 再卸 overlay：addon 被卸载后 EFMI 绝不能还指着我们的函数
-        vkey::uninstall();
-        reshade::unregister_overlay("ModeController", draw_overlay);
-        reshade::unregister_addon(hModule);
+        early_log("DllMain detach: begin");
+        // 先拆 hook 再卸 overlay：addon 被卸载后 EFMI 绝不能还指着我们的函数。
+        // 全程包异常 —— DETACH 阶段抛出去同样是进程级灾难。
+        try
+        {
+            vkey::uninstall();
+        }
+        catch (...)
+        {
+        }
+        try
+        {
+            reshade::unregister_overlay("ModeController", draw_overlay);
+            reshade::unregister_addon(hModule);
+        }
+        catch (...)
+        {
+        }
+        early_log("DllMain detach: done");
         break;
     }
     return TRUE;

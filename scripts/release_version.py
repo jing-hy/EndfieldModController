@@ -68,6 +68,12 @@ def latest_release_version() -> str:
     return _via_gh() or _via_api()
 
 
+def _strip_prerelease(value: str) -> str:
+    """剥掉 `-beta` 之类的预发布后缀（口径与 `endfieldmodcontroller.version` 一致）。"""
+    text = str(value or "").strip().lstrip("vV")
+    return re.split(r"[-+]", text)[0].strip() or "0"
+
+
 def next_version(version: str) -> str:
     parts = str(version or "").split(".")
     if len(parts) != 3 or not all(p.isdigit() for p in parts):
@@ -103,13 +109,17 @@ def check(local: str | None = None) -> dict[str, object]:
     """核对"本地版本号 vs 最新 Release"。返回 dict（含 `ok` / `kind` / `message`）。"""
     local = str(local or read_version())
     latest = latest_release_version()
+    # ⚠️ 未发版时本地版本带 `-beta`（用户 2026-10-04 约定：本地 = Release+1 且加 -beta）
+    #    ⇒ 比对前先剥掉后缀，否则「本地 1.0.10-beta vs Release 1.0.9」会被误判成"不是 +1"。
+    local_base = _strip_prerelease(local)
     if not latest:
         return {
             "ok": None, "kind": "unknown", "local": local, "latest": "",
             "message": "查不到 GitHub 最新 Release（网络不通或 gh 未登录）—— 规则不变："
-                       "本地应保持在「最新 Release + 1」；只推了源码没发 Release 时不动号",
+                       "本地应保持在「最新 Release + 1」（未发版时写成 `<那个号>-beta`）；"
+                       "只推了源码没发 Release 时不动号",
         }
-    if local == latest:
+    if local_base == latest:
         # ⚠️ `local == latest` **不一定是 OK**（2026-10-04 修）：用户规则是"本地/源码只要有
         # 改动就领先 Release 一个号"（原话：「不发 release，但是本地和源码如果有改动要领先
         # release 一个版本」）。原来这里一律 `ok=True`，于是"发完 Release 忘了 +1、又攒了一批
@@ -128,15 +138,17 @@ def check(local: str | None = None) -> dict[str, object]:
             "message": f"本地 {local} 与最新 Release v{latest} **相同**，且 `v{latest}` 之后没有新提交"
                        f" —— 属于「刚发完版、还没攒新改动」的正常状态",
         }
-    if local == next_version(latest):
+    if local_base == next_version(latest):
         return {
             "ok": True, "kind": "ahead-one", "local": local, "latest": latest,
             "message": f"本地 {local} = 最新 Release v{latest} + 1　✅ 符合规则"
-                       f"（main 上就算又推了源码没发 Release，这个号也不用动）",
+                       f"（未发版时应写作 {next_version(latest)}-beta；"
+                       f"main 上就算又推了源码没发 Release，这个号也不用动）",
         }
     return {
         "ok": False, "kind": "off", "local": local, "latest": latest,
-        "message": f"本地 {local} 不是「最新 Release v{latest} + 1」（应为 {next_version(latest)}）"
+        "message": f"本地 {local} 不是「最新 Release v{latest} + 1」"
+                   f"（应为 {next_version(latest)}，未发版时写成 {next_version(latest)}-beta）"
                    f" —— 检查是不是凭空吃掉了版本号，或者忘了先发 Release",
     }
 

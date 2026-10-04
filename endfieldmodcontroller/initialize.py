@@ -128,6 +128,25 @@ def _downloadable_names() -> set[str]:
         return set()
 
 
+def _component_key_for_file(name: str) -> str | None:
+    """某个文件名属于哪个**可联网安装**的组件（用来在自检里直接补，而不是只喊一声）。
+
+    判据委托给 `dlss5_fetcher.COMPONENTS` 的 `required` 列表 —— 与依赖页共用同一份清单，
+    避免"依赖页能装、自检却说没有"的两套判据（同族教训：下载侧与激活侧必须共用判据）。
+    """
+    try:
+        from . import dlss5_fetcher
+
+        wanted = name.replace("\\", "/").rsplit("/", 1)[-1].lower()
+        for component in dlss5_fetcher.COMPONENTS:
+            for relative in component.required:
+                if relative.replace("\\", "/").rsplit("/", 1)[-1].lower() == wanted:
+                    return component.key
+    except Exception:  # noqa: BLE001 - 判据取不到就当"不可下载"，走原来的提示分支
+        return None
+    return None
+
+
 def source_dirs(config: AppConfig) -> list[Path]:
     """可用的素材来源目录（按优先级）。"""
     candidates: list[Path] = []
@@ -143,6 +162,21 @@ def source_dirs(config: AppConfig) -> list[Path]:
             candidates.extend([d for d in backups.iterdir() if d.is_dir()])
         except OSError:
             pass
+    # ④ **默认 DLSS5 目录**（`runtime\dlss5`）：用户把 `dlss5_dir` 改到别处之后，程序以前
+    #    下载/展开的那一份还在这儿 —— 而"改过目录"恰恰是最容易缺组件的时候。
+    candidates.append(config.runtime_path / "dlss5")
+    # ⑤ **ReShade 的 base 目录**（`RESHADE_BASE_PATH_OVERRIDE` 的落点）
+    candidates.append(config.reshade_runtime_path)
+    # ⑥ **DLSS5 目录的上一级**：整合包常见的摆法就是"组件在父目录、游戏在子目录"
+    #    （2026-10-04 反馈者那台：`E:\新建文件夹\d3d12.dll` + `E:\新建文件夹\Arknights Endfield\`，
+    #    而他的 `dlss5_dir` 填的是那个子目录 ⇒ 以前只会报"缺失"，不会去上一级找）。
+    parent = config.dlss5_path.parent
+    if parent != config.dlss5_path:
+        candidates.append(parent)
+    # ⑦ 游戏目录（有人直接把组件铺在游戏目录里）
+    game_exe = config.game_exe_path
+    if game_exe is not None:
+        candidates.append(game_exe.parent)
     result: list[Path] = []
     for candidate in candidates:
         try:
@@ -326,7 +360,42 @@ def _check_dlss5_dir(config: AppConfig, report: Report, log: Callable[[str], Non
             report.add(f"dlss5:{name}", True, "已按开关停用（在 _disabled 目录）")
             continue
         source = _find_file(config, name)
+        if source is not None and name.lower() == "d3d12.dll":
+            # ⚠️ 不是所有叫 `d3d12.dll` 的都是 ReShade 底座：反馈者游戏目录里那份 157,520 B 的
+            #    就不是（程序当时判"内容不像 ReShade 载荷"并跳过，那个判断是对的）。往 DLSS5
+            #    目录里复制一份错的底座，会把"明摆着缺文件"变成"补齐了却更查不出来"。
+            from . import reshade_integration
+
+            if not reshade_integration._looks_like_reshade_dll(source):
+                source = None
         if source is None:
+            # ⑧ **本机别处都没有 ⇒ 直接联网补齐**（2026-10-04 用户要求①）：`d3d12.dll` /
+            #    `dlss5-feed.addon64` **不随包分发**，所以"只找本地素材"这条路上它们永远补不上
+            #    ⇒ 用户看到的就是"填错目录 / 组件不全 ⇒ 注入链静默失效 + 一句提示"。
+            #    现在：能下就下（判据与依赖页共用 `dlss5_fetcher.COMPONENTS`），下不动才退回
+            #    原来那句清楚的手动指引。
+            key = _component_key_for_file(name)
+            if key:
+                try:
+                    from . import dlss5_fetcher
+
+                    outcome = dlss5_fetcher.install(config, key, log=log)
+                    if target.is_file():
+                        report.add(f"dlss5:{name}", True,
+                                   f"已联网下载补齐（组件 {key}）", fixed=True)
+                        report.action(f"下载补齐 {name}")
+                        continue
+                    detail = ""
+                    if isinstance(outcome, dict):
+                        detail = str(outcome.get("message") or "")
+                    report.add(f"dlss5:{name}", False,
+                               f"缺失，联网补齐失败{('：' + detail) if detail else ''}"
+                               "（可到「依赖」页重试）", manual=True)
+                    continue
+                except Exception as exc:  # noqa: BLE001
+                    report.add(f"dlss5:{name}", False,
+                               f"缺失，联网补齐失败: {exc}（可到「依赖」页重试）", manual=True)
+                    continue
             # ⚠️ 说清"这是**缺下载**，不是坏了"（2026-10-04 用户实测）：
             # 他点「自动修复」后依然报 `dlss5:d3d12.dll / dlss5:dlss5-feed.addon64 缺失且找不到
             # 素材来源`，看起来像"修不好"。其实这两个文件上游都有（ReShade 官网 / DLSS5-Feeder），
@@ -1602,10 +1671,27 @@ def _check_game_libs(config: AppConfig, report: Report, log: Callable[[str], Non
     """
     from . import reshade_integration
 
-    game = reshade_integration.detect_game_dir(config)
+    # ⚠️ `prefer_actual=True`（2026-10-04）：这一步**会把 nvngx 运行库写进游戏目录** ——
+    #    打在错的那份安装上毫无意义（反馈者那台正是如此：组件被铺到他根本不玩的 D 盘那份，
+    #    而 XXMI 实际跑的是 E 盘）。
+    game = reshade_integration.detect_game_dir(config, prefer_actual=True)
     if game is None:
         report.add("game_dir", False, "未定位到游戏目录", manual=True)
         return
+    # 游戏目录错位必须**说出来**（配置写的那份 ≠ XXMI 实际启动的那份）：它会让所有
+    # "游戏目录"结论一起失效，而用户完全看不到（2026-10-04 反馈者现场就是这样）。
+    try:
+        configured_exe = config.game_exe_path
+        if configured_exe is not None and configured_exe.is_file():
+            configured_dir = configured_exe.parent
+            if not reshade_integration._same_dir(configured_dir, game):
+                report.add(
+                    "game_dir:mismatch", False,
+                    f"游戏目录以 XXMI 实际启动的那份为准：{game}"
+                    f"（配置里写的是 {configured_dir}）—— 建议到设置页把游戏目录改成前者",
+                    manual=True)
+    except Exception:  # noqa: BLE001 - 这条提示失败不该影响运行库部署
+        pass
     deploy_new = bool(getattr(config, "deploy_new_nvngx", False))
     for name in GAME_LIBS:
         source = config.dlss5_path / name

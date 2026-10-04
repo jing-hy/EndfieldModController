@@ -398,10 +398,138 @@ def restore_conflicting_addons(game_dir: Path, *, log: Callable[[str], None] | N
     return {"restored": restored, "warnings": warnings}
 
 
-def detect_game_dir(config: AppConfig, *, allow_scan: bool = True) -> Path | None:
+def _same_dir(a: Path, b: Path) -> bool:
+    try:
+        return os.path.normcase(str(Path(a).resolve())) == os.path.normcase(str(Path(b).resolve()))
+    except OSError:
+        return os.path.normcase(str(a)) == os.path.normcase(str(b))
+
+
+def xxmi_effective_game_dir(config: AppConfig, *, deep: bool = True) -> Path | None:
+    """**XXMI 那边真正生效的游戏目录** —— 比 `config.game_exe` 更接近事实。
+
+    为什么要有（2026-10-04 反馈者现场）：他机器上至少三份游戏安装，`config.game_exe` 指向
+    官方启动器那份（`D:\\Hypergryph Launcher\\games\\Arknights Endfield`），而 XXMI 实际启动并
+    注入的是 `E:\\新建文件夹\\Arknights Endfield`。`detect_game_dir()` 原来第一步就
+    `return game_exe.parent` ⇒ **永远走不到 XXMI 的 `game_folder`** ⇒ 净化、备份、文件守护、
+    ngx 运行库部署**整段都打在另一份安装上**，而"游戏目录"这个词在 30 多个调用点里被当成事实。
+
+    判据顺序（都是**纯文件读取**，不开子进程）：
+      ① 各 importer 的 `game_folder`：本身带 `Endfield.exe` 的先用；
+      ② 它是个"搜索根"时（反馈者那台是 `E:/`），在**根下有限层数**里找含 `Endfield.exe` 的目录
+         （`deep=False` 时不做这一步 —— GUI 线程要快）；
+      ③ 都没有 ⇒ XXMI 自己的启动日志（`game_dir_from_xxmi_log`，它每次注入都会记真实路径）。
+    """
+    launcher = config.xxmi_launcher_path
+    if launcher is None:
+        return None
+    # ⚠️ 只在**用户显式配置了 XXMI 路径**时才把它当"另一份事实"：`xxmi_launcher` 留空时
+    #    `xxmi_launcher_path` 会回退到**内置那份**，而那份的 `game_folder` 本来就是我们自己
+    #    写进去的 —— 读它得不到任何新信息，却会让"没有外部 XXMI 的环境"（例如测试）指到
+    #    真实机器上的目录去（2026-10-04 实测：5 个既有测试因此变红）。
+    if not str(getattr(config, "xxmi_launcher", "") or "").strip():
+        return None
+    config_path = xxmi_config_path(launcher)
+    data: dict = {}
+    if config_path is not None and config_path.is_file():
+        try:
+            loaded = json.loads(config_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                data = loaded
+        except (OSError, json.JSONDecodeError):
+            data = {}
+    if data:
+        importers = data.get("Importers") if isinstance(data.get("Importers"), dict) else {}
+        active = str((data.get("Launcher") or {}).get("active_importer") or "")
+        order = ([active] if active else []) + [name for name in importers if name != active]
+        for name in order:
+            block = importers.get(name)
+            if not isinstance(block, dict):
+                continue
+            importer = block.get("Importer") or {}
+            folder = importer.get("game_folder")
+            if not folder:
+                continue
+            root = Path(str(folder))
+            if not root.is_dir():
+                continue
+            if (root / "Endfield.exe").is_file():
+                return root
+            if not deep:
+                continue
+            found = _find_endfield_dir_below(root, max_depth=3, budget=400)
+            if found is not None:
+                return found
+    return game_dir_from_xxmi_log(launcher, config_path)
+
+
+def _find_endfield_dir_below(root: Path, *, max_depth: int, budget: int) -> Path | None:
+    """在 `root` 下**有限层数、有限次数**地找一个含 `Endfield.exe` 的目录。
+
+    限制是刻意的：`game_folder` 可能是个盘根（`E:/`），无限制遍历会把界面冻住
+    （2026-10-01 的教训：`get_state()` 扫盘 18 秒 ⇒ 窗口白屏）。
+    """
+    queue: list[tuple[Path, int]] = [(root, 0)]
+    visited = 0
+    while queue and visited < budget:
+        current, depth = queue.pop(0)
+        if depth >= max_depth:
+            continue
+        try:
+            children = sorted(current.iterdir())
+        except OSError:
+            continue
+        for child in children:
+            if not child.is_dir():
+                continue
+            visited += 1
+            if (child / "Endfield.exe").is_file():
+                return child
+            if visited >= budget:
+                break
+            queue.append((child, depth + 1))
+    return None
+
+
+def detect_game_dir(config: AppConfig, *, allow_scan: bool = True,
+                    prefer_actual: bool = False) -> Path | None:
+    """游戏目录（默认 `config.game_exe` 优先）。
+
+    `prefer_actual=True`（2026-10-04 加）时**先认"XXMI 实际启动的那份"**
+    （`xxmi_effective_game_dir`），再退回 `config.game_exe`；两者不一致会写一条 WARN 日志留痕。
+
+    ⚠️ 为什么默认**不**这么做：这个函数有 30 多个调用点，绝大多数是**只读探测**；改掉全局优先级
+    会连带改掉它们的行为（2026-10-04 实测：13 个既有测试立刻变红，那些测试代表的是既有契约）。
+    所以"以实际在玩的那份为准"只交给**真会动手改游戏目录**的调用方按需开启
+    （净化 / 文件守护 / 运行库部署），语义变更可控、可回退。
+    """
+    configured_dir: Path | None = None
     game_exe = config.game_exe_path
     if game_exe is not None and game_exe.is_file():
-        return game_exe.parent
+        configured_dir = game_exe.parent
+
+    if prefer_actual:
+        # ⓪ **XXMI 生效目录优先**：真正启动并注入游戏的是 XXMI，它的答案比"我们按官方启动器
+        #    推断出来的 game_exe"更接近事实。反馈者那台就是如此：config 指向 D 盘那份，而
+        #    XXMI 实际跑 `E:\新建文件夹\Arknights Endfield` ⇒ 净化 / 文件守护 / 运行库部署
+        #    全打在另一份安装上，而且**不留任何痕迹**（所以这里必须记一条日志）。
+        actual = xxmi_effective_game_dir(config, deep=allow_scan)
+        if actual is not None:
+            if configured_dir is not None and not _same_dir(actual, configured_dir):
+                try:
+                    from . import diagnostics
+
+                    diagnostics.log_event(
+                        config,
+                        "游戏目录以 XXMI 生效目录为准（与 config.game_exe 不一致）",
+                        category="launch", level="WARN",
+                        configured=str(configured_dir), actual=str(actual))
+                except Exception:  # noqa: BLE001 - 留痕失败不该影响探测
+                    pass
+            return actual
+
+    if configured_dir is not None:
+        return configured_dir
 
     # ② 从**官方启动器路径**推断 `<启动器根>/games/<游戏目录>`。
     #    空环境里往往是这种情况：`official_launcher` 有值、`game_exe` 为空，而这里以前

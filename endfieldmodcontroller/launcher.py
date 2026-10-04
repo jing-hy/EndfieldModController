@@ -1250,6 +1250,56 @@ def component_addon_status(config: AppConfig) -> dict[str, Any]:
     return {"dlss5": probe(DLSS5_ADDON_GLOBS), "firstperson": probe(FIRSTPERSON_ADDON_GLOBS)}
 
 
+def active_efmi_loader(config: AppConfig) -> Path | None:
+    """**当前生效那个 XXMI 自己的 EFMI loader（`d3d11.dll`）**在哪。
+
+    为什么非要"它自己那份"（2026-10-04 两个用户现场一起定出来的）：
+      * 注入库里**必须**有 `d3d11.dll` —— 否则 XXMI 会把自带那份**补到列表最前面**，
+        变成「EFMI 先、ReShade 后」⇒ **顺序反了游戏起不来**（用户实测：改动前能玩 122 秒、
+        改动后 25 秒就退）；
+      * 但**只能列它自己那份**：列了别的 XXMI 的（用户装外部 XXMI 时列了内置那份），
+        XXMI 去重不掉 ⇒ `Inject('d3d11.dll, d3d12.dll, d3d11.dll')` ⇒ 第二次注入必然失败
+        ⇒ 「注入额外库 … 失败：DLL 注入失败！」**并中断整个启动**。
+
+    路径取自 XXMI 配置的 `Importers.<active_importer>.Importer.importer_folder`：
+      * 绝对路径（外部 XXMI 实测 `E:/ENDFIELD/EFMI`）⇒ 直接用；
+      * 相对路径（内置 XXMI 实测 `EFMI/`）⇒ 相对 **XXMI 根**
+        （`<XXMI 根>\\Resources\\Bin\\XXMI Launcher.exe` 往上三层）。
+    """
+    launcher = config.xxmi_launcher_path
+    if launcher is None:
+        return None
+    launcher = Path(launcher)
+    root = launcher.parent.parent.parent
+    folder_text = ""
+    try:
+        from . import reshade_integration
+
+        config_path = reshade_integration.xxmi_config_path(launcher)
+        if config_path is not None and config_path.is_file():
+            data = json.loads(config_path.read_text(encoding="utf-8"))
+            importers = data.get("Importers") or {}
+            active = str((data.get("Launcher") or {}).get("active_importer") or "EFMI")
+            block = importers.get(active) or importers.get("EFMI") or {}
+            folder_text = str((block.get("Importer") or {}).get("importer_folder") or "")
+    except Exception:  # noqa: BLE001 - 读不到就退回默认布局
+        folder_text = ""
+    candidates: list[Path] = []
+    if folder_text.strip():
+        folder = Path(folder_text.strip().replace("/", "\\"))
+        if not folder.is_absolute():
+            folder = root / folder
+        candidates.append(folder / "d3d11.dll")
+    candidates.append(root / "EFMI" / "d3d11.dll")     # 常规布局兜底
+    fallback = config.efmi_dll_path                     # 最后退回我们自己探测到的那份
+    if fallback is not None:
+        candidates.append(Path(fallback))
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 def dlss5_injection_targets(config: AppConfig) -> list[str]:
     """本方案写进 XXMI 注入库的内容：DLSS5 的 d3d12.dll + EFMI 的 d3d11.dll。
 
@@ -1282,8 +1332,15 @@ def dlss5_injection_targets(config: AppConfig) -> list[str]:
     # **加回 EFMI 的 `d3d11.dll`**（= 我改动之前的写法，用户当时是能跑的）。
     # 用户实测「开 DLSS5 或第一人称就崩、两个都关就能启动」，需要一次判定
     # "去掉这第二条" 是不是崩因之一。默认 True = 回到改动前。
+    # ⚠️⚠️ **必须列，但只能列"当前生效 XXMI 自己那份 loader"**（2026-10-04 定案；完整机理见
+    #    `config.py` 里该字段的说明与 `active_efmi_loader()`）：
+    #      * **不列** ⇒ XXMI 把自带那份补到列表最前面 ⇒ EFMI 先、ReShade 后 ⇒ **游戏起不来**
+    #        （用户实测：改动前能玩 122 秒、改动后 25 秒就退）；
+    #      * **列错的那份** ⇒ XXMI 去重不掉 ⇒ `Inject('d3d11.dll, d3d12.dll, d3d11.dll')`
+    #        ⇒ 第二次注入失败 + **整个启动中断**。
+    #    它排在上面那条 `d3d12.dll` **之后**，这正是顺序要求（ReShade 必须先于 EFMI 进进程）。
     if bool(getattr(config, "extra_libraries_include_efmi_dll", True)):
-        _efmi = config.efmi_dll_path
+        _efmi = active_efmi_loader(config)
         if _efmi is not None and _efmi.is_file():
             targets.append(str(_efmi))
     # 乳摇：可选用「注入 sbm.dll」的方式（config.secondary_motion_dll 指向短路径下的

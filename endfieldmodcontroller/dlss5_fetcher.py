@@ -113,8 +113,10 @@ def _unique_sibling(path: Path) -> Path:
 
 
 def _version_tuple(value: str) -> tuple[int, ...]:
-    parts = re.findall(r"\d+", value or "")
-    return tuple(int(p) for p in parts) or (0,)
+    """版本比较一律走 `version.parse_version`（**全项目一套口径**，含 beta 语义）。"""
+    from .version import parse_version
+
+    return parse_version(value)
 
 
 # ---------------------------------------------------------------------------

@@ -346,8 +346,13 @@ def sync_to_modtest(source: Path, *, artifact: str = "latest") -> None:
         return
     running = _running_processes()
     if running:
-        print(f"      跳过：{', '.join(running)} 正在运行 —— 不替换、也不杀进程；"
-              f"等他退出后重跑本脚本即可", flush=True)
+        # ⚠️ 这里**故意不替换、也不杀进程**（禁止动用户正在用的东西）。但提示要说全：
+        # 2026-10-04 就因为只写了"等他退出后重跑本脚本"，我看漏了这句、误判成"脚本静默失败"，
+        # 让用户拿着旧版测了半小时。所以补上"不用重新构建、直接把 dist 那份拷过去"这条更省事的路。
+        print(f"      ！跳过同步：{', '.join(running)} 正在运行 —— 不替换、也不杀进程", flush=True)
+        print(f"        他关掉之后有两种做法：① 重跑本脚本；"
+              f"② **不用重新构建**，直接把 {source.parent / (APP_NAME + '.exe')} 复制到 "
+              f"{MODTEST_DIR / (APP_NAME + '.exe')}", flush=True)
         return
 
     # ① 先清掉原来的 exe（删除类动作：先打印清单，删完**回读**确认）

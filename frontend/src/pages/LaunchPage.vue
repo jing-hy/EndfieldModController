@@ -40,6 +40,43 @@ const renderApiWarn = computed(() => {
 });
 const running = ref(false);
 
+// ── 热重载（2026-10-04 用户要求）──────────────────────────────────────────────
+// 用户原话：「加一个热重载，如果终末地在运行，现在一键启动那个位置左右切成两个按钮，
+// 左边一键启动，右边热重载，点了热重载能包括改配置按 f10 等等，然后在终末地没运行的
+// 时候就像现在这样整个按钮横在那」。
+// 这里只负责"游戏当前在不在跑"（决定按钮布局）；真正做事的后端是 `api.hot_reload()`
+// —— 改配置复用 `prepare_launch()`，再发 F10 让 3DMigoto 重新加载配置 / 重扫 Mod。
+const gameLive = ref(false);
+const hotReloading = ref(false);
+let liveTimer = null;
+
+async function refreshGameLive() {
+  try {
+    const g = await call("game_running");
+    gameLive.value = !!(g && g.running);
+  } catch (e) { /* 查询失败就保持原状态，不能因为一次失败把按钮弹回去 */ }
+}
+
+async function hotReload() {
+  if (hotReloading.value) return;          // 一次点击 = 一次热重载，连点不叠
+  hotReloading.value = true;
+  appendLog("热重载：先重铺配置，再给游戏发 F10…");
+  startLogPolling();
+  try {
+    const r = await call("hot_reload");
+    const msg = (r && r.message) || "热重载已发起";
+    appendLog(msg);
+    if (r && r.ok === false) {
+      await showModalDialog({ title: "热重载没成功", message: String(msg) });
+    }
+  } catch (e) {
+    appendLog("热重载失败：" + String(e));
+  } finally {
+    hotReloading.value = false;
+    refreshGameLive();
+  }
+}
+
 // ⚠️ **B8 / B9：开关要"真的有用"**（2026-10-03 补回归）。
 // 用户定过：「那些**滑块要真的有用，不要就做表面功夫**，你确定一下」。
 // 0.9.5 里这两个开关**拨动即装卸**：
@@ -150,7 +187,13 @@ function startLogPolling() {
   // 一分钟足够覆盖"注入 → 拉起 XXMI → 进程监视"这段；之后停掉，不常驻
   setTimeout(() => { if (logTimer) { clearInterval(logTimer); logTimer = null; } }, 60000);
 }
-onUnmounted(() => { if (logTimer) clearInterval(logTimer); });
+onUnmounted(() => {
+  if (logTimer) clearInterval(logTimer);
+  if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+});
+// 每 3 秒看一次"游戏在不在跑"，只用来决定按钮布局（一次 IPC 查询，开销极小）
+refreshGameLive();
+liveTimer = setInterval(refreshGameLive, 3000);
 
 // 往启动页日志框追加一行（带换行）。启动页日志有两个来源：
 // `read_launch_log()` 轮询到的后端日志，以及前端自己这几句状态说明。
@@ -648,13 +691,29 @@ useLogAutoScroll(logBox, () => consoleLog.value);
 
 <template>
   <div class="space-y-4">
-    <button id="oneclick-launch-btn"
-            class="w-full py-4 rounded-lg text-white text-base font-semibold transition-colors"
-            :disabled="running"
-            :style="{ background: running ? 'var(--border-strong)' : 'var(--accent)' }"
-            @click="oneClick">
-      {{ running ? "正在启动…" : "一键启动" }}
-    </button>
+    <!-- 终末地在跑 ⇒ 左右两个按钮（左「一键启动」/ 右「热重载」）；没跑 ⇒ 整宽单按钮。
+         用户 2026-10-04 原话：「如果终末地在运行，现在一键启动那个位置左右切成两个按钮，
+         左边一键启动，右边热重载……然后在终末地没运行的时候就像现在这样整个按钮横在那」。 -->
+    <div class="flex gap-2">
+      <button id="oneclick-launch-btn"
+              :class="gameLive ? 'flex-1' : 'w-full'"
+              class="py-4 rounded-lg text-white text-base font-semibold transition-colors"
+              :disabled="running"
+              :style="{ background: running ? 'var(--border-strong)' : 'var(--accent)' }"
+              @click="oneClick">
+        {{ running ? "正在启动…" : "一键启动" }}
+      </button>
+      <button v-if="gameLive"
+              id="hot-reload-btn"
+              class="flex-1 py-4 rounded-lg text-base font-semibold transition-colors"
+              :disabled="hotReloading"
+              :style="{ background: 'transparent',
+                        color: hotReloading ? 'var(--text-muted)' : 'var(--text)',
+                        border: '1px solid var(--border-strong)' }"
+              @click="hotReload">
+        {{ hotReloading ? "热重载中…" : "热重载" }}
+      </button>
+    </div>
 
     <Card title="注入开关">
       <div class="divide-y" style="border-color: var(--border)">

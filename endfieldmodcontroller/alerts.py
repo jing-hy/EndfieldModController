@@ -178,9 +178,10 @@ def hold_seconds(document: dict[str, Any], alert: dict[str, Any] | None = None) 
 
 
 def _version_tuple(value: Any) -> tuple[int, ...]:
-    """`"0.9.4"` → `(0, 9, 4)`；取不出数字时给 `(0,)`（与 `dlss5_fetcher` 同一套口径）。"""
-    parts = re.findall(r"\d+", str(value or ""))
-    return tuple(int(p) for p in parts) or (0,)
+    """版本比较一律走 `version.parse_version`（**全项目一套口径**，含 beta 语义）。"""
+    from .version import parse_version
+
+    return parse_version(value)
 
 
 def version_applies(item: dict[str, Any], version: str | None = None) -> bool:

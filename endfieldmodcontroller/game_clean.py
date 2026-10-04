@@ -148,7 +148,10 @@ class Finding:
 
 def audit(config: AppConfig, *, log: Log = None) -> dict[str, Any]:
     """列出游戏目录里所有**原版不会有**的东西。"""
-    game_dir = reshade_integration.detect_game_dir(config)
+    # ⚠️ `prefer_actual=True`（2026-10-04）：审计必须针对"**用户实际在玩的那份**"——
+    #    反馈者那台 `config.game_exe` 指向 D 盘、XXMI 实际跑 E 盘，于是整份审计结论
+    #    （含"游戏目录里没有检测到第三方注入 proxy"）都指向一个他根本不玩的安装。
+    game_dir = reshade_integration.detect_game_dir(config, prefer_actual=True)
     if game_dir is None:
         return {"ok": False, "message": "没有找到游戏目录", "game_dir": "", "findings": [], "clean": False}
 
@@ -385,7 +388,9 @@ def quarantine_injector(
     """
     from . import reshade_integration
 
-    game_dir = reshade_integration.detect_game_dir(config)
+    # ⚠️ `prefer_actual=True`（2026-10-04）：这一步**会真的移走文件**，打在错的那份安装上
+    #    既没用、又会在另一个安装上留下"被我们动过"的痕迹。以"用户实际在玩的那份"为准。
+    game_dir = reshade_integration.detect_game_dir(config, prefer_actual=True)
     if game_dir is None:
         return {"ok": False, "changed": False, "moved": [], "message": "没有找到游戏目录"}
     try:
