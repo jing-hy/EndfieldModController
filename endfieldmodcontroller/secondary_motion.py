@@ -69,13 +69,21 @@ def _system_module(name: str) -> Path | None:
 
 
 def ensure_proxy_backup(game: Path, name: str, log: Callable[[str], None] | None = None) -> Path | None:
-    """确保 `<game>\\<name>.bak` 有一份**系统原版**（缺了就补上），返回它；补不到返回 None。
+    """确保 `<game>\\<name>.bak` 有一份**原版**（缺了就补上），返回它；补不到返回 None。
 
     ⚠️ 为什么要有（2026-10-04，真实反馈者机器上的状态）：游戏目录里常见
     "**proxy 在位、`.bak` 不在**" —— 那种状态**无法安全还原**：删掉 proxy 之后
     没有原版可以放回去，游戏目录会**永久缺 `d3dcompiler_47.dll`**（历史事故，
     见 `game_clean` 里的注释）。而原版其实就在 `System32`，所以"补齐备份"是
     **能自动做掉**的一步 —— 用户定的判据是"能自动补齐的就别让他手动"。
+
+    ⚠️⚠️ **2026-10-04 修：补之前必须先看游戏目录里那份本体**。原实现**跳过本体直接
+    从 System32 复制**，于是出现这条不可逆的破坏链：`.bak` 被写成 System32 版 ⇒ 接下来
+    装 proxy 时（`poser.ensure_loader` 见 `.bak` 已存在就**不再备份本体**）⇒ **游戏自带的
+    原版被 proxy 覆盖、永久丢失** ⇒ 之后"一键还原"还原回来的是 System32 版，不是游戏原本那份。
+    对照证据：本机（能正常玩）`d3dcompiler_47.dll.bak` = 4,524,496 B 且 mtime = 游戏安装日
+    2026-01-24；反馈者 = 4,669,440 B（System32 版）。判据用 `_is_proxy` 的另一端：
+    **明显大于 proxy 就是真原版**。
     """
     backup = game / f"{name}.bak"
     try:
@@ -83,6 +91,18 @@ def ensure_proxy_backup(game: Path, name: str, log: Callable[[str], None] | None
             return backup
     except OSError:
         pass
+    # ① 本体还在、而且是真原版 ⇒ 那才是"这个游戏目录原本的样子"，优先存它。
+    target = game / name
+    try:
+        if target.is_file() and not _is_proxy(target):
+            shutil.copy2(target, backup)
+            _log(log, f"已备份游戏目录里的原版 {name} → {backup.name}"
+                      f"（{backup.stat().st_size:,} B）")
+            return backup
+    except OSError as exc:
+        _log(log, f"⚠ 备份 {name} 失败: {exc}")
+        return None
+    # ② 本体不在（或它自己就是 proxy）⇒ 才退回 System32 的那份。
     source = _system_module(name)
     if source is None:
         return None

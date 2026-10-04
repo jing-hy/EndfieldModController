@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import subprocess
 import sys
 import threading
@@ -941,11 +942,57 @@ def collect_environment_report(config: Any, game_dir: Path | None = None) -> tup
     else:
         lines.append(events)
 
+    # ── "有 DLL 没加载起来"的**直接记录点**（2026-10-04 加）────────────────────
+    # 为什么单开一段：反馈者报的 `0xC0000135 STATUS_DLL_NOT_FOUND` 直译就是"某个 DLL 没加载
+    # 起来"，而这类失败**不一定**进 Application 日志 —— 它常只落在 SideBySide（WinSxS
+    # 激活失败）与 AppModel-Runtime 里。原来只看 Application Error/Hang/WER，
+    # 等于把这条线上唯一的直接证据漏掉了。
+    lines.append("")
+    lines.append("-- DLL 加载 / 映像相关性（**STATUS_DLL_NOT_FOUND 的经典记录点**）--")
+    sxs, err = _powershell(
+        "Get-WinEvent -FilterHashtable @{LogName='Application';ProviderName='SideBySide';"
+        "StartTime=(Get-Date).AddDays(-2)} -ErrorAction SilentlyContinue | "
+        "Select-Object -First 10 | Format-List TimeCreated,Id,LevelDisplayName,Message"
+    )
+    if err:
+        lines.append(f"SideBySide：（抓取失败：{err}）")
+    else:
+        lines.append("SideBySide：" + (sxs.strip() or "（近 2 天没有事件）"))
+    appmodel, err2 = _powershell(
+        "Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-AppModel-Runtime/Admin';"
+        "StartTime=(Get-Date).AddDays(-2)} -ErrorAction SilentlyContinue | "
+        "Select-Object -First 10 | Format-List TimeCreated,Id,LevelDisplayName,Message"
+    )
+    if not err2:
+        lines.append("AppModel-Runtime/Admin：")
+        lines.append(appmodel.strip() or "（近 2 天没有事件）")
+
+    # ── 近 60 分钟 Application 里的**全部**错误（不限那几个 Provider）────────────
+    # 原来是白名单式筛选（Application Error / Hang / WER + 提到 Endfield），
+    # 于是"游戏自己注册的事件源报的错"永远看不到。用户要的是"尽量多塞、别老是判据不够"。
+    lines.append("")
+    lines.append("-- 近 60 分钟 Application 日志里的全部错误/严重（不限 Provider）--")
+    all_errors, err3 = _powershell(
+        "Get-WinEvent -FilterHashtable @{LogName='Application';Level=@(1,2);"
+        "StartTime=(Get-Date).AddMinutes(-60)} -ErrorAction SilentlyContinue | "
+        "Select-Object -First 20 | "
+        "Format-List TimeCreated,Id,ProviderName,LevelDisplayName,Message"
+    )
+    if err3:
+        lines.append(f"（抓取失败：{err3}）")
+    else:
+        lines.append(all_errors.strip() or "（近 60 分钟一条错误都没有）")
+
     lines.append("")
     lines.append("-- 反作弊 / 安全相关服务（判断「是不是被反作弊结束」看这里）--")
+    # ⚠️ 2026-10-04 扩正则：`PassGuard` 是 `EisPassGuardXInputService`（反馈者机器上 Running、
+    # 本机没有）—— 它靠 `SGuard` 这条**误打误撞**匹配进来的（`PassGuard` 里含 `sGuard`），
+    # 说明原来的正则既漏（Eis / Defender / 国产杀毒全不在）又歪（靠子串撞进来）。
+    # 这里按"反作弊 + 安全软件"两类补齐，并**保留 XInput**：那个服务名带 XInput，
+    # 而反馈者的 Player.log 恰好断在 `Using XInput` 之后，需要它出现在同一份报告里。
     services, err = _powershell(
         "Get-Service -ErrorAction SilentlyContinue | "
-        "Where-Object { $_.Name -match 'AntiCheat|ACE|SGuard|SGuard64|TenSafe|Hypergryph|Gryphline|BEDaisy|EasyAntiCheat' } | "
+        "Where-Object { $_.Name -match 'AntiCheat|ACE|SGuard|PassGuard|XInput|TenSafe|Hypergryph|Gryphline|BEDaisy|EasyAntiCheat|WinDefend|WdNisSvc|Sense|MBAMService|Avast|Avira|ekrn|Kaspersky|ESET|Huorong|火绒|QQPCMgr|Kingsoft|ZhuDongFangYu|360' } | "
         "Format-Table -AutoSize Name,DisplayName,Status,StartType"
     )
     if err:
@@ -953,6 +1000,60 @@ def collect_environment_report(config: Any, game_dir: Path | None = None) -> tup
         lines.append(f"（抓取失败：{err}）")
     else:
         lines.append(services or "（没有匹配到反作弊/官方服务）")
+
+    # ── 安全软件与它的"吃文件"记录（2026-10-04 加）─────────────────────────────
+    # 为什么：反馈者报的退出码是 `0xC0000135 STATUS_DLL_NOT_FOUND` —— "某个 DLL 加载失败"。
+    # 而用户早就要过同一条防线（原话：「如果某一文件老是被删掉，要在启动的时候出个弹窗
+    # 提醒用户，建议把某个文件夹加入杀毒软件白名单」）⇒ **杀毒隔离文件是这个项目已知的问题类**，
+    # 排查"缺哪个 DLL"必须先看一眼安全软件最近干了什么，而不是靠猜。
+    lines.append("")
+    lines.append("-- 已注册的安全软件（判断「这台机器上谁在拦文件」）--")
+    av, err = _powershell(
+        "Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntiVirusProduct "
+        "-ErrorAction SilentlyContinue | "
+        "Select-Object displayName,productState,pathToSignedProductExe | Format-List"
+    )
+    if err:
+        notes.append(f"杀毒产品查询失败：{err}")
+        lines.append(f"（抓取失败：{err}）")
+    else:
+        lines.append(av.strip() or
+                     "（SecurityCenter2 里没有注册任何杀毒产品 —— 要么真没装，"
+                     "要么系统把这块裁剪掉了；本机就是这种空结果）")
+    excludes, err = _powershell(
+        "(Get-MpPreference -ErrorAction SilentlyContinue).ExclusionPath -join ', '"
+    )
+    if not err:
+        lines.append("Defender 排除项：" + (excludes.strip() or "（无 —— 游戏/运行目录都没加白名单）"))
+
+    lines.append("")
+    lines.append("-- 安全软件的检测/隔离记录（近 7 天；**怀疑文件被吃掉时先看这里**）--")
+    defender, err = _powershell(
+        "Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-Windows Defender/Operational';"
+        "StartTime=(Get-Date).AddDays(-7)} -ErrorAction SilentlyContinue | "
+        "Where-Object { $_.Id -in 1006,1007,1008,1009,1010,1011,1012,1013,1015,1116,1117,1118,1119 } | "
+        "Select-Object -First 15 | Format-List TimeCreated,Id,Message"
+    )
+    if err:
+        notes.append(f"Defender 事件抓取失败：{err}")
+        lines.append(f"（抓取失败：{err}）")
+    else:
+        lines.append(defender.strip() or
+                     "（近 7 天没有 Defender 的检测/处置事件 —— 至少 Defender 没动过手）")
+    # **最直接的一条**：Defender 到底动过哪些文件（`Resources` 里就是被隔离/删除的路径）。
+    # 原来只能靠翻事件日志的 `Message` 去猜，而这条直接给出路径 ——
+    # "某个 DLL 加载失败"的答案常常就在这份清单里。
+    threats, err = _powershell(
+        "Get-MpThreatDetection -ErrorAction SilentlyContinue | "
+        "Sort-Object InitialDetectionTime -Descending | Select-Object -First 10 | "
+        "Format-List InitialDetectionTime,ThreatID,ActionSuccess,Resources"
+    )
+    if err:
+        lines.append(f"（Defender 威胁清单抓取失败：{err}）")
+    else:
+        lines.append("Defender 处理过的文件（Recent detections）：")
+        lines.append(threats.strip() or
+                     "（没有 —— Defender 没隔离/删过任何文件；注意这一项需要管理员权限）")
 
     lines.append("")
     lines.append("-- 崩溃转储（%LOCALAPPDATA%\\CrashDumps，只列清单不收本体）--")
@@ -984,14 +1085,56 @@ def collect_environment_report(config: Any, game_dir: Path | None = None) -> tup
         lines.append(f"{target}")
         lines.append(info if not err else f"（读取失败：{err}）")
 
+    # ── 关键运行时模块的**存在性**（2026-10-04 加）─────────────────────────────
+    # `0xC0000135` 直译就是"某个 DLL 没加载起来"。而我们的 loader proxy 是**转发到
+    # System32** 的（字符串表里写死 `C:\Windows\System32\d3dcompiler_47.D3DCompile`
+    # 这种"路径.导出名"），所以 **System32 里那几个文件在不在**直接决定 proxy 能不能把
+    # 调用转出去。以前整份包里没有这份清单 —— 真出这种事时，连"文件是不是被杀毒吃掉"
+    # 都答不上来（本机对照：vulkan-1.dll 1,730,096 B / d3dcompiler_47.dll 4,669,440 B）。
+    lines.append("")
+    lines.append("-- 关键运行时模块（System32：proxy 的转发目标 + VC 运行库）--")
+    modules, err = _powershell(
+        "$names = @('vulkan-1.dll','d3dcompiler_47.dll','nvngx_dlss.dll','nvngx_dlssg.dll',"
+        "'nvngx_dlssd.dll','dxgi.dll','d3d11.dll','d3d12.dll','msvcp140.dll','vcruntime140.dll',"
+        "'vcruntime140_1.dll','nvapi64.dll');"
+        "foreach ($n in $names) { $p = Join-Path $env:SystemRoot ('System32\\' + $n);"
+        " if (Test-Path -LiteralPath $p) { $i = Get-Item -LiteralPath $p;"
+        " '{0,-22} {1,12:N0} B  {2:yyyy-MM-dd HH:mm}  v{3}' -f $n, $i.Length, $i.LastWriteTime, $i.VersionInfo.FileVersion }"
+        " else { '{0,-22} **缺失**' -f $n } }"
+    )
+    lines.append(modules if not err else f"（抓取失败：{err}）")
+
     lines.append("")
     lines.append("-- 相关进程（注入框架 / 插件 / 启动器，判断谁在同时跑）--")
+    # ⚠️ 2026-10-04 扩正则：原来的清单只看我们自己的组件与注入框架，于是**覆盖层 /
+    # 加速 / 远程桌面**这类"会改渲染与输入行为"的常驻软件一律看不见。反馈者机器上就
+    # 有 `Todesk Virtual Display Adapter`（虚拟显示器），而它的 Player.log 恰好断在
+    # `Using XInput` 之后 —— 这类软件必须出现在同一份报告里才可能被关联上。
     procs, err = _powershell(
         "Get-Process -ErrorAction SilentlyContinue | "
-        "Where-Object { $_.ProcessName -match 'XXMI|loader|migoto|d3dx|Endfield|SecondaryMotion|Poser|webview|EndfieldModController' } | "
+        "Where-Object { $_.ProcessName -match 'XXMI|loader|migoto|d3dx|Endfield|SecondaryMotion|Poser|webview|EndfieldModController|OptiScaler|Lossless|SpecialK|RTSS|RivaTuner|Afterburner|Nahimic|Todesk|Sunlogin|AnyDesk|TeamViewer|Fraps|Bandicam|obs' } | "
         "Select-Object Id,ProcessName,@{n='StartTime';e={try{$_.StartTime}catch{''}}} | Format-Table -AutoSize"
     )
     lines.append(procs if not err else f"（抓取失败：{err}）")
+
+    # ── 系统级注入点（2026-10-04 加）─────────────────────────────────────────────
+    # 为什么："游戏进程里多了一个不认识的东西"是闪退的常见成因，而它**不一定**来自游戏
+    # 目录 —— `AppInit_DLLs`（全局注入）与 IFEO（映像劫持 / 调试器、`VerifierDlls`）
+    # 都能在游戏启动瞬间把 DLL 塞进去。两处都很短，值得常备在包里。
+    lines.append("")
+    lines.append("-- 系统级注入点（全局注入 / 映像劫持）--")
+    injections, err = _powershell(
+        "$k = 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Windows';"
+        "$v = Get-ItemProperty -Path $k -ErrorAction SilentlyContinue;"
+        "'AppInit_DLLs     = ' + [string]$v.AppInit_DLLs;"
+        "'LoadAppInit_DLLs = ' + [string]$v.LoadAppInit_DLLs;"
+        "$ifeo = 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options';"
+        "Get-ChildItem $ifeo -ErrorAction SilentlyContinue | ForEach-Object {"
+        " $p = Get-ItemProperty -Path $_.PSPath -ErrorAction SilentlyContinue;"
+        " foreach ($n in @('Debugger','AppInit_DLLs','VerifierDlls')) {"
+        "  if ($p.$n) { '{0} -> {1} = {2}' -f $_.PSChildName, $n, $p.$n } } }"
+    )
+    lines.append(injections.strip() if not err else f"（抓取失败：{err}）")
 
     text = "\n".join(lines) + "\n"
     reason = "；".join(notes)
@@ -1017,11 +1160,24 @@ def game_dir_inventory_text(config: Any, game_dir: Path | None, *, limit: int = 
     lines.append(f"游戏目录: {game}")
     lines.append("")
     lines.append("== 注入 proxy（决定游戏能否加载 plugin\\*.dll）==")
+    # ⚠️ 只有这两个是**我们真的会借它注入**的 loader 底座。`LOADER_PROXY_MODULES` 里
+    # 其余那些（`dxgi.dll` / `d3d11.dll` / `d3d12.dll` / `nvapi64.dll` / `winmm.dll`）
+    # 是"别的注入器可能占用的位置"，**正常游戏目录本来就没有** —— 对它们报"缺失"纯属噪音，
+    # 会把真正要看的那两行淹掉（本机实测：一次刷出 5 行假警报）。
+    required_loaders = {"d3dcompiler_47.dll", "vulkan-1.dll"}
     for name in reshade_integration.LOADER_PROXY_MODULES:
         path = game / name
         parked = path.with_name(name + reshade_integration.LOADER_PROXY_DISABLED_SUFFIX)
         backup = path.with_name(name + ".bak")
-        if not path.is_file() and not parked.is_file():
+        # ⚠️⚠️ **不存在的也要列出来**（2026-10-04 改）。原来这一句是
+        # `if not path.is_file() and not parked.is_file(): continue` —— 于是
+        # "**proxy 和 .bak 都不在**"这种最危险的状态（游戏可能因为缺这个模块直接起不来，
+        # 而且没有任何可还原的原版）在清单里**一个字都不出现**，恰恰是最该被看见的情况
+        # 被静默跳过了。反馈者这次的退出码正是 `STATUS_DLL_NOT_FOUND`，这一行必须永远可见。
+        if not path.is_file() and not parked.is_file() and not backup.is_file():
+            if name.lower() in required_loaders:
+                lines.append(f"{name}: **缺失（proxy 与原版备份都不在）** —— "
+                             "游戏若依赖它会直接起不来，而且没有可还原的原版")
             continue
         try:
             is_proxy = reshade_integration.looks_like_loader_proxy(path) if path.is_file() else False
@@ -1081,6 +1237,43 @@ def game_dir_inventory_text(config: Any, game_dir: Path | None, *, limit: int = 
                 lines.append(f"    {child.name}\\  （{count} 项）")
     except OSError:
         pass
+    # ── 值得看的子目录**内容**（2026-10-04 加）─────────────────────────────────
+    # 上面那一段只列子目录名与项数 —— 而"游戏为什么没起来"的答案往往就在其中某几个里：
+    # `CrashSightLog\` 是**游戏自己的崩溃日志**（`0xC0000135` 那次唯一可能指名道姓的地方）、
+    # `_DLSS5_Backup\` 是我们动过 DLSS5 相关文件的备份、`sdklogs\` 是官方 SDK 的日志。
+    # 只列名字等于知道"那儿有东西"却看不到是什么。
+    lines.append("")
+    lines.append("== 值得看的子目录内容（最新 8 个）==")
+    wanted = ["_DLSS5_Backup", "CrashSightLog", "sdklogs", "launcher_tmp", "U8Data",
+              "HGEventLog_Encrypted"]
+    try:
+        wanted += [p.name for p in game.glob("_nvngx_before_dlss5*") if p.is_dir()]
+    except OSError:
+        pass
+    for sub in wanted:
+        folder = game / sub
+        if not folder.is_dir():
+            continue
+        try:
+            items = sorted((p for p in folder.rglob("*") if p.is_file()),
+                           key=lambda p: p.stat().st_mtime, reverse=True)
+        except OSError:
+            items = []
+        if not items:
+            lines.append(f"    {sub}\\  （空）")
+            continue
+        lines.append(f"    {sub}\\  （{len(items)} 个文件）")
+        for entry in items[:8]:
+            try:
+                stat = entry.stat()
+            except OSError:
+                continue
+            try:
+                rel = entry.relative_to(folder).as_posix()
+            except ValueError:
+                rel = entry.name
+            lines.append(f"        {stat.st_size:>12,} B  "
+                         f"{datetime.fromtimestamp(stat.st_mtime).isoformat(timespec='seconds')}  {rel}")
     return "\n".join(lines) + "\n"
 
 
@@ -1214,8 +1407,75 @@ def _capture_postmortem(config: Any, game_dir: Path | None, reason: str) -> None
         return
     _capture_windows_events(config)
     bundle = create_diagnostic_bundle(config, game_dir=game_dir,
-                                      note=f"auto-postmortem: {reason}", manifest=manifest)
+                                      note=f"auto-postmortem: {_describe_reason(reason)}",
+                                      manifest=manifest)
     log_event(config, "已生成诊断包", category="crash", path=bundle, reason=reason)
+
+
+# ── 退出码 → 人话（2026-10-04 加）─────────────────────────────────────────────
+# 为什么需要：反馈者机器上抓到 `exit_code=3221225781`，而当时包里**只有裸数字** ——
+# 事后得靠人工把它折成 `0xC0000135` 再去查表，才知道是 `STATUS_DLL_NOT_FOUND`。
+# 这个码本身是最强的判据之一（"有 DLL 没加载起来"），必须一抓下来就写成能直接读的形态。
+# 取值：Windows NTSTATUS 常量（ntstatus.h）+ 常见 CRT/运行时退出码。
+_EXIT_CODE_NAMES: dict[int, tuple[str, str]] = {
+    0xC0000005: ("STATUS_ACCESS_VIOLATION", "访问了非法内存 —— 典型的内存/兼容性问题"),
+    0xC0000017: ("STATUS_NO_MEMORY", "内存不足"),
+    0xC000001D: ("STATUS_ILLEGAL_INSTRUCTION",
+                 "执行了非法指令（CPU 指令集不匹配，或注入器写坏了指令流）"),
+    0xC0000022: ("STATUS_ACCESS_DENIED", "权限被拒绝"),
+    0xC000007B: ("STATUS_INVALID_IMAGE_FORMAT", "32/64 位混用或映像损坏"),
+    0xC0000094: ("STATUS_INTEGER_DIVIDE_BY_ZERO", "整数除零"),
+    0xC0000096: ("STATUS_PRIVILEGED_INSTRUCTION", "执行了特权指令"),
+    0xC00000FD: ("STATUS_STACK_OVERFLOW", "栈溢出"),
+    0xC0000135: ("STATUS_DLL_NOT_FOUND",
+                 "**有 DLL 加载失败** —— 被杀毒隔离 / 缺 VC 运行库 / 注入的 proxy 没有转发成功"),
+    0xC0000139: ("STATUS_ENTRYPOINT_NOT_FOUND",
+                 "DLL 里找不到入口点 —— 典型的**版本不匹配**（放错了另一版的 dll）"),
+    0xC0000142: ("STATUS_DLL_INIT_FAILED", "DLL 找到了、但初始化失败"),
+    0xC0000374: ("STATUS_HEAP_CORRUPTION", "堆被写坏"),
+    0xC0000409: ("STATUS_STACK_BUFFER_OVERRUN",
+                 "栈保护触发（/GS）—— 缓冲区越界，或注入器写坏了内存"),
+    0xC0000417: ("STATUS_INVALID_CRUNTIME_PARAMETER", "传给 CRT 的参数非法"),
+    0xC0000602: ("STATUS_FAIL_FAST_EXCEPTION", "主动 fail-fast（断言/完整性检查没过）"),
+    0x40000015: ("FATAL_APP_EXIT", "CRT 致命退出"),
+}
+
+
+def describe_exit_code(code: Any) -> str:
+    """把退出码写成人能读的一行；**认不出就如实说认不出，不猜**。
+
+    退出码在 Windows 上是 32 位无符号，但 `ctypes` 有时给回带符号整数 —— 这里统一
+    折成无符号再查表（否则 `0xC0000135` 会显示成 `-1073741515`，没人认得出）。
+    """
+    if code is None:
+        return "（拿不到退出码 —— 进程句柄没打开，或进程已被 TerminateProcess 结束）"
+    try:
+        value = int(code)
+    except (TypeError, ValueError):
+        return f"（退出码不是整数：{code!r}）"
+    unsigned = value & 0xFFFFFFFF
+    if unsigned == 0:
+        return "0x00000000 正常退出"
+    text = f"0x{unsigned:08X}（{unsigned}）"
+    known = _EXIT_CODE_NAMES.get(unsigned)
+    if known:
+        return f"{text} {known[0]} —— {known[1]}"
+    if unsigned <= 0xFF:
+        return f"{text} 普通非零退出码，含义由程序自己决定"
+    return f"{text} 不是已知的 NTSTATUS —— 需要对照该程序自己的文档"
+
+
+def _describe_reason(reason: str) -> str:
+    """给 `exit_code=…` 这类内部 reason 补上人能读的解释。
+
+    ⚠️ 只用于写进诊断包（`note`），**绝不参与 `_is_normal_exit_reason` 的判据** ——
+    那个函数按精确字符串比对（`exit_code=0`），改格式会把判据弄坏。
+    """
+    text = str(reason or "").strip()
+    match = re.fullmatch(r"exit_code=(-?\d+)", text)
+    if not match:
+        return text
+    return f"{text} → {describe_exit_code(int(match.group(1)))}"
 
 
 def _is_normal_exit_reason(reason: str) -> bool:
@@ -1273,7 +1533,10 @@ def _monitor_process(config: Any, game_dir: Path | None, image_name: str, timeou
                               level="WARN", pid=found_pid)
                 if handle is not None and _process_exited(handle):
                     code = _process_exit_code(handle)
-                    log_event(config, "游戏进程已退出", category="crash", image=image_name, pid=pid, exit_code=code)
+                    # 退出码必须**连同人话一起落盘**（2026-10-04）：光一个 3221225781，
+                    # 事后要靠人工折成 0xC0000135 再查表才知道是"有 DLL 没加载起来"。
+                    log_event(config, "游戏进程已退出", category="crash", image=image_name, pid=pid,
+                              exit_code=code, exit_text=describe_exit_code(code))
                     _close_handle(handle)
                     _capture_postmortem(config, game_dir, f"exit_code={code}")
                     return
@@ -1769,6 +2032,33 @@ def create_diagnostic_bundle(
                 for entry in payloads[:80]:
                     arc = "game/SecondaryMotion/" + entry.relative_to(secondary).as_posix()
                     _zip_tracked(archive, entry, arc, manifest, max_bytes=2 * 1024 * 1024)
+            # ①d **游戏自己的崩溃日志**（2026-10-04 加，反馈者 AST 那次暴露的缺口）。
+            #     那次游戏退出码是 `0xC0000135 STATUS_DLL_NOT_FOUND`（"有 DLL 没加载起来"），
+            #     而 Windows 侧**一条 WER 都没有**（被 TerminateProcess / 显式退出码结束不留事件）。
+            #     游戏自带的 CrashSight（崩溃上报 SDK）是**唯一**可能指名道姓写出"崩在哪、
+            #     缺什么"的现场 —— 而整份诊断包以前完全没采集它，判据因此断在这里。
+            crashsight = game_path / "CrashSightLog"
+            if crashsight.is_dir():
+                try:
+                    cs_logs = sorted((p for p in crashsight.rglob("*") if p.is_file()),
+                                     key=lambda p: p.stat().st_mtime, reverse=True)
+                except OSError:
+                    cs_logs = []
+                for entry in cs_logs[:12]:
+                    arc = "game/CrashSightLog/" + entry.relative_to(crashsight).as_posix()
+                    _zip_tracked(archive, entry, arc, manifest, max_bytes=2 * 1024 * 1024)
+            # ①e 反作弊目录里的文本（ACE 的日志/配置）—— 判断"是不是被反作弊结束"的一手材料。
+            anticheat = game_path / "AntiCheatExpert"
+            if anticheat.is_dir():
+                try:
+                    ac_files = [p for p in anticheat.rglob("*") if p.is_file()
+                                and p.suffix.lower() in (".log", ".txt", ".json", ".ini", ".dat")]
+                    ac_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+                except OSError:
+                    ac_files = []
+                for entry in ac_files[:20]:
+                    arc = "game/AntiCheatExpert/" + entry.relative_to(anticheat).as_posix()
+                    _zip_tracked(archive, entry, arc, manifest, max_bytes=1024 * 1024)
 
         # ② EFMI / 3DMigoto 两侧的 ini 与日志（**两侧都收**，谁是谁写清楚）
         for label, source in _try_capture(config, "EFMI 日志候选", efmi_log_candidates, config) or []:

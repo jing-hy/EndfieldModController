@@ -487,9 +487,25 @@ def ensure_loader(config: AppConfig, log: Log = None) -> dict[str, Any]:
         if reshade_integration.looks_like_loader_proxy(target):
             continue                       # 已经有 loader 了（不管是谁装的）
         try:
-            if target.is_file() and not (game / f"{name}.bak").is_file():
-                shutil.copy2(target, game / f"{name}.bak")
+            # ⚠️ **备份语义（2026-10-04 修）**：原判据只看"`.bak` 存在吗"，于是
+            # "`.bak` 在、但它其实是**从 System32 补来的**（不是游戏原本那份）"这种情况会
+            # **跳过备份**，紧接着下面那句就把 proxy 复制过去 ⇒ 游戏目录里那份**真原版
+            # 被永久覆盖**，"一键还原"也还原不回它。对照证据：本机（能正常玩）
+            # `d3dcompiler_47.dll.bak` = 4,524,496 B 且 mtime = 游戏安装日 2026-01-24；
+            # 反馈者 = 4,669,440 B（System32 版）。
+            # 现在：`.bak` 缺失就正常备份；`.bak` 已在（可能是错的）就**另存一份固定名**
+            # `.bak.game-original` —— **备份只增不删**，一份都不覆盖，两份都留着。
+            # 固定名（而不是时间戳）是为了幂等：每次启动不会堆出一串副本。
+            backup = game / f"{name}.bak"
+            if target.is_file() and not backup.is_file():
+                shutil.copy2(target, backup)
                 actions.append(f"备份原版 {name} → {name}.bak")
+            elif target.is_file():
+                alt = game / f"{name}.bak.game-original"
+                if not alt.is_file():
+                    shutil.copy2(target, alt)
+                    actions.append(f"原版 {name} 另存为 {alt.name}"
+                                   f"（已有 .bak，按「只增不删」不覆盖它）")
             shutil.copy2(source, target)
             actions.append(f"部署 loader {name}")
         except OSError as exc:

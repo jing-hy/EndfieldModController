@@ -810,6 +810,27 @@ def is_dependency_package(name: str, path: Path | None = None) -> bool:
         return True
 
 
+def site_category_character(meta: dict[str, Any]) -> str:
+    """从香蕉网分类路径里抠出**角色名**（`Skins / Operators / Arcane` ⇒ `Arcane`）。
+
+    2026-10-04 接入（用户：「把 mod 在香蕉网中的分类接入管理器的分类」）。
+    为什么可信：那是**作者投稿时自己挑的**分类；实测终末地全量 695 个 Mod **100% 都带**，
+    根只有 `Skins` / `UI` / `Other-Misc` 三个。
+
+    ⚠️ 只在 `Skins / Operators / <角色>` 这一种形态下取值 —— 其余（`Skins / Weapons`、
+    `UI`、`Other/Misc`、以及没见过的分类）**一律返回空**，不猜。
+    """
+    path = str(meta.get("site_category") or "")
+    if not path:
+        return ""
+    parts = [part.strip() for part in path.split("/") if part.strip()]
+    if len(parts) < 3:
+        return ""
+    if parts[0].lower() != "skins" or parts[1].lower() != "operators":
+        return ""
+    return parts[-1]
+
+
 def infer_kind_and_group(
     rel_parts: Sequence[str],
     meta: dict[str, Any],
@@ -829,6 +850,15 @@ def infer_kind_and_group(
     kind = str(meta.get("kind") or "").strip().lower()
     explicit_group = str(meta.get("group") or meta.get("character") or "").strip()
     matched = explicit_group or match_character(" ".join(rel_parts).lower())
+    # ── 网站分类兜底角色（2026-10-04 接入）──────────────────────────────────────
+    # 名字/目录里看不出是谁时，拿香蕉网分类里的角色名再试一次
+    #（`Skins / Operators / Arcane` ⇒ `Arcane` ⇒ 别名表命中「诀」）。
+    # ⚠️ 只在**还没匹配到**时兜底，**绝不覆盖**已有识别结果 —— 名字/ini 是一手证据，
+    #    网站分类是作者填的表单，两者冲突时以本地证据为准。
+    if not matched:
+        _site_char = site_category_character(meta)
+        if _site_char:
+            matched = match_character(_site_char.lower())
     group = matched
     if not group:
         group = rel_parts[0] if rel_parts else "未分类"
@@ -1120,6 +1150,13 @@ def looks_like_assist(
         return False
     lowered = " ".join(rel_parts).lower() + " " + str(meta.get("name", "")).lower()
     if any(hint in lowered for hint in ASSIST_HINTS):
+        return True
+    # ②b 香蕉网把它归在 `UI` 根分类下（**作者投稿时自己选的**，2026-10-04 接入）——
+    #     与 `ASSIST_HINTS` 里的 `ui` / `hud` / `hide` 是同一个方向，只是从"在名字里猜"
+    #     升级成"按权威分类判"。
+    #     ⚠️ 上面两条否决项（**有换装资源** / **能识别出角色**）照旧先生效 ⇒ 真皮肤不会被它
+    #     误伤：皮肤一定带 Meshes/Textures（第一关就否掉），而能认出角色的也会在第二关否掉。
+    if str(meta.get("site_category_root") or "").strip().lower() == "ui":
         return True
     try:
         for ini in list(path.rglob("*.ini"))[:4]:
