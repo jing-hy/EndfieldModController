@@ -158,27 +158,47 @@ def _write_marker(config: AppConfig, key: str, version: str, extra: dict[str, An
 # ---------------------------------------------------------------------------
 # 状态
 # ---------------------------------------------------------------------------
+def _required_path(config: AppConfig, rel: str) -> Path:
+    """组件文件的绝对路径。
+
+    `assets/...` 开头的是**按显卡架构下载的运行库候选**（落在数据根的 assets 下，
+    由 `runtime_assets` 的选择逻辑消费）；其余都相对 `runtime\\dlss5`。
+    """
+    if rel.replace("\\", "/").startswith("assets/"):
+        return config.resolve_path(rel)
+    return config.dlss5_path / rel
+
+
 def _component_state(config: AppConfig, component: Component) -> dict[str, Any]:
-    missing = [rel for rel in component.required if not (config.dlss5_path / rel).is_file()]
+    missing = [rel for rel in component.required if not _required_path(config, rel).is_file()]
     marker = read_marker(config).get(component.key) or {}
+    optional = component.key.startswith("dlssnr_")
     return {
         "display": component.display,
         "source": component.upstream,
         "install_dir": str(config.dlss5_path),
         "present": not missing,
         "required": component.key in {"reshade_base", "dlss5_feed", "immersse"},
-        "needed": bool(missing),
-        "status": "已安装" if not missing else f"缺失 {len(missing)} 个文件",
+        # ⚠️ **可选的运行库变体不算"必须补"**：它缺失是正常状态（随包那份已经覆盖本机
+        # 架构），所以 `needed` 固定 False —— 自检与「一键更新全部」都不会去下这 ~110 MB。
+        "needed": False if optional else bool(missing),
+        "status": ("未安装（可选）" if optional and missing
+                   else ("已安装" if not missing else f"缺失 {len(missing)} 个文件")),
         "version": str(marker.get("version") or ""),
         "enabled": True,
+        "optional": optional,
         "missing": missing,
         "note": component.note,
     }
 
 
 def component_report(config: AppConfig) -> dict[str, dict[str, Any]]:
-    """依赖页用：每个在线组件的在位状态。"""
-    return {component.key: _component_state(config, component) for component in COMPONENTS}
+    """依赖页用：每个在线组件的在位状态（含**按本机显卡**决定的可选运行库变体）。"""
+    report = {component.key: _component_state(config, component) for component in COMPONENTS}
+    optional = dlssnr_variant_component(config)
+    if optional is not None:
+        report[optional.key] = _component_state(config, optional)
+    return report
 
 
 def check_updates(config: AppConfig, log: Callable[[str], None] | None = None) -> dict[str, Any]:
@@ -448,6 +468,153 @@ def install_immersse(
             "message": f"已安装 {len(written)} 个文件（{revision}）"}
 
 
+# ---------------------------------------------------------------------------
+# 按显卡架构的**可选**运行库变体（2026-10-05 接入社区镜像）
+# ---------------------------------------------------------------------------
+# 用户 2026-10-05 要求：「改造随包内容和下载链路，针对不同 gpu 自动切换下载内容」。
+# 随包那份（`official`，只含 sm_120）+ 社区 `sf`（含 sm_75/86/89）**已覆盖全部受支持
+# 型号**，所以一键启动永远不需要下载运行库；这里提供的是 40 系的**可选优化**：
+# `rtx40` 是把内核重定向到 sm_89 的那一版，比 `sf` 的 FP16 路径更贴合 Ada。
+#
+# ⚠️ 该镜像的 release **tag 不是版本号语义**（`dlssnr-310.8.0-RTX40` 这种），
+# 所以只能按 tag **精确匹配**，不能走 `releases/latest`（那个指向最后发布的任一组件）。
+RHI_REPO = "RankFTW/rhi-repo"
+DLSSNR_VARIANT_TAGS: dict[str, str] = {
+    "official": "dlssnr-310.8.0",
+    "rtx40": "dlssnr-310.8.0-RTX40",
+    "sf": "dlssnr-310.8.SF-v2",
+}
+# 每个变体**必须**内含的架构（装错文件时当场拒绝，而不是等进游戏看到 NR 帧恒为 0）
+DLSSNR_VARIANT_ARCH: dict[str, int] = {"official": 120, "rtx40": 89, "sf": 86}
+# 哪个变体给哪个架构用（依赖页按本机显卡决定显示与 needed）
+DLSSNR_VARIANT_FOR_SM: dict[int, str] = {120: "official", 89: "rtx40", 86: "sf", 75: "sf"}
+
+
+def dlssnr_variant_key(variant: str) -> str:
+    return f"dlssnr_{variant}"
+
+
+def dlssnr_variant_component(config: AppConfig) -> Component | None:
+    """按**本机显卡架构**给出"可选优化运行库"组件；这台机器用不上就返回 None。
+
+    只对**下载能得到更贴合版本**的机器显示：
+      * 40 系（sm_89）→ `rtx40`（随包给的是 `sf`，能用但非最优）；
+      * 50/30/20 系 → None（随包那份就是该架构的首选，没有更好的可下）。
+    """
+    try:
+        from . import deviceinfo
+
+        sm = deviceinfo.best_rtx_sm()
+    except Exception:  # noqa: BLE001
+        return None
+    if sm != 89:
+        return None
+    return Component(
+        dlssnr_variant_key("rtx40"),
+        "DLSS NR 运行库 · RTX 40 优化版（可选）",
+        f"https://github.com/{RHI_REPO}",
+        (f"assets/nvngx/nvngx_dlssnr.rtx40.dll",),
+        "把神经渲染内核重定向到 Ada(sm_89) 的那一版，比随包的通用版更贴合 40 系；"
+        "不装也能正常用（随包版含 sm_89）,装了一键启动会自动切到它。",
+    )
+
+
+def _dlssnr_variant_target(config: AppConfig, variant: str) -> Path:
+    from . import runtime_assets
+
+    root = runtime_assets.group_root(config, "nvngx") or config.resolve_path("assets/nvngx")
+    return root / f"nvngx_dlssnr.{variant}.dll"
+
+
+def install_dlssnr_variant(
+    config: AppConfig,
+    variant: str = "rtx40",
+    *,
+    log: Callable[[str], None] | None = None,
+    force: bool = False,
+) -> dict[str, Any]:
+    """从社区镜像取**按架构重定向的运行库**，放进 `assets\\nvngx\\` 当候选。
+
+    落点是"裸 dll"（不解压成压缩分卷）：`runtime_assets._dlssnr_sources()` 会把它当
+    **下载候选**扫到，选中后由 `ensure_dlssnr()` 复制成 `runtime\\dlss5\\nvngx_dlssnr.dll`
+    —— 于是"下载链路"和"随包链路"共用同一套选择/落盘逻辑。
+    """
+    import shutil
+
+    from . import fastnet, github, runtime_assets
+
+    tag = DLSSNR_VARIANT_TAGS.get(variant)
+    if not tag:
+        return {"ok": False, "changed": False, "message": f"未知的运行库变体：{variant}"}
+    want_sm = DLSSNR_VARIANT_ARCH.get(variant)
+    dest = _dlssnr_variant_target(config, variant)
+    marker = read_marker(config).get(dlssnr_variant_key(variant)) or {}
+    if dest.is_file() and not force:
+        archs = runtime_assets.dll_architectures(dest)
+        if not want_sm or want_sm in archs:
+            return {"ok": True, "changed": False, "version": str(marker.get("version") or tag),
+                    "message": f"已就位（{variant}，内含 sm_{want_sm}）"}
+    try:
+        release = github.api_get(f"https://api.github.com/repos/{RHI_REPO}/releases/tags/{tag}")
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "changed": False,
+                "message": f"查询镜像 release 失败（{tag}）: {exc}"}
+    assets = (release or {}).get("assets") or []
+    asset = next((item for item in assets
+                  if str(item.get("name") or "").lower().endswith(".zip")
+                  and "dlssnr" in str(item.get("name") or "").lower()), None)
+    if asset is None:
+        return {"ok": False, "changed": False,
+                "message": f"镜像里 {tag} 没有可用的 zip 资产（上游可能已变动）"}
+    url = str(asset.get("browser_download_url") or "")
+    if not url:
+        return {"ok": False, "changed": False, "message": f"{tag} 的资产没有下载地址"}
+
+    with tempfile.TemporaryDirectory(prefix="mc-dlssnr-") as tmp:
+        archive = Path(tmp) / str(asset.get("name") or "dlssnr.zip")
+        _log(log, f"下载运行库变体 {variant}（{int(asset.get('size') or 0) / 1048576:.1f} MB）…")
+        report = fastnet.download(url, archive, log=log, timeout=1800)
+        if not report.ok:
+            return {"ok": False, "changed": False, "message": f"下载失败：{report.message}"}
+        try:
+            with zipfile.ZipFile(archive) as archive_zip:
+                member = next(
+                    (name for name in archive_zip.namelist()
+                     if Path(name).name.lower().startswith("nvngx_dlssnr")
+                     and name.lower().endswith(".dll")),
+                    "",
+                )
+                if not member:
+                    return {"ok": False, "changed": False,
+                            "message": f"{tag} 的包里没有 nvngx_dlssnr.dll"}
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                staging = dest.with_name(dest.name + f".mc-tmp-{os.getpid()}")
+                with archive_zip.open(member) as source, open(staging, "wb") as sink:
+                    shutil.copyfileobj(source, sink, 1 << 22)
+        except (OSError, zipfile.BadZipFile) as exc:
+            return {"ok": False, "changed": False, "message": f"解包失败：{exc}"}
+        archs = runtime_assets.dll_architectures(staging)
+        if want_sm and want_sm not in archs:
+            try:
+                staging.unlink()
+            except OSError:
+                pass
+            return {"ok": False, "changed": False,
+                    "message": (f"这个包与变体 {variant} 不符：它内含 "
+                                f"{sorted(archs) or '读不到的架构'}，缺少 sm_{want_sm}"
+                                f"（镜像可能换了内容，已拒绝安装）")}
+        os.replace(staging, dest)
+    _write_marker(config, dlssnr_variant_key(variant), tag, {"variant": variant, "arch": sorted(archs)})
+    # 装完立刻按本机架构重选一次：让"一键启动会自动切到它"这句话当场成立
+    try:
+        switched = runtime_assets.ensure_dlssnr(config, log=log, force=True)
+        note = switched.message if switched.ok else f"落位失败：{switched.message}"
+    except Exception as exc:  # noqa: BLE001
+        note = f"落位失败：{exc}"
+    return {"ok": True, "changed": True, "version": tag,
+            "message": f"已安装 {variant} 变体（内含 sm_{want_sm}）；{note}"}
+
+
 INSTALLERS: dict[str, Callable[..., dict[str, Any]]] = {
     "reshade_base": install_reshade_base,
     "dlss5_feed": install_dlss5_feed,
@@ -457,6 +624,12 @@ INSTALLERS: dict[str, Callable[..., dict[str, Any]]] = {
 
 def install(config: AppConfig, key: str, *, log: Callable[[str], None] | None = None,
             force: bool = False) -> dict[str, Any]:
+    # 运行库变体（`dlssnr_rtx40` 等）走自己的安装器：它要按**本机架构**去镜像里挑
+    # 不同的 release tag，不是固定 URL，所以塞不进 `INSTALLERS` 那张静态表。
+    if key.startswith("dlssnr_"):
+        result = install_dlssnr_variant(config, key[len("dlssnr_"):], log=log, force=force)
+        result.setdefault("key", key)
+        return result
     installer = INSTALLERS.get(key)
     if installer is None:
         return {"ok": False, "changed": False, "message": f"未知组件: {key}"}

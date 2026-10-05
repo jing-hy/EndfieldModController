@@ -13,7 +13,7 @@
   <a href="LICENSE"><img alt="MIT 许可" src="https://img.shields.io/github/license/jing-hy/EndfieldModController?label=License&amp;color=3DA639"></a>
 </p>
 
-<p>Windows 桌面程序（Python + Pywebview，界面为 Vue 3 + Vite + Tailwind），单文件 exe。当前版本 <b>1.0.14</b> —— <a href="https://github.com/jing-hy/EndfieldModController/releases">下载最新版</a></p>
+<p>Windows 桌面程序（Python + Pywebview，界面为 Vue 3 + Vite + Tailwind），单文件 exe。当前版本 <b>1.0.15</b> —— <a href="https://github.com/jing-hy/EndfieldModController/releases">下载最新版</a></p>
 
 <p>📖 安装细节、目录结构、逐项故障排查、开发与发布流程 → <b><a href="docs/README.detailed.md">详细文档</a></b></p>
 
@@ -104,7 +104,9 @@ Mod 自带的按键各不相同（`←`、`Ctrl+5`、`Alt 0`…），装多了�
 先看启动日志里自检有没有报错；再确认游戏内超分选的是 **DLSS**（选 FSR / XeSS 时神经渲染不会绑定）。更细的排查顺序见详细文档。
 
 **Q：DLSS5 的开关默认是关的 / 想打开被拒绝了？**
-说明你的显卡是 **RTX 40 系（或更早）**。DLSS5 神经渲染**首发只支持 RTX 50 系**（英伟达已表示后续会扩展到 40 系，但目前驱动/运行库还没放开），40 系机器上它一帧也出不来 —— 所以程序**默认帮你关掉、也不让你打开**，免得你以为装坏了去折腾（分辨率、驱动、重装都是白费）。等官方放开之后更新一下版本就能用了。
+说明你的显卡**没有 tensor core** —— DLSS5 神经渲染必须跑在 NVIDIA 自己的运行库上，需要 **RTX 20 系及以上**；GTX 10 系及以下、GTX 16 系、A 卡与 Intel 核显都不行。这类机器上它一帧也出不来，所以程序**默认帮你关掉、也不让你打开**，免得你以为装坏了去折腾（改分辨率、换驱动、重装都是白费）。
+
+RTX 20 / 30 / 40 / 50 系都能用：程序会**按你的显卡架构自动准备对应的运行库**，不需要你做任何额外设置（40 系还可以在依赖页选装一个更贴合 Ada 的优化版，不装也照样能用）。
 
 **Q：第一人称进去是英文？**
 在它自己的面板里把语言切成中文即可，程序会记住（这个属于个人偏好，程序不会去覆盖你的选择）。若面板里中文显示不出来，多半是 ReShade 的字体被改成了不含中文的字体，把 ReShade 的字体设成中文字体、或点一次「一键启动」由程序补回默认中文字体。
@@ -147,6 +149,7 @@ Mod 自带的按键各不相同（`←`、`Ctrl+5`、`Alt 0`…），装多了�
 | [Endfield Poser](https://github.com/OedoSoldier/Endfield-Poser) | 摆姿 / MMD 播放（可选） | **AGPL-3.0** —— **不随包分发**，只从官方 Release 下载并调用它自己的安装向导 |
 | **Endfield PS-T DrawSection Fix** | 修老 Mod | **B站 up 主 可可HXL**《终末地Mod修复工具包》v1.5；版权归原作者，**随包分发** |
 | NVIDIA NGX 运行库 | DLSS 与神经渲染 | NVIDIA 版权，随包仅为免去手动下载 |
+| **社区 DLSS NR 运行库变体**（`sf` / 优化版 `rtx40`） | 让 **RTX 20 / 30 / 40 系**也能跑 DLSS5 神经渲染（把内核重定向到对应架构） | 取自社区镜像 [RankFTW/rhi-repo](https://github.com/RankFTW/rhi-repo)；NVIDIA 运行库本身闭源，此处按其发布分发 |
 
 **特别声明**：随包分发的第一人称**中文**补丁由 **B站 up 主 Hirahido** 制作，版权归其所有；Mod 修复工具由 **B站 up 主 可可HXL** 制作，版权归其所有。本程序只做分发与安装编排、不修改其内容 —— 两位作者若不希望被随包分发，请在 issue 里说明，我们会立即移除。
 

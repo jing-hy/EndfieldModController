@@ -654,10 +654,12 @@ class EndfieldModControllerApi:
 
         if component not in ("dlss5", "firstperson"):
             return {"ok": False, "message": f"未知组件: {component}"}
-        # **按显卡代次闸门**（用户 2026-10-01 要求：「开启时检测机器，如果不是 50 系就默认关
-        # dlss5，开启 dlss5 的时候弹窗说明拒绝」）—— DLSS5 首发只支持 RTX 50 系，40 系及更早
-        # 的机器上它一帧都出不来（NGX 回 `0xBAD00001` FeatureNotSupported）。与其让它"开着但
-        # 没用"，不如明确拒绝并说明原因；**拒绝时不写配置**，前端会把开关弹回去。
+        # **按显卡支持范围闸门**（用户 2026-10-01 要求「开启时检测机器，不是 50 系就默认关、
+        # 开启时弹窗说明拒绝」；**2026-10-05 范围扩大**：原话「去掉所有对非 50 系的锁，
+        # 换成对 a 卡和 10 系及以下和核显」）。判据的唯一实现仍是 `deviceinfo.dlss5_supported()`：
+        # **NVIDIA + 型号名含 RTX（= 有 tensor core）⇒ RTX 20 系及以上都支持**。
+        # 不支持的机器上它一帧都出不来（NGX 回 `0xBAD00001`），与其"开着但没用"，
+        # 不如明确拒绝并说明原因；**拒绝时不写配置**，前端会把开关弹回去。
         if component == "dlss5" and enabled:
             from . import deviceinfo
 
@@ -674,8 +676,10 @@ class EndfieldModControllerApi:
                     "message": (
                         f"这台机器的显卡是 {gpu}，{reason}\n\n"
                         "所以这个开关不给你开 —— 开了也是白开：进游戏后面板会一直显示"
-                        "「成功NR帧 0」和 `最新NR NGX结果 0xBAD00001`，还会让你误以为是装坏了。\n\n"
-                        "等 NVIDIA 放开 RTX 40 系之后，这个开关会自动变得可用（到时更新一下就行）。"
+                        "「成功NR帧 0」和 `最新NR NGX结果 0xBAD00001`。\n\n"
+                        "DLSS5 神经渲染必须跑在 NVIDIA 自己的运行库上，而那需要 tensor core"
+                        "（RTX 20 系及以上才有）—— 这是硬件层面的前提，不是配置问题，"
+                        "也不用重装或改画质档位。"
                     ),
                 }
         key = "dlss5_addon_enabled" if component == "dlss5" else "firstperson_addon_enabled"
@@ -694,6 +698,50 @@ class EndfieldModControllerApi:
         )
         return result
 
+    def import_assets_bundle(self) -> dict[str, Any]:
+        """依赖页「导入随包 zip…」：导入**依赖的随包 zip**（不是 Mod 压缩包）。
+
+        用户 2026-10-05 要求：「**依赖页加入本地随包文件，可以导入本地的随包 zip**」，
+        随后补充「**需要写明是依赖的随包 zip，而且也要检查**」。所以：
+        * 文案处处点明这是**依赖组件**（Mod 压缩包走 Mod 库那条路，界面与文件框都写清楚）；
+        * 导入**前**逐条校验（`runtime_assets.inspect_assets_zip`）：manifest 要能解析、
+          它列出的每个文件的**全部分卷都得在包里**，缺一卷就**拒绝**并列出缺什么 ——
+          避免"导入看着成功、之后解压到处报错"这种最难查的状态。
+
+        典型场景：单文件 exe 用户本地没有 `assets\\`、从别的机器或网盘拿到了
+        `assets-bundle.zip`、或从社区镜像下了单份 `nvngx_dlssnr_310.8.SF-v2.zip`。
+
+        实现：系统原生文件选择框（只列 zip）+ `runtime_assets.import_bundle`
+        （安全解包：只接受 zip 里 `assets/…` 的条目、拒绝 `..` 穿越；单份运行库则按
+        fatbin 判定它属于哪个变体，落到 `assets\\nvngx\\` 的候选位）。
+        """
+        from . import runtime_assets
+
+        picked = self.choose_path(
+            directory=False,
+            title="选择依赖的随包 zip（assets-bundle.zip 或单个组件 zip；不是 Mod 包）",
+            file_types=("Zip 压缩包 (*.zip)",),
+        )
+        if not picked.get("ok"):
+            if picked.get("cancelled"):
+                return {"ok": False, "cancelled": True, "message": "cancelled"}
+            return {"ok": False, "message": picked.get("message") or "没有选到文件"}
+        archive = str(picked.get("path") or "")
+        try:
+            result = runtime_assets.import_bundle(self.config, archive)
+        except Exception as exc:  # noqa: BLE001
+            launcher._append_log(self.config, f"导入本地随包文件失败：{archive} —— {exc}")
+            return {"ok": False, "message": f"导入失败：{exc}\n文件：{archive}"}
+        launcher._append_log(
+            self.config,
+            f"导入本地随包文件：{archive} → {result.get('message') or result.get('kind') or ''}",
+        )
+        return result
+
+    # ⚠️ 这里原先有 `fetch_assets_bundle()`（依赖页「从 Release 下载」按钮的后端）——
+    # 2026-10-05 用户要求**连按钮一起去掉**：本地没有 `assets\` 时**一键启动自己会拉**
+    #（`runtime_assets.ensure_all` → `fetch_bundle`），不需要用户手点；要手动补就走
+    # `import_assets_bundle()`（导入依赖的随包 zip，带逐条校验）。
     def crash_bundle_status(self) -> dict[str, Any]:
         """前端轮询用：取走刚生成的崩溃包（含终末地日志的 zip），只提示一次。"""
         from . import crashwatch
@@ -2348,7 +2396,8 @@ class EndfieldModControllerApi:
             return {"ok": False, "cancelled": True, "message": "cancelled"}
         return {"ok": True, "path": str(path)}
 
-    def choose_path(self, directory: bool = False, title: str = "选择路径") -> dict[str, Any]:
+    def choose_path(self, directory: bool = False, title: str = "选择路径",
+                    file_types: tuple = ()) -> dict[str, Any]:
         """弹出**系统原生的**选择框，返回用户选中的路径。
 
         ⚠️ **为什么不用 tkinter**（2026-10-03 用户报「mod 库的浏览点了没反应」）：
@@ -2363,7 +2412,7 @@ class EndfieldModControllerApi:
         —— 而且这次前端**会把原因弹出来**，不再静默。
         """
         # ── 首选：pywebview 原生对话框（统一走 helper）──────────────────────
-        native = self._native_file_dialog(directory, title)
+        native = self._native_file_dialog(directory, title, file_types)
         if native.get("ok") or native.get("cancelled"):
             return native
         # 原生这条路走不通（比如源码模式下没有窗口）→ 记一条日志再退回 tkinter

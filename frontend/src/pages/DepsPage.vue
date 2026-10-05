@@ -49,10 +49,53 @@ const missingCount = computed(() => deps.value.filter((d) => d.status === "缺�
 // 用户 2026-10-03：「组件确实要标红，正常标绿」。改用后端给的**真布尔** `present` 判断，
 // 比匹配中文字符串可靠（status 是给人看的，present 是给机器判的）。
 function tone(d) {
+  // ⚠️ **可选组件没装不是"缺"**（2026-10-05）：按显卡架构下载的运行库变体（`dlssnr_*`）
+  // 缺了是正常状态 —— 随包那份已经覆盖本机架构，它只是"更贴合"的优化项。
+  // 标红会让人以为环境坏了，所以走 muted。
+  if (d && d.optional && !d.present) return "muted";
   return d && d.present ? "success" : "danger";
 }
 function rowColor(d) {
+  if (d && d.optional && !d.present) return "var(--border, #555)";
   return d && d.present ? "var(--success, #2e7d32)" : "var(--danger, #c0392b)";
+}
+
+// ---- 「导入依赖的随包 zip」（用户 2026-10-05 要求）------------------------------
+// 场景：单文件 exe 用户本地没有 assets\、从别的机器/网盘拿到了 assets-bundle.zip、
+// 或从社区镜像下了单份组件 zip（如 nvngx_dlssnr_310.8.SF-v2.zip）—— 都不必再走网络。
+// ⚠️ 这是**依赖组件**的入口，不是 Mod 压缩包（Mod 走 Mod 库）。后端会弹系统文件框，
+// 并且在导入**前**逐条校验：manifest 能解析、它列出的每个文件的全部分卷都在包里，
+// 缺一卷就拒绝并列出缺什么（"导入看着成功、之后解压到处报错"是最难查的状态）。
+async function importLocalZip() {
+  try {
+    const r = await call("import_assets_bundle");
+    if (r && r.cancelled) return;
+    if (r && r.ok === false) {
+      await showAlert("没能导入依赖的随包 zip", String((r && r.message) || "未知原因"));
+      return;
+    }
+    showToast(String((r && r.message) || "导入完成"), "success");
+    await refreshState();
+  } catch (e) { /* call() 已经弹过窗 */ }
+}
+
+// ⚠️ 原先这里还有一个「从 Release 下载」按钮（走后端 `fetch_assets_bundle`）—— 2026-10-05
+// 用户要求**直接去掉**：本地没有 `assets\` 时**一键启动自己就会去拉**
+//（`runtime_assets.ensure_all` 里的 `fetch_bundle`），单独放个按钮既重复、又容易让人以为
+// "必须手点一下才装得上"。要手动补的时候走「导入随包 zip…」更可控：能挑文件，而且会
+// **逐条校验分卷**。
+
+// 按显卡架构下载"更贴合"的运行库变体（目前只有 40 系会看到这一行）
+async function installVariant(d) {
+  try {
+    const r = await call("install_dlss5_component", d.key, true);
+    if (r && r.ok === false) {
+      await showAlert("没能安装", String((r && r.message) || "未知原因"));
+      return;
+    }
+    showToast(String((r && r.message) || "已安装"), "success");
+    await refreshState();
+  } catch (e) { /* 同上 */ }
 }
 
 // 下载实时速度：后端在 byte_progress 里采样并平滑过；不在下载时是 0 ⇒ 显示 —（不留假数字）
@@ -676,6 +719,19 @@ useLogAutoScroll(logBox, () => logLines.value);
             <div class="text-xs mt-0.5" style="color: var(--text-muted)">{{ d.version || "" }}</div>
           </div>
           <div class="flex items-center gap-2 shrink-0">
+            <!-- 随包资产包 / 可选运行库变体：各给自己的动作（2026-10-05 加） -->
+            <!-- ⚠️ 文案必须写明是**依赖的随包 zip**（用户 2026-10-05：「那个导入本地 zip
+                 需要写明是依赖的随包 zip，而且也要检查」）—— 依赖页不是 Mod 压缩包的入口，
+                 别让用户把皮肤包拖到这里（Mod 走 Mod 库导入）。 -->
+            <template v-if="d.key === 'bundle'">
+              <Btn size="sm" variant="primary" @click="importLocalZip"
+                   title="导入依赖的随包 zip（assets-bundle.zip）；会逐条校验分卷是否齐全">导入随包 zip…</Btn>
+            </template>
+            <template v-else-if="d.key && d.key.startsWith('dlssnr_')">
+              <Btn size="sm" variant="primary" @click="installVariant(d)">
+                {{ d.present ? "重新安装" : "下载并启用" }}
+              </Btn>
+            </template>
             <!-- ⚠️ **B4：有新版就在这一行直接更新**（2026-10-03 补回归）。
                  0.9.5（`app.js:966-979`）对有 `update_available` 的组件渲染一个
                  「更新到 vX」按钮 → `startAppUpdateFromDep()`（切依赖页 + 进度条）。

@@ -28,6 +28,12 @@ NR 一旦**抢在前面**激活，相机 hook 就会 `error 8`（分配 hook tra
   读不到才退回 F6，**并把"没读到、用了默认值"写进日志**；
 * **NR 已经开着就不按**：日志里若已出现 `feature 18 created` / `evaluation succeeded`，
   说明它已经在出帧（多半是用户自己开过了），再按一次会把它**关掉**；
+* **hook 装失败就明说**（2026-10-05 加）：日志里出现 `camera hook installation failed`
+  时**明确报出来**并就此打住 —— 以前"还没走到那一步"与"装失败了"都表现为"一直等"，
+  用户看到的就是"没自动开 NR"，而日志里什么线索都没有（实测踩到）；
+* **等太久也留一行诊断**（2026-10-05 加）：`_WAIT_DIAG_SECONDS` 秒后既没 `installed`
+  也没 `failed`，就写一行"还没等到 + 已读到多少日志"，把"没进到场景"这个最常见原因
+  摆在日志里；
 * **一次运行只按一次**（`sent` 置位后不再动）。
 
 调用方：`diagnostics._monitor_process` —— 检测到游戏进程时 `arm()`，之后每次轮询 `poll()`。
@@ -35,6 +41,7 @@ NR 一旦**抢在前面**激活，相机 hook 就会 `error 8`（分配 hook tra
 from __future__ import annotations
 
 import re
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -45,6 +52,13 @@ _TEXT_LIMIT = 2 * 1024 * 1024
 
 # 「相机 hook 装好了」的唯一判据（enhancer 自己打的原文）
 _HOOK_MARK = "Camera controls installed."
+# 「相机 hook 装失败了」的判据（同样是 enhancer 自己的原文）—— 看到它就**明确报出来**：
+# 这次不能自动开 NR（NR 抢在它前面会把相机控制弄没），而不是继续默默等。
+_HOOK_FAIL_MARK = "camera hook installation failed"
+# 等太久的兜底诊断（秒）：到点若既没 installed 也没 failed，就写一行"还没等到"。
+# 2026-10-05 用户实测「又测了一次，就是没自动开 nr」暴露的正是这个盲区 ——
+# 那次 ReShade 日志里 enhancer 只有"已注册"一行，**两种字样都没有**（游戏 87 秒内没进场景）。
+_WAIT_DIAG_SECONDS = 60.0
 # 「NR 已经在出帧」的两条判据（任一命中就不该再按 —— 再按会把它关掉）
 _NR_ACTIVE_MARKS = ("feature 18 created", "evaluation succeeded")
 # addon 启动行里的快捷键声明，例如：
@@ -74,6 +88,8 @@ _STATE: dict[str, Any] = {
     "hook_seen": False,
     "sent": False,
     "note": "",
+    "armed_at": 0.0,
+    "wait_logged": False,
 }
 
 
@@ -85,7 +101,7 @@ def reshade_log_path(config: AppConfig) -> Path:
 def reset() -> None:
     """清空状态（换了游戏进程 / 监视重开时调）。"""
     _STATE.update({"armed": False, "log_pos": 0, "text": "", "hook_seen": False,
-                   "sent": False, "note": ""})
+                   "sent": False, "note": "", "armed_at": 0.0, "wait_logged": False})
 
 
 def _size(path: Path) -> int:
@@ -119,6 +135,7 @@ def arm(config: AppConfig, *, log: Callable[[str], None] | None = None) -> dict[
     path = reshade_log_path(config)
     _STATE["log_pos"] = _size(path)
     _STATE["armed"] = True
+    _STATE["armed_at"] = time.time()
     if log is not None:
         log(f"NR 自动开启: 已就位（等相机 hook 装好后按一次 NR 键；日志 {path}）")
     return dict(_STATE)
@@ -162,7 +179,28 @@ def poll(config: AppConfig, *, log: Callable[[str], None] | None = None) -> dict
             log("NR 自动开启: " + str(_STATE["note"]))
         return {"ok": True, "action": "skip", "reason": "nr_active"}
 
+    # ⚠️ **相机 hook 装失败** ⇒ 明确报出来、就此打住（2026-10-05 加）。
+    #    以前"还没走到那一步"和"装失败了"都表现为"一直等"，用户看到的现象是
+    #    "没自动开 NR"，而日志里连一条线索都没有 —— 实测踩过（enhancer 只打了
+    #    "Registered add-on" 一行，`installed` / `failed` 两种字样都没有）。
+    if _HOOK_FAIL_MARK in text.lower():
+        _STATE["sent"] = True
+        _STATE["note"] = ("enhancer 报「相机 hook 安装失败」—— 这次不能自动开 NR"
+                          "（NR 抢在它前面会把第一人称的相机控制弄没）")
+        if log is not None:
+            log("NR 自动开启: " + str(_STATE["note"]))
+        return {"ok": True, "action": "skip", "reason": "hook_failed"}
+
     if _HOOK_MARK not in text:
+        # ★ 等太久的兜底诊断（2026-10-05 加）：把"还没进到场景"这个最常见原因摆进日志，
+        #   而不是让用户对着"已就位"干等。只写一次，不刷屏。
+        waited = time.time() - float(_STATE.get("armed_at") or 0.0)
+        if waited >= _WAIT_DIAG_SECONDS and not _STATE.get("wait_logged"):
+            _STATE["wait_logged"] = True
+            if log is not None:
+                log(f"NR 自动开启: 已等 {waited:.0f} 秒还没等到「{_HOOK_MARK}」"
+                    f"（也没有 hook 失败记录）—— 多半是**还没进到游戏场景**"
+                    f"（相机对象尚未创建）；本次已读到 ReShade 日志 {len(text):,} 字符")
         return {"ok": True, "action": "wait"}      # 相机 hook 还没装好
 
     vk, why = _resolve_key(text)

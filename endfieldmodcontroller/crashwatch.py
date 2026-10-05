@@ -1069,6 +1069,19 @@ def collect_evidence(config: AppConfig, *, started_at: float | None = None,
     except Exception:  # noqa: BLE001
         evidence["watch_samples"] = []
 
+    # 注入现场时间线（五个时机各一张照片）—— 2026-10-05 用户要求：
+    # 「在一键启动最开始和 xxmi 拉起后和终末地启动后和终末地关闭和崩溃后都要收注入列表」。
+    # 与上面那条的分工：那条只有**进程层**（每 5 秒的模块/内存/句柄），这条多了
+    # **配置层**（注入库逐条内容 + 游戏目录注入物 + `runtime\dlss5` 文件状态），
+    # 而且**贴着关键时刻**。两条一起看，才能回答"注入库是何时被改的、
+    # 进程里到底进了哪几个 DLL"。
+    try:
+        from . import injecttrace
+
+        evidence["injection_trace"] = injecttrace.read_all(config)
+    except Exception:  # noqa: BLE001
+        evidence["injection_trace"] = []
+
     low = _endfield_local_low() / "Player.log"
     if low.is_file():
         try:
@@ -1308,6 +1321,195 @@ def _collect_game_config(config: AppConfig, bundle_dir: Path) -> None:
         pass
 
 
+def _collect_injection_files(config: AppConfig, bundle_dir: Path) -> None:
+    """收**注入链上的文件本体**（2026-10-05 用户批准：「加一下」）。
+
+    收三样，都是"光有哈希查不了、必须有本体"的东西：
+
+    * **`ReShade.ini` 正文**（2 KB 级）—— 诊断包以前只收它的哈希，于是**看不到里面写了什么**。
+      而 DLSS5 / 第一人称的钩子开关、`[RenoDX.DLSS5]` 段（含已知会破坏第一人称相机 hook 的
+      `NeuralUplift`）全在那里面。实测反馈者那份只有 **2,259 B**、开发机是 **6,708 B**，
+      差三倍却无从比对 —— 2 KB 的东西收不到纯亏。两份都收：部署源 + **生效那份**
+      （`RESHADE_BASE_PATH_OVERRIDE` 指向 `runtime\\reshade`）。
+    * **游戏目录里的 proxy 本体**（`d3dcompiler_47.dll` / `vulkan-1.dll` / `plugin\\*.dll`）：
+      各几十 KB。反馈者那份 `d3dcompiler_47.dll` 是 **35,840 B**，开发机是 **14,336 B**，
+      **不是同一个版本** —— 只有拿到本体，才能对他的文件跑依赖检查（`pedeps`）。
+    """
+    # ① 两份 ReShade.ini 的正文
+    try:
+        candidates: list[tuple[str, Path]] = [("dlss5", Path(config.dlss5_path) / "ReShade.ini")]
+        runtime_ini = Path(config.reshade_runtime_path) / "ReShade.ini"
+        candidates.append(("effective", runtime_ini))
+        for tag, src in candidates:
+            if src.is_file() and src.stat().st_size <= 2 * 1024 * 1024:
+                shutil.copy2(src, bundle_dir / f"reshade-{tag}-ReShade.ini")
+    except Exception:  # noqa: BLE001
+        pass
+    # ② 游戏目录里的 proxy 本体（含 plugin\ 下的 DLL）
+    try:
+        from . import reshade_integration
+
+        game_dir = reshade_integration.detect_game_dir(config, prefer_actual=True)
+        if game_dir is not None:
+            for name in reshade_integration.LOADER_PROXY_MODULES:
+                src = game_dir / name
+                try:
+                    if src.is_file() and src.stat().st_size <= 8 * 1024 * 1024:
+                        shutil.copy2(src, bundle_dir / f"game-{name}")
+                except OSError:
+                    continue
+            plugin_dir = game_dir / reshade_integration.PLUGIN_DIR_NAME
+            if plugin_dir.is_dir():
+                for item in sorted(plugin_dir.glob("*.dll")):
+                    try:
+                        if item.is_file() and item.stat().st_size <= 32 * 1024 * 1024:
+                            shutil.copy2(item, bundle_dir / f"game-plugin-{item.name}")
+                    except OSError:
+                        continue
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def collect_diagnosis_files(config: AppConfig, dest: Path, *,
+                            log: Callable[[str], None] | None = None) -> list[str]:
+    """把**排查真正要用到的那些文件**一次性收进包里。
+
+    用户 2026-10-05 要求：「**你自己怎么查的，就把那些文件全收进日志包**」。
+
+    所以这一批不是拍脑袋列的 —— 它们是这次定位「`0xC0000135` / NR 不自动开 / 资产展开失败」
+    时**实际打开过的**那份清单：ReShade 生效日志（判 `Camera controls installed.` 有没有出现
+    全靠它）、面板 addon 日志、feed 日志、运行库变体 marker、游戏自己的 `Player.log`、
+    XXMI 配置与日志、**各 addon 的身份（名 + 大小 + sha256）**、随包资产清单 ……
+
+    以前它们里有些**只收了一半**（addon 只有清单没有身份、变体 marker 完全没收、
+    `ReShade.ini` 只有哈希没有正文）⇒ 每次排查都要回头再要一轮，与用户定的
+    「日志包一次抓齐所有数据，不要搞好几轮」冲突。现在统一收齐。
+
+    返回收进去的相对名（便于在报告里逐条列出来）。
+    """
+    emit: Callable[[str], None] = log or (lambda message: None)
+    taken: list[str] = []
+
+    def take(src: Path | None, arcname: str, *, limit: int = 8 * 1024 * 1024) -> None:
+        """收一个文件（超限/读不到就安静跳过 —— 取证不能反噬打包）。"""
+        if src is None:
+            return
+        try:
+            if not src.is_file() or src.stat().st_size > limit:
+                return
+            shutil.copy2(src, dest / arcname)
+            taken.append(arcname)
+        except OSError:
+            return
+
+    try:
+        dest.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        emit(f"排查素材: 建目录失败 {exc}")
+        return taken
+
+    reshade = Path(config.reshade_runtime_path)
+    dlss5 = Path(config.dlss5_path)
+
+    # ① ReShade 那一侧（**生效那份**的日志与 ini、面板 addon 日志、按键表）
+    take(reshade / "ReShade.log", "reshade-effective-ReShade.log")
+    take(reshade / "ReShade.ini", "reshade-effective-ReShade.ini")
+    take(reshade / "modecontroller.addon.log", "reshade-modecontroller.addon.log")
+    take(reshade / "actions.tsv", "reshade-actions.tsv")
+    take(reshade / "user_ini_path.txt", "reshade-user_ini_path.txt")
+    for extra in ("renodx-dlss5.log", "dlss5.log", "ReShade.log.old"):
+        take(reshade / extra, f"reshade-{extra}")
+
+    # ② DLSS5 那一侧（部署源的 ini、feed 的日志与配置、**运行库变体 marker**）
+    take(dlss5 / "ReShade.ini", "dlss5-ReShade.ini")
+    take(dlss5 / "ReShade.log", "dlss5-ReShade.log")
+    take(dlss5 / "dlss5-feed.log", "dlss5-feed.log")
+    take(dlss5 / "dlss5-feed.cfg", "dlss5-feed.cfg")
+    take(dlss5 / ".dlssnr_variant.json", "dlss5-variant.json")
+    take(dlss5 / "panel_info.txt", "dlss5-panel_info.txt")
+
+    # ③ 各 addon 的**身份**（只收清单：名 + 字节 + sha256 前 16 —— 判"对方用的是不是我们随包那份"
+    #    靠它；4 MB 的本体不收，包会太大）
+    try:
+        from . import runtime_assets
+
+        rows = ["runtime\\dlss5 里的 addon（名 / 字节 / sha256 前 16）"]
+        for item in sorted(dlss5.glob("*.addon64")):
+            try:
+                rows.append(f"{item.name}\t{item.stat().st_size} B\t{runtime_assets.sha256_file(item)[:16]}")
+            except OSError:
+                rows.append(f"{item.name}\t(读不到)")
+        (dest / "dlss5-addons.txt").write_text("\n".join(rows) + "\n", encoding="utf-8")
+        taken.append("dlss5-addons.txt")
+    except Exception as exc:  # noqa: BLE001
+        emit(f"排查素材: addon 清单失败（忽略）: {exc}")
+
+    # ④ 游戏自己的日志（判"走到哪一步"必看）
+    try:
+        home = Path(os.environ.get("USERPROFILE") or "")
+        if home.is_dir():
+            for sub in ("Endfield", "Arknights Endfield"):
+                take(home / "AppData" / "LocalLow" / "Hypergryph" / sub / "Player.log",
+                     "player-Player.log")
+    except Exception:  # noqa: BLE001
+        pass
+
+    # ⑤ XXMI 那一侧（配置 + 它自己的日志）
+    try:
+        from . import reshade_integration
+
+        launcher_path = config.xxmi_launcher_path
+        if launcher_path:
+            take(reshade_integration.xxmi_config_path(launcher_path), "xxmi-Launcher-Config.json")
+            take(Path(launcher_path).parent.parent.parent / "XXMI Launcher Log.txt",
+                 "xxmi-Launcher-Log.txt")
+    except Exception as exc:  # noqa: BLE001
+        emit(f"排查素材: XXMI 侧失败（忽略）: {exc}")
+
+    # ⑥ 随包资产清单（每个组一份 manifest.json —— 判"资产齐不齐、分卷对不对"全靠它）
+    try:
+        from . import runtime_assets
+
+        seen: set[str] = set()
+        for _group, root, _name, _entry in runtime_assets.manifest_entries(config):
+            key = f"assets-{Path(root).name}-manifest.json"
+            if key in seen:
+                continue
+            seen.add(key)
+            take(Path(root) / "manifest.json", key, limit=1024 * 1024)
+    except Exception as exc:  # noqa: BLE001
+        emit(f"排查素材: 资产清单失败（忽略）: {exc}")
+
+    # ⑦ 游戏目录里的 proxy 本体（依赖检查要用本体，光有哈希查不了）
+    _collect_injection_files(config, dest)
+
+    # ⑧ **大日志的关键行摘录**（用户 2026-10-05 定的规矩：「**特别大文件可以节选你要的**」）。
+    #    `ReShade.log` 动辄几十上百 KB，而排查真正要看的就那么几类行 ——
+    #    相机 hook 装没装、NR 有没有建帧、addon 注册了哪些、有没有 hook 失败与报错。
+    #    全量那份照收（超限时 `_safe_zip_write` 会截尾并注明），这里再给一份"只看这几类"的，
+    #    让**第一轮排查不必再回头要文件**（这正是这条纪律的目的）。
+    try:
+        src = reshade / "ReShade.log"
+        if src.is_file():
+            keys = ("Camera controls installed", "camera hook installation failed",
+                    "feature 18 created", "evaluation succeeded", "Registered add-on",
+                    "Loading add-on", "installing delayed hooks", "hotkeys:", "| ERROR | ")
+            picked: list[str] = []
+            with src.open("r", encoding="utf-8", errors="replace") as handle:
+                for line in handle:
+                    if any(key in line for key in keys):
+                        picked.append(line.rstrip("\n"))
+            (dest / "reshade-keylines.txt").write_text(
+                "ReShade.log 关键行摘录（相机 hook / NR 建帧 / addon 注册 / hook 失败 / 报错）\n"
+                f"源: {src}（{src.stat().st_size:,} B）· 共命中 {len(picked)} 行"
+                f"（只保留最后 {min(len(picked), 400)} 行）\n\n"
+                + "\n".join(picked[-400:]) + "\n", encoding="utf-8")
+            taken.append("reshade-keylines.txt")
+    except Exception as exc:  # noqa: BLE001
+        emit(f"排查素材: ReShade 关键行摘录失败（忽略）: {exc}")
+    return taken
+
+
 def _collect_event_log(config: AppConfig, bundle_dir: Path, started_at: float | None) -> None:
     """把该时段的 Windows 事件日志导出来 —— 应用崩溃/挂起事件会写**出错模块名**。"""
     import subprocess
@@ -1515,6 +1717,23 @@ def make_bundle(config: AppConfig, evidence: dict[str, Any] | None = None,
     _collect_full_game_logs(config, bundle_dir)
     _collect_crash_dumps(config, bundle_dir)
     _collect_game_config(config, bundle_dir)
+    # ④-d **注入现场时间线**（2026-10-05 用户要求「在一键启动最开始和 xxmi 拉起后和
+    #     终末地启动后和终末地关闭和崩溃后都要收注入列表」）：五张照片连同
+    #     "**进程里到底进了哪几个 DLL**"一起带走。只抓崩溃那一刻的话，"本来是对的、
+    #     中途被改坏"和"一直都是这样"分不开 —— 而 `0xC0000135` 恰好有这两种来源。
+    try:
+        from . import injecttrace
+
+        entries = injecttrace.read_all(config)
+        if entries:
+            (bundle_dir / "injection-trace.jsonl").write_text(
+                "\n".join(_json.dumps(item, ensure_ascii=False) for item in entries) + "\n",
+                encoding="utf-8")
+            (bundle_dir / "injection-trace.txt").write_text(
+                injecttrace.render(entries), encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        pass
+    collect_diagnosis_files(config, bundle_dir, log=log)
     _collect_mods_tree(config, bundle_dir)
     _collect_event_log(config, bundle_dir, evidence.get("_started_at"))
     _collect_xxmi_log(config, bundle_dir)
@@ -1736,6 +1955,181 @@ def take_bundle() -> dict[str, Any] | None:
     return bundle
 
 
+def arm_runtime_watch(config: AppConfig, pid: int, *,
+                      log: Callable[[str], None] | None = None) -> dict[str, Any]:
+    """游戏进程**刚出现**时调用：重置采样 + 记一张"终末地启动后"的注入照片。
+
+    返回的 state 要一路交给 `poll_runtime_watch()`（它记着"上次采样是什么时候、
+    已经见过哪些模块"）。
+
+    ⚠️ 为什么要抽出来：采样与注入时间线原先只长在 `crashwatch.start_watch` 身上，
+    而**主路径跑的是 `diagnostics._monitor_process`** ⇒ 那两样在主路径下**从来没跑过**
+    （反馈者的诊断包里连 `watch-samples.jsonl` 都不存在）。现在两个监视器都调这一对函数，
+    **判据只有一处**。
+    """
+    emit: Callable[[str], None] = log or (lambda message: None)
+    state: dict[str, Any] = {"known": set(), "last": 0.0}
+    try:
+        from . import watchsample
+
+        watchsample.reset(config)
+    except Exception as exc:  # noqa: BLE001
+        emit(f"崩溃监控: 重置采样失败（忽略）: {exc}")
+    try:
+        from . import injecttrace
+
+        injecttrace.record(config, phase="game-started", pid=pid, log=emit)
+    except Exception as exc:  # noqa: BLE001 —— 取证失败绝不能打断跟踪
+        emit(f"注入时间线: 记录失败（忽略）: {exc}")
+    return state
+
+
+def poll_runtime_watch(config: AppConfig, pid: int, state: dict[str, Any], *,
+                       log: Callable[[str], None] | None = None,
+                       interval: float = 5.0) -> bool:
+    """监视循环里**每轮**调一次；内部按"距上次 ≥ `interval` 秒"决定是否真采。
+
+    采到就返回 True。失败只记日志、绝不抛 —— 监视器不能因为取证而停摆。
+    """
+    emit: Callable[[str], None] = log or (lambda message: None)
+    now = time.time()
+    if now - float(state.get("last") or 0.0) < interval:
+        return False
+    state["last"] = now
+    try:
+        from . import watchsample
+
+        entry = watchsample.sample(
+            pid,
+            known_modules=state.get("known") or set(),
+            feed_log=Path(config.dlss5_path) / "dlss5-feed.log",
+            reshade_log=Path(config.dlss5_path) / "ReShade.log",
+        )
+        if not entry:
+            return False
+        watchsample.append(config, entry)
+        state["known"] = {os.path.basename(m).lower() for m in (entry.get("modules") or [])}
+        return True
+    except Exception as exc:  # noqa: BLE001 —— 采样失败绝不打断跟踪
+        emit(f"崩溃监控: 采样失败 {exc}")
+        return False
+
+
+def on_game_exit(
+    config: AppConfig,
+    *,
+    pid: int | None = None,
+    started_at: float | None = None,
+    exit_time: float | None = None,
+    alive_seconds: float | None = None,
+    exit_code: int | None = None,
+    log: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
+    """**游戏退出后的统一取证**：证据 → 报告 → 归因 → 记账 → 崩溃包 → 建议。
+
+    ⚠️ **为什么必须收敛成一个入口**（2026-10-05 从反馈者的包里查出来的真问题）：
+    项目里有**两套**进程监视器 ——
+
+    * `diagnostics._monitor_process`：**主路径唯一在跑的那个**（能读退出码、带 NR 自动开启、
+      命令行采集、句柄降级）；
+    * `crashwatch.start_watch`：只在"以系统默认方式启动 XXMI"那条分支里被调用。
+
+    而**取证这一整套只长在后者身上** ⇒ 主路径下从来没有 5 秒采样、没有注入时间线、
+    没有崩溃归因、没有崩溃记忆与跑通台账、**也没有"连续三次失败"计数** ——
+    反馈者连崩 5 次都没等到那个弹窗，就是这个原因（他的包里连
+    `watch-samples.jsonl` 都不存在）。
+
+    现在两条路径都调它，**判据只有一处**。返回值供调用方写回自己的状态：
+    `{"evidence", "report", "crashed", "bundle", "advice", "launch_failure"}`。
+    """
+    emit: Callable[[str], None] = log or (lambda message: None)
+    started = float(started_at if started_at is not None else time.time())
+    ended = float(exit_time if exit_time is not None else time.time())
+    alive = float(alive_seconds if alive_seconds is not None else max(ended - started, 0.0))
+    result: dict[str, Any] = {"crashed": False}
+
+    # ① 注入现场时间线·**时机 4／5：终末地关闭**（用户 2026-10-05 要求）。
+    #    必须在"等 WER 落盘那 6 秒"**之前**记，时间戳才贴着真实退出时刻。
+    code_note = f"，退出码 {exit_code}" if exit_code is not None else ""
+    try:
+        from . import injecttrace
+
+        injecttrace.record(config, phase="game-exited", pid=pid,
+                           note=f"存活 {alive:.0f} 秒{code_note}", log=emit)
+    except Exception as exc:  # noqa: BLE001 —— 取证失败绝不能影响主流程
+        emit(f"注入时间线: 记录失败（忽略）: {exc}")
+
+    # ② 等 **6 秒**（2026-10-05 由 3 秒加长）：Windows 的 WER 报告（`AppCrash_*.wer`，
+    #    里面写着"故障模块 + 异常代码"）是崩溃取证里最硬的一手材料，而它由 WerFault 在
+    #    进程终止后**几秒内**才落盘；等 3 秒时常还没写完 ⇒ "真崩了"被判成"未发现崩溃迹象"。
+    time.sleep(6.0)
+    try:
+        evidence = collect_evidence(config, started_at=started, exit_time=ended,
+                                    alive_seconds=alive)
+    except Exception as exc:  # noqa: BLE001
+        emit(f"崩溃监控: 收集现场失败 {exc}")
+        return result
+    # 把调用方手里的退出码并进证据（`_monitor_process` 有、`start_watch` 没有）——
+    # 归因、报告、包内证据都读这一份，避免两处各写一个。
+    if exit_code is not None:
+        try:
+            from . import diagnostics
+
+            evidence.setdefault("process", {})
+            evidence["process"]["exit_code"] = int(exit_code)
+            evidence["process"]["exit_text"] = diagnostics.describe_exit_code(int(exit_code))
+        except Exception:  # noqa: BLE001
+            pass
+    try:
+        path = write_report(config, evidence)
+        crashed = is_crash(evidence)
+        emit(f"崩溃监控: {'检测到崩溃' if crashed else '未检测到崩溃（正常退出）'}，报告: {path.name}")
+        result.update({"evidence": evidence, "report": str(path), "crashed": bool(crashed)})
+    except Exception as exc:  # noqa: BLE001
+        emit(f"崩溃监控: 写报告失败 {exc}")
+        return result
+
+    # ③ 注入现场时间线·**时机 5／5：崩溃后**（事后状态：注入库/游戏目录有没有被动过）
+    try:
+        from . import injecttrace
+
+        injecttrace.record(config, phase="crash", pid=pid,
+                           note=("检测到崩溃" if crashed else "正常退出"), log=emit)
+    except Exception as exc:  # noqa: BLE001
+        emit(f"注入时间线: 记录失败（忽略）: {exc}")
+
+    # ④ 记一笔"这次启动算成功还是失败"（2026-10-05 用户要求：连续 3 次失败 ⇒ 弹「强力修复」）。
+    #    判据在 `record_launch_result` 里复用 `combo_succeeded`，所以**静默闪退也计数**
+    #    （不能只数崩溃 —— 反馈者那台一条 WER 都没有，只数崩溃就永远等不到这个弹窗）。
+    try:
+        result["launch_failure"] = record_launch_result(config, evidence, log=emit)
+    except Exception as exc:  # noqa: BLE001 —— 记账失败绝不影响崩溃取证
+        emit(f"崩溃监控: 记录启动结果失败（忽略）: {exc}")
+
+    # ⑤ 崩溃包
+    bundle: dict[str, Any] | None = None
+    try:
+        bundle = make_bundle(config, evidence, log=emit)
+        result["bundle"] = bundle
+        emit(f"崩溃监控: 崩溃包已就绪（含终末地日志 {len(bundle.get('game_logs') or [])} 份）"
+             + ("" if crashed else "，正常退出不提示"))
+    except Exception as exc:  # noqa: BLE001
+        emit(f"崩溃监控: 打包失败 {exc}")
+
+    # ⑥ 崩溃后的**建议**（2026-10-05 用户要求：「崩溃不要卸掉功能，应该弹窗建议清空依赖并
+    #    重新下载重试」）。这里**只产出建议、不动任何开关**；点不点由用户决定。
+    try:
+        advice = crash_advice(config, evidence)
+        if advice:
+            result["advice"] = advice
+            if isinstance(bundle, dict):
+                bundle["advice"] = advice
+            emit("崩溃监控: 建议 —— " + str(advice.get("title") or ""))
+    except Exception as exc:  # noqa: BLE001 —— 建议算不出来不该影响崩溃包本身
+        emit(f"崩溃监控: 生成建议失败（忽略）: {exc}")
+    return result
+
+
 def start_watch(config: AppConfig, *, timeout: float = 6 * 3600.0,
                 log: Callable[[str], None] | None = None) -> dict[str, Any]:
     """后台等游戏进程出现→退出，然后自动收集现场并写报告。"""
@@ -1769,83 +2163,47 @@ def start_watch(config: AppConfig, *, timeout: float = 6 * 3600.0,
             _WATCH["pid"] = pid
             _WATCH["started_at"] = started
             _emit(f"崩溃监控: 已跟踪 {GAME_PROCESS} pid={pid}")
+            # ★ 采样 + 注入时间线·**时机 3／5：终末地启动后**。2026-10-05 收敛成共用入口：
+            #   `arm_runtime_watch()` 重置采样并记下"**注入到底进没进进程**"的那张照片
+            #   （看 `expect_missing` —— 非空就等于"XXMI 报告注入成功、进程里却没有它"，
+            #   `0xC0000135` 的两种来源由此分开）。
+            sample_state = arm_runtime_watch(config, pid, log=_emit)
 
             # ② 等进程退出 —— **每 5 秒采一次样**（2026-10-01 用户要求"日志包一次抓全"）：
             #    "跑四十多秒就闪退"这种问题，静态快照看不出任何东西；
             #    必须留下**时间线**（哪个模块在哪一秒才加载、内存/句柄怎么涨、日志有没有停）。
             #    采样增量落盘，即使进程被强杀也已写好前面几次。
-            from . import watchsample
-
-            watchsample.reset(config)
-            known_modules: set[str] = set()
-            last_sample = 0.0
             while time.time() < deadline:
                 if not _process_ids():
                     break
-                now = time.time()
-                if now - last_sample >= 5.0:
-                    try:
-                        entry = watchsample.sample(
-                            pid,
-                            known_modules=known_modules,
-                            feed_log=Path(config.dlss5_path) / "dlss5-feed.log",
-                            reshade_log=Path(config.dlss5_path) / "ReShade.log",
-                        )
-                        if entry:
-                            watchsample.append(config, entry)
-                            known_modules = {os.path.basename(m).lower()
-                                             for m in (entry.get("modules") or [])}
-                    except Exception as exc:  # noqa: BLE001 —— 采样失败绝不打断跟踪
-                        _emit(f"崩溃监控: 采样失败 {exc}")
-                    last_sample = now
+                poll_runtime_watch(config, pid, sample_state, log=_emit)
                 time.sleep(1.0)
             exit_time = time.time()
             alive = exit_time - started
             _emit(f"崩溃监控: 游戏已退出（存活 {alive:.0f} 秒），正在收集现场…")
-
-            # ③ 收集现场 + 写报告 + 打崩溃包
-            # ⚠️ 等 **6 秒**（2026-10-05 由 3 秒加长）：Windows 的 **WER 报告**
-            #    （`AppCrash_*.wer`，里面写着"故障模块 + 异常代码"）是崩溃取证里最硬的一手材料，
-            #    而它由 WerFault 在进程终止后**几秒内**才落盘；等 3 秒时常常还没写完，
-            #    于是"真崩了"被判成"未发现崩溃迹象"（2026-10-05 那份诊断包里 8 次真崩
-            #    全是这个下场）。多等这 3 秒只影响崩溃包生成时间，换的是判据不再漏。
-            time.sleep(6.0)   # 等崩溃报告（CrashSight / WER / 游戏自身的 Crash_* 目录）落盘
-            evidence = collect_evidence(config, started_at=started, exit_time=exit_time, alive_seconds=alive)
-            path = write_report(config, evidence)
-            crashed = is_crash(evidence)
-            _emit(f"崩溃监控: {'检测到崩溃' if crashed else '未检测到崩溃（正常退出）'}，报告: {path.name}")
-
-            # ③-a **记一笔"这次启动算成功还是失败"**（2026-10-05 用户要求）：
-            #     连续 3 次失败 ⇒ 前端弹「强力修复」。判据在 `record_launch_result` 里
-            #     复用 `combo_succeeded`，所以"静默闪退"也计数（不能只数崩溃 —— 反馈者那台
-            #     一条 WER 都没有，只数崩溃就永远等不到这个弹窗）。
+            # ★ 注入现场时间线·**时机 4／5：终末地关闭**（用户 2026-10-05 要求）。
+            #   放在"等 WER 落盘那 6 秒"**之前**记，时间戳才贴着真实退出时刻。
             try:
-                outcome = record_launch_result(config, evidence, log=_emit)
-                _WATCH["launch_failure"] = outcome
-            except Exception as exc:  # noqa: BLE001 —— 记账失败绝不影响崩溃取证
-                _emit(f"崩溃监控: 记录启动结果失败（忽略）: {exc}")
-            try:
-                bundle = make_bundle(config, evidence, log=_emit)
-                # 只有真的崩了才让前端弹窗提示反馈；正常退出只留日志与包，不打扰用户
-                if crashed:
-                    _WATCH["bundle"] = bundle
-                _emit(f"崩溃监控: 崩溃包已就绪（含终末地日志 {len(bundle.get('game_logs') or [])} 份）"
-                      + ("" if crashed else "，正常退出不提示"))
+                from . import injecttrace
+
+                injecttrace.record(config, phase="game-exited", pid=pid,
+                                   note=f"存活 {alive:.0f} 秒", log=_emit)
             except Exception as exc:  # noqa: BLE001
-                _emit(f"崩溃监控: 打包失败 {exc}")
+                _emit(f"注入时间线: 记录失败（忽略）: {exc}")
 
-            # ③-b 崩溃后的**建议**（用户 2026-10-05：「崩溃不要卸掉功能，应该弹窗建议清空
-            #      依赖并重新下载重试」）。这里**只产出建议、不动任何开关**；
-            #      前端弹窗据此多给一个「清空依赖并重新下载」按钮，点不点由用户决定。
-            try:
-                advice = crash_advice(config, evidence)
-                if advice:
-                    _WATCH["advice"] = advice
-                    if isinstance(bundle, dict):
-                        bundle["advice"] = advice
-                    _emit("崩溃监控: 建议 —— " + str(advice.get("title") or ""))
-            except Exception as exc:  # noqa: BLE001 —— 建议算不出来不该影响崩溃包本身
-                _emit(f"崩溃监控: 生成建议失败（忽略）: {exc}")
+            # ③ 收集现场 + 写报告 + 归因 + 记账 + 打崩溃包 + 出建议
+            #    —— 全在 `on_game_exit()` 里，**与 `diagnostics._monitor_process` 共用
+            #    同一个入口**（判据只有一处）。抽出来之前的教训：这一整套只挂在
+            #    `start_watch` 身上，而它只在"以系统默认方式启动 XXMI"那条分支里被调用 ⇒
+            #    主路径下从来没有采样/归因/记忆/计数，反馈者崩 5 次都没等到那个弹窗。
+            outcome = on_game_exit(config, pid=pid, started_at=started, exit_time=exit_time,
+                                   alive_seconds=alive, log=_emit)
+            if outcome.get("launch_failure"):
+                _WATCH["launch_failure"] = outcome["launch_failure"]
+            if outcome.get("crashed") and outcome.get("bundle"):
+                _WATCH["bundle"] = outcome["bundle"]
+            if outcome.get("advice"):
+                _WATCH["advice"] = outcome["advice"]
         except Exception as exc:  # noqa: BLE001
             _emit(f"崩溃监控异常: {exc}")
         finally:

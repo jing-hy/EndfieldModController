@@ -200,8 +200,10 @@ def test_nr_binding_check_flags_create_failure_only(tmp_path, monkeypatch):
     assert result["ok"] is True, result
 
     # ② 真正失败：feature 18 create failed
-    #    先打桩显卡 —— **别让测试依赖本机到底是 50 系还是 40 系**（开发机是 5080，跑测试的
-    #    人可能是 40 系，结论完全不同）。DLSS5 首发只支持 RTX 50 系。
+    #    先打桩显卡 —— **别让测试依赖本机到底是哪一代卡**（开发机是 5080，跑测试的人可能
+    #    40 系，结论完全不同）。⚠️ 2026-10-05 起 40/30/20 系**属于受支持范围**
+    #    （社区把运行库内核重定向到了 sm_89/86/75），所以"失败"的归因也变了：
+    #    不受支持的机器 → 硬件问题（别折腾）；受支持的机器 → 查运行库架构 / 驱动与 addon 版本。
     from endfieldmodcontroller import deviceinfo
 
     log.write_text(
@@ -217,18 +219,26 @@ def test_nr_binding_check_flags_create_failure_only(tmp_path, monkeypatch):
             return {"adapters": [{"name": adapters}]}
         return _collect
 
-    # ②a 40 系（那两台反馈机的情形）→ 判为"支持范围问题"，**不**报成故障、也不让他折腾设置
-    monkeypatch.setattr(deviceinfo, "collect", fake_collect("NVIDIA GeForce RTX 4060 Laptop GPU"))
+    # ②a **没有 tensor core 的机器**（GTX 16 系 / A 卡）→ 判为"硬件不支持"，**不**报成故障、
+    #    也不让他折腾设置（40 系从 2026-10-05 起不再属于这一类，见 ②a2）
+    monkeypatch.setattr(deviceinfo, "collect", fake_collect("NVIDIA GeForce GTX 1660 SUPER"))
     result = check()
     assert result["ok"] is True, result
-    assert "50 系" in result["message"] and "4060" in result["message"]
+    assert "tensor core" in result["message"]
 
-    # ②b 50 系却失败 → 罕见，报出来让他发日志，并明确排除档位/驱动/运行库三个方向
+    # ②a2 **受支持的卡**（40 系）却失败 → 不再是"支持范围问题"，要指向可执行方向
+    #     （运行库架构 / 驱动与 addon 版本的组合）
+    monkeypatch.setattr(deviceinfo, "collect", fake_collect("NVIDIA GeForce RTX 4060 Laptop GPU"))
+    result = check()
+    assert result["ok"] is False
+    assert "sm_89" in result["message"], result["message"]
+
+    # ②b 50 系却失败 → 罕见，报出来让他发日志，并指向驱动与 addon 版本
     monkeypatch.setattr(deviceinfo, "collect", fake_collect("NVIDIA GeForce RTX 5080"))
     result = check()
     assert result["ok"] is False
     assert "0xbad00001" in result["message"]
-    assert "不是" in result["message"] and "档位" in result["message"]
+    assert "驱动" in result["message"]
 
     # ③ 老日志里的失败不许拿来吓人：只看最后一次运行
     log.write_text(

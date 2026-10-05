@@ -169,7 +169,7 @@ def _has_github_token() -> bool:
 
 
 def _may_parallel(url: str) -> bool:
-    """这个源允许分片吗？
+    """这个源**在源层面**允许分片吗？（不含"这一刻快不快"的判断）
 
     ⚠️⚠️ **直连（真实 GitHub 主机）在没有 token 时禁止并发**（2026-10-03 用户明确要求：
     「**直连应该在没有 ghtoken 的时候禁止并发**」）。
@@ -181,6 +181,13 @@ def _may_parallel(url: str) -> bool:
     实测 `ghproxy.net` 16 连接 2.05 MB/s（单连接 0.19，10 倍），所以镜像照常并发。
 
     另：`NO_SPLIT_HOSTS` 里那批主机（照 PCL 的经验）仍然一律单线程。
+
+    ⚠️ **2026-10-05 修订**（用户原话：「只要直连不达到单片 1.5MB/s，而且没有 ghtoken，
+    就直接进动态抢块测试，如果抢块比直连快就继续，比直连慢就恢复直连」）：
+    本函数返回 `False` **不再等于"这一趟一定单连接"** —— 是不是真的禁用并发，由
+    `_parallel_gate()` 在**拿到单连接实测速度之后**决定：慢到 `SLOW_MBPS`（1.5 MB/s）
+    以下就放行进抢块试用，去留交给试用窗口的实测比较。
+    本函数仍是**源层面**的判据（也被"续传"分支用），别把它当成最终结论。
     """
     host = _host_of(url)
     if not host:
@@ -201,6 +208,54 @@ def _is_github_host(host: str) -> bool:
     host = (host or "").lower()
     return any(host == h or host.endswith("." + h)
                for h in ("github.com", "githubusercontent.com", "githubassets.com"))
+
+
+def _direct_last_mbps(url: str) -> float:
+    """这条**直连**上次实测的速度（`0` = 没有记录 / 不是 GitHub 直连）。
+
+    只给**续传**分支用：那一刻还没做单连接探测，但线路成绩缓存里有上次的值。
+    """
+    if not _is_github_host(_host_of(url)):
+        return 0.0
+    return float((_load_lines_cache().get(DIRECT.name) or {}).get("mbps") or 0)
+
+
+def _parallel_gate(url: str, probe_mbps: float, policy: str) -> tuple[bool, str]:
+    """**这一刻允许进并发抢块吗**？返回 `(允许, 说明)`。
+
+    规则来自用户 2026-10-05 的原话：「**只要直连不达到单片 1.5MB/s，而且没有 ghtoken，
+    就直接进动态抢块测试，如果抢块比直连快就继续，比直连慢就恢复直连**」。
+
+    * `policy="always"`：调用方（或用户）**显式**要加速 ⇒ 允许，不再看下面的门禁；
+    * **真实 GitHub 直连**且**没有 token**：
+        - 实测 ≥ `SLOW_MBPS`（1.5 MB/s）⇒ **不许并发**（已经够快，没必要拿未认证 IP
+          去撞 GitHub 的限流）；
+        - 实测 < 1.5 MB/s ⇒ **允许进抢块试用** —— 慢到这份上试一把多连接是值得的，
+          去留完全交给试用窗口的实测比较（`BOOST_TRIAL_SECONDS` 后与探测值比，
+          不如就把剩下的切回单连接，见 `_attempt_line` 里那段）；
+    * 其它**源层面**不许分片的（bmclapi 等，见 `NO_SPLIT_HOSTS`）⇒ 不许；
+    * 其余（镜像线路等）⇒ 允许。
+
+    ⚠️ 这是对 2026-10-03「直连在没有 ghtoken 的时候禁止并发」的**延伸**，而不是推翻：
+    用户 2026-10-05 又补了一句「**抢块不包含直连**」—— 所以**直连自己永远不开多连接**
+    （有没有 token、快不快，都不开）；"慢直连"要走的不是"直连并发"，而是
+    **换去镜像抢块**：由 `download()` 对无 token 的直连把 `dead_mbps` 提到 `SLOW_MBPS`，
+    让它慢到 1.5 MB/s 以下时直接换线路，镜像那边才开多线路并发抢块。
+    """
+    if policy == "always":
+        return True, "已按设置强制启用并发"
+    host = _host_of(url)
+    for blocked in NO_SPLIT_HOSTS:
+        if host == blocked or host.endswith("." + blocked):
+            if _is_github_host(host):
+                if _has_github_token():
+                    return True, "有 GitHub token，直连允许并发"
+                # 没 token：**直连自己一律不并发**（未认证并发只会撞 GitHub 限流）；
+                # 它慢的时候由 `download()` 换到镜像去抢块，而不是在这儿把直连拆成多连接。
+                return False, ("没有 token 的直连不开并发（抢块不含直连）—— "
+                               "慢的话换镜像线路去抢块")
+            return False, "这个下载源按连接数限流，单连接反而更快"
+    return True, "这条线路允许并发"
 
 
 def _looks_rate_limited(message: str) -> bool:
@@ -1398,9 +1453,19 @@ def download(
     # ★ 多线路动态抢块（2026-10-04 落地）：把其它候选线路的 URL 交给**第一条**线路的
     # 并发分块去共用 —— 实测比"单线路内并发"快 47%，而"每条线路各下自己那段"（静态等分）
     # 反而更慢（0.508 vs 0.664）。只给第一条：后面几条是它失败后的兜底，走原逻辑。
+    # ★ 「慢直连去抢块、抢块不如直连就回直连」（用户 2026-10-05 原话：
+    #   「只要直连不达到单片 1.5MB/s，而且没有 ghtoken，就直接进动态抢块测试，
+    #     如果抢块比直连快就继续，比直连慢就恢复直连」＋「**抢块不包含直连**」）。
+    #   `multi_alt` 一直就是"镜像线路池"、**不含直连** ✓；这里补的是两个新判据：
+    #   ① 无 token 的直连把判死门槛提到 `SLOW_MBPS` —— 慢就直接换线路去抢块；
+    #   ② 后面的线路以"直连实测速度"为下限 —— 抢块不如直连快就判死，最后回直连单连接。
+    direct_probe_mbps = 0.0        # 直连实测速度（给后面的线路当门槛）
+    slow_direct_skipped = False    # 直连因"太慢"被跳过 → 最后要回它兜底
+    no_token = not _has_github_token()
     multi_alt = [line.apply(url) for line in lines[1:] if line is not DIRECT]
     if len(multi_alt) >= 1:
-        _log(log, "多线路动态抢块已启用： " + "、".join(f"{line.name}" for line in lines[1:])
+        _log(log, "多线路动态抢块已启用（**不含直连**）： "
+                  + "、".join(f"{line.name}" for line in lines[1:])
                   + "（谁空谁领，连挂两次的线路本次淘汰）")
 
     for index, line in enumerate(lines):
@@ -1417,12 +1482,22 @@ def download(
             continue
         # 多线路时单条线路的等待要短，坏线路要快速跳过
         line_timeout = timeout if len(lines) == 1 else min(timeout, LINE_TIMEOUT_MULTI)
+        # ★ 这一条线路的"判死门槛"
+        line_dead = dead_mbps
+        if line is DIRECT and len(lines) > 1 and no_token:
+            # 没有 token ⇒ 直连不开并发（**抢块不含直连**）。那它慢到 `SLOW_MBPS` 以下时
+            # 就不该在这儿单连接慢慢磨 —— 把门槛提到 SLOW_MBPS，直接换线路去抢块。
+            line_dead = max(dead_mbps, SLOW_MBPS)
+        elif direct_probe_mbps > 0:
+            # **抢块不如直连快就恢复直连**：拿直连实测速度当门槛，后面的线路连这个都达不到
+            # 就判死 → 换下一条 → 都不行时由循环外的兜底回直连单连接。
+            line_dead = max(dead_mbps, direct_probe_mbps)
         report = _attempt_line(
             line.apply(url), dest, line=line,
             alt_urls=multi_alt if index == 0 and multi_alt else None,
             log=log, progress=_tracked, timeout=line_timeout, policy=policy,
             expected_size=expected_size, expected_sha256=expected_sha256,
-            dead_mbps=dead_mbps, cancel=cancel,
+            dead_mbps=line_dead, cancel=cancel,
         )
         if report.ok:
             _remember_line(line.name, True, report.mbps)
@@ -1461,6 +1536,14 @@ def download(
             _remember_line(line.name, False, 0.0, cert_error=cert_error, rate_limited=rate_limited)
         errors.append(f"{line.name}: {report.message}")
         _log(log, f"线路 {line.name} 失败：{report.message}")
+        if line is DIRECT:
+            # 记下直连实测速度：后面的镜像线路要拿它当"至少得比这个快"的门槛；
+            # 同时记住"直连是因为太慢被跳过的"，好在最后回它兜底。
+            probe = float(getattr(report, "probe_mbps", 0) or 0)
+            if probe > 0:
+                direct_probe_mbps = probe
+            if "低于" in message and "可用线" in message:
+                slow_direct_skipped = True
         if cert_error:
             _log(log, f"（{line.name} 的 HTTPS 证书与你当前网络返回的不符 —— 常见于加速器/运营商"
                       f"劫持镜像域名；已临时跳过这条线路，不影响其它线路）")
@@ -1468,6 +1551,28 @@ def download(
         # 文件 —— 一条线路失败不代表它该被删（2026-10-01 修：原实现会 unlink 它，
         # 等于"这条线路不通就把你已下好的东西删了"）。半成品始终在 work 文件里，
         # 且只有 finish() 校验通过后才会原子落位到 dest。
+
+    # ★ **抢块都没比直连快 ⇒ 回直连、用单连接把它下完**（用户 2026-10-05：
+    # 「如果抢块比直连快就继续，**比直连慢就恢复直连**」）。直连慢，但我们没别的选择。
+    # 用 `policy="never"` + `dead_mbps=0`：强制单连接、且不再因慢判死自己。
+    if slow_direct_skipped and any(line is DIRECT for line in lines):
+        _log(log, f"各线路都没比直连快（直连实测 {direct_probe_mbps:.2f} MB/s）→ 回到直连、"
+                  f"用**单连接**下完（不并发：没有 token 时直连开多连接只会撞 GitHub 限流）")
+        try:
+            fallback = _attempt_line(
+                url, dest, line=DIRECT, log=log, progress=_tracked, timeout=timeout,
+                policy="never", expected_size=expected_size,
+                expected_sha256=expected_sha256, dead_mbps=0.0, cancel=cancel,
+            )
+        except Exception as exc:  # noqa: BLE001
+            fallback = DownloadReport(path=str(dest), ok=False, message=str(exc))
+        if fallback.ok:
+            fallback.line = DIRECT.name
+            fallback.reason = f"{fallback.reason}；抢块不如直连，已回直连单连接".strip("；")
+            _remember_line(DIRECT.name, True, fallback.mbps)
+            _set_speed(fallback, started)
+            return fallback
+        errors.append(f"{DIRECT.name}(回退): {fallback.message}")
 
     report = DownloadReport(
         ok=False, path=str(dest),
@@ -1583,8 +1688,10 @@ def _attempt_line(
         # 断点续传优先：直接用分块把缺的补齐（哪怕设置里关了加速也续，否则前面的白下）
         # ⚠️ 续传分支**也要**遵守"这个源不许分片"（多角度审查抓到：原先只在小文件分支判了
         #    `_may_parallel`，续传路径直接进并发，于是 github.com 这类限流源在续传时照样开多连接）。
-        if (incomplete or resume_from) and supports_range and size \
-                and policy != "never" and _may_parallel(url):
+        # ⚠️ 续传分支**仍按源层面判**（`_may_parallel`）：没有 token 的直连不许自己开多连接
+        # —— 用户 2026-10-05：「**抢块不包含直连**」。
+        if ((incomplete or resume_from) and supports_range and size
+                and policy != "never" and _may_parallel(url)):
             threads = recommended_threads(size)
             report.boosted = True
             report.threads = threads
@@ -1612,12 +1719,27 @@ def _attempt_line(
         # 小文件 / 不支持 Range / 明确不要加速 → 老老实实单连接
         # PCL 的 `TryBeginThread` 里对 github.com 这类源直接 Return Nothing（不分片）——
         # 它们按连接数限流，分片只会更容易被拒。
-        if (not supports_range or (size and size < MIN_PARALLEL_BYTES)
-                or policy == "never" or not _may_parallel(url)):
+        # ⚠️ 续传 + **没有 token 的直连**：不许直连并发（抢块不含直连），但已知它慢时也不该
+        # 在这儿单连接慢慢磨 —— **放弃这条线路**，让 `download()` 换到镜像去抢块。
+        # 消息里带"低于…可用线"，与探测判死那句同格式：外层据此认出"是慢直连被跳过"，
+        # 好在所有线路都不如它时回它兜底。
+        last_mbps = _direct_last_mbps(url)
+        if ((incomplete or resume_from) and supports_range and size
+                and policy != "never" and not _may_parallel(url)
+                and 0 < last_mbps < SLOW_MBPS):
+            raise OSError(
+                f"直连上次实测只有 {last_mbps:.2f} MB/s（低于 {SLOW_MBPS} MB/s 可用线）"
+                f"且没有 token → 不在这儿单连接磨，换线路抢块")
+
+        # ⚠️⚠️ **不再在这里用 `_may_parallel` 一票否决**（2026-10-05 用户要求：
+        # 「只要直连不达到单片 1.5MB/s，而且没有 ghtoken，就直接进动态抢块测试，
+        #  如果抢块比直连快就继续，比直连慢就恢复直连」）。
+        # 真实 GitHub 直连在没有 token 时该不该并发，要看**实测速度** —— 慢到 `SLOW_MBPS`
+        # 以下就进抢块试用，那必须等下面的单连接探测拿到速度才能判。所以这里只留与速度无关的几条。
+        if not supports_range or (size and size < MIN_PARALLEL_BYTES) or policy == "never":
             reason = ("服务器不支持 Range" if not supports_range else
                       "文件较小，不值得并发" if size and size < MIN_PARALLEL_BYTES else
-                      "这个下载源限流，单连接反而更快" if not _may_parallel(url)
-                      else "已按设置关闭加速")
+                      "已按设置关闭加速")
             report.reason = reason
             # 已有部分数据时按追加写（不截断），否则从头写
             written, stalled, note = _download_sequential(
@@ -1688,11 +1810,18 @@ def _attempt_line(
             _log(log, f"线路很慢（探测 {report.probe_mbps:.3f} MB/s）→ 仍用 {threads} 连接试"
                       f"（实测慢线路上并发收益最大，且 4 条不够、要十几条才吃满），"
                       f"试用窗口后按实测速度决定去留")
-        need_boost = policy == "always" or slow or stalled
+        # ★ **这一刻允不允许并发**（用户 2026-10-05 的规则，判据都在 `_parallel_gate` 里）：
+        # 没有 token 的真实 GitHub 直连，只有慢到 `SLOW_MBPS` 以下才放行进抢块试用。
+        gate, gate_note = _parallel_gate(url, report.probe_mbps, policy)
+        need_boost = policy == "always" or (gate and (slow or stalled))
+        if gate and need_boost:
+            _log(log, f"决定启用并发抢块：{gate_note}")
 
         if not need_boost:
-            # 链路够快：接着单连接把剩下的下完（不折腾）
-            report.reason = f"单连接 {report.probe_mbps:.2f} MB/s（够快，不启用加速）"
+            # 两种情形都走这里：链路够快（不折腾），或这个源此刻不许并发
+            report.reason = (f"单连接 {report.probe_mbps:.2f} MB/s（够快，不启用加速）"
+                             if gate else
+                             f"单连接 {report.probe_mbps:.2f} MB/s（{gate_note}）")
             _log(log, report.reason)
             rest, stalled2, note2 = _download_sequential(
                 url, work, offset=written, total=size, timeout=timeout, progress=progress,

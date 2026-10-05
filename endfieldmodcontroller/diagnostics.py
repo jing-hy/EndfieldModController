@@ -1579,6 +1579,28 @@ def _is_normal_exit_reason(reason: str) -> bool:
     return str(reason or "").strip() in ("exit_code=0", "exit_code=None")
 
 
+def _after_game_exit(config: Any, game_dir: Path | None, *, pid: int | None,
+                     started_at: float | None, exit_time: float | None,
+                     exit_code: int | None) -> None:
+    """游戏退出后的**统一取证**（与 `crashwatch.start_watch` 共用同一入口 `on_game_exit`）。
+
+    2026-10-05 加。这一整套 —— 采样收尾、注入时间线、证据采集、报告、崩溃归因、
+    崩溃记忆与跑通台账、**"连续三次失败"计数**、崩溃包、崩溃后的建议 —— 原先**只挂在
+    `crashwatch.start_watch` 上**，而主路径跑的是 `_monitor_process` ⇒
+    主路径下一次都没跑过（反馈者的包里连 `watch-samples.jsonl` 都不存在，
+    连崩 5 次也没等到那个弹窗）。现在两个监视器都走这一个入口。
+    """
+    started = started_at if started_at is not None else _LAST_GAME_START or None
+    try:
+        from . import crashwatch
+
+        crashwatch.on_game_exit(
+            config, pid=pid, started_at=started, exit_time=exit_time, exit_code=exit_code,
+            log=lambda message: log_event(config, message, category="crash"))
+    except Exception as exc:  # noqa: BLE001 —— 取证失败绝不能影响监视器收尾
+        log_event(config, f"游戏退出取证失败（忽略）: {exc}", category="crash", level="WARN")
+
+
 def _monitor_process(config: Any, game_dir: Path | None, image_name: str, timeout: float) -> None:
     global _LAST_GAME_START
 
@@ -1586,6 +1608,13 @@ def _monitor_process(config: Any, game_dir: Path | None, image_name: str, timeou
     found_pid: int | None = None
     handle: int | None = None
     started = time.monotonic()
+    # ★ 运行时取证（2026-10-05）：采样曲线 + 注入现场时间线 + 退出后的统一取证。
+    #   ⚠️ 这三样原先**只挂在 `crashwatch.start_watch` 身上**，而主路径跑的是这个函数 ⇒
+    #   主路径下从来没有 5 秒采样、没有注入时间线、没有归因与崩溃记忆、
+    #   **也没有"连续三次失败"计数**（反馈者的包里连 `watch-samples.jsonl` 都不存在，
+    #   他崩了 5 次都没等到那个弹窗）。现在把它们装进这个**唯一在跑的监视器**里。
+    runtime_state: dict[str, Any] | None = None
+    game_started_at: float | None = None
     # ⚠️ 句柄打不开时的降级判据（2026-10-04 修，见下面 `handle is None` 分支的说明）
     degraded_logged = False
     try:
@@ -1607,6 +1636,18 @@ def _monitor_process(config: Any, game_dir: Path | None, image_name: str, timeou
                     # 记下"这次游戏是什么时候起来的" —— 采集层用它判断抓到的日志
                     # 是**本次现场**还是上一次留下的旧文件（2026-10-04 加）。
                     _LAST_GAME_START = time.time()
+                    game_started_at = _LAST_GAME_START
+                    # ★ 注入时间线·**时机 3／5：终末地启动后** + 重置运行时采样
+                    #   （共用入口，与 `crashwatch.start_watch` 同源 —— 判据只有一处）
+                    try:
+                        from . import crashwatch
+
+                        runtime_state = crashwatch.arm_runtime_watch(
+                            config, pid,
+                            log=lambda message: log_event(config, message, category="crash"))
+                    except Exception as exc:  # noqa: BLE001 —— 取证失败绝不打断监视
+                        log_event(config, f"运行时取证: 就位失败（忽略）: {exc}",
+                                  category="crash", level="WARN")
                     log_event(config, "检测到游戏进程", category="monitor", image=image_name, pid=pid,
                               # 读不到就把原因写出来（否则"命令行是空的"永远是个谜 ——
                               # 原来那条 wmic 兜底在新系统上必然失败且不留痕迹）
@@ -1631,6 +1672,19 @@ def _monitor_process(config: Any, game_dir: Path | None, image_name: str, timeou
                         config, message, category="dlss5"))
                 except Exception:  # noqa: BLE001 —— 补开失败绝不影响崩溃取证
                     pass
+                # ★ 运行时采样：每 5 秒一次（`poll_runtime_watch` 内部判间隔；
+                #   与 `crashwatch.start_watch` 同源 —— 判据只有一处）。
+                #   2026-10-05 之前这份采样只挂在 `start_watch` 上，而主路径跑的是这里 ⇒
+                #   主路径下**从来没采过**（反馈者的包里连 watch-samples 都没有）。
+                if runtime_state is not None:
+                    try:
+                        from . import crashwatch
+
+                        crashwatch.poll_runtime_watch(
+                            config, pid, runtime_state,
+                            log=lambda message: log_event(config, message, category="crash"))
+                    except Exception:  # noqa: BLE001 —— 采样失败绝不打断监视
+                        pass
                 if handle is None and found_pid is not None and not degraded_logged:
                     # ⚠️⚠️ **`OpenProcess` 拿不到句柄时必须降级**（2026-10-04 修）。
                     # 游戏以管理员运行时，非提权的我们 `OpenProcess` 会 Access denied
@@ -1933,6 +1987,51 @@ def _ngx_consumer_summary(game_dir: Path | None) -> list[str]:
     lines.append("  · 判断 DLSS5 是否生效请看：面板的「成功 NR 帧」是否增长，以及本包里 "
                  "`dlss5\\dlss5-feed.log` 是否出现 `feature ready` 与持续的帧统计。")
     return lines
+
+
+def _pe_deps_summary(config: Any, game_path: Any) -> list[str]:
+    """**注入 DLL 的依赖预检** —— 把"缺哪个 DLL"变成诊断包里能直接读到的结论。
+
+    为什么要它（2026-10-05，用户明确要求「**自动取证做一下**」）：那份
+    `diagnostics-20261005-223225` 的机器上，游戏以 `0xC0000135 STATUS_DLL_NOT_FOUND`
+    **极早期**退出（现象是"滴滴两声、任务栏只闪一下终末地图标、没有窗口"），
+    而诊断包只能看出"它死得很早"——**看不出缺的是哪一个 DLL**。反馈者自称"电脑小白"，
+    让他去装 Process Monitor、开 loader snaps 不现实。
+
+    做法：把「我们要注入的 DLL + 游戏 exe + 游戏目录里已有的 proxy」的 **PE 静态导入表**
+    逐个读出来，查每个依赖能否在「游戏目录 → System32 → SysWOW64」里解析到
+    （实现是 `pedeps` 模块，纯标准库、只读、单文件毫秒级）。
+
+    ⚠️ **限制会一并写进 summary**（免得被当成"全量体检"）：只覆盖**静态导入表**；
+    延迟加载与运行期 `LoadLibrary` 拉起的 DLL 不在其中 ⇒「没报缺」≠「运行期不缺」。
+    """
+    from . import pedeps
+
+    candidates: list[Path] = []
+    game_dir = Path(game_path) if game_path else None
+    if game_dir and game_dir.is_dir():
+        exe = game_dir / "Endfield.exe"
+        if exe.is_file():
+            candidates.append(exe)
+        for folder in (game_dir, game_dir / "plugin"):
+            if not folder.is_dir():
+                continue
+            try:
+                candidates.extend(sorted(folder.glob("*.dll")))
+            except OSError:
+                pass
+    dlss5 = Path(config.dlss5_path)
+    for name in ("d3d12.dll", "dxgi.dll", "d3d11.dll", "nvngx_dlss.dll", "nvngx_dlssnr.dll"):
+        path = dlss5 / name
+        if path.is_file():
+            candidates.append(path)
+    if not candidates:
+        return []
+    try:
+        result = pedeps.check_paths(candidates, game_dir=game_dir)
+    except Exception as exc:  # noqa: BLE001 - 取证失败绝不能拖垮整个诊断包
+        return ["", "-- 注入 DLL 依赖检查 --", f"（扫描失败: {exc}）"]
+    return [""] + pedeps.report_lines(result, limit=20)
 
 
 def _xxmi_summary(config: Any) -> list[str]:
@@ -2442,6 +2541,9 @@ def create_diagnostic_bundle(
         f"game_dir={game_dir}",
     ]
     summary.extend(_game_injection_summary(config, game_path))
+    # 注入 DLL 的依赖预检（2026-10-05 加）：把"**缺哪个 DLL**"直接写进包。
+    # 起因：一台机器上游戏以 `0xC0000135` 极早期退出，而包里只能看出"它死得早"。
+    summary.extend(_pe_deps_summary(config, game_path))
     summary.extend(_nvngx_fingerprint(config))
     summary.extend(_xxmi_summary(config))
     # XXMI 自己的注入现场（启动参数 / work_dir / 每个 dll 的注入结果 / 它报的错）—— 2026-10-04 加
@@ -2696,6 +2798,30 @@ def create_diagnostic_bundle(
                     _safe_zip_write(archive, path, f"{arc}/{path.name}", max_bytes=256 * 1024)
         if config_path.is_file():
             _safe_zip_write(archive, config_path, "config.json")
+        # ★ **排查素材一次收齐**（2026-10-05 用户要求：「**你自己怎么查的，就把那些文件全收进
+        #   日志包**」）：与崩溃包共用 `crashwatch.collect_diagnosis_files()` —— 判据只有一处。
+        #   收的是这次定位实际打开过的那一批：生效的 ReShade 日志与 ini、面板 addon 日志、
+        #   feed 日志与配置、**运行库变体 marker**、游戏自己的 `Player.log`、XXMI 配置与日志、
+        #   **各 addon 的身份（名/字节/sha256）**、**随包资产清单**、游戏目录里的 proxy 本体。
+        #   以前它们里有些只收了一半（ini 只有哈希、addon 只有清单、marker 完全没收），
+        #   于是每次排查都要回头再要一轮。
+        try:
+            import tempfile
+
+            from . import crashwatch
+
+            with tempfile.TemporaryDirectory(prefix="mc-diag-") as staging:
+                staging_dir = Path(staging)
+                taken = crashwatch.collect_diagnosis_files(config, staging_dir)
+                for item in taken:
+                    staged = staging_dir / item
+                    if staged.is_file():
+                        _safe_zip_write(archive, staged, f"diagnosis/{item}")
+                        _manifest_add(manifest, arcname=f"diagnosis/{item}",
+                                      source="(排查素材·与崩溃包同一批)", status="ok")
+        except Exception as exc:  # noqa: BLE001 —— 取证失败不能反噬打包
+            _manifest_add(manifest, arcname="diagnosis/", source="(排查素材)",
+                          status="error", note=str(exc))
         archive.writestr("runtime-inventory.txt", inventory + "\n")
         archive.writestr("game-inventory.txt", inventory_text)
         archive.writestr("environment.txt",

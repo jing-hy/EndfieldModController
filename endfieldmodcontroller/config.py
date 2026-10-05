@@ -82,27 +82,50 @@ def _safe_save(cfg: "AppConfig", path: Path) -> bool:
 
 
 def _apply_gpu_defaults(cfg: "AppConfig") -> bool:
-    """按**显卡代次**决定 DLSS5 的默认开关；只在"还没跟过这个默认"时执行一次。
+    """按**显卡支持范围**决定 DLSS5 的默认开关；只在"还没跟过当前这套范围"时执行一次。
 
-    用户 2026-10-01 要求：「**开启时检测机器，如果不是 50 系就默认关 dlss5，开启 dlss5 的
-    时候弹窗说明拒绝**」。理由：DLSS5 首发只支持 RTX 50 系，40 系及更早的机器上它**一帧都
-    出不来**（NGX 回 `0xBAD00001` FeatureNotSupported），默认开着只会让人以为坏了。
+    用户 2026-10-01 要求：「开启时检测机器，如果不是 50 系就默认关 dlss5，开启 dlss5 的
+    时候弹窗说明拒绝」。理由：当时 DLSS5 首发只支持 RTX 50 系，40 系及更早在 NGX 层会被
+    `0xBAD00001` 拒掉，默认开着只会让人以为坏了。
+
+    **2026-10-05 范围扩大**（原话：「去掉所有对非 50 系的锁，换成对 a 卡和 10 系及以下和
+    核显」）⇒ 判据变成"有 tensor core 的 RTX（20 系及以上）"。于是**老 40/30/20 系用户
+    那份配置里的 `False` 是旧判据写进去的，必须替他们打开** —— 这就是第二个标记
+    `dlss5_gpu_scope_applied` 的用途。
+
+    ⚠️ **只动"旧判据不支持、新判据支持"那部分机器**（`sm < 120`）：
+    * 50 系：旧判据本来就支持 ⇒ 现在的 `False` 只可能是**用户自己关的**，绝不覆盖；
+    * A 卡 / 核显 / GTX：新判据也不支持 ⇒ 保持关闭；
+    * 探测失败（读不到设备信息）：**一个字都不改、也不置标记**，下次启动再试
+      —— 绝不因为一次读取失败就把用户的功能关掉。
 
     返回是否改动过配置（调用方据此决定要不要落盘）。读设备信息是毫秒级注册表查询且有
-    进程内缓存，而且只在迁移那一次真正取值。
+    进程内缓存，只在迁移那一次真正取值。
     """
-    if getattr(cfg, "dlss5_gpu_default_applied", False):
+    if getattr(cfg, "dlss5_gpu_scope_applied", False):
         return False
-    supported = True
+    sm: int | None = None
+    detected = False
     try:
         from . import deviceinfo
 
-        supported, _gpu, _reason = deviceinfo.dlss5_supported()
-    except Exception:  # noqa: BLE001 - 读不到就当支持，绝不因为探测失败把功能关掉
-        supported = True
-    if not supported:
-        cfg.dlss5_addon_enabled = False
-    cfg.dlss5_gpu_default_applied = True
+        info = deviceinfo.collect()
+        adapters = info.get("adapters")
+        detected = adapters is not None
+        # **从 adapters 自己算**，不去读 `collect()` 里的派生字段：判据只有一处
+        # （`rtx_cards`），打桩测试与真实运行才会得出同一个结论。
+        cards = deviceinfo.rtx_cards(adapters or [])
+        sm = cards[-1][1] if cards else None
+    except Exception:  # noqa: BLE001 - 探测失败不改配置（见 docstring）
+        detected = False
+    if not detected:
+        return False
+    cfg.dlss5_gpu_scope_applied = True
+    cfg.dlss5_gpu_default_applied = True     # 旧标记一并置位，免得两条迁移互相打架
+    if sm is None:
+        cfg.dlss5_addon_enabled = False      # 新判据也不支持（A 卡 / 核显 / GTX 10/16）
+    elif sm < 120:
+        cfg.dlss5_addon_enabled = True       # 40/30/20 系：旧判据关掉的，现在替用户打开
     return True
 
 
@@ -403,6 +426,12 @@ class AppConfig:
     # 如果不是 50 系就默认关 dlss5，开启 dlss5 的时候弹窗说明拒绝」）。
     # 为 True = 这份配置已经按机器代次定过默认值，之后用户手动设的不会被改回来。
     dlss5_gpu_default_applied: bool = False
+    # **支持范围扩大后的第二次迁移标记**（2026-10-05 用户要求：「去掉所有对非 50 系的锁，
+    # 换成对 a 卡和 10 系及以下和核显」）。
+    # 旧判据"只支持 RTX 50 系"曾把 40/30/20 系机器的开关**写成 False** —— 光改判据不够，
+    # 那些配置里的 False 得被重新打开，否则老 40 系用户升级后依然用不了 DLSS5。
+    # 为 True = 已按新范围处理过；之后用户自己关掉的不再改回来。
+    dlss5_gpu_scope_applied: bool = False
     # **面板的中文字体**：ReShade 默认字体（ProggyClean）没有中文字形，面板里的中文含义
     # 会显示成方块。True（默认）= 打开「整合 Mod 快捷键」时，若 `ReShade.ini` 的
     # `[STYLE] Font=` 还是空的，就自动指向系统中文字体（`msyh.ttc` 等，写前备份）。
@@ -518,7 +547,7 @@ class AppConfig:
             cfg._config_path = str(path)
             cfg.data_root = _data_root_of(path)   # 记下这一版的数据根，下次搬家才对得上
             cfg.hotkey_default_applied = True   # 新配置天然就是新默认，无需迁移
-            _apply_gpu_defaults(cfg)            # 非 50 系 → DLSS5 默认关（读注册表，毫秒级）
+            _apply_gpu_defaults(cfg)            # 按显卡支持范围定 DLSS5 默认（读注册表，毫秒级）
             cfg.autofill(deep=False)   # 只填内嵌路径（毫秒级）；全盘探测交给后台预热
             _safe_save(cfg, path)
             return cfg

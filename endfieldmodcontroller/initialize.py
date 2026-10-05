@@ -74,7 +74,14 @@ FIRSTPERSON_LANGUAGE_EN = "2"
 FIRSTPERSON_DEFAULT_SECTION = (
     "[endfield-enhancer]\n"
     "CameraEFMICompatibility=1\n"            # 与 EFMI 服装 Mod 共存所必需
-    "CameraFirstPerson=0\n"                  # 默认不常开，用快捷键切换
+    # ⚠️ **默认开着**（2026-10-05 改；用户实测要求：「**相机 hook 好像要等我开第一人称才创建**，
+    #    你试一下**一开始就开上**」）：
+    #    它是 `0`（出厂默认"不常开、用快捷键切换"）时，enhancer **不会去装相机 hook** ⇒
+    #    日志里永远不会出现 `Camera controls installed.` ⇒ `nr_autostart` 只能一直等 ⇒
+    #    用户看到的现象正是「**又测了一次，就是没自动开 nr**」（实测现场：ReShade.log 里
+    #    enhancer 只打了 `Registered add-on` 一行，`installed` / `failed` 都没有）。
+    #    用户随时按 F1（`ShortcutFirstPerson=112`）即可切回，不影响他自己的选择。
+    "CameraFirstPerson=1\n"
     "CameraFirstPersonDialogue=1\n"
     "CameraFirstPersonFOV=60\n"
     "CameraFirstPersonFOVOverride=0\n"
@@ -781,14 +788,18 @@ def _check_dlss5_preset(config: AppConfig, report: Report, log: Callable[[str], 
 
 def _check_dlss5_gpu_support(config: AppConfig, report: Report,
                              log: Callable[[str], None] | None) -> None:
-    """**按显卡代次决定 DLSS5 能不能用**（非 RTX 50 系 → 自动关掉，也不给手动开）。
+    """**按显卡支持范围决定 DLSS5 能不能用**（不支持的机器 → 自动关掉，也不给手动开）。
 
-    用户 2026-10-01 要求：「**开启时检测机器，如果不是 50 系就默认关 dlss5，开启 dlss5 的
-    时候弹窗说明拒绝**」。理由：DLSS5 首发只支持 RTX 50 系，40 系及更早的机器上它一帧都
-    出不来（NGX 回 `0xBAD00001` FeatureNotSupported，见 lesson `0mup6bvc`），默认开着只会
-    让人以为装坏了 —— 而那台机器上所有"排查建议"都是白折腾。
+    判据的唯一实现是 `deviceinfo.dlss5_supported()`：**NVIDIA + 型号名含 RTX
+    （= 有 tensor core）⇒ RTX 20 系及以上都支持**。
 
-    这里**永远判 ok=True**：它不是用户的故障（硬件支持范围问题），不需要"待处理"；
+    支持范围两度变更，这里跟着走、不自己判代次：
+    * 2026-10-01：「开启时检测机器，如果不是 50 系就默认关 dlss5，开启 dlss5 的时候
+      弹窗说明拒绝」—— 当时 DLSS5 首发只有 50 系运行库；
+    * **2026-10-05**：「去掉所有对非 50 系的锁，换成对 a 卡和 10 系及以下和核显」——
+      社区的架构重定向运行库到位后，40/30/20 系不再需要被挡（见 `runtime_assets` 的变体表）。
+
+    这里**永远判 ok=True**：不支持的机器不是用户的故障（硬件不支持），不需要"待处理"；
     真发现开关还开着就顺手关掉（`fixed` 语义），并在消息里说清为什么。
     """
     from . import deviceinfo
@@ -799,7 +810,9 @@ def _check_dlss5_gpu_support(config: AppConfig, report: Report,
         report.add("dlss5:gpu_support", True, f"读不到设备信息（{exc}）—— 跳过显卡代次检查")
         return
     if supported:
-        report.add("dlss5:gpu_support", True, f"满足 DLSS5 硬件前提：{gpu}")
+        # ⚠️ **把 `reason` 也带上**（2026-10-05）：支持范围扩大后，"本机该用哪一份运行库
+        # 变体"是排查"NR 不出帧"的第一判据，诊断包里必须有它。
+        report.add("dlss5:gpu_support", True, f"满足 DLSS5 硬件前提：{gpu}｜{reason}")
         return
     turned_off = False
     if getattr(config, "dlss5_addon_enabled", True):
@@ -824,6 +837,65 @@ def _check_dlss5_gpu_support(config: AppConfig, report: Report,
         True,
         (f"{reason}　" + ("已自动关闭 DLSS5 开关。" if turned_off else "DLSS5 开关保持关闭。")),
     )
+
+
+def _check_dlssnr_arch(config: AppConfig, report: Report,
+                       log: Callable[[str], None] | None) -> None:
+    """**运行库架构自检**：`nvngx_dlssnr.dll` 里有没有本机显卡的 CUDA 内核？
+
+    为什么必须有（2026-10-05 换方案的配套）：DLSS5 的运行库是**按架构分别编译**的 ——
+    NVIDIA 官方那份只带 sm_120（Blackwell），社区重定向版才带 sm_89 / sm_86 / sm_75。
+    换显卡、被整合包替换文件、双卡机器换了主卡，只要落地的文件与本机架构不符，游戏里就是
+    `feature 18 create failed with 0xBAD00001`，而用户完全看不出原因（本项目此前实测到的
+    40 系失败，根因正是"随包那份只有 sm_120"）。
+
+    判据（实测三份文件得出）：文件 fatbin 里含本机 sm ⇒ 正常；不含/读不出 ⇒ **自动换成
+    `select_dlssnr_variant()` 选出的那一份**（旧文件留 `.bak`，可回退）。
+
+    * 不支持的机器（A 卡 / 核显 / GTX）整项跳过 —— 不制造噪音；
+    * 快路径先看 marker（不碰 165 MB），只有对不上才真扫 fatbin（实测 0.1 秒）。
+    """
+    from . import runtime_assets
+
+    try:
+        choice = runtime_assets.select_dlssnr_variant(config)
+    except Exception as exc:  # noqa: BLE001
+        report.add("dlss5:nr_arch", True, f"读取运行库变体失败（不影响使用）: {exc}")
+        return
+    if choice.sm is None:
+        report.add("dlss5:nr_arch", True, "本机显卡不使用 DLSS5 神经渲染（跳过运行库架构检查）")
+        return
+    if choice.source_kind == "installed":
+        report.add("dlss5:nr_arch", True,
+                   f"运行库架构与本机显卡匹配（{runtime_assets.DLSSNR_TARGET} = 变体 "
+                   f"`{choice.effective}`，本机 sm_{choice.sm}）")
+        return
+    # 快路径说"不确定/不匹配" → 慢路径真扫一次（换卡、被替换、marker 丢失都会走到这里）
+    try:
+        choice = runtime_assets.select_dlssnr_variant(config, rescan=True)
+    except Exception as exc:  # noqa: BLE001
+        report.add("dlss5:nr_arch", True, f"扫描运行库架构失败（不影响使用）: {exc}")
+        return
+    if choice.source_kind == "installed":
+        report.add("dlss5:nr_arch", True,
+                   f"运行库架构已确认匹配（变体 `{choice.effective}`，本机 sm_{choice.sm}）")
+        return
+    if not choice.ok:
+        report.add("dlss5:nr_arch", False,
+                   f"找不到含本机架构（sm_{choice.sm}）的 DLSS5 运行库：{choice.reason}",
+                   manual=True)
+        return
+    try:
+        result = runtime_assets.ensure_dlssnr(config, log=log, force=True, rescan=True)
+    except Exception as exc:  # noqa: BLE001
+        report.add("dlss5:nr_arch", False, f"按显卡架构切换运行库失败: {exc}", manual=True)
+        return
+    if result.ok:
+        report.add("dlss5:nr_arch", True,
+                   f"已按你的显卡架构切换运行库：{result.message}", fixed=True)
+    else:
+        report.add("dlss5:nr_arch", False,
+                   f"按显卡架构切换运行库没成功：{result.message}", manual=True)
 
 
 def _check_dlss5_ngx_consumer(config: AppConfig, report: Report,
@@ -1144,11 +1216,11 @@ def _check_dlss5_nr_binding(config: AppConfig, report: Report,
         report.add("dlss5:nr_binding", True, "上次进游戏时 DLSS5 的 NR 正常出帧（面板「成功NR帧」应当有数）")
         return
     if "feature 18 create failed" in recent or "NR feature create failed" in recent:
-        # 先看显卡代次 —— DLSS5 神经渲染首发**只支持 RTX 50 系**，40 系及更早会被 NGX
-        # 以"该特性不支持"拒掉（正是这个 0xBAD00001）。2026-10-01 三台机器的一致模式：
-        # RTX 5080 正常出帧；RTX 4060 / 4070 Laptop 都是同一个码。别让 40 系用户去折腾
-        # 分辨率、驱动、虚拟显示适配器 —— 那是白费功夫。
-        generation = None
+        # 这个码（`0xBAD00001` = NGX 回「不支持该特性」）有**两种完全不同的成因**，必须分开说：
+        #   ① 卡本来就跑不了（A 卡 / Intel / 核显 / GTX：没有 tensor core）→ 硬件不支持，别折腾；
+        #   ② 卡跑得了，但**落地的那份运行库不含本机架构** —— 2026-10-05 实测定案的根因
+        #      （随包那份只有 sm_120，所以 40/30/20 系必然失败）。这种要给出可执行方向。
+        sm = None
         gpu = ""
         try:
             from . import deviceinfo
@@ -1156,31 +1228,47 @@ def _check_dlss5_nr_binding(config: AppConfig, report: Report,
             info = deviceinfo.collect()
             names = " / ".join(str(a.get("name") or "") for a in (info.get("adapters") or []))
             gpu = "、".join(
-                str(a.get("name")) for a in (info.get("adapters") or []) if "nvidia" in str(a.get("name", "")).lower()
+                str(a.get("name")) for a in (info.get("adapters") or [])
+                if "nvidia" in str(a.get("name", "")).lower()
             ) or names
-            generation = deviceinfo.nvidia_generation(names.lower())
+            sm = deviceinfo.best_rtx_sm()
         except Exception:  # noqa: BLE001
-            generation = None
-        if generation is not None and generation < 50:
+            sm = None
+        if sm is None:
             report.add(
-                "dlss5:nr_binding",
-                True,
+                "dlss5:nr_binding", True,
                 f"上次进游戏时 DLSS5 的 NR 没建起来（`feature 18 create failed with 0xbad00001`）——"
-                f"你的显卡是 **{gpu or ('RTX ' + str(generation) + ' 系')}**，而 **DLSS5 神经渲染目前只支持"
-                f" RTX 50 系**（官方已表态后续会扩展到 40 系）。NGX 回的就是「不支持该特性」，所以"
-                f"**这不是装坏了、也不是配置问题，暂时不用折腾任何设置**；等 NVIDIA 放开后再进游戏，"
-                f"面板「成功NR帧」自然会有数。",
+                f"你的显卡是 **{gpu or '未检测到 NVIDIA RTX 显卡'}**。DLSS5 神经渲染需要 NVIDIA 的 "
+                f"tensor core（RTX 20 系及以上才有），**这属于硬件不支持、不是装坏了**，"
+                f"不用再折腾任何设置。",
+            )
+            return
+        archs: set[int] = set()
+        try:
+            from . import runtime_assets
+
+            target = config.dlss5_path / runtime_assets.DLSSNR_TARGET
+            if target.is_file():
+                archs = runtime_assets.dll_architectures(target)
+        except Exception:  # noqa: BLE001
+            archs = set()
+        if archs and sm not in archs:
+            report.add(
+                "dlss5:nr_binding", False,
+                f"上次进游戏时 DLSS5 的 NR 没建起来：**落地的那份运行库不含你显卡的架构**"
+                f"（本机需要 sm_{sm}，而文件里只有 "
+                f"{'、'.join('sm_' + str(item) for item in sorted(archs))}）—— 这正是 40/30/20 系"
+                f"「NR 帧恒为 0」的根因。自检会按架构重新切换一份，切完进游戏再开一次 NR。",
+                manual=True,
             )
             return
         report.add(
-            "dlss5:nr_binding",
-            False,
-            "上次进游戏时 DLSS5 的 NR 没建起来（日志：`feature 18 create failed with 0xbad00001`）。"
-            "**注意**：这**不是**游戏内超分档位的问题（原生 / DLAA / 开超分都能正常出帧，反例已实测），"
-            "也**不是**驱动或运行库的问题（同驱动同运行库的机器上是正常的）；失败机与正常机的日志"
-            "逐行对照只差这一行 —— 所以别再试「降分辨率 / 关虚拟显示适配器」。"
-            "请把显卡型号与 `ReShade.log` 里 `feature 18 create failed` 前后 20 行发出来"
-            "（RTX 50 系仍然失败属于罕见情况，值得单独查）。",
+            "dlss5:nr_binding", False,
+            f"上次进游戏时 DLSS5 的 NR 没建起来（`feature 18 create failed with 0xbad00001`），"
+            f"而本机显卡（sm_{sm}）与运行库架构是**匹配**的 —— 那就要看驱动与 addon 版本的组合："
+            f"`renodx-dlss5` 在驱动 ≥616.64 上有已知的 evaluate 失败（上游实测 4.55 通过 300/300、"
+            f"4.7 通过 0/300）。请把显卡型号、驱动版本，以及 `ReShade.log` 里 "
+            f"`feature 18 create failed` 前后 20 行发出来。",
             manual=True,
         )
         return
@@ -2573,8 +2661,10 @@ def ensure_all(config: AppConfig, log: Callable[[str], None] | None = None) -> d
     _check_dlss5_preset(config, report, log)
     # NGX 消费者检查：检测到第三方截获（OptiScaler）就**自动移走**（用户要求"自动检测处理"，
     # 不是写一句说明让用户自己看日志）
-    # 显卡代次决定 DLSS5 能否使用（非 50 系 → 自动关掉开关）
+    # 显卡支持范围决定 DLSS5 能否使用（不支持 → 自动关掉开关）
     _check_dlss5_gpu_support(config, report, log)
+    # 运行库架构自检：这份 `nvngx_dlssnr.dll` 含不含**本机显卡的内核**（不含就自动换一份）
+    _check_dlssnr_arch(config, report, log)
     _check_dlss5_ngx_consumer(config, report, log)
     # 面板合成键有没有和别的 addon 快捷键撞车（F6/F7 撞车事故的兜底检查）
     _check_panel_hotkey_conflicts(config, report, log)

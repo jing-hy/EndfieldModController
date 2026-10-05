@@ -249,3 +249,71 @@ def test_sync_adds_shortcut_when_key_absent(tmp_path):
     launcher._sync_enhancer_section(source, target)
 
     assert "ShortcutFirstPerson=112" in target.read_text(encoding="utf-8")
+
+
+def test_sync_never_touches_camera_first_person(tmp_path):
+    """★ 2026-10-05：**不许覆写用户的第一人称开关状态**。
+
+    用户原话：「**你不要复写我的第一人称开启状态配置**」。它确实是"相机 hook 能不能装上"
+    的关键（`0` 时 enhancer 不去装 hook ⇒ 永远等不到 `Camera controls installed.`），
+    但**开不开第一人称是用户自己的偏好** —— 一键启动只保证**不去动它**。
+    """
+    source = tmp_path / "dlss5" / "ReShade.ini"
+    target = tmp_path / "reshade" / "ReShade.ini"
+    _write_ini(source, "[endfield-enhancer]\nCameraFirstPerson=1\n")
+    _write_ini(target, "[endfield-enhancer]\nCameraFirstPerson=0\n")
+
+    launcher._sync_enhancer_section(source, target)
+
+    text = target.read_text(encoding="utf-8")
+    assert "CameraFirstPerson=0" in text, "用户设的 0 必须原样保留"
+    assert "CameraFirstPerson=1" not in text
+
+
+# ---------------------------------------------------------------------------
+# ⑤ 2026-10-05 加：**「还没走到那一步」与「hook 装失败了」必须分得开**
+#
+# 用户实测「又测了一次，就是没自动开 nr」。查下来那次 ReShade 日志里 enhancer
+# **只打了 "Registered add-on" 一行** —— 既没有 `Camera controls installed.`（成功），
+# 也没有 `camera hook installation failed`（失败，游戏 87 秒内没进到场景）。
+# 当时的判据只认前者 ⇒ 两种情形都表现为"一直等"，日志里连一条线索都没有。
+# ---------------------------------------------------------------------------
+def test_hook_failure_is_reported_not_silently_waited(env, monkeypatch):
+    """★ 相机 hook 装失败 ⇒ 明确报出来并打住，不许继续默默等。"""
+    calls = _fake_send(monkeypatch)
+    nr_autostart.arm(env.config)
+    env.log_path.write_text(
+        "12:00:10 | WARN | [RenoDX: Arknights Endfield Enhancer] Endfield enhancer: "
+        "Camera hook installation failed; camera controls disabled.\n", encoding="utf-8")
+    lines: list[str] = []
+
+    result = nr_autostart.poll(env.config, log=lines.append)
+
+    assert result["action"] == "skip" and result["reason"] == "hook_failed", result
+    assert calls == [], "hook 装失败时绝不能开 NR（NR 抢在前面会把相机控制弄没）"
+    assert any("安装失败" in line for line in lines), lines
+
+
+def test_wait_diagnostic_fires_once_after_timeout(env, monkeypatch):
+    """★ 等太久 ⇒ 留一行诊断（说清多半是还没进场景），且**只写一次**不刷屏。"""
+    calls = _fake_send(monkeypatch)
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(nr_autostart.time, "time", lambda: clock["now"])
+    nr_autostart.arm(env.config)
+    env.log_path.write_text("12:00:02 | INFO | Registered add-on ...\n", encoding="utf-8")
+    lines: list[str] = []
+
+    nr_autostart.poll(env.config, log=lines.append)
+    assert not any("已等" in line for line in lines), "还没到点不该刷诊断"
+
+    clock["now"] += nr_autostart._WAIT_DIAG_SECONDS + 1
+    with env.log_path.open("a", encoding="utf-8") as handle:
+        handle.write("12:01:30 | INFO | another line\n")
+    nr_autostart.poll(env.config, log=lines.append)
+    assert any("已等" in line and "场景" in line for line in lines), lines
+
+    with env.log_path.open("a", encoding="utf-8") as handle:
+        handle.write("12:01:40 | INFO | third line\n")
+    nr_autostart.poll(env.config, log=lines.append)
+    assert sum(1 for line in lines if "已等" in line) == 1, "诊断只写一次，不许刷屏"
+    assert calls == []

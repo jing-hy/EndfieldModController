@@ -634,6 +634,43 @@ def backup_and_clean(
     }
 
 
+def injection_snapshot(config: AppConfig) -> set[str]:
+    """游戏目录里**此刻**有哪些"原版不会有"的注入物 → 相对路径集合。
+
+    只回答"在不在"、**不算 sha256**：它给"**净化后按开关铺回了哪些**"做前后差集用
+    （用户 2026-10-05 要求：「净化后没有'按开关铺回了哪些'的显式说明也做一下」）。
+    每次一键启动要跑两遍，不该为它哈希几十 MB。
+
+    与 `audit()` 同一套判据（同一批常量与 `is_third_party_proxy`），只是省掉哈希与详情。
+    """
+    game_dir = reshade_integration.detect_game_dir(config, prefer_actual=True)
+    if game_dir is None:
+        return set()
+    found: set[str] = set()
+    for name in reshade_integration.LOADER_PROXY_MODULES:
+        path = game_dir / name
+        try:
+            if path.is_file() and reshade_integration.is_third_party_proxy(path):
+                found.add(name)
+        except OSError:
+            continue
+    for name in getattr(reshade_integration, "INJECTOR_DATA_NAMES", ()):
+        try:
+            if (game_dir / name).is_file():
+                found.add(name)
+        except OSError:
+            continue
+    plugin_dir = game_dir / reshade_integration.PLUGIN_DIR_NAME
+    if plugin_dir.is_dir():
+        try:
+            for item in plugin_dir.iterdir():
+                if item.is_file():
+                    found.add(f"{plugin_dir.name}/{item.name}")
+        except OSError:
+            pass
+    return found
+
+
 def _game_running(image: str = "Endfield.exe") -> bool:
     """游戏（或它的启动器进程）是不是正在跑 —— 冲突时才跳过清理，不抛异常。"""
     from . import diagnostics

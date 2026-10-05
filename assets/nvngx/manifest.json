@@ -1,6 +1,7 @@
 {
   "version": 1,
-  "notes": "NVIDIA DLSS 运行库（nvngx_dlss*.dll）。为了绕开 GitHub 单文件 100 MiB 上限，压缩后按需分卷；首次启动由 EndfieldModController 自动拼接解压到 runtime/dlss5/。重新打包：python scripts/pack_nvngx_assets.py",
+  "group": "nvngx",
+  "notes": "NVIDIA DLSS 运行库。`nvngx_dlss.dll` 官方 SDK 就有；`nvngx_dlssnr.dll`（DLSS5 神经渲染运行库）**按显卡架构分别编译**，所以这里放多份变体（2026-10-05）：官方那份只含 sm_120（Blackwell），社区把内核重定向到 sm_89/sm_86/sm_75 之后，RTX 20/30/40 系也能跑 —— 程序按本机显卡架构自动选一份落成 nvngx_dlssnr.dll。为绕开 GitHub 单文件 100 MiB 上限，压缩后按需分卷；首次启动自动拼接解压。",
   "compression": "xz (BCJ x86 + LZMA2 preset 9e)",
   "files": {
     "nvngx_dlss.dll": {
@@ -22,7 +23,31 @@
         "nvngx_dlssnr.dll.xz.part1",
         "nvngx_dlssnr.dll.xz.part2"
       ],
-      "origin": "NVIDIA DLSS runtime library (nvngx_dlss*.dll)"
+      "origin": "NVIDIA DLSS runtime library (nvngx_dlss*.dll)",
+      "install_as": "nvngx_dlssnr.dll",
+      "variant": "official",
+      "arch": [
+        120
+      ]
+    },
+    "nvngx_dlssnr.sf.dll": {
+      "size": 165830144,
+      "sha256": "6eb209e764f39872625debd6abaf45e2bb6322f6f270f781f70c059ae30b3927",
+      "packed_bytes": 117275612,
+      "packed_sha256": "3c203f851d2f3502f19a1659d0d43f487e35c6c88e955ee857ae6f7648c4e540",
+      "parts": [
+        "nvngx_dlssnr.sf.dll.xz.part1",
+        "nvngx_dlssnr.sf.dll.xz.part2"
+      ],
+      "origin": "NVIDIA DLSS runtime library (nvngx_dlss*.dll)",
+      "install_as": "nvngx_dlssnr.dll",
+      "variant": "sf",
+      "arch": [
+        75,
+        86,
+        89,
+        120
+      ]
     }
   }
 }

@@ -201,6 +201,9 @@ def component_versions(config: AppConfig) -> dict[str, Any]:
             "name": "DLSS 运行库 (nvngx)",
             "dlss": (dlss5_dir / "nvngx_dlss.dll").stat().st_size if (dlss5_dir / "nvngx_dlss.dll").is_file() else 0,
             "dlssnr": (dlss5_dir / "nvngx_dlssnr.dll").stat().st_size if (dlss5_dir / "nvngx_dlssnr.dll").is_file() else 0,
+            # 本机在用哪个变体 + 本机架构（2026-10-05）：运行库现在是**按显卡架构自动
+            # 选**的，光看字节数说明不了"对不对"—— 这一行才是判据。
+            "variant": _dlssnr_variant_tag(config),
         },
         "xxmi": _xxmi_versions(config),
         "secondary_motion": {
@@ -221,6 +224,23 @@ def component_versions(config: AppConfig) -> dict[str, Any]:
         },
     }
     return versions
+
+
+def _dlssnr_variant_tag(config: AppConfig) -> str:
+    """本机在用的 DLSS5 运行库变体 + 本机架构，形如 `official（RTX 50 系（sm_120））`。
+
+    给"检查更新"、诊断包与依赖页显示用：运行库是**按显卡架构自动选**的，
+    换了显卡、或文件被整合包换过，这一行就是判据（`runtime_assets` 的 marker 是唯一真源）。
+    """
+    try:
+        from . import deviceinfo, runtime_assets
+
+        sm = deviceinfo.best_rtx_sm()
+        marker = runtime_assets.read_dlssnr_marker(config)
+        variant = str(marker.get("variant") or "") or deviceinfo.dlss5_runtime_variant(sm)
+        return f"{variant or '?'}（{deviceinfo._sm_label(sm) if sm else '不支持'}）"
+    except Exception:  # noqa: BLE001 - 读不到就不显示，不能因此让更新检查整项失败
+        return ""
 
 
 def _poser_local_version(config: AppConfig) -> str:

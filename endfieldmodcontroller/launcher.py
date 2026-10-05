@@ -363,6 +363,12 @@ def resolve_hotkey_takeover(
 def _sync_enhancer_section(source: Path, target: Path,
                            keys: tuple[str, ...] = (
                                "CameraEFMICompatibility",
+                               # ⚠️ **`CameraFirstPerson` 故意不在这里**（2026-10-05 用户明确要求：
+                               #    「**你不要复写我的第一人称开启状态配置**」）。
+                               #    它确实是"相机 hook 能不能装上"的关键（值为 `0` 时 enhancer
+                               #    不会去装 hook ⇒ 永远等不到 `Camera controls installed.`），
+                               #    但**开不开第一人称是用户自己的偏好**，不该由一键启动替他决定。
+                               #    想默认开的人自己按一次 F1 即可；我们只保证**不去动它**。
                                "CameraFirstPersonDialogue",
                                "CameraFirstPersonMovement",
                                "CameraMeshHeadHiding",
@@ -1728,6 +1734,17 @@ def bootstrap_xxmi_config(config: AppConfig, *, wait_seconds: int = 40,
         _spawn_elevated(config, str(launcher_path), str(Path(launcher_path).parent), show_window=0)
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "created": False, "message": f"启动 XXMI 失败：{exc}"}
+    # ★ 注入现场时间线·**时机 2／5：XXMI 拉起后**（用户 2026-10-05 要求）。
+    #   此刻 XXMI 已经在跑，而**它自己也会补写配置** —— 这正是"我们写好的注入库被第三方
+    #   改掉"的窗口，所以这一张照片是后面所有点里最不能省的一张。
+    try:
+        from . import injecttrace
+
+        injecttrace.record(config, phase="xxmi-started", note="拉起 XXMI 生成配置",
+                           log=log or (lambda message: None))
+    except Exception as exc:  # noqa: BLE001 —— 取证失败绝不能影响启动
+        if log:
+            log(f"注入时间线: 记录失败（忽略）: {exc}")
     deadline = time.time() + max(5, int(wait_seconds))
     created_path: Path | None = None
     while time.time() < deadline:
@@ -2513,6 +2530,19 @@ def launch(
     inject_timeout: float = 60.0,
 ) -> dict[str, Any]:
     config.ensure_dirs()
+    # ★ 注入现场时间线·**时机 1／5：一键启动最开始**（用户 2026-10-05 要求：
+    #   「在一键启动最开始和 xxmi 拉起后和终末地启动后和终末地关闭和崩溃后都要收注入列表」）。
+    #   此刻还没净化、还没写注入库，记的是"**这一趟出发前**"的状态 —— 与后面四个点一比，
+    #   就能看出"注入库/游戏目录是被谁、在什么时候改掉的"（`0xC0000135` 的两种来源只有
+    #   时间线分得开：真缺依赖 vs 进程内 `LoadLibrary` 失败后异常传播成退出码）。
+    if not dry_run:
+        try:
+            from . import injecttrace
+
+            injecttrace.record(config, phase="launch-begin",
+                               log=lambda message: _append_log(config, message))
+        except Exception as exc:  # noqa: BLE001 —— 取证失败绝不能影响启动
+            _append_log(config, f"注入时间线: 记录失败（忽略）: {exc}")
     # 防多开：真的要启动游戏时，先确认没有别的事例在跑
     if not dry_run and start_game:
         state = check_game_multi_instance(config)
@@ -2596,6 +2626,7 @@ def launch(
     # 痕迹备份移走、把系统原版补回，再由下面按当前开关重新铺我们自己那一份 ——
     # 反过来的话，刚铺好的注入会被当成"残留"清掉。
     # 只搬不删、写备份清单、随时可一键还原（`game_clean.restore`）。
+    purged: set[str] | None = None      # 净化后的"干净基线"，用来算"铺回了哪些"
     if not dry_run:
         try:
             from . import game_clean
@@ -2606,6 +2637,10 @@ def launch(
                 _append_log(config,
                             f"启动前净化完成：移走 {len(clean_report['moved'])} 项；"
                             f"备份在 {clean_report.get('backup_dir')}（可在设置页一键还原）")
+            # ★ 记下净化后的现场（用户 2026-10-05 要求：「净化后没有'**按开关铺回了哪些**'
+            #   的显式说明也做一下」）：下面按开关铺回之后再扫一次，**差集**就是本次铺回来的
+            #   —— 免得读日志的人把"我们又装回来的 poser/sbm"误判成"净化没生效"。
+            purged = game_clean.injection_snapshot(config)
         except Exception as exc:  # noqa: BLE001 —— 净化失败不能拦住启动
             _append_log(config, f"WARN 启动前净化失败（继续启动）: {exc}")
 
@@ -2614,6 +2649,24 @@ def launch(
         reshade["injection_report"] = injection_report
         for warning in injection_report.get("warnings", []):
             _append_log(config, f"WARN 注入自检: {warning}")
+        # ★ **净化后按开关铺回了哪些**（用户 2026-10-05 要求）：与净化后的基线求差集。
+        #   `plugin/poser.dll`、`plugin/sbm.dll`、`d3dcompiler_47.dll`、`vulkan-1.dll` 这些
+        #   是**我们按开关铺的**，不是"净化没生效"、也不是第三方残留 —— 不写清楚，
+        #   读日志的人（包括我们自己排查崩溃时）就会把它当成污染源。
+        if purged is not None:
+            try:
+                from . import game_clean
+
+                restored = sorted(game_clean.injection_snapshot(config) - purged)
+            except Exception:  # noqa: BLE001
+                restored = []
+            if restored:
+                shown = "、".join(restored[:12]) + ("…" if len(restored) > 12 else "")
+                _append_log(
+                    config,
+                    f"净化后按当前开关重新铺设了 {len(restored)} 项：{shown}"
+                    f"（这些是**我们要的**注入、不是第三方残留；不想让它们进来就去设置页"
+                    f"关掉对应开关 —— Poser / 乳摇 / DLSS5 / 第一人称）")
         # ⚠️ **必须放在 `ensure_injections()` 之后**（2026-10-04 用户报「第一人称的中文没了」的根因）：
         # `initialize.ensure_all()` 会在这一步**重建** `dlss5\ReShade.ini`（里面才带
         # `[endfield-enhancer] Language=1` 与中文字体）；而上面 `prepare_reshade_runtime()`

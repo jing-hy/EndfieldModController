@@ -45,14 +45,25 @@ FILTERS = [
 GROUPS: dict[str, dict] = {
     "nvngx": {
         "assets_dir": ROOT / "assets" / "nvngx",
-        "patterns": ("nvngx_dlss.dll", "nvngx_dlssnr.dll"),
+        "patterns": ("nvngx_dlss.dll", "nvngx_dlssnr.dll", "nvngx_dlssnr.sf.dll"),
         "origin": "NVIDIA DLSS runtime library (nvngx_dlss*.dll)",
         "notes": (
-            "NVIDIA DLSS 运行库。NVIDIA 官方 SDK 只提供 nvngx_dlss.dll，"
-            "nvngx_dlssnr.dll（DLSS5 光线重建模型）没有官方直链，故随包分发；"
-            "为绕开 GitHub 单文件 100 MiB 上限，压缩后按需分卷；"
-            "首次启动自动拼接解压到 dlss5_dir。"
+            "NVIDIA DLSS 运行库。`nvngx_dlss.dll` 官方 SDK 就有；`nvngx_dlssnr.dll`（DLSS5 "
+            "神经渲染运行库）**按显卡架构分别编译**，所以这里放多份变体（2026-10-05）："
+            "官方那份只含 sm_120（Blackwell），社区把内核重定向到 sm_89/sm_86/sm_75 之后，"
+            "RTX 20/30/40 系也能跑 —— 程序按本机显卡架构自动选一份落成 nvngx_dlssnr.dll。"
+            "为绕开 GitHub 单文件 100 MiB 上限，压缩后按需分卷；首次启动自动拼接解压。"
         ),
+        # 变体元信息：`install_as` = 最终落成的文件名（NGX 只认这一个名字）、
+        # `variant` = 变体名、`arch` = 内含架构（打包时**实测**，声明值只用于校对）。
+        "variants": {
+            "nvngx_dlssnr.dll": {
+                "install_as": "nvngx_dlssnr.dll", "variant": "official", "arch": [120],
+            },
+            "nvngx_dlssnr.sf.dll": {
+                "install_as": "nvngx_dlssnr.dll", "variant": "sf", "arch": [75, 86, 89, 120],
+            },
+        },
     },
     "dlss5": {
         "assets_dir": ROOT / "assets" / "dlss5",
@@ -82,6 +93,19 @@ def sha256_file(path: Path) -> str:
                 break
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _architectures(path: Path) -> list[int]:
+    """这份运行库**内含**的 CUDA 架构号，如 `[75, 86, 89, 120]`。
+
+    复用主程序那一份实现（`runtime_assets.dll_architectures`）—— 判据只留一处，
+    免得"打包时按一个说法写、运行时按另一个说法判"对不上。
+    """
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from endfieldmodcontroller.runtime_assets import dll_architectures
+
+    return sorted(dll_architectures(path))
 
 
 def source_candidates(from_dir: Path | None) -> list[Path]:
@@ -180,7 +204,7 @@ def build_group(key: str, group: dict, from_dir: Path | None, part_limit: int) -
         packed_bytes = packed.stat().st_size
         packed_sha = sha256_file(packed)
         parts = [p.name for p in split_even(packed, part_limit)]
-        files[name] = {
+        entry: dict = {
             "size": src.stat().st_size,
             "sha256": sha256_file(src),
             "packed_bytes": packed_bytes,
@@ -189,6 +213,20 @@ def build_group(key: str, group: dict, from_dir: Path | None, part_limit: int) -
             # 注意：**不写本机路径**（清单要进公开仓库，个人目录名不该出现）
             "origin": group["origin"],
         }
+        # 运行库变体：把"装成什么名字 / 属于哪个变体 / 内含哪些架构"写进清单 ——
+        # `runtime_assets` 就是靠这三个字段按本机显卡挑文件的。`arch` 一律**实测覆盖**
+        # 声明值（声明只用来校对，写错了当场看得见）。
+        variant_meta = dict((group.get("variants") or {}).get(name) or {})
+        if variant_meta:
+            measured = _architectures(src)
+            declared = sorted(int(item) for item in (variant_meta.get("arch") or []))
+            if declared and measured != declared:
+                print(f"  !! {name}: 声明的架构 {declared} 与实测 {measured} 不符 —— 以实测为准",
+                      file=sys.stderr)
+            variant_meta["arch"] = measured
+            entry.update(variant_meta)
+            print(f"  变体 {variant_meta.get('variant')}: 内含架构 {measured}")
+        files[name] = entry
 
     manifest = {
         "version": 1,

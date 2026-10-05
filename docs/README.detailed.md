@@ -5,7 +5,7 @@
 
 《明日方舟：终末地》的一站式 Mod 管理器：把 **DLSS5 神经渲染 + 第一人称视角 + 服装 Mod（EFMI）** 以及 **乳摇（SecondaryMotion）** 统一到一次「一键启动」里，并自动维护各项注入与初始化自检。
 
-Windows 桌面程序（Python + PyWebview），单文件 exe，**零配置启动即用**。当前版本 **1.0.14**。
+Windows 桌面程序（Python + PyWebview），单文件 exe，**零配置启动即用**。当前版本 **1.0.15**。
 
 > 💬 **QQ 群：1045239747**（加群验证答案 `jing_hy`）—— 不方便用 GitHub 或想直接问，都可以在群里发诊断包；记得附上现象。
 
@@ -212,13 +212,51 @@ False**（返回值是 `stage_and_prepare(hotkey_takeover=...)` 用的，而锁�
 "锁住 Mod 按键"那半已经停用（见 `core.HOTKEY_LOCK_ENABLED` 的说明：面板改成直接发 Mod 原键，
 锁键会让它失效）。关掉开关时**已经铺好的面板文件不删**，只是下次启动不再铺。
 
-**DLSS5 的默认开关按显卡代次决定**（2026-10-01 用户要求「开启时检测机器，如果不是 50 系就
-默认关 dlss5，开启 dlss5 的时候弹窗说明拒绝」）：DLSS5 神经渲染**首发只支持 RTX 50 系**，
-40 系及更早的机器上 NGX 直接回 `0xBAD00001`（FeatureNotSupported），面板永远 `成功NR帧 0`。
-所以：`deviceinfo.dlss5_supported()` 是**唯一判据**（迁移、开关闸门、自检三处共用），
-非 50 系 → 默认关掉（`dlss5_gpu_default_applied` 一次性迁移）；**手动去开会被后端拒绝**
-（`set_component_addon` 返回 `rejected: dlss5_unsupported_gpu`，前端弹窗讲清原因并把开关
-弹回关闭），自检项 `dlss5:gpu_support` 也会如实说明。
+**DLSS5 的默认开关按显卡支持范围决定** —— 判据的唯一实现在 `deviceinfo.dlss5_supported()`：
+**NVIDIA 且型号名含 `RTX`（= 有 tensor core）⇒ RTX 20 系及以上都支持**。
+
+判据两度变更，别把它们弄混：
+
+* **2026-10-01**（用户原话「开启时检测机器，如果不是 50 系就默认关 dlss5，开启 dlss5 的
+  时候弹窗说明拒绝」）：当时 DLSS5 首发只有 50 系运行库，40 系及更早在 NGX 层会被
+  `0xBAD00001`（FeatureNotSupported）拒掉 ⇒ 非 50 系一律默认关 + 拒绝手动开。
+* **2026-10-05**（用户原话「**去掉所有对非 50 系的锁，换成对 a 卡和 10 系及以下和核显**」）：
+  实测发现随包那份运行库**只含 sm_120 内核**（这正是 40 系必然失败的根因），而社区把它重定向
+  到 sm_89 / sm_86 / sm_75 之后 40/30/20 系都能跑 ⇒ 支持范围扩大为"有 tensor core 的 RTX"，
+  并**按显卡架构自动选运行库**（见下一节）。
+
+迁移：`dlss5_gpu_scope_applied` 是一次性标记 —— 老 40 系用户配置里的 `False` 是**旧判据**
+写进去的，会被替他们**打开**；50 系用户自己关掉的不动（旧判据本来就支持 50 系，那个 `False`
+只可能是用户设的）。不支持的机器（GTX 10/16 系、A 卡、核显）仍默认关，手动去开会被后端拒绝
+（`set_component_addon` 返回 `rejected: dlss5_unsupported_gpu`），自检项 `dlss5:gpu_support`
+也会如实说明"这是硬件前提、不是配置问题"。
+
+### 运行库按显卡架构自动切换（2026-10-05）
+
+DLSS5 的神经渲染代码跑在 `nvngx_dlssnr.dll` 里，而那份运行库**按 CUDA 架构分别编译**。
+程序按本机显卡架构**自动选一份**落成 `runtime\dlss5\nvngx_dlssnr.dll`（NGX 与 addon 只认
+这个名字 —— 变体只体现在**内容**上）：
+
+| 变体 | 内含内核（实测 fatbin） | 给谁 | 来源 |
+|---|---|---|---|
+| `official` | sm_120 | RTX 50 系 | NVIDIA 官方 `310.8.0`（**随包**） |
+| `sf` | sm_75 / 86 / 89 / 120 | RTX 20 / 30 / 40 系 | 社区镜像 `RankFTW/rhi-repo` 的 `310.8.SF-v2`（**随包**） |
+| `rtx40` | sm_89 / 120 | RTX 40 系（可选优化） | 同镜像 `310.8.0-RTX40`（**依赖页按需下载**） |
+
+* **随包两份即可覆盖全部受支持型号** ⇒ 一键启动**永远不需要为运行库下载任何东西**，
+  而且四种机器的动作序列与耗时同量级（自检**只展开选中那一份**，不会白解压第二份 165 MB）；
+* `rtx40` 是 40 系"更贴合 Ada"的版本，**不装也完整可用**（`sf` 含 sm_89）；装了之后一键启动
+  会自动切到它，用户不需要做任何额外操作；
+* **判据只有一处**：`runtime_assets.dll_architectures()` 读文件里的 fatbin 记录 ↔
+  `deviceinfo.best_rtx_sm()`。换显卡、被整合包替换文件、双卡换主卡都会**自动切回**
+  （自检项 `dlss5:nr_arch`），旧文件留 `.bak-*` 可回退；
+* 基线检查（`baseline_mismatches`）**按"本机生效的那一份"判** —— 否则 40 系上刚装好的 `sf`
+  会被判成"偏离随包基线"、被自动换回 `official`、下次再判不符，**每次启动来回替换 165 MB**。
+
+**依赖页**另有两件事：一行「随包资产包（assets-bundle.zip）」= **导入本地 zip**（或从 Release
+下载）—— 单文件 exe 用户、离线机器、以及从社区镜像下了单份运行库 zip 的场景都用它（单份
+运行库 zip 会**按内含架构自动识别变体**）；40 系机器上还会多一行「DLSS NR 运行库 · RTX 40
+优化版（可选）」，未安装标灰而不是标红（它缺失是正常状态）。
 
 ### 面板的按键是怎么送进游戏的（进程内伪造读键 + F13..F24 内部通道）
 
@@ -338,7 +376,15 @@ run.bat --cli    :: 不开界面，直接打印当前状态 JSON（调试用）
 
 4. 再点一次「一键启动」就会真正写好注入库并拉起 XXMI。
 
-> **DLSS5 那套组件没有上游可下载**（`renodx-endfield-enhancer.addon64`、`trans-zh.addon64`、`nvngx_dlssnr.dll` 全网都没有自动可用的发布源），需要随包自备（`assets\dlss5\`）或从可用的旧环境复制到 `runtime\dlss5\`。缺了会明确提示缺哪个文件，而不是静默失败。
+> **DLSS5 那套组件大部分没有上游可下载**（`renodx-endfield-enhancer.addon64`、`trans-zh.addon64`，以及 `renodx-dlss5` 的中文版，全网都没有自动可用的发布源），需要随包自备（`assets\dlss5\`）或从可用的旧环境复制到 `runtime\dlss5\`。缺了会明确提示缺哪个文件，而不是静默失败。
+>
+> **例外（2026-10-05）**：DLSS5 的**神经渲染运行库**现在有可用来源 —— 社区镜像
+> [`RankFTW/rhi-repo`](https://github.com/RankFTW/rhi-repo) 按显卡架构分发（`official` / `sf` /
+> `rtx40`，见「运行库按显卡架构自动切换」一节）。随包带 `official` + `sf` **两份**即可覆盖
+> 全部受支持型号；40 系的 `rtx40` 优化版可在**依赖页**一键下载。从别处拿到的 zip（完整
+> `assets-bundle.zip` 或单份组件 zip）也能用依赖页的「**导入随包 zip…**」直接导入 ——
+> 那是**依赖组件**的入口（不是 Mod 包），导入前会**逐条校验**：manifest 要能解析、它列出的
+> 每个文件的**全部分卷都得在包里**，缺一卷就拒绝并列出缺什么。
 
 ### DLSS5 装完直接玩，不需要手动配置
 
@@ -670,6 +716,7 @@ python scripts\upload_release_assets.py  :: 上传两个附件（大文件走直
 | [Endfield Poser](https://github.com/OedoSoldier/Endfield-Poser)（`honxi1/Endfield-Poser` 的功能分支） | 摆姿 / MMD 播放（可选） | **AGPL-3.0** —— **不随包分发**，只从它的官方 Release 下载并调用它自己的安装向导 |
 | **Endfield PS-T DrawSection Fix v2.1**（《终末地Mod修复工具包》v1.5）—— **B站 up 主 可可HXL** | Mod 卡片的「修复（实验性）」与「一键修复所有」 | 版权归原作者（B站搜索「可可HXL」可找到工具包与教程）；**随包分发**，使用方式按其教程：在**临时目录**里跑，不把 `_ps_t_draw_fix_backup_*` 与日志留在 Mods 里 |
 | NVIDIA NGX 运行库（`nvngx_dlss.dll` / `nvngx_dlssnr.dll`） | DLSS 与神经渲染运行库 | NVIDIA 版权，随包仅为免去手动下载 |
+| **社区 DLSS NR 运行库变体**（`nvngx_dlssnr.sf.dll` / 依赖页的 `rtx40`） | 让 **RTX 20 / 30 / 40 系**也能跑 DLSS5 神经渲染（内核重定向到 sm_75/86/89） | 取自社区镜像 [RankFTW/rhi-repo](https://github.com/RankFTW/rhi-repo)（`dlssnr-310.8.SF-v2` / `dlssnr-310.8.0-RTX40`）；NVIDIA 运行库本身**闭源、无公开许可**，此处按其发布分发。若权利人有异议，在 issue 里说明即移除 |
 
 **关于第一人称中文补丁（特别声明）**：随包分发的第一人称**中文**补丁由 **B站 up 主 Hirahido** 制作，
 版权归其所有（源自作者发布的"终末地EE"）。
