@@ -1,6 +1,6 @@
 <script setup>
 // 辅助 Mod 页（旧 #tab-assist）：只列辅助/工具类 Mod，不参与换装。
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { call } from "../lib/bridge.js";
 import { store, refreshState } from "../store.js";
 import { settings, loadSettings } from "../lib/settings.js";
@@ -9,6 +9,7 @@ import Switch from "../components/ui/Switch.vue";
 import ModDownloadCard from "../components/ModDownloadCard.vue";
 import CharacterAssignDialog from "../components/CharacterAssignDialog.vue";
 import { showToast, showAlert, showModalDialog } from "../lib/dialog.js";
+import { placeMenu } from "../lib/floatingMenu.js";
 import { ImageOff } from "lucide-vue-next";
 import { Wrench } from "lucide-vue-next";
 import Btn from "../components/ui/Btn.vue";
@@ -113,17 +114,35 @@ watch(() => [list.value.length, store.demoCovers], () => { queueCovers(list.valu
 // ⚠️ 用户 2026-10-03：「还有辅助类 mod 没有更多按钮」—— 服装页早就有，辅助页一直没做，
 // 于是"更改归属 / 移到皮肤 / 修复 / 回滚 / 移出库"这些在辅助页全都够不着。
 const menu = ref(null);          // { id, name, x, y }
+const menuEl = ref(null);        // 菜单根节点：用来**实测**尺寸（不再靠估计高度）
 const assignRef = ref(null);     // 归属下拉（复用服装页那个两下拉的组件）
 
-function openMenu(mod, event) {
+async function openMenu(mod, event) {
   event.stopPropagation();
   const box = event.currentTarget.getBoundingClientRect();
-  const width = 176;
-  const x = Math.max(8, Math.min(box.right - width, (window.innerWidth || 1200) - width - 8));
-  const y = Math.max(8, Math.min(box.bottom + 4, (window.innerHeight || 800) - 200));
-  menu.value = { id: String(mod.id), name: mod.name, x, y };
+  // 与服装页共用 `lib/floatingMenu.js`：先摆一次，再按**实测高度**修正（同一帧内完成）
+  const viewport = { width: window.innerWidth || 1200, height: window.innerHeight || 800 };
+  const first = placeMenu(box, { width: 176, height: 0 }, viewport);
+  menu.value = { id: String(mod.id), name: mod.name, x: first.x, y: first.y };
+  await nextTick();
+  const el = menuEl.value;
+  if (!el || !menu.value || menu.value.id !== String(mod.id)) return;
+  const pos = placeMenu(box, { width: el.offsetWidth || 176, height: el.offsetHeight || 0 }, viewport);
+  menu.value = { ...menu.value, x: pos.x, y: pos.y };
 }
-function closeMenu() { menu.value = null; }
+// 鼠标悬停打开 / 离开收起（2026-10-05 用户要求：「只要鼠标放到更多按钮上就弹出菜单，
+// 然后鼠标不在更多按钮或菜单上就收起」）。
+// 关键在于**延迟关闭**：菜单与按钮之间有 4px 间隙，鼠标横穿时必然有一瞬间两边都不在，
+// 立即关掉会让人根本点不到菜单。给 180ms 宽限，这期间进入按钮或菜单就取消。
+let menuCloseTimer = null;
+function cancelMenuClose() {
+  if (menuCloseTimer) { clearTimeout(menuCloseTimer); menuCloseTimer = null; }
+}
+function scheduleMenuClose() {
+  cancelMenuClose();
+  menuCloseTimer = setTimeout(() => { menuCloseTimer = null; closeMenu(); }, 180);
+}
+function closeMenu() { cancelMenuClose(); menu.value = null; }
 
 async function menuAct(act) {
   const m = menu.value;
@@ -167,6 +186,46 @@ async function menuAct(act) {
       const r = await call("delete_mod", m.id);
       if (r && r.ok === false) await showAlert("移出失败", r.message || "未知原因");
       else showToast(r && r.moved_to ? `已移出库：${r.moved_to}` : "已移出 辅助 Mod", "success");
+    } else if (act === "rename") {
+      // 输入型弹窗：确认时 resolve 的是**用户输入的那串文本**（不是 true）
+      const name = await showModalDialog({
+        title: `重命名「${m.name}」`,
+        message: `新名字会同时改到库里那个文件夹上（你在资源管理器里看到的也是它）。`
+          + `\n已经启用/勾选的状态、预览图和 Mod 内容都不受影响。`,
+        okText: "改名", cancelText: "不改了",
+        input: { label: "新名字", value: m.name, maxlength: 80 },
+      });
+      if (!name) return;
+      const r = await call("rename_mod", m.id, name);
+      if (r && r.ok === false) await showAlert("改名失败", r.message || "未知原因");
+      else if (r && r.unchanged) showToast("名字没变", "info");
+      else showToast(`已改名为「${(r && r.name) || name}」`, "success");
+    } else if (act === "cover") {
+      const r = await call("set_mod_cover", m.id);
+      if (r && r.ok === false && r.cancelled) return;      // 用户自己关掉了选图框，不算失败
+      if (r && r.ok === false) await showAlert("换预览图失败", r.message || "未知原因");
+      else {
+        // 封面有缓存（`store.covers`，与服装页共用）—— 不清掉的话界面上还是旧图
+        if (store.covers) delete store.covers[m.id];
+        await loadCover(m.id);
+        showToast(`「${m.name}」的预览图已更新`, "success");
+      }
+    } else if (act === "purge") {
+      // 真删、恢复不了 —— 破坏性最强的一档：红字入口 + **手输 ok** 才放行。
+      // 后端也会再判一次 `confirm`（界面只是第一道闸，绕不过去第二道）。
+      const typed = await showModalDialog({
+        title: `彻底删除「${m.name}」？`,
+        message: `${m.name}\n\n这会把这个 Mod 的文件夹从库里**直接删掉**：不进回收站、`
+          + `**删了就找不回来**。\n已经启用/勾选的话会同时从勾选里去掉；游戏本体和别的 Mod 不受影响。`
+          + `\n\n确定要删，请在下面输入 ok。`,
+        okText: "彻底删除", cancelText: "不删了", focusCancel: true,
+        requireText: "ok",
+        input: { label: "输入 ok 确认", placeholder: "ok", maxlength: 8 },
+      });
+      if (!typed) return;
+      const r = await call("purge_mod", m.id, String(typed));
+      if (r && r.ok === false) await showAlert("删除失败", r.message || "未知原因");
+      else showToast(`已彻底删除「${m.name}」`, "success");
     }
     await call("scan");
     await refreshState();
@@ -252,8 +311,8 @@ async function openLib() {
               <span class="mt-auto flex items-center justify-between gap-2">
                 <Switch :model-value="selected.has(String(m.id))"
                         @update:model-value="() => toggleMod(m)" />
-                <button class="btn btn-mini shrink-0" title="更多：分类 / 移到服装 Mod / 修复 / 回滚 / 移出库"
-                        @click="openMenu(m, $event)">⋯</button>
+                <button class="btn btn-mini shrink-0" title="更多：分类 / 移到服装 Mod / 修复 / 回滚 / 重命名 / 换预览图 / 移出库 / 彻底删除"
+                        @mouseenter="openMenu(m, $event)" @click="openMenu(m, $event)" @mouseleave="scheduleMenuClose()">⋯</button>
               </span>
             </span>
           </div>
@@ -276,8 +335,8 @@ async function openLib() {
               <span class="switch-state">{{ selected.has(String(m.id)) ? "已启用" : "未启用" }}</span>
               <Switch :model-value="selected.has(String(m.id))"
                       @update:model-value="() => toggleMod(m)" />
-              <button class="btn btn-mini shrink-0" title="更多：分类 / 移到服装 Mod / 修复 / 回滚 / 移出库"
-                      @click="openMenu(m, $event)">⋯</button>
+              <button class="btn btn-mini shrink-0" title="更多：分类 / 移到服装 Mod / 修复 / 回滚 / 重命名 / 换预览图 / 移出库 / 彻底删除"
+                      @mouseenter="openMenu(m, $event)" @click="openMenu(m, $event)" @mouseleave="scheduleMenuClose()">⋯</button>
             </span>
           </div>
         </div>
@@ -286,17 +345,25 @@ async function openLib() {
     <ModDownloadCard />
 
     <!-- ⋯ 就地小菜单（浮层，点空白处关闭） -->
-    <div v-if="menu" class="fixed inset-0 z-40" @click="closeMenu"></div>
-    <div v-if="menu" class="fixed z-50 card py-1 shadow-lg" style="min-width: 172px"
-         :style="{ left: menu.x + 'px', top: menu.y + 'px' }">
+    <div v-if="menu" class="fixed inset-0 z-40" @click="closeMenu" @mouseenter="scheduleMenuClose()"></div>
+    <div v-if="menu" ref="menuEl" class="fixed z-50 card py-1 shadow-lg"
+         style="min-width: 176px; max-height: calc(100vh - 16px); overflow-y: auto"
+         :style="{ left: menu.x + 'px', top: menu.y + 'px' }" @mouseenter="cancelMenuClose()" @mouseleave="scheduleMenuClose()">
       <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('character')">更改分类…</button>
       <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('toSkin')">移到「服装 Mod」</button>
       <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('fix')">修复 Mod 文件</button>
       <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('rollback')">回滚</button>
       <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('open')">打开所在目录</button>
       <div style="height:1px;background:var(--border)" class="my-1"></div>
+      <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('rename')">重命名…</button>
+      <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('cover')">更换预览图…</button>
+      <div style="height:1px;background:var(--border)" class="my-1"></div>
       <button class="w-full text-left px-3 py-1.5 text-sm" style="color: var(--danger)"
               @click="menuAct('delete')">移出 辅助 Mod</button>
+      <!-- ⚠️ 彻底删除（真删、恢复不了）：红字 + 更重一点的字体，排在最后一个 -->
+      <button class="w-full text-left px-3 py-1.5 text-sm"
+              style="color: var(--danger); font-weight: 600"
+              @click="menuAct('purge')">彻底删除…</button>
     </div>
 
     <CharacterAssignDialog ref="assignRef" />

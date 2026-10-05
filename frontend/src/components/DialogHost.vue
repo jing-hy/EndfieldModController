@@ -21,6 +21,25 @@ const okBtn = ref(null);
 const holdLeft = ref(0);
 let holdTimer = null;
 
+// ── 输入型弹窗（2026-10-05 加）──────────────────────────────────────────────
+// `input`：弹窗里带一个输入框，确认时把**输入的文本**交回去（重命名用）；
+// `requireText`：必须逐字输入指定内容，确认按钮才会亮（彻底删除要用户手输 ok）。
+const inputValue = ref("");
+const inputRef = ref(null);
+const needText = computed(() => String(uiState.dialog?.requireText || ""));
+const hasInput = computed(() => !!(uiState.dialog?.input || needText.value));
+const textMatched = computed(() => {
+  if (!needText.value) return true;
+  return inputValue.value.trim().toLowerCase() === needText.value.trim().toLowerCase();
+});
+const canOk = computed(() => holdLeft.value <= 0 && textMatched.value);
+
+function confirmDialog() {
+  const dialog = uiState.dialog;
+  if (!dialog || !canOk.value) return;
+  resolveDialog(dialog.input ? inputValue.value.trim() : true);
+}
+
 function stopHold() {
   if (holdTimer) { clearInterval(holdTimer); holdTimer = null; }
   holdLeft.value = 0;
@@ -28,9 +47,12 @@ function stopHold() {
 
 watch(() => uiState.dialog, async (dialog) => {
   stopHold();
+  inputValue.value = dialog && dialog.input ? String(dialog.input.value || "") : "";
   if (!dialog) return;
   await nextTick();
-  const target = dialog.focusCancel ? cancelBtn.value : okBtn.value;
+  // 有输入框时**焦点先给输入框**：不管是重命名还是"输入 ok 确认"，焦点落在按钮上
+  // 都等于逼用户先用鼠标点一下输入框，多此一举。
+  const target = dialog.input ? inputRef.value : (dialog.focusCancel ? cancelBtn.value : okBtn.value);
   if (target && target.focus) target.focus();
   const hold = Number(dialog.holdSeconds || 0);
   if (hold > 0) {
@@ -120,6 +142,24 @@ function onMessageClick(event) {
              style="max-width: 100%; overflow-wrap: anywhere; word-break: break-word;
                     max-height: 46vh; overflow-y: auto"
              v-html="renderedMessage" @click="onMessageClick"></pre>
+        <!-- 输入区（重命名的新名字 / 彻底删除的"输入 ok"）——
+             `requireText` 没输对时确认按钮是灰的，并在下面说清还差什么。 -->
+        <div v-if="hasInput" class="mt-3">
+          <div v-if="uiState.dialog.input && uiState.dialog.input.label"
+               class="text-xs mb-1" style="color: var(--text-muted)">
+            {{ uiState.dialog.input.label }}
+          </div>
+          <input ref="inputRef" class="field" type="text" autocomplete="off" spellcheck="false"
+                 :value="inputValue"
+                 :placeholder="uiState.dialog.input ? uiState.dialog.input.placeholder : ''"
+                 :maxlength="uiState.dialog.input && uiState.dialog.input.maxlength
+                            ? uiState.dialog.input.maxlength : null"
+                 @input="inputValue = $event.target.value"
+                 @keyup.enter="confirmDialog" />
+          <div v-if="!textMatched" class="text-xs mt-1" style="color: var(--text-muted)">
+            把 {{ needText }} 照原样输进去，确认按钮才会亮。
+          </div>
+        </div>
         <a v-if="uiState.dialog.link && uiState.dialog.link.url" :href="uiState.dialog.link.url"
            class="text-accent text-xs mt-2 inline-block" @click.prevent="$emit('open-link', uiState.dialog.link.url)">
           {{ uiState.dialog.link.text || uiState.dialog.link.url }}
@@ -141,8 +181,8 @@ function onMessageClick(event) {
         <Btn v-for="b in uiState.dialog.extraButtons" :key="b.text" variant="secondary"
              :disabled="holdLeft > 0"
              @click="resolveDialog(b.value === undefined ? true : b.value)">{{ b.text }}</Btn>
-        <Btn ref="okBtn" variant="primary" :disabled="holdLeft > 0"
-             @click="resolveDialog(true)">{{ uiState.dialog.okText }}</Btn>
+        <Btn ref="okBtn" variant="primary" :disabled="!canOk"
+             @click="confirmDialog">{{ uiState.dialog.okText }}</Btn>
       </div>
     </div>
   </div>

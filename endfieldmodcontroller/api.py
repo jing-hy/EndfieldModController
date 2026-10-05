@@ -2287,7 +2287,8 @@ class EndfieldModControllerApi:
     # ------------------------------------------------------------------
     # small utilities
     # ------------------------------------------------------------------
-    def _native_file_dialog(self, directory: bool, title: str = "") -> dict[str, Any]:
+    def _native_file_dialog(self, directory: bool, title: str = "",
+                            file_types: tuple[str, ...] = ()) -> dict[str, Any]:
         """用 **pywebview 的系统原生对话框**选路径。
 
         返回 `{"ok": True, "path": …}` / `{"ok": False, "cancelled": True}` /
@@ -2313,11 +2314,19 @@ class EndfieldModControllerApi:
         if window is None:
             return {"ok": False, "message": "窗口还没就绪，请直接把路径填进输入框"}
         dialog_type = webview.FOLDER_DIALOG if directory else webview.OPEN_DIALOG
+        # `file_types`（2026-10-05 加）：换预览图时**只列图片**，别让用户在一堆 dll 里翻。
+        # pywebview 对空元组不保证兼容 ⇒ 只在真的有过滤条件时才带这个关键字。
+        kwargs: dict[str, Any] = {"allow_multiple": False}
+        if file_types:
+            kwargs["file_types"] = file_types
         try:
             try:
-                picked = window.create_file_dialog(dialog_type, allow_multiple=False)
-            except TypeError:      # 老版本 pywebview 不接受 allow_multiple
-                picked = window.create_file_dialog(dialog_type)
+                picked = window.create_file_dialog(dialog_type, **kwargs)
+            except TypeError:      # 老版本 pywebview 不接受这些关键字
+                try:
+                    picked = window.create_file_dialog(dialog_type, allow_multiple=False)
+                except TypeError:
+                    picked = window.create_file_dialog(dialog_type)
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "message": f"打开选择框失败：{exc}"}
         if not picked:
@@ -2701,6 +2710,205 @@ class EndfieldModControllerApi:
                 pass
         self._invalidate_mods()
         return result
+
+    # ── 「⋯ 更多」里的三件：彻底删除 / 重命名 / 换预览图（2026-10-05 用户要求）──────
+    #   原话：「mod 的更多菜单中需要加入**彻底删除**（红字，需要用户输入 ok 二次确认）、
+    #          **重命名**和**更换预览图**（弹个选择文件的窗口）」。
+    #
+    # ⚠️ 数据安全（用户红线：「任何情况都不要动用户的 mod 库」）—— 这三个动作**只由用户
+    # 点击触发**，而且每个都先用 `_library_top_dir()` 把目标钉死在「库的**直接**子目录」上：
+    # 库根本身、`_` 开头的依赖/内部目录、库外面的路径一律拒绝。删又是**真删**（不进
+    # 回收站），所以 `purge_mod` 除了界面那道输入确认，后端**再判一次** `confirm`。
+    def _library_top_dir(self, mod) -> Path | None:
+        """这个 Mod 在库里的**顶层目录**（= 用户在资源管理器里看到的那个文件夹）。
+
+        扫描出来的 `mod.path` 可能是顶层目录里的**子目录**（Mod 包套一层，
+        `source_root` / `mod_root` 不是同一个），所以统一往上取「相对库根的第一段」——
+        删除与改名动的必须是这一层，否则会把用户的 Mod 包拆散。
+        """
+        library = Path(self.config.library_path).resolve()
+        try:
+            rel = Path(mod.path).resolve().relative_to(library)
+        except (ValueError, OSError):
+            return None
+        if not rel.parts:
+            return None
+        return library / rel.parts[0]
+
+    @staticmethod
+    def _read_mod_meta(meta_path: Path) -> dict[str, Any]:
+        """读 Mod 自己的 sidecar（`mod.meta.json`）；读不动/不是对象就当空的。"""
+        try:
+            loaded = json.loads(meta_path.read_text(encoding="utf-8"))
+            return loaded if isinstance(loaded, dict) else {}
+        except (OSError, json.JSONDecodeError):
+            return {}
+
+    def purge_mod(self, mod_id: str, confirm: str = "") -> dict[str, Any]:
+        """**彻底删除**：把这个 Mod 从库里真删掉（**不进回收站、恢复不了**）。
+
+        `confirm` 必须等于 `ok` —— 界面上那个弹窗要求用户手输，这里**再判一次**：
+        只靠界面挡的话，任何绕过界面的调用（脚本 / 旧前端 / 以后新加的入口）都能把
+        用户的库删掉。库外的历史备份（`runtime\\backups\\`）**一律不动**。
+        """
+        if str(confirm or "").strip().lower() != "ok":
+            return {"ok": False, "message": "没有确认：这个动作要在弹窗里输入 ok"}
+        mod = next((m for m in self._mods() if m.id == mod_id), None)
+        if mod is None:
+            return {"ok": False, "message": "找不到这个 Mod"}
+        library = Path(self.config.library_path).resolve()
+        top = self._library_top_dir(mod)
+        if top is None:
+            return {"ok": False, "message": "这个 Mod 不在 Mod 库里，拒绝删除"}
+        if top == library:
+            return {"ok": False, "message": "拒绝删除：目标是 Mod 库根目录"}
+        if str(top.parent) != str(library):
+            return {"ok": False, "message": f"拒绝删除：{top} 不是库里的顶层目录"}
+        if top.name.startswith("_"):
+            return {"ok": False, "message": f"拒绝删除：「{top.name}」是依赖/内部目录，不是普通 Mod"}
+        if not top.is_dir():
+            return {"ok": False, "message": f"这个目录已经不在了：{top}"}
+
+        # 先从勾选里去掉（否则下次一键启动会去找一个已经不存在的 Mod）——
+        # 这一步失败就**什么都不删**，别留下"库里没了、配置里还在"的半截状态。
+        unselected = False
+        try:
+            selected = list(self.config.selected_mods or [])
+            if mod_id in selected:
+                self.config.selected_mods = [x for x in selected if x != mod_id]
+                self.config.save()
+                unselected = True
+        except OSError as exc:
+            return {"ok": False, "message": f"先从勾选里去掉这一步失败了，没有删除任何东西：{exc}"}
+
+        try:
+            shutil.rmtree(top)
+        except OSError as exc:
+            return {"ok": False, "message": f"删除失败: {exc}"}
+
+        self._invalidate_mods()
+        launcher._append_log(self.config, f"彻底删除 Mod: {mod.name} → {top}")
+        return {"ok": True, "name": mod.name, "removed": str(top), "unselected": unselected,
+                "message": f"已彻底删除「{mod.name}」"}
+
+    def rename_mod(self, mod_id: str, new_name: str) -> dict[str, Any]:
+        """给 Mod 改名：**库里那个文件夹名**和 sidecar 里的 `name` 一起改。
+
+        改名只允许改「库的顶层目录」，因为那也是卡片上显示名字的来源
+        （`core._make_mod_info`：`name = meta["name"] or source_root.name`）。
+        """
+        mod = next((m for m in self._mods() if m.id == mod_id), None)
+        if mod is None:
+            return {"ok": False, "message": "找不到这个 Mod"}
+        library = Path(self.config.library_path).resolve()
+        top = self._library_top_dir(mod)
+        if top is None or top == library or str(top.parent) != str(library) or top.name.startswith("_"):
+            return {"ok": False, "message": "这个 Mod 不在 Mod 库的顶层，拒绝改名"}
+
+        new = str(new_name or "").strip()
+        if not new:
+            return {"ok": False, "message": "名字不能为空"}
+        if len(new) > 80:
+            return {"ok": False, "message": "名字太长了（最多 80 个字）"}
+        if new in {".", ".."}:
+            return {"ok": False, "message": "这个名字不能用"}
+        bad = [ch for ch in '\\/:*?"<>|' if ch in new] + [ch for ch in "\r\n\t" if ch in new]
+        if bad:
+            return {"ok": False, "message": "名字里不能有这些字符：" + " ".join(bad)}
+        target = library / new
+        if new.lower() == top.name.lower():
+            return {"ok": True, "id": mod_id, "name": top.name, "path": str(top),
+                    "unchanged": True, "message": "名字没变"}
+        if target.exists():
+            return {"ok": False, "message": f"库里已经有一个叫「{new}」的了，换个名字吧"}
+
+        # sidecar 写在 Mod 自己那一层（`mod.path`），扫描时它**优先于目录名**
+        meta_path = Path(mod.path) / "mod.meta.json"
+        before = meta_path.read_text(encoding="utf-8") if meta_path.is_file() else None
+        payload = self._read_mod_meta(meta_path)
+        payload["name"] = new
+        # ⚠️ **把 id 钉进 sidecar**：id 由 `stable_id(路径, 名字)` 算出，名字一变 id 就会变
+        # —— 而"勾选状态"存的是 id，一变就等于把用户已经选好的 Mod 丢了。
+        payload.setdefault("id", mod.id)
+        try:
+            meta_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError as exc:
+            return {"ok": False, "message": f"写 mod.meta.json 失败: {exc}"}
+
+        try:
+            top.rename(target)
+        except OSError as exc:
+            # 文件夹没改成 ⇒ 把 sidecar 恢复原样，别留下"名字和文件夹对不上"的现场
+            try:
+                if before is None:
+                    meta_path.unlink(missing_ok=True)
+                else:
+                    meta_path.write_text(before, encoding="utf-8")
+            except OSError:
+                pass
+            return {"ok": False, "message": f"改名失败（已还原）: {exc}"}
+
+        self._invalidate_mods()
+        launcher._append_log(self.config, f"重命名 Mod: {top.name} → {new}")
+        return {"ok": True, "id": mod_id, "name": new, "path": str(target),
+                "meta_path": str(meta_path)}
+
+    def set_mod_cover(self, mod_id: str) -> dict[str, Any]:
+        """换预览图：弹**系统原生**的选图框，把选中的图拷进 Mod 目录。
+
+        落点是 `<mod>\\cover.<ext>` —— 与下载入库时那份通道完全一致
+        （`core.find_cover()` 的 COVER_HINTS 认 `cover`），另外再往 sidecar 写一条
+        `"cover": "cover.<ext>"`（显式值优先级最高，保证换完立刻生效，不会被同目录里
+        别的图片抢走）。换之前先清掉我们自己以前铺的 `cover.*`，免得越换越多。
+        """
+        mod = next((m for m in self._mods() if m.id == mod_id), None)
+        if mod is None:
+            return {"ok": False, "message": "找不到这个 Mod"}
+        images = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif")
+        picked = self._native_file_dialog(
+            False, "选一张图片当预览图",
+            file_types=("图片 (*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif)", "所有文件 (*.*)"),
+        )
+        if not picked.get("ok"):
+            if picked.get("cancelled"):
+                return {"ok": False, "cancelled": True, "message": "已取消"}
+            return {"ok": False, "message": picked.get("message") or "没能打开选择框"}
+
+        src = Path(str(picked.get("path") or ""))
+        if not src.is_file():
+            return {"ok": False, "message": f"选的不是文件：{src}"}
+        suffix = src.suffix.lower()
+        if suffix not in images:
+            return {"ok": False, "message": "这个格式不支持，请选 png / jpg / webp / bmp / gif"}
+
+        dest_dir = Path(mod.path)
+        if not dest_dir.is_dir():
+            return {"ok": False, "message": f"Mod 目录不存在：{dest_dir}"}
+        for old in dest_dir.glob("cover.*"):
+            if old.is_file() and old.suffix.lower() in images:
+                try:
+                    old.unlink()
+                except OSError:
+                    pass
+        dest = dest_dir / f"cover{suffix}"
+        try:
+            shutil.copy2(src, dest)
+        except OSError as exc:
+            return {"ok": False, "message": f"复制图片失败: {exc}"}
+
+        meta_path = dest_dir / "mod.meta.json"
+        payload = self._read_mod_meta(meta_path)
+        payload["cover"] = dest.name
+        payload.setdefault("id", mod.id)
+        payload.setdefault("name", mod.name)
+        try:
+            meta_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError as exc:
+            return {"ok": False, "message": f"图已放进目录，但写 mod.meta.json 失败：{exc}"}
+
+        self._invalidate_mods()
+        launcher._append_log(self.config, f"换了预览图: {mod.name} → {dest.name}")
+        return {"ok": True, "id": mod_id, "cover": dest.name, "path": str(dest)}
 
     def fix_all_mods(self, only_unfixed: bool = True) -> dict[str, Any]:
         """一键修复所有：**后台线程**逐个修（每个都走同一套隔离流程），可轮询进度。
@@ -4269,6 +4477,83 @@ class EndfieldModControllerApi:
         label = "辅助 Mod" if kind == "assist" else "角色 Mod"
         launcher._append_log(self.config, f"已标记为{label}: {target.name}")
         return {"ok": True, "id": mod_id, "kind": kind, "meta_path": str(meta_path)}
+
+    def vc_runtime_status(self) -> dict[str, Any]:
+        """VC++ 运行库的版本与结论（只读；自检里也报同一条）。"""
+        from . import initialize as _initialize
+
+        found = _initialize._vc_runtime_versions()
+        return {
+            "ok": True,
+            "versions": {n: v.get("version", "") for n, v in sorted(found.items())},
+            "missing": [n for n, v in found.items() if v.get("missing")],
+            "outdated": _initialize.vc_runtime_outdated(found),
+            "minimum": ".".join(str(x) for x in _initialize.VC_RUNTIME_MIN),
+            "url": _initialize.VC_RUNTIME_URL,
+            "message": _initialize.vc_runtime_summary(found),
+        }
+
+    def install_vc_runtime(self) -> dict[str, Any]:
+        """从**微软官方**下载 VC++ 运行库并静默安装，然后复检版本。
+
+        ⚠️ 这是"装系统组件"，所以**只在用户点了确认之后**才走这里 —— 不做任何
+        自动静默安装（用户红线：不要背着人改系统）。来源写死官方短链
+        `aka.ms/vs/17/release/vc_redist.x64.exe`（2026-10-05 实测国内可直连），
+        不经过任何第三方站点。
+        """
+        from . import fastnet, initialize as _initialize
+
+        dest_dir = Path(self.config.runtime_path) / "downloads"
+        try:
+            dest_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            return {"ok": False, "message": f"建下载目录失败: {exc}"}
+        dest = dest_dir / "VC_redist.x64.exe"
+
+        url = _initialize.VC_RUNTIME_URL
+        launcher._append_log(self.config, f"VC++ 运行库: 开始下载 {url}")
+        try:
+            fastnet.download(
+                url, dest,
+                log=lambda message: launcher._append_log(self.config, message),
+                timeout=180,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "message": f"下载失败：{exc}（也可以手动装：{url}）"}
+        if not dest.is_file() or dest.stat().st_size < 1_000_000:
+            return {"ok": False, "message": f"下载到的文件不对劲（{dest}），已中止；可手动装：{url}"}
+
+        launcher._append_log(self.config, f"VC++ 运行库: 静默安装 {dest.name}")
+        try:
+            proc = subprocess.run(
+                [str(dest), "/install", "/quiet", "/norestart"],
+                capture_output=True, text=True, timeout=900,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "message": f"安装程序没能跑起来：{exc}（可手动双击 {dest}）"}
+
+        found = _initialize._vc_runtime_versions()
+        # 0 = 成功；3010 = 成功但要重启；1638 = 已经装了不旧的版本（也算成功）
+        code = int(getattr(proc, "returncode", -1))
+        ok = code in (0, 3010, 1638)
+        launcher._append_log(
+            self.config,
+            f"VC++ 运行库: 安装程序退出码 {code} → {'成功' if ok else '失败'}；现版本 "
+            f"{_initialize.vc_runtime_summary(found)}")
+        detail = (proc.stdout or "").strip() or (proc.stderr or "").strip()
+        return {
+            "ok": ok,
+            "exit_code": code,
+            "versions": {n: v.get("version", "") for n, v in sorted(found.items())},
+            "missing": [n for n, v in found.items() if v.get("missing")],
+            "message": (
+                f"现版本：{_initialize.vc_runtime_summary(found)}"
+                + ("（安装程序要求重启后才生效，方便的话重启一次）" if code == 3010 else "")
+                + ("" if ok else f"；安装程序退出码 {code}。可手动双击 {dest} 再试"
+                   + (f"（{detail[:200]}）" if detail else ""))
+            ),
+        }
 
     def ensure_initialized(self) -> dict[str, Any]:
         """手动跑一次文件层初始化自检（不含注入库；一键启动请用 prepare_launch）。"""

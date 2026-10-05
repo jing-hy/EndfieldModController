@@ -14,6 +14,7 @@ XXMI 负责的部分（进程启动时把 d3d12.dll / d3d11.dll 注入进去、E
 """
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import zipfile
@@ -1727,6 +1728,100 @@ def _rebuild_ini(config: AppConfig, current: str) -> str | None:
     return section + "\n" + tail
 
 
+# ---------------------------------------------------------------- VC++ 运行库
+# 为什么加这一项（2026-10-05，issue #16）：反馈者现场的游戏退出码是
+# `0xC0000135 = STATUS_DLL_NOT_FOUND`，而他的开关对照把范围缩到了
+# 「只要注入 ReShade 底座（DLSS5 神经渲染 / 第一人称视角任一开启）就崩、
+# 不注入就能进」。那条注入链上**唯一依赖 VC++ 运行库**的组件是
+# `dlss5-feed.addon64`（它的导入表里写着 MSVCP140 / VCRUNTIME140 / VCRUNTIME140_1），
+# 而他那台机器上的运行库是 14.42.34438、开发机是 14.51.36247。
+#
+# ⚠️ **这不是定案**：这一项的作用是**把判据采下来**（版本号会进自检、也会进诊断包），
+# 让"他那台"和"我们这台"能一眼对照；低于下限时**只提示、不当故障** ——
+# 运行库"版本旧"并不必然导致加载失败，把它报成故障会误导排查。
+VC_RUNTIME_DLLS = ("msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll")
+VC_RUNTIME_MIN = (14, 40, 0)          # 保守下限（VS2022 17.10 那一档），不是硬判据
+# 微软官方短链（2026-10-05 实测：302 → download.visualstudio.microsoft.com，
+# 国内可直连、首字节 0.6s、支持 Range）。**不是第三方站点，也不是 GitHub。**
+VC_RUNTIME_URL = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
+
+
+def _vc_runtime_versions() -> dict[str, dict[str, Any]]:
+    """System32 里三个 VC 运行库的 `{名字: {path, version, missing}}`。"""
+    from . import updates  # 复用现成的版本读取（ctypes + version.dll），不另写一份
+
+    root = Path(os.environ.get("SystemRoot") or r"C:\Windows") / "System32"
+    out: dict[str, dict[str, Any]] = {}
+    for name in VC_RUNTIME_DLLS:
+        path = root / name
+        if path.is_file():
+            try:
+                version = updates.file_version(path) or ""
+            except Exception:  # noqa: BLE001
+                version = ""
+            out[name] = {"path": str(path), "version": version, "missing": False}
+        else:
+            out[name] = {"path": str(path), "version": "", "missing": True}
+    return out
+
+
+def _version_tuple(text: str) -> tuple[int, ...]:
+    parts = re.findall(r"\d+", str(text or ""))
+    return tuple(int(x) for x in parts[:4]) if parts else ()
+
+
+def vc_runtime_outdated(found: dict[str, dict[str, Any]]) -> bool:
+    """三个运行库都在、但最低的那个低于 `VC_RUNTIME_MIN` ⇒ True。"""
+    versions = [_version_tuple(v.get("version", "")) for v in found.values() if v.get("version")]
+    if not versions:
+        return False
+    return min(versions) < VC_RUNTIME_MIN
+
+
+def vc_runtime_summary(found: dict[str, dict[str, Any]]) -> str:
+    """人能读的一句话：在位版本 / 缺了谁。"""
+    missing = [n for n, v in found.items() if v.get("missing")]
+    versions = [f"{n} {v.get('version') or '版本读不到'}"
+                for n, v in sorted(found.items()) if not v.get("missing")]
+    detail = "、".join(versions) or "一个都没找到"
+    if missing:
+        return f"缺少 {'、'.join(missing)}；现有：{detail}"
+    return detail
+
+
+def _check_vc_runtime(config: AppConfig, report: Report, log: Callable[[str], None] | None) -> None:
+    """VC++ 运行库在位吗、版本够不够（**只报不改** —— 装系统组件要用户自己点）。"""
+    try:
+        found = _vc_runtime_versions()
+    except Exception as exc:  # noqa: BLE001
+        report.add("vc_runtime", False, f"读不到 VC++ 运行库信息: {exc}", manual=True)
+        return
+    missing = [n for n, v in found.items() if v.get("missing")]
+    summary = vc_runtime_summary(found)
+    if missing:
+        report.add(
+            "vc_runtime", False,
+            f"缺少 VC++ 运行库（{'、'.join(missing)}）—— ReShade 的插件需要它，"
+            f"装一次即可（微软官方）：{VC_RUNTIME_URL}",
+            manual=True,
+        )
+        return
+    if vc_runtime_outdated(found):
+        report.add(
+            "vc_runtime", True,
+            f"VC++ 运行库 {summary}（比建议下限 "
+            f"{'.'.join(str(x) for x in VC_RUNTIME_MIN)} 旧一档；若插件起不来可以先更新它："
+            f"{VC_RUNTIME_URL}）",
+        )
+        return
+    # 在位就报版本号 + 更新入口。**刻意不判"旧"**：我没有可靠阈值 —— 反馈者那台是
+    # 14.42.34438、开发机是 14.51.36247，谁算"够用"我证明不了；编一个阈值只会把排查带偏
+    # （2026-10-05）。把版本号如实摆出来，两台机器一对就知道差在哪。
+    report.add("vc_runtime", True,
+               f"VC++ 运行库 {summary}"
+               f"（ReShade 的插件依赖它；需要更新时用微软官方安装包：{VC_RUNTIME_URL}）")
+
+
 def _check_game_libs(config: AppConfig, report: Report, log: Callable[[str], None] | None) -> None:
     """游戏目录的 DLSS 运行库。
 
@@ -2493,6 +2588,9 @@ def ensure_all(config: AppConfig, log: Callable[[str], None] | None = None) -> d
     _check_dlss5_nrstyle(config, report, log)
     _check_game_libs(config, report, log)
     _check_bundled_versions(config, report, log)
+    # VC++ 运行库版本（2026-10-05 加）：issue #16 的退出码是 STATUS_DLL_NOT_FOUND，
+    # 而注入链上唯一依赖它的组件是 dlss5-feed.addon64 ⇒ 先把版本号这条判据采下来。
+    _check_vc_runtime(config, report, log)
     _check_controller(config, report, log)
     # 统一面板（整合 Mod 快捷键用）：必须在控制器生成之后 —— 它要读 actions.tsv
     _check_hotkey_panel(config, report, log)

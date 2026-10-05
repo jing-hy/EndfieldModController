@@ -13,7 +13,7 @@ import Badge from "../components/ui/Badge.vue";
 import SettingPath from "../components/ui/SettingPath.vue";
 import SettingPathBrowse from "../components/ui/SettingPathBrowse.vue";
 import SettingSwitch from "../components/ui/SettingSwitch.vue";
-import { showModalDialog, showToast, showProgressToast, hideProgressToast } from "../lib/dialog.js";
+import { showModalDialog, showAlert, showToast, showProgressToast, hideProgressToast } from "../lib/dialog.js";
 import SettingSelect from "../components/ui/SettingSelect.vue";
 
 const RE_INJECTION = [
@@ -308,6 +308,31 @@ async function runFullCheck() {
 }
 
 // 详细状态：一个面板接住各类状态查询，结果落在纯黑日志框里（可复制）
+// 装 VC++ 运行库（2026-10-05 加）：ReShade 的插件（DLSS5 喂帧组件）依赖 MSVCP140 /
+// VCRUNTIME140。这是**装系统组件**，所以：二次确认 + 默认聚焦"先不装"，来源写死微软官方
+// （实测国内可直连），装完把新版本号报出来 —— 用户要的就是"看得见结果"。
+async function installVcRuntime() {
+  const ok = await showModalDialog({
+    title: "安装 / 更新 VC++ 运行库？",
+    message: [
+      "会从微软官方下载 VC_redist.x64.exe（约 24 MB）并静默安装（/install /quiet /norestart）。",
+      "来源：https://aka.ms/vs/17/release/vc_redist.x64.exe —— 不是第三方站点、也不是 GitHub。",
+      "",
+      "ReShade 的插件需要它；装完程序会把新版本号报给你。",
+    ].join("\n"),
+    okText: "下载并安装", cancelText: "先不装", focusCancel: true,
+  });
+  if (!ok) return;
+  showProgressToast("vc-runtime", "正在下载并安装 VC++ 运行库…（约 24 MB，装的时候会静默进行）");
+  try {
+    const r = await call("install_vc_runtime");
+    if (r && r.ok === false) await showAlert("没能装好", r.message || "未知原因");
+    else await showAlert("VC++ 运行库已就绪", (r && r.message) || "");
+  } finally {
+    hideProgressToast("vc-runtime");
+  }
+}
+
 const probeText = ref("点上面的按钮查询：DLSS5 / Poser / 组件版本 / 完整性 / 初始化自检。");
 const probeBusy = ref(false);
 const PROBES = [
@@ -779,6 +804,11 @@ useLogAutoScroll(probeBox, () => probeText);
         <Btn variant="primary" @click="showResult('game_clean_backup_and_clean', '备份并净化游戏目录')">备份并净化游戏目录</Btn>
         <Btn @click="showResult('game_clean_restore', '还原游戏目录')">从备份还原游戏目录</Btn>
         <span class="text-xs self-center" style="color: var(--text-muted)">只移动不删除：先把非原版文件整体备份，再让本体回到原版状态。</span>
+      </div>
+      <div class="flex flex-wrap gap-2 mt-2">
+        <Btn @click="showResult('vc_runtime_status', 'VC++ 运行库')">检查 VC++ 运行库</Btn>
+        <Btn @click="installVcRuntime">安装 / 更新 VC++ 运行库</Btn>
+        <span class="text-xs self-center" style="color: var(--text-muted)">ReShade 的插件依赖它；走微软官方下载（国内可直连），装完会回报版本。</span>
       </div>
     </Card>
 

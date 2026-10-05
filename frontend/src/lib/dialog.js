@@ -65,15 +65,31 @@ export function showToast(text, tone) {
 // 用户 2026-09-30 要求：「在按一键启动的时候如果是异常状态要每次弹弹窗展示情况，
 // **强制用户停留一定秒数**（可在仓库配置，默认 10s）」。用于异常状态预警这种
 // "必须让人看见"的提示 —— 秒数来自仓库里的 alerts.json，作者改了 push 即生效。
+// `requireText`（2026-10-05 加）：**必须逐字输入指定文本才能点确认**。用户要求
+// 「mod 的更多菜单中需要加入彻底删除（**红字，需要用户输入 ok 二次确认**）」。
+// 比对时去掉首尾空格、忽略大小写（输 Ok / OK 也算）—— 这种闸门是防手滑，不是考拼写。
+//
+// `input`（2026-10-05 加）：弹窗里带一个输入框，点确认时 **resolve 输入的那串文本**
+// （原来只返回 true/false），取消仍然是 false。重命名走的就是这条。
+// 两者可以同时给：`input` 管"显示输入框 + 交回文本"，`requireText` 管"能不能点确认"。
 export function showModalDialog({
   title, message, okText = "确定", cancelText = "取消",
   showCancel = true, link = null, extraButtons = [], focusCancel = false,
-  holdSeconds = 0,
+  holdSeconds = 0, requireText = "", input = null,
 }) {
   return new Promise((resolve) => {
     uiState.dialog = {
       title, message, okText, cancelText, showCancel, link, extraButtons, focusCancel,
       holdSeconds: Math.max(0, Number(holdSeconds) || 0),
+      requireText: String(requireText || ""),
+      input: input
+        ? {
+            label: String(input.label || ""),
+            value: String(input.value === undefined || input.value === null ? "" : input.value),
+            placeholder: String(input.placeholder || ""),
+            maxlength: Number(input.maxlength || 0),
+          }
+        : null,
       _resolve: resolve,
     };
   });
