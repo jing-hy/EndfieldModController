@@ -4,9 +4,9 @@
 > 目的：让「当时为什么这么改、踩过什么坑」跟着源码一起留在仓库里。
 > 想改内容 → 改记忆库（用记忆工具），再跑一次本脚本；不要直接编辑本文件。
 
-- 生成时间：2026-10-05 21:02:11
+- 生成时间：2026-10-05 21:27:32
 - 来源：`.dsh-meow/memory.db`
-- 条目：551 条（已跳过 archived / 其它项目的条目）
+- 条目：554 条（已跳过 archived / 其它项目的条目）
 
 ---
 
@@ -510,15 +510,14 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 `关键词：["发布流程","build_release prepare_release push","自己 commit 别忘","draft 转正 latest","按 release id 核对 digest","资产不带版本号","vite build 再打包","RELEASE_NOTES 先确认版本","check_component_versions --strict","pytest -n 4 attempts"]`
 
 ### 【modecontroller 当前状态唯一真源】（20…
-*2026-10-05 19:45*
+*2026-10-05 21:20*
 
-【modecontroller 当前状态唯一真源】（2026-10-05 19:44 发版后更新）
-**Latest Release = `v1.0.12`**：tag `v1.0.12`、`isDraft=false`/`isPrerelease=false`、发布时刻 **2026-10-05T11:44:46Z（北京 19:44）**、**release id `403652800`**、tag 打在 main `01b3ec6e7079`。
-**资产（只两个、都不带版本号）**：`EndfieldModController.exe` **30,037,944 B** / sha256 `53c607a29f867d5c…`；`assets-bundle.zip` **144,685,157 B** / sha256 `570f9fcb707e4dc5…`（**digest 已按 release id 核对，与本地逐位一致**）。
-**本地 main = 远端 main = `01b3ec6`**；推送前快照 `D:\zmdmod\_snapshot_1.0.12-20261005-194334`；modtest 已同步新 exe。
-**版本号**：本地 `1.0.12` = Release 同号（刚发完版的正常态）⇒ **下次攒到实质改动时才升 `1.0.13-beta`**。
-**v1.0.12 内容**：① DLSS5 与第一人称相机 hook 自动错开（启动前压 `NeuralUplift=0`，进游戏后按日志里实读的 NR 键自动补开）；② 不再覆写用户/插件自绑的 `ShortcutFirstPerson`；③ 诊断包补游戏退出码 + `sdklogs\` + 「游戏自有文件本次写过没有」；④ 连续 3 次启动失败 → 强力修复（还原终末地含第三方 + 清空依赖重下）；⑤ 依赖更新不再"更新完还说有新版"（`version.txt` 写入 + 同一轮去重）；⑥ 乳摇插件本体随包更新到上游 3.1.2（108 KB → 142 KB）且"内容不一致就备份替换"。
-**issue**：#15 已回复并关闭（结论：DLSS5 没出帧是因为走了官方启动器）；**仓库当前 0 open**。
+【modecontroller 当前状态唯一真源】（2026-10-05 21:20 更新）
+**Latest Release = `v1.0.13`**（tag `v1.0.13`、release id `403719169`、tag 打在 main `912235755a49`；资产 `EndfieldModController.exe` 30,051,790 B / sha256 `9b0e1d14ca93eb6b…`、`assets-bundle.zip` 144,685,157 B / sha256 `cae7f963bec031705069…`，digest 已按 release id 核对）。
+**本地现在 = `1.0.14-beta`（未发版，比 Release 领先一个）**：已构建 `dist\EndfieldModController.exe` **30,053,866 B / sha256 `e82bf385e87afed6eac9…`**（21:20:19），modtest 已同步（哈希一致）；**未 commit、未推、未发版**，等用户发话。
+**v1.0.14-beta 内容（相对 v1.0.13）**：① 「⋯ 更多」菜单改成**悬停即出 + 离开收起**（180ms 宽限）—— 服装页本来就有悬停、辅助页没有、两页都没有离开收起，这次统一；② **VC++ 运行库接进依赖安装流程**：依赖页多一行「VC++ 运行库（系统组件）」带版本号、`runtime_deps.ensure_all` 末尾追加一条 `needs_install` 检查（已进 `ok_status`，不会被当失败重试）、依赖页与启动页共用 `frontend/src/lib/vcRuntime.js` 弹「安装（推荐）/ 跳过」（**缺了才弹**）；③ `install_vc_runtime` 补**管理员检查**（非管理员明确提示，不再只回一个退出码）。
+**v1.0.13 内容**：Mod 卡片三件（彻底删除/重命名/更换预览图）、菜单浮层自适应定位、自检 `vc_runtime` 判据、设置页一键装 VC 运行库。
+**issue**：#16 已回两条，反馈者已回报「只开 DLSS5 / 只开第一人称崩、全关能进」+ 退出码 `0xC0000135`；等下一步结论。
 
 `关键词：["当前状态唯一真源","Latest v1.0.12","release id 403652800","main 01b3ec6","exe 30037944 sha256 53c607a2","assets-bundle 144685157 570f9fcb","快照 1.0.12-20261005-194334","下一个号 1.0.13-beta","v1.0.12 内容速览","issue 0 open"]`
 
@@ -769,7 +768,7 @@ issue #16（xingluo667，游戏加载过程中闪退）：已追加评论，让�
 
 `关键词：["issue 16","游戏加载过程中闪退","本机复现不了","injector.py 自启动注入","RESHADE_BASE_PATH_OVERRIDE","sbm loader 14336","Poser loader 35840","exit_code=0","退出码判据有效","System32 d3dcompiler_47 版本差异","sdklogs","对照实验"]`
 
-## 经验教训（被纠正过的、踩过的坑）（382 条）
+## 经验教训（被纠正过的、踩过的坑）（384 条）
 
 ### XXMI/EFMI 启动终末地是 Endfield.ex…
 *2026-09-27 14:58*
@@ -4270,7 +4269,21 @@ Mod 卡片的「⋯ 更多」在服装页与辅助页各有一套，加动作必
 
 `关键词：["浮层定位","⋯ 菜单出界","写死估计高度","offsetHeight 实测","翻到上方","夹进视口","floatingMenu.js","靠下会出去"]`
 
-## 事实（细碎的原子信息）（79 条）
+### 给已有元素加属性前先读那个元素：服装页「⋯」早就带 @m…
+*2026-10-05 21:03*
+
+给已有元素加属性前先读那个元素：服装页「⋯」早就带 @mouseenter，我又加一个导致 Vue「Duplicate attribute」构建失败。
+
+`关键词：["Duplicate attribute","重复属性","Vue 模板","vite build 失败","加属性前先读","mouseenter","⋯ 菜单","前端构建报错"]`
+
+### 往 ensure_all 结果里追加一条要同时改三处：o…
+*2026-10-05 21:20*
+
+往 ensure_all 结果里追加一条要同时改三处：ok_status 加新 status、检查消费方、更新"恰好 N 项"的既有断言。
+
+`关键词：["ensure_all","追加结果","ok_status","重试逻辑","既有断言","恰好 N 项","消费方","内置组件"]`
+
+## 事实（细碎的原子信息）（80 条）
 
 ### modecontroller：游戏目录 loader_l…
 *2026-09-27 14:58*
@@ -5119,6 +5132,13 @@ Steam++（Watt Toolkit）加速内核 = **FastGithub 2.1.4 的移植**：本地�
 前端构建要在 **`frontend\` 目录**里跑：`cd frontend; node node_modules/vite/bin/vite.js build` —— `node_modules` 装在 `frontend\` 下、**不在仓库根**，在仓库根跑会 `MODULE_NOT_FOUND`。产物写到 `..\web\dist\index.html`（单文件内联，约 218 KB / 241 KB 落盘）。改过 `frontend\` 就必须重建它，否则 exe 里还是旧界面。
 
 `关键词：["前端构建","vite build","frontend 目录","node_modules 位置","web/dist/index.html","MODULE_NOT_FOUND","单文件内联","改前端必须重建"]`
+
+### VC++ 运行库：官方 https://aka.ms/v…
+*2026-10-05 21:20*
+
+VC++ 运行库：官方 https://aka.ms/vs/17/release/vc_redist.x64.exe（302 到 download.visualstudio.microsoft.com，非 GitHub）。**2026-10-05 在本机端到端实测**：管理员下下载 25,635,768 B 用时 24.5s（国内直连）、`/install /quiet /norestart` 静默安装 **退出码 1638**（= 已装相同/更高版本，幂等成功）、0.9s，版本前后都是 14.51.36247.0。⇒ 参数与退出码语义（0/3010/1638）确认可用。
+
+`关键词：["VC++ 运行库","vc_redist.x64.exe","aka.ms","visualstudio.microsoft.com","国内可直连","MSVCP140","VCRUNTIME140","0xC0000135","STATUS_DLL_NOT_FOUND","静默安装参数"]`
 
 ## 用户偏好与环境（**含个人信息，公开前请自行取舍**）（18 条）
 
