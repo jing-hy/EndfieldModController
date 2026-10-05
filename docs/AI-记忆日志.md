@@ -4,9 +4,9 @@
 > 目的：让「当时为什么这么改、踩过什么坑」跟着源码一起留在仓库里。
 > 想改内容 → 改记忆库（用记忆工具），再跑一次本脚本；不要直接编辑本文件。
 
-- 生成时间：2026-10-05 10:09:12
+- 生成时间：2026-10-05 10:31:08
 - 来源：`.dsh-meow/memory.db`
-- 条目：537 条（已跳过 archived / 其它项目的条目）
+- 条目：538 条（已跳过 archived / 其它项目的条目）
 
 ---
 
@@ -4142,7 +4142,7 @@ poser/sbm 的 loader proxy（`d3dcompiler_47.dll` / `vulkan-1.dll`，35~56 KB）
 
 `关键词：["依赖清空并重新下载","reset_dependencies_and_redownload","没有找到任何游戏目录备份","还原失败不许清空","P0 保护误伤","list_backups 盲区","清单损坏备份","game_backup 被删","判据区分无可保护对象","restore_failed 中止"]`
 
-## 事实（细碎的原子信息）（76 条）
+## 事实（细碎的原子信息）（77 条）
 
 ### modecontroller：游戏目录 loader_l…
 *2026-09-27 14:58*
@@ -4964,6 +4964,18 @@ Steam++（Watt Toolkit）加速内核 = **FastGithub 2.1.4 的移植**：本地�
 ⚠️ **本地 `version.py` 现在 = `1.0.11`，与 Release 同号 ⇒ 下次攒到实质改动时要升成 `1.0.12-beta`**（发正式版时去掉 beta）。
 
 `关键词：["v1.0.11 发布","release latest","issue 14 关闭","assets-bundle.zip","sha256 核对","draft 转正","release id 403295115","build_release prepare_release push","snapshot 1.0.11","1.0.12-beta 下一个号"]`
+
+### 【乳摇上游现状（2026-10-05 核实）】 * 最新…
+*2026-10-05 10:12*
+
+【乳摇上游现状（2026-10-05 核实）】
+* 最新 Release **3.1.2**（**2026-10-04 才补传到 GitHub**、tag `Endfield-1.5-available`），作者原话 「Already released elsewhere 1 month ago... forgot to upload here haha」⇒ **代码其实是一个月前的**（commit `8f20b05` = 2026-09-06 "Version 3.1.2"，之后再无提交）。所以 GitHub 上"2.3.5 → 3.1.2"这个跳变**不代表新增了这么多功能**，标题是 `3.1.2 Jump update + import fix`。
+* **资产改名**：`ShakingBreastManager-v3.1.2-EN/-ZH-win-x64.zip`（各 66.8 MB，原来是 `SecondaryMotion` 前缀）。我们的筛选是 `"-zh-" in name.lower()` + `[vV](\d+\.\d+)+` ⇒ **不受改名影响**，已核对能命中。
+* **用户在上游提的 issue #5**（建议把 `chr_0034_typhoea` 提弗洛斯数据带进正式版）长期以来 **OPEN、0 评论、无 label/assignee**（作者从未回复）。2026-10-05 已由我**回复并关闭（COMPLETED）**：读了 commit `8f20b05` 的 `SecondaryMotion/data/characters.default.json` ⇒ **已含 `chr_0034_typhoea`**，即诉求实质已被 3.1.2 满足（当时"main 有、发行包没有"是因为 GitHub 上挂的还是旧版）。回复链接见 issue #5 评论。
+* **用户在上游 XXMI 仓库提的 issue #349**（`Locale/Strings/<lang>` 缺失时启动即崩、且错误弹窗自身也崩 `'NoneType' object has no attribute 'show_messagebox'`）被作者 SpectrumQT 标 **CLOSED / NOT_PLANNED**，回复原话：「Locale folder is essential for launcher to work. Even EN locale now absolutely requires locale files, because any locale key can reference any other locale key. And other locales require full EN locale data for validation.」⇒ **我们侧必须保证内置 XXMI 包带全 Locale**；其中"错误弹窗自身崩"那条作者**完全未回应**。
+* 另注：我们控制器自己会把提弗洛斯同步进乳摇数据（`runtime\secondary_motion\SecondaryMotion\data\characters.default.json` 里有 `typhoea`）⇒ **不依赖上游也够用**。
+
+`关键词：["乳摇 3.1.2","ShakingBreastManager","Endfield-1.5-available","补传版本","chr_0034_typhoea 提弗洛斯","issue 5 已关闭","XXMI issue 349","NOT_PLANNED","Locale 必需","上游 issue 状态","资产改名"]`
 
 ## 用户偏好与环境（**含个人信息，公开前请自行取舍**）（18 条）
 
