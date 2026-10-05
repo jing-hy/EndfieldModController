@@ -4,9 +4,9 @@
 > 目的：让「当时为什么这么改、踩过什么坑」跟着源码一起留在仓库里。
 > 想改内容 → 改记忆库（用记忆工具），再跑一次本脚本；不要直接编辑本文件。
 
-- 生成时间：2026-10-05 19:43:35
+- 生成时间：2026-10-05 21:02:11
 - 来源：`.dsh-meow/memory.db`
-- 条目：544 条（已跳过 archived / 其它项目的条目）
+- 条目：551 条（已跳过 archived / 其它项目的条目）
 
 ---
 
@@ -246,7 +246,7 @@
 
 `关键词：["issue 先给他检查再回","回复只要三件事","能不能确定问题 有没有修 按哪几个键","不要让别人移动文件改配置","不要结构式 用自然语言","处理掉就 close","reopen 或另开","个人小问题直接说","纯答疑 vs 等实测","gh issue close completed"]`
 
-## 项目记忆（结构 / 决策 / 部署 / 待办）（30 条）
+## 项目记忆（结构 / 决策 / 部署 / 待办）（31 条）
 
 ### 项目概述
 
@@ -498,19 +498,6 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 
 `关键词：["MMD素材来源","v-idol组织","vidol-dance仓库","codeload取tar.gz","default_branch","lobe-vidol-market","r2.vidol.chat已失效","BowlRoll要登录","镜头可匿名下载","极乐净土已归档"]`
 
-### **modecontroller 当前状态 · 唯一真源…
-*2026-10-05 13:35*
-
-**modecontroller 当前状态 · 唯一真源**（有变动**更新本条**，别另开新条目）。发布流程与踩坑见同项目 "发布流程" 条。
-**发布**：GitHub **Latest = v1.0.11**（2026-10-05 09:27 北京，release id `403295115`）；附件 `EndfieldModController.exe` 30,014,947 B / `sha256:121719782efb82b5a9561d70eca02bc28b56c0e212c047ef168ba049d6a19304` + `assets-bundle.zip` 144,699,465 B / `sha256:44eb9e70b72206c772336a27f3ae955d1a1806c7ee93adafce01fee5b0cba8ea`（远端 digest 与本地逐字节核对一致）。上一版 v1.0.10。v1.0.11 内容：ReShade 下载四处同族修复（issue #14）、「依赖清空并重新下载」第二次执行误报中止、崩溃取证补 WER 判据 + 崩溃弹窗给"清空依赖重下"建议（不卸功能）、净化补 `dxgi.dll`、`system_module_differs` 升级为 sha256。
-**仓库**：远端 main = 本地 HEAD = `d8375a16af6f`，**工作区 0 项未提交**。v1.0.11 之后又推了 3 个 commit（`d3c8ad9` 补 34 项回归测试 / `7d863a0` 内置版本表更新到上游最新 + 让发版核对真的会拦 / `d8375a1` 加固并行下时序断言），**都在等下一个 Release 带上**。
-**版本号**：本地源码 = Release = **`1.0.11`**（刚发完版、与 Release 同号是正常态）⇒ **下次动实质改动要升 `1.0.12-beta`**（发正式版去掉 beta）。
-**已发布功能速览（别重复实现）**：一键启动 + 启动自检、DLSS5/第一人称/EFMI/乳摇/Poser 组件编排、热重载（发 F10）、诊断包一次抓全、一键还原游戏本体、启动前清除第三方注入（`clear_game_injections_on_launch` 默认开）、杀毒线（只处理 Defender，`defender_exclusions_enabled` 默认 True）、香蕉网分类入库、ReShade 底座可联网安装（标准库解包、不依赖 7z）、版本号 beta 约定。
-**issue**：本仓库只剩 **#5**（用户说过"不要管"）；#14 已回复并关闭。上游：乳摇 #5 已由我回复并关闭（3.1.2 已含提弗洛斯数据）；XXMI #349 被上游标 NOT_PLANNED。
-**Steam++ 结论**：加速内核是 FastGithub 2.1.4 移植（GPL-3.0 不可内嵌）；真正超时点是 `github.com` 直连（20s → WinError 10060）。报告 `_tmp/research/steampp-accelerator.md`。
-
-`关键词：["当前状态唯一真源","v1.0.11 latest","release id 403295115","main d8375a1","1.0.12-beta 下一个号","已发布功能速览","issue 14 已关","乳摇 issue 5 已关","XXMI 349 NOT_PLANNED","Steam++ FastGithub"]`
-
 ### **modecontroller 发布流程与踩坑**（每…
 *2026-10-05 13:35*
 
@@ -521,6 +508,19 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 **并行度**：测试用 `-n 4` + `attempts=3` 重试（实测 `-n 16` 更慢：152s vs 100~120s，无收益）。
 
 `关键词：["发布流程","build_release prepare_release push","自己 commit 别忘","draft 转正 latest","按 release id 核对 digest","资产不带版本号","vite build 再打包","RELEASE_NOTES 先确认版本","check_component_versions --strict","pytest -n 4 attempts"]`
+
+### 【modecontroller 当前状态唯一真源】（20…
+*2026-10-05 19:45*
+
+【modecontroller 当前状态唯一真源】（2026-10-05 19:44 发版后更新）
+**Latest Release = `v1.0.12`**：tag `v1.0.12`、`isDraft=false`/`isPrerelease=false`、发布时刻 **2026-10-05T11:44:46Z（北京 19:44）**、**release id `403652800`**、tag 打在 main `01b3ec6e7079`。
+**资产（只两个、都不带版本号）**：`EndfieldModController.exe` **30,037,944 B** / sha256 `53c607a29f867d5c…`；`assets-bundle.zip` **144,685,157 B** / sha256 `570f9fcb707e4dc5…`（**digest 已按 release id 核对，与本地逐位一致**）。
+**本地 main = 远端 main = `01b3ec6`**；推送前快照 `D:\zmdmod\_snapshot_1.0.12-20261005-194334`；modtest 已同步新 exe。
+**版本号**：本地 `1.0.12` = Release 同号（刚发完版的正常态）⇒ **下次攒到实质改动时才升 `1.0.13-beta`**。
+**v1.0.12 内容**：① DLSS5 与第一人称相机 hook 自动错开（启动前压 `NeuralUplift=0`，进游戏后按日志里实读的 NR 键自动补开）；② 不再覆写用户/插件自绑的 `ShortcutFirstPerson`；③ 诊断包补游戏退出码 + `sdklogs\` + 「游戏自有文件本次写过没有」；④ 连续 3 次启动失败 → 强力修复（还原终末地含第三方 + 清空依赖重下）；⑤ 依赖更新不再"更新完还说有新版"（`version.txt` 写入 + 同一轮去重）；⑥ 乳摇插件本体随包更新到上游 3.1.2（108 KB → 142 KB）且"内容不一致就备份替换"。
+**issue**：#15 已回复并关闭（结论：DLSS5 没出帧是因为走了官方启动器）；**仓库当前 0 open**。
+
+`关键词：["当前状态唯一真源","Latest v1.0.12","release id 403652800","main 01b3ec6","exe 30037944 sha256 53c607a2","assets-bundle 144685157 570f9fcb","快照 1.0.12-20261005-194334","下一个号 1.0.13-beta","v1.0.12 内容速览","issue 0 open"]`
 
 ### 待办
 
@@ -534,18 +534,29 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 
 `关键词：["B站宣传片","BGM 选曲","Elektronomia Sky High","TheFatRat Xenogenesis","B站音频库按使用量","视频简介 A版","置顶评论文案","DLSS5 无需额外设置","物理效果中性表述","宣传视频脚本待更新"]`
 
-### **modecontroller 待办**（做完一项就更…
-*2026-10-05 13:35*
+### 【modecontroller 项目待办】（2026-1…
+*2026-10-05 19:46*
 
-**modecontroller 待办**（做完一项就更新本条；已完成的不再罗列）
-🔨 **还欠的（我自己能做，不必等他）**：① **normify 结构树待重跑四步** —— 10-04 起多批改动让所有行号变了；②③④ 是插件工具，要在有 normify 的会话里做（详见同项目 structure 条）。② **v1.0.5 的 Release 正文与标题不符**（发它时 `RELEASE_NOTES.md` 还是上一版内容）⇒ `gh release edit v1.0.5 --notes-file …`，**等他点头**。
-⏳ **等他实测/拍板**：① **反馈者"开第一人称后游戏起不来"** 的两个 30 秒实验（游戏目录 `dxgi.dll` 改名 `.bak` 启动一次；只关第一人称插件启动一次）**尚未回报**，根因未定；② 热重载关掉"当前角色正穿"的 Mod 后外观是否回滚（不立刻回滚属正常，需换场景）；③ addon 每进一次游戏会不会把生效那份 ini 写回 `Language=0`；④ "进去之后感觉好卡"的对照结论（先移出 RabbitFX，仍卡再关 DLSS5）；⑤ **MMD 播放测试**（极乐净土素材已备 `D:\zmdmod\mmd素材\极乐净土\`，但 `poser_injection=false`、`plugin\poser.dll` 仍是 `.disabled`，要测得先开 Poser）。
-📦 **收尾待办（下一版带上）**：崩溃包补 `Mods` 清单 + 主链路 stage 后打日志；`[Key*]` 协议退役；`hotkey_takeover` 语义与 UI 文案；详细文档的 DLSS5 节；「移出 Mod 库」清理 `d3dx_user.ini` 残留；依赖项缺界面入口；`load_library_redirect` 待验证；湿润效果 `match_index_count` 与换 mesh 皮肤匹配未深挖；**内置版本表已修 + 34 项回归测试已加 + 并行时序断言已加固 —— 这 3 个 commit 都在等下一个 Release 带上**。
-🧵 **别忘的其他线**：**本仓库 issue 只剩 #5**（用户说"5 不要管"）；**sbm 自维护**（提弗洛斯运动数值三选一、含 PR #4 的 `sbm.dll` 与 Manager 未部署、「1.5 适配」PR 未提）；**宣传片**（BGM 与简介方案已定，**还没写进 `docs\宣传视频脚本-2分钟.md`**，那份脚本还停在 v0.3.2 且没体现"DLSS5 已全线修好"）。
+【modecontroller 项目待办】（2026-10-05 20:00 更新）
+**本轮已清**：v1.0.12 已发布并转正为 Latest；**`v1.0.5` 正文修正已作废**（用户 2026-10-05 原话：「**v1.0.5 正文修正别管了**」⇒ 不再做、不再提）。
+**仍欠**：
+① **normify 结构树四步**（`normify_realign.py --apply` → `normify_module_refresh(all=true)` → `normify_validate` → `normify_build` + `normify_render`）：`push.py` 只同步镜像（本次 187 个文件到 `docs\structure`）；后三步是**插件工具**，必须在**带 normify 插件的会话**里做 ⇒ 本会话没有该工具时**做不了，要如实说**，别假装同步了；
+② **dxgi 崩溃的两个实验**仍待反馈者回报（游戏目录 `dxgi.dll` 改名启动一次 / 只关第一人称启动一次）；
+③ **宣传片脚本**（`docs\宣传视频脚本-2分钟.md`）还停在 v0.3.2，未体现 DLSS5 已修好；
+④ **MMD 播放测试**、**提弗洛斯运动数值三选一**（sbm 侧）；
+⑤ **`sbm.dll` 自维护那条线**：本次只把**上游 3.1.2 的成品**随包，我们自己的 `sbm-fork`（v2.4.0 源）**没动** —— 要不要跟上游对齐待定。
+**下一个号**：`1.0.13-beta`。
 
-`关键词：["项目待办","normify 四步待重跑","v1.0.5 正文待修","dxgi 崩溃两个实验待回报","MMD 播放测试待做","下一版收尾清单","sbm 自维护","宣传片脚本待更新","issue 5 不要管","下一个 Release 带上这 3 个 commit"]`
+`关键词：["项目待办","v1.0.5 正文别管了 已作废","normify 四步要有插件会话","dxgi 崩溃两个实验","宣传片脚本待更新","MMD 播放测试","提弗洛斯运动数值","sbm-fork 未跟上上游","下一个号 1.0.13-beta"]`
 
-## 话题（一件事的前因后果）（20 条）
+### issue #16（xingluo667，游戏加载过程中…
+*2026-10-05 20:09*
+
+issue #16（xingluo667，游戏加载过程中闪退）：已追加评论，让他更新 v1.0.12 后自己试开关组合 —— 第一组全关（DLSS5 神经渲染/第一人称/皮肤 Mod/乳摇/Poser），能进则按 DLSS5 → 乳摇 → 皮肤 Mod → Poser 逐项加回，回报"哪组崩/不崩"，不再要诊断包。本机两次对照已证伪"注入组合必然闪退"。等回报。
+
+`关键词：["issue 16","开关组合测试","全关再逐项加回","DLSS5 神经渲染","ShakingBreastManager","皮肤 Mod","Endfield Poser","v1.0.12 开关生效","等反馈者回报","游戏加载过程中闪退"]`
+
+## 话题（一件事的前因后果）（22 条）
 
 ### 诊断并稳定终末地换装 Mod 的 DX11/EFMI 路线
 *2026-09-27 18:24*
@@ -744,7 +755,21 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 
 `关键词：["不支持相机控制 已定案","NR 抢在相机 hook 之前激活","error 8 trampoline","NeuralUplift 写回 ini 的坑","Camera controls installed","feature 18 created 时序","F6 自动开 NR 方案","pre-loaded 不是元凶","两全 先 hook 后 NR"]`
 
-## 经验教训（被纠正过的、踩过的坑）（378 条）
+### 2026-10-05 第三位反馈者（issue #16，…
+*2026-10-05 19:53*
+
+2026-10-05 第三位反馈者（issue #16，xingluo667，RTX 5070 Ti Laptop + Intel UHD）报「游戏加载过程中闪退」：现场与 HUAWEI/Intel Arc 那份**逐行相同** —— 一帧未渲染（addon 的 ensure_setup 从未执行）、交换链建好后 1.4 秒进程退出、无 WER/崩溃转储/Unity 崩溃/本次 CrashSightLog。新增判据：① 失败现场独有的 `MemoryPool::MMapMemoryBlock count:0` —— 能进游戏的现场**没有**这行，它在 `hdrProbe: 0)` 之后还有 `<RI> Initialized touch support.`，故失败停点在「建完图形设备、进主场景/登录前」；② addon 收到 DllMain detach ⇒ 进程是 ExitProcess 自己退。该玩家用的是旧版（包内无退出码），仍缺退出码这条判据。
+
+`关键词：["issue 16","游戏加载过程中闪退","MemoryPool::MMapMemoryBlock","一帧未渲染","交换链","无 WER","CrashSightLog 未产生","RTX 5070 Ti Laptop","Intel Arc","ExitProcess","sdkassist language:zh-cn","hdrProbe","退出码判据缺失"]`
+
+### 【issue #16 本机对照实验：复现不了】2026-…
+*2026-10-05 20:04*
+
+【issue #16 本机对照实验：复现不了】2026-10-05 20:01~20:04 用 injector.py 自启动+注入（照 XXMI：Endfield.exe -force-d3d11 → 注入 dlss5\d3d12.dll → EFMI\d3d11.dll，带 RESHADE_BASE_PATH_OVERRIDE）在本机跑两次：① 原配置（Poser loader 35,840/56,832 + poser.dll）→ 能进、正常退出；② 原样换成失败者那套（sbm loader 14,336/35,328 + 移走 poser.dll，sbm.dll 都是 108,032）→ 照样能进、正常退出。⇒「我们的注入组合必然导致该闪退」被证伪，问题落在反馈者机器环境（可查到的差异：他们 System32 的 d3dcompiler_47.dll 是 2026-09-06 的 4,669,440 版，本机是 2026-01-24 的 4,524,496 版）。已还原游戏目录并 sha256 校验一致。下一步只能等玩家在 v1.0.12 复现取退出码+sdklogs（本机实测退出码判据有效：19:04 记到 exit_code=0）。
+
+`关键词：["issue 16","游戏加载过程中闪退","本机复现不了","injector.py 自启动注入","RESHADE_BASE_PATH_OVERRIDE","sbm loader 14336","Poser loader 35840","exit_code=0","退出码判据有效","System32 d3dcompiler_47 版本差异","sdklogs","对照实验"]`
+
+## 经验教训（被纠正过的、踩过的坑）（382 条）
 
 ### XXMI/EFMI 启动终末地是 Endfield.ex…
 *2026-09-27 14:58*
@@ -4216,6 +4241,34 @@ poser/sbm 的 loader proxy（`d3dcompiler_47.dll` / `vulkan-1.dll`，35~56 KB）
 **测试**：`tests/test_sbm_version_and_update_dedup.py`（4 条）；全量 819 passed。
 
 `关键词：["更新完还说有新版","version.txt 只读不写","keep_files 没放 version.txt","乳摇版本检测不收敛","import_pack 写版本号","_version_from_name 复用","两个一样的动态","pending_component_updates 重复调用","3 秒缓存去重","状态文件必须有写入方"]`
+
+### 判游戏是崩溃还是自己退出：看 addon 有没有收到 D…
+*2026-10-05 19:53*
+
+判游戏是崩溃还是自己退出：看 addon 有没有收到 DllMain detach——有=走 ExitProcess（自己退），无=被 TerminateProcess 强杀。
+
+`关键词：["DllMain detach","ExitProcess","TerminateProcess","闪退判据","ReShade addon","Unregistered add-on","进程退出方式","静默退出","崩溃还是自己退出","诊断判据"]`
+
+### 报「启动即闪退」时，先在本机把对方的注入组合原样跑一遍再…
+*2026-10-05 20:04*
+
+报「启动即闪退」时，先在本机把对方的注入组合原样跑一遍再下结论：本次两次对照都能进游戏，直接证伪「组合必然闪退」。
+
+`关键词：["启动即闪退","对照实验","注入组合","本机复现","证伪","注入组合不是原因","排查方法","先跑一遍再下结论"]`
+
+### Mod 卡片的「⋯ 更多」在服装页与辅助页各有一套，加动…
+*2026-10-05 20:34*
+
+Mod 卡片的「⋯ 更多」在服装页与辅助页各有一套，加动作必须两处都改——只改一处会被当场报「辅助 mod 没有」。
+
+`关键词：["⋯ 更多","辅助 Mod 页","服装 Mod 页","两套菜单","MenuAct","AssistPage","ModLibraryPage","加动作两处都改"]`
+
+### ⋯ 菜单这类就地浮层不许写死估计高度：渲染后实测 off…
+*2026-10-05 20:34*
+
+⋯ 菜单这类就地浮层不许写死估计高度：渲染后实测 offsetHeight，下方放不下就翻到按钮上方并夹进视口。
+
+`关键词：["浮层定位","⋯ 菜单出界","写死估计高度","offsetHeight 实测","翻到上方","夹进视口","floatingMenu.js","靠下会出去"]`
 
 ## 事实（细碎的原子信息）（79 条）
 
