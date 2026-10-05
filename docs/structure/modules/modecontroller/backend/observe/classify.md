@@ -17,13 +17,13 @@ fingerprint: 3fb420114abfd292c11af3fd53ecc5032baa6def0a6f6eb915c7cd237bf5a000
 source:
   - path: "endfieldmodcontroller/crashwatch.py"
     line: 126
-    end_line: 216
+    end_line: 328
   - path: "endfieldmodcontroller/crashwatch.py"
-    line: 216
-    end_line: 296
+    line: 272
+    end_line: 408
   - path: "endfieldmodcontroller/crashwatch.py"
-    line: 161
-    end_line: 216
+    line: 217
+    end_line: 328
 apis:
   - protocol: rpc
     path: "is_crash"

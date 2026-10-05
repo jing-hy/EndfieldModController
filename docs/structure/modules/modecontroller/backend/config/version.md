@@ -17,7 +17,7 @@ fingerprint: 424e16717b26af7a8ce510edc8cf09467e477381ced3e195fa91daa8a202df3e
 source:
   - path: "endfieldmodcontroller/version.py"
     line: 1
-    end_line: 29
+    end_line: 88
 apis:
   - protocol: rpc
     path: "version.__version__"

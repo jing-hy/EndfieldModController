@@ -17,7 +17,7 @@ fingerprint: 8953c1b3674a022affaae19dfd2f51d6c489739683a202ea2fe9f74e71323ca1
 source:
   - path: "endfieldmodcontroller/integrity.py"
     line: 1
-    end_line: 312
+    end_line: 386
 apis:
   - protocol: rpc
     path: "integrity.repair_integrity"

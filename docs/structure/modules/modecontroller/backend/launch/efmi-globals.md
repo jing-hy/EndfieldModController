@@ -16,11 +16,11 @@ updated_at: "2026-10-03T15:48:42.307Z"
 fingerprint: 625d41711e2451a0f8a305d04dd8a75624112aefc037c331b8863d1d6749bd2d
 source:
   - path: "endfieldmodcontroller/launcher.py"
-    line: 2625
-    end_line: 3427
+    line: 3040
+    end_line: 4327
   - path: "endfieldmodcontroller/launcher.py"
-    line: 2718
-    end_line: 3598
+    line: 3133
+    end_line: 4498
 apis:
   - protocol: rpc
     path: "ensure_efmi_library_globals"

@@ -23,7 +23,7 @@ source:
     end_line: 228
   - path: "tests/test_poser.py"
     line: 1
-    end_line: 266
+    end_line: 268
   - path: "tests/test_alerts.py"
     line: 1
     end_line: 200

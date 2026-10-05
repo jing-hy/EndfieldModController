@@ -16,7 +16,7 @@ updated_at: "2026-10-03T15:48:42.330Z"
 fingerprint: 6d7af66102dee5cb6f6370ce37de24dbe18ae8eebea0328e42e5e8d8819c9578
 source:
   - path: "tests/test_single_instance.py"
-    line: 115
-    end_line: 364
+    line: 229
+    end_line: 592
 apis: []
 ---

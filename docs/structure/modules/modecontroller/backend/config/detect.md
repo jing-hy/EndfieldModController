@@ -16,11 +16,11 @@ updated_at: "2026-10-03T15:48:42.301Z"
 fingerprint: 4c9b2749c47924fbecec4e148f639bcfd18dc8031f7dc659fdd6c5a7d906dd71
 source:
   - path: "endfieldmodcontroller/config.py"
-    line: 1005
-    end_line: 1412
+    line: 1059
+    end_line: 1536
   - path: "endfieldmodcontroller/config.py"
-    line: 1091
-    end_line: 1586
+    line: 1145
+    end_line: 1710
 apis:
   - protocol: rpc
     path: "config.auto_detect_game_dir"

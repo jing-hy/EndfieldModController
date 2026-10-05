@@ -16,11 +16,11 @@ updated_at: "2026-10-03T15:48:42.308Z"
 fingerprint: 625d41711e2451a0f8a305d04dd8a75624112aefc037c331b8863d1d6749bd2d
 source:
   - path: "endfieldmodcontroller/launcher.py"
-    line: 1389
-    end_line: 2163
+    line: 1668
+    end_line: 2964
   - path: "endfieldmodcontroller/launcher.py"
-    line: 1541
-    end_line: 2530
+    line: 1830
+    end_line: 3395
 apis:
   - protocol: rpc
     path: "ensure_injections"

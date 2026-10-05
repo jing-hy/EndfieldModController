@@ -16,14 +16,14 @@ updated_at: "2026-10-03T15:48:42.304Z"
 fingerprint: 61efb3f6cee6f0fb07be25de7cacec91b96852d3e1ce17a05bc74d2b78e5bf3e
 source:
   - path: "endfieldmodcontroller/reshade_integration.py"
-    line: 449
-    end_line: 602
+    line: 583
+    end_line: 915
   - path: "endfieldmodcontroller/reshade_integration.py"
-    line: 541
-    end_line: 786
+    line: 675
+    end_line: 1181
   - path: "endfieldmodcontroller/reshade_integration.py"
-    line: 1443
-    end_line: 1651
+    line: 1747
+    end_line: 2349
 apis:
   - protocol: rpc
     path: "reshade_integration.detect_game_dir"

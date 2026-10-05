@@ -16,7 +16,7 @@ updated_at: "2026-10-03T15:48:42.328Z"
 fingerprint: b32cabf7c60bfa13a0df8a8010af8817b14fb45df1b0c996e90c0deb8b9f189a
 source:
   - path: "tests/test_frontend_menu_actions.py"
-    line: 76
-    end_line: 230
+    line: 151
+    end_line: 380
 apis: []
 ---

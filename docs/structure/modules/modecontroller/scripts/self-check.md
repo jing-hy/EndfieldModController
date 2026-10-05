@@ -17,7 +17,7 @@ fingerprint: eb62be25e1621e36d9060cbc758f3bb203c2179d3fd57979d31f25c827017809
 source:
   - path: "scripts/self_check.py"
     line: 1
-    end_line: 56
+    end_line: 72
 apis:
   - protocol: rpc
     path: "scripts.self_check"

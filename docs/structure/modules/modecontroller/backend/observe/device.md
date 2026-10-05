@@ -17,10 +17,10 @@ fingerprint: 109911a981598132125a16f7bea2d18c258b1403af92a4b758f02bb7ad83787a
 source:
   - path: "endfieldmodcontroller/deviceinfo.py"
     line: 115
-    end_line: 292
+    end_line: 352
   - path: "endfieldmodcontroller/deviceinfo.py"
-    line: 266
-    end_line: 359
+    line: 296
+    end_line: 419
 apis:
   - protocol: rpc
     path: "collect"

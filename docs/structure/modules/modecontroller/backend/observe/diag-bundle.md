@@ -16,11 +16,11 @@ updated_at: "2026-10-03T15:48:42.314Z"
 fingerprint: 0c53c8639adc28a15a835bab7ab846058eb0edaca5528357bc84a1ba597a42dc
 source:
   - path: "endfieldmodcontroller/diagnostics.py"
-    line: 654
-    end_line: 1048
+    line: 1919
+    end_line: 4938
   - path: "endfieldmodcontroller/diagnostics.py"
-    line: 977
-    end_line: 1114
+    line: 2922
+    end_line: 5004
 apis:
   - protocol: rpc
     path: "create_diagnostic_bundle"

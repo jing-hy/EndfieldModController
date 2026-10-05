@@ -16,14 +16,14 @@ updated_at: "2026-10-03T15:48:42.300Z"
 fingerprint: 01ed974925eb80667de4f7cf8b3ccbfdb59e25fc8e27c57b925652d9607673d5
 source:
   - path: "endfieldmodcontroller/fastnet.py"
-    line: 225
-    end_line: 1328
+    line: 226
+    end_line: 2106
   - path: "endfieldmodcontroller/fastnet.py"
-    line: 471
-    end_line: 1946
+    line: 544
+    end_line: 2726
   - path: "endfieldmodcontroller/fastnet.py"
-    line: 1023
-    end_line: 2256
+    line: 1378
+    end_line: 3036
 apis:
   - protocol: rpc
     path: "download"

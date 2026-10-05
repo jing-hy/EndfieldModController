@@ -17,13 +17,13 @@ fingerprint: c5a6bc8c96ea19c3ce68250b0a79b8b549942c7450c986a8b6e1f5f9ec8e1883
 source:
   - path: "endfieldmodcontroller/dependencies.py"
     line: 124
-    end_line: 219
+    end_line: 241
   - path: "endfieldmodcontroller/dependencies.py"
-    line: 212
-    end_line: 363
+    line: 217
+    end_line: 417
   - path: "endfieldmodcontroller/dependencies.py"
-    line: 333
-    end_line: 496
+    line: 360
+    end_line: 550
 apis:
   - protocol: rpc
     path: "_download"

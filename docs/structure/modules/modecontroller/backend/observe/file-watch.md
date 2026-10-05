@@ -17,10 +17,10 @@ fingerprint: c588711487f6bd0225e0eb472c3e2b67ce13515fc3529dfbfc3efb17898d7193
 source:
   - path: "endfieldmodcontroller/filewatch.py"
     line: 48
-    end_line: 118
+    end_line: 236
   - path: "endfieldmodcontroller/filewatch.py"
-    line: 292
-    end_line: 389
+    line: 398
+    end_line: 617
 apis:
   - protocol: rpc
     path: "filewatch.scan"

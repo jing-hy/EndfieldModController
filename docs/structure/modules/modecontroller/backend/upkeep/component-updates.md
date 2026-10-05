@@ -16,14 +16,14 @@ updated_at: "2026-10-03T15:48:42.319Z"
 fingerprint: 60153d868f19007bf05bb7a4ea08569549ff05ac28f2551cfe603e49ecbf6169
 source:
   - path: "endfieldmodcontroller/updates.py"
-    line: 43
-    end_line: 133
+    line: 44
+    end_line: 135
   - path: "endfieldmodcontroller/updates.py"
-    line: 167
-    end_line: 341
+    line: 169
+    end_line: 357
   - path: "endfieldmodcontroller/updates.py"
-    line: 313
-    end_line: 616
+    line: 315
+    end_line: 676
 apis:
   - protocol: rpc
     path: "updates.file_version"

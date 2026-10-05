@@ -16,14 +16,14 @@ updated_at: "2026-10-03T15:48:42.304Z"
 fingerprint: d56c291f41c0573cd191dcb7dabeb3ad7d89d44864c8eef399ce963d4c4cc2cd
 source:
   - path: "endfieldmodcontroller/secondary_motion.py"
-    line: 48
-    end_line: 199
+    line: 50
+    end_line: 395
   - path: "endfieldmodcontroller/secondary_motion.py"
-    line: 211
-    end_line: 283
+    line: 298
+    end_line: 527
   - path: "endfieldmodcontroller/secondary_motion.py"
-    line: 259
-    end_line: 603
+    line: 368
+    end_line: 928
 apis:
   - protocol: rpc
     path: "secondary_motion.status"

@@ -17,10 +17,10 @@ fingerprint: cb3aa853877a45d0b38aa72888961f66611abe16b2189554163208d48ccf5489
 source:
   - path: "endfieldmodcontroller/app.py"
     line: 1
-    end_line: 687
+    end_line: 1029
   - path: "endfieldmodcontroller/app.py"
-    line: 518
-    end_line: 805
+    line: 689
+    end_line: 1147
 apis:
   - protocol: rpc
     path: "app.main"

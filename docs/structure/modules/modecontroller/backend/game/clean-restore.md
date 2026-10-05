@@ -16,11 +16,11 @@ updated_at: "2026-10-03T15:48:42.303Z"
 fingerprint: a6396b5e305e53b7f4806fbd7626415fe70330acd1379d706b48e6d9b4e4a5a0
 source:
   - path: "endfieldmodcontroller/game_clean.py"
-    line: 289
-    end_line: 330
+    line: 358
+    end_line: 483
   - path: "endfieldmodcontroller/game_clean.py"
-    line: 325
-    end_line: 837
+    line: 394
+    end_line: 1371
 apis:
   - protocol: rpc
     path: "game_clean.backup_and_clean"

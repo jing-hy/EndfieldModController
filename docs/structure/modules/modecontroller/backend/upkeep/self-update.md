@@ -17,13 +17,13 @@ fingerprint: 83197284e22ac0cd985f0828273f68ef02444f9852586a7e08959d156aba7456
 source:
   - path: "endfieldmodcontroller/selfupdate.py"
     line: 44
-    end_line: 115
+    end_line: 119
   - path: "endfieldmodcontroller/selfupdate.py"
-    line: 115
-    end_line: 449
+    line: 117
+    end_line: 499
   - path: "endfieldmodcontroller/selfupdate.py"
-    line: 426
-    end_line: 646
+    line: 451
+    end_line: 696
 apis:
   - protocol: rpc
     path: "selfupdate.check_update"

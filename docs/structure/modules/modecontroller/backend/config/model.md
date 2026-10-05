@@ -17,13 +17,13 @@ fingerprint: 4c9b2749c47924fbecec4e148f639bcfd18dc8031f7dc659fdd6c5a7d906dd71
 source:
   - path: "endfieldmodcontroller/config.py"
     line: 14
-    end_line: 127
+    end_line: 137
   - path: "endfieldmodcontroller/config.py"
-    line: 290
-    end_line: 929
+    line: 295
+    end_line: 1037
   - path: "endfieldmodcontroller/config.py"
-    line: 979
-    end_line: 1058
+    line: 1033
+    end_line: 1166
 apis:
   - protocol: rpc
     path: "config.AppConfig"

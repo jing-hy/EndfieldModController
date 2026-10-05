@@ -16,8 +16,8 @@ updated_at: "2026-10-03T15:48:42.316Z"
 fingerprint: 0c53c8639adc28a15a835bab7ab846058eb0edaca5528357bc84a1ba597a42dc
 source:
   - path: "endfieldmodcontroller/diagnostics.py"
-    line: 360
-    end_line: 682
+    line: 371
+    end_line: 3892
 apis:
   - protocol: rpc
     path: "start_process_monitor"

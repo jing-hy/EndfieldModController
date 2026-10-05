@@ -16,14 +16,14 @@ updated_at: "2026-10-03T15:48:42.299Z"
 fingerprint: fc2e801c72fff0bfb1b9cf6e615b7b2c8fea23c46600a72b04cb9fae9b8f5b5a
 source:
   - path: "endfieldmodcontroller/dlss5_fetcher.py"
-    line: 44
-    end_line: 142
+    line: 47
+    end_line: 190
   - path: "endfieldmodcontroller/dlss5_fetcher.py"
-    line: 156
-    end_line: 300
+    line: 180
+    end_line: 392
   - path: "endfieldmodcontroller/dlss5_fetcher.py"
-    line: 281
-    end_line: 499
+    line: 327
+    end_line: 591
 apis:
   - protocol: rpc
     path: "component_report"

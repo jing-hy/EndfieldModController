@@ -17,10 +17,10 @@ fingerprint: 61efb3f6cee6f0fb07be25de7cacec91b96852d3e1ce17a05bc74d2b78e5bf3e
 source:
   - path: "endfieldmodcontroller/reshade_integration.py"
     line: 55
-    end_line: 153
+    end_line: 165
   - path: "endfieldmodcontroller/reshade_integration.py"
-    line: 146
-    end_line: 451
+    line: 147
+    end_line: 719
 apis:
   - protocol: rpc
     path: "reshade_integration.deploy_panel"

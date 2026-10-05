@@ -17,13 +17,13 @@ fingerprint: 36727fe7b21e99a04f6d8d037cd6bbde6d275f6abd063b06833c6037f608b1a8
 source:
   - path: "endfieldmodcontroller/alerts.py"
     line: 102
-    end_line: 218
+    end_line: 220
   - path: "endfieldmodcontroller/alerts.py"
-    line: 218
-    end_line: 312
+    line: 219
+    end_line: 314
   - path: "endfieldmodcontroller/alerts.py"
-    line: 312
-    end_line: 400
+    line: 313
+    end_line: 402
 apis:
   - protocol: rpc
     path: "alerts.overview"

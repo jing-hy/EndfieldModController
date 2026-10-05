@@ -17,7 +17,7 @@ fingerprint: 924d56ae67430c7d9e2425051dc85cb49b96d170a15ffa68a1b54fedd2b9bd13
 source:
   - path: "frontend/src/pages/LaunchPage.vue"
     line: 1
-    end_line: 778
+    end_line: 1200
 apis:
   - protocol: rpc
     path: "web.runOneClickLaunch"

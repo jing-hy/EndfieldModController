@@ -17,7 +17,7 @@ fingerprint: 4b9e77ec8be8ff7a6b4575d086659d5fb87acb1ff52e136046acb6fa2b5a222f
 source:
   - path: "frontend/src/store.js"
     line: 1
-    end_line: 213
+    end_line: 299
 apis:
   - protocol: rpc
     path: "web.escapeHtml"

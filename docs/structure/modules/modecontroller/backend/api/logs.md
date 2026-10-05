@@ -16,14 +16,14 @@ updated_at: "2026-10-03T15:48:42.296Z"
 fingerprint: f4f737f3126ceb30b7fe4eb77e658a2d448e8b85926c1be3e9f378bba509a468
 source:
   - path: "endfieldmodcontroller/api.py"
-    line: 630
-    end_line: 872
+    line: 654
+    end_line: 1129
   - path: "endfieldmodcontroller/api.py"
-    line: 2026
-    end_line: 2864
+    line: 2226
+    end_line: 3645
   - path: "endfieldmodcontroller/api.py"
-    line: 4964
-    end_line: 7026
+    line: 5625
+    end_line: 8348
 apis:
   - protocol: rpc
     path: "read_launch_log"

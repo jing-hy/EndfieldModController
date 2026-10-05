@@ -17,7 +17,7 @@ fingerprint: 63221a5a3a09dc421eda5b3fefc6da091153baee522ff41d48a0fc48614574db
 source:
   - path: "frontend/src/pages/ModLibraryPage.vue"
     line: 1
-    end_line: 658
+    end_line: 782
 apis:
   - protocol: rpc
     path: "web.openModMenu"

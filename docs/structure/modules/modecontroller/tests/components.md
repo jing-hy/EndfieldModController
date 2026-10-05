@@ -23,7 +23,7 @@ source:
     end_line: 134
   - path: "tests/test_selfupdate_stale.py"
     line: 1
-    end_line: 110
+    end_line: 120
   - path: "tests/test_asset_fetch_fallback.py"
     line: 1
     end_line: 94

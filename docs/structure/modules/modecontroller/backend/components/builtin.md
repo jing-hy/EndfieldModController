@@ -20,10 +20,10 @@ source:
     end_line: 104
   - path: "endfieldmodcontroller/runtime_deps.py"
     line: 104
-    end_line: 312
+    end_line: 409
   - path: "endfieldmodcontroller/runtime_deps.py"
     line: 188
-    end_line: 656
+    end_line: 776
 apis:
   - protocol: rpc
     path: "runtime_deps.ensure_all"

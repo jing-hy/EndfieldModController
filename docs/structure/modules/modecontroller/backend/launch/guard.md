@@ -19,11 +19,11 @@ source:
     line: 137
     end_line: 249
   - path: "endfieldmodcontroller/launcher.py"
-    line: 1808
-    end_line: 2716
+    line: 2145
+    end_line: 3581
   - path: "endfieldmodcontroller/launcher.py"
-    line: 2374
-    end_line: 3080
+    line: 2789
+    end_line: 3980
 apis:
   - protocol: rpc
     path: "launcher._stop_locked_files_processes"

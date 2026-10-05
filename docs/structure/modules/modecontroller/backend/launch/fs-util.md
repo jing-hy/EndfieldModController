@@ -19,14 +19,14 @@ source:
     line: 30
     end_line: 51
   - path: "endfieldmodcontroller/launcher.py"
-    line: 304
-    end_line: 1289
+    line: 322
+    end_line: 1857
   - path: "endfieldmodcontroller/launcher.py"
-    line: 973
-    end_line: 1624
+    line: 1195
+    end_line: 2250
   - path: "endfieldmodcontroller/launcher.py"
-    line: 2228
-    end_line: 2970
+    line: 2643
+    end_line: 3870
 apis:
   - protocol: rpc
     path: "_copy_if_changed"

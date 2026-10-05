@@ -17,7 +17,7 @@ fingerprint: bb4096083336a6e9aeca0ddf4b735cc22952cf644ed0c8d57b81ac2850ca16ab
 source:
   - path: "reshade_addon/src/endfieldmodcontroller_addon.cpp"
     line: 1
-    end_line: 1646
+    end_line: 1910
 apis:
   - protocol: file
     path: "actions.tsv"

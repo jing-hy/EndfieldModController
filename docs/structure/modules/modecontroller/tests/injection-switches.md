@@ -16,7 +16,7 @@ updated_at: "2026-10-03T15:48:42.329Z"
 fingerprint: 6574d21b282ecd6bd243729fd72a297294e64d74193958da0b36702df0608ebf
 source:
   - path: "tests/test_injection_switches.py"
-    line: 304
-    end_line: 826
+    line: 607
+    end_line: 1432
 apis: []
 ---

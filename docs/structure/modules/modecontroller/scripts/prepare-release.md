@@ -17,7 +17,7 @@ fingerprint: 5d1dfafd2db5a2750761726e6f7a6f2274b0bdb6e59ab2ca8868febeac770997
 source:
   - path: "scripts/prepare_release.py"
     line: 1
-    end_line: 100
+    end_line: 128
 apis:
   - protocol: rpc
     path: "scripts.prepare_release"

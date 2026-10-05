@@ -16,17 +16,17 @@ updated_at: "2026-10-03T15:48:42.305Z"
 fingerprint: e91e0c625160d3b0cb5d81abfc73c0b53876898d4bdd7e83a086c129f409b689
 source:
   - path: "endfieldmodcontroller/reshade_integration.py"
-    line: 674
-    end_line: 987
+    line: 842
+    end_line: 1443
   - path: "endfieldmodcontroller/reshade_integration.py"
-    line: 400
-    end_line: 512
+    line: 534
+    end_line: 814
   - path: "endfieldmodcontroller/reshade_integration.py"
-    line: 902
-    end_line: 1062
+    line: 1105
+    end_line: 1584
   - path: "endfieldmodcontroller/reshade.py"
-    line: 26
-    end_line: 45
+    line: 35
+    end_line: 121
 apis:
   - protocol: rpc
     path: "reshade_integration.deploy_existing_reshade"

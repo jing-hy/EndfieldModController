@@ -16,11 +16,11 @@ updated_at: "2026-10-03T15:48:42.317Z"
 fingerprint: 79ede51fc38bb72e15920536adcaba2411f2fbddeaff94ff12ac911b8e2eb95a
 source:
   - path: "endfieldmodcontroller/initialize.py"
-    line: 179
-    end_line: 242
+    line: 242
+    end_line: 443
   - path: "endfieldmodcontroller/initialize.py"
-    line: 2961
-    end_line: 4161
+    line: 3345
+    end_line: 4929
 apis:
   - protocol: rpc
     path: "initialize.ensure_all"

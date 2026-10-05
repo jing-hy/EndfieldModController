@@ -16,7 +16,7 @@ updated_at: "2026-10-03T15:48:42.322Z"
 fingerprint: d6fcb4560afac4bde8ca8d57f0e41448106837c8f3b006aaf3e89f3cca1166b1
 source:
   - path: "scripts/memory_log.py"
-    line: 214
-    end_line: 616
+    line: 427
+    end_line: 1042
 apis: []
 ---

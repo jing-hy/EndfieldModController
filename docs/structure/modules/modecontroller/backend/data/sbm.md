@@ -16,11 +16,11 @@ updated_at: "2026-10-03T15:48:42.303Z"
 fingerprint: 88b21c4fce5f985bc21c5c85116f69f45226d75ba75406a252af68e8dfa2e08e
 source:
   - path: "endfieldmodcontroller/sbm_data_sync.py"
-    line: 66
-    end_line: 173
+    line: 65
+    end_line: 171
   - path: "endfieldmodcontroller/sbm_data_sync.py"
-    line: 174
-    end_line: 318
+    line: 173
+    end_line: 316
 apis:
   - protocol: rpc
     path: "sbm_data_sync.sync"

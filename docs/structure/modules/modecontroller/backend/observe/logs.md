@@ -16,14 +16,14 @@ updated_at: "2026-10-03T15:48:42.315Z"
 fingerprint: 0c53c8639adc28a15a835bab7ab846058eb0edaca5528357bc84a1ba597a42dc
 source:
   - path: "endfieldmodcontroller/diagnostics.py"
-    line: 79
-    end_line: 130
+    line: 83
+    end_line: 138
   - path: "endfieldmodcontroller/diagnostics.py"
-    line: 171
-    end_line: 344
+    line: 175
+    end_line: 352
   - path: "endfieldmodcontroller/diagnostics.py"
-    line: 1014
-    end_line: 1166
+    line: 2959
+    end_line: 5056
 apis:
   - protocol: rpc
     path: "log_event"

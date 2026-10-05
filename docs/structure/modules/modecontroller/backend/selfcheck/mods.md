@@ -16,14 +16,14 @@ updated_at: "2026-10-03T15:48:42.318Z"
 fingerprint: 79ede51fc38bb72e15920536adcaba2411f2fbddeaff94ff12ac911b8e2eb95a
 source:
   - path: "endfieldmodcontroller/initialize.py"
-    line: 2657
-    end_line: 3906
+    line: 3041
+    end_line: 4674
   - path: "endfieldmodcontroller/initialize.py"
-    line: 2851
-    end_line: 4079
+    line: 3235
+    end_line: 4847
   - path: "endfieldmodcontroller/initialize.py"
-    line: 2928
-    end_line: 4112
+    line: 3312
+    end_line: 4880
 apis:
   - protocol: rpc
     path: "staging"

@@ -20,10 +20,10 @@ source:
     end_line: 118
   - path: "endfieldmodcontroller/character_sync.py"
     line: 118
-    end_line: 264
+    end_line: 262
   - path: "endfieldmodcontroller/character_sync.py"
-    line: 265
-    end_line: 338
+    line: 264
+    end_line: 336
 apis:
   - protocol: rpc
     path: "character_sync.sync"

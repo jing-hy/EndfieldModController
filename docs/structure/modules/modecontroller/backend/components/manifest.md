@@ -22,8 +22,8 @@ source:
     line: 100
     end_line: 117
   - path: "endfieldmodcontroller/dependencies.py"
-    line: 662
-    end_line: 740
+    line: 689
+    end_line: 794
 apis:
   - protocol: rpc
     path: "load_manifest"
