@@ -369,7 +369,8 @@ def _sync_enhancer_section(source: Path, target: Path,
                                "CameraSmoothPerspectiveTransition",
                                "ShortcutFirstPerson",
                                "Language",
-                           )) -> int:
+                           ),
+                           preserve_user_values: tuple[str, ...] = ("ShortcutFirstPerson",)) -> int:
     """把源 ini 里 `[endfield-enhancer]` 段的关键项同步进目标 ini，返回改了几项。
 
     为什么需要它：`core.py` 给游戏进程设了 `RESHADE_BASE_PATH_OVERRIDE` = `runtime\\reshade`，
@@ -433,10 +434,22 @@ def _sync_enhancer_section(source: Path, target: Path,
         if inside and "=" in text:
             key = text.partition("=")[0].strip()
             present.add(key)
-            if key in wanted and wanted[key] != text.partition("=")[2].strip():
-                out.append(f"{key}={wanted[key]}")
-                changed += 1
-                continue
+            if key in wanted:
+                current = text.partition("=")[2].strip()
+                # ⚠️⚠️ **用户自己绑的快捷键不许被我们改回去**（2026-10-05：反馈者报
+                # 「管理器会覆写它的快捷键」）。`ShortcutFirstPerson` 是**偏好**（他要绑 F2
+                # 就绑 F2），而我们每次一键启动都把它写回 112(F1) ⇒ 他改完又被改回来。
+                # 判据：目标里**已有非 0 值 ⇒ 原样保留**；只有"缺失或 0"才算没设过、补默认
+                # （`0` 在 enhancer 里是"没有绑定快捷键"，不是用户的选择）。
+                # 不在此列的是**功能必需项**（`CameraEFMICompatibility` 那几项：为 0 时
+                # 第一人称会被 EFMI 顶掉）与用户明确要的中文 `Language` —— 它们照旧覆盖。
+                if key in preserve_user_values and current not in ("", "0"):
+                    out.append(line)
+                    continue
+                if wanted[key] != current:
+                    out.append(f"{key}={wanted[key]}")
+                    changed += 1
+                    continue
         out.append(line)
     if inside and insert_at is None:
         insert_at = len(out)

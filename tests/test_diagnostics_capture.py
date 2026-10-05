@@ -342,5 +342,68 @@ def test_end_to_end_matches_real_feedback_shape(tmp_path: Path, monkeypatch):
     assert "missing" in manifest
 
 
+# ---------------------------------------------------------------------------
+# ⑤ 游戏 SDK 日志 + 「游戏自有文件本次写过没有」（2026-10-05 补的判据）
+# ---------------------------------------------------------------------------
+
+
+def test_bundle_collects_game_sdk_logs(tmp_path: Path, monkeypatch):
+    """`sdklogs\\*.log` 必须**收内容**进包，不能只列个文件名。
+
+    为什么（2026-10-05）：反馈者那台游戏只活 20 秒、**一帧都没渲染**、Windows 侧一条
+    WER 都没有 —— 那种现场里唯一能回答"游戏走到哪一步才死的"就是游戏自己的 SDK
+    事件日志。以前 `sdklogs\\` 只出现在"值得看的子目录"里（只有文件名与大小），
+    等于知道那儿有东西却看不到内容 ⇒ 判据又断一次。
+    """
+    _quiet_collectors(monkeypatch)
+    staging = tmp_path / "EFMI" / "Mods"
+    staging.mkdir(parents=True)
+    config, game, _runtime = _make_config(tmp_path, staging=staging)
+    sdklogs = game / "sdklogs"
+    sdklogs.mkdir(parents=True)
+    (sdklogs / "HGEventLog.log").write_text("sdk event line\n", encoding="utf-8")
+
+    bundle = diagnostics.create_diagnostic_bundle(config, game_dir=game, note="test")
+
+    with zipfile.ZipFile(bundle) as archive:
+        names = set(archive.namelist())
+        manifest = archive.read("capture-manifest.txt").decode("utf-8")
+        body = archive.read("game/sdklogs/HGEventLog.log").decode("utf-8")
+
+    assert "game/sdklogs/HGEventLog.log" in names, names
+    assert "sdk event line" in body
+    assert "game/sdklogs/HGEventLog.log" in manifest
+
+
+def test_game_dir_inventory_flags_files_not_written_this_run(tmp_path: Path, monkeypatch):
+    """「游戏自有文件：本次运行写过没有」这一段必须存在 **而且判对**。
+
+    现场用法：游戏跑了 20 秒，而 `sdklogs\\HGEventLog.log` / `eld_Endfield.db` 的 mtime
+    全停在**上一次运行** ⇒ 一眼看出"游戏死得非常早"。以前这个结论要人肉把清单里每个
+    时间戳跟启动时刻对一遍才知道。反向验证：删掉那一段 ⇒ 本测试变红。
+    """
+    import os
+    import time as _time
+
+    config, game, _runtime = _make_config(tmp_path, staging=tmp_path / "Mods")
+    (game / "sdklogs").mkdir(parents=True, exist_ok=True)
+    (game / "sdklogs" / "HGEventLog.log").write_text("old", encoding="utf-8")
+    (game / "eld_Endfield.db").write_bytes(b"db")
+    old = 1_600_000_000
+    os.utime(game / "sdklogs" / "HGEventLog.log", (old, old))
+    os.utime(game / "eld_Endfield.db", (old, old))
+
+    monkeypatch.setattr(diagnostics, "_LAST_GAME_START", _time.time())
+    text = diagnostics.game_dir_inventory_text(config, game)
+    assert "游戏自有文件：本次运行写过没有" in text
+    assert "· 本次没写" in text and "HGEventLog.log" in text
+    assert "本次运行写过 0 个" in text
+
+    # 本次真的写过 ⇒ 必须标成 ✔（否则"没写"这个判据没有对照，等于永远在报警）
+    (game / "sdklogs" / "HGEventLog.log").write_text("new", encoding="utf-8")
+    text2 = diagnostics.game_dir_inventory_text(config, game)
+    assert "✔ 本次写过" in text2 and "本次运行写过 1 个" in text2
+
+
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(pytest.main([__file__, "-q"]))

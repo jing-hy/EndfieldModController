@@ -506,6 +506,130 @@ def combo_succeeded(evidence: dict[str, Any]) -> bool:
     return alive >= COMBO_SUCCESS_ALIVE_SECONDS
 
 
+# ── 「连续启动失败」计数 → 界面弹「强力修复」（2026-10-05 用户要求）──────────────
+# 用户原话：「**如果连续启动三次失败，加个弹窗，做个强力修复功能，一键还原终末地，
+#            然后清空依赖并重新下载**，注意：**还原终末地需要把其他第三方的也还原掉**」。
+#
+# 判据刻意与 `combo_succeeded` **共用同一套**（`record_launch_result` 直接调它）：
+# **崩了**、或**没活过 120 秒且没有正常退出卸载统计**（静默闪退）都算一次失败 ——
+# 这样"启动即退"和"真崩溃"能累加到同一个计数里。这一条很关键：2026-10-05 那位反馈者
+# 就是典型的"静默闪退"（每次活 20 秒、一条 WER 都没有），只数崩溃的话他永远等不到弹窗。
+LAUNCH_FAILURE_NAME = Path("_state") / "launch_failures.json"
+STRONG_REPAIR_THRESHOLD = 3
+_LAUNCH_FAILURE_HISTORY = 10
+
+
+def launch_failure_path(config: AppConfig) -> Path:
+    return Path(config.runtime_path) / LAUNCH_FAILURE_NAME
+
+
+def read_launch_failures(config: AppConfig) -> dict[str, Any]:
+    """读计数（文件缺失/写坏一律当"没有记录" —— 绝不因为读不出来影响启动）。"""
+    import json
+
+    blank = {"streak": 0, "prompted_streak": 0, "history": []}
+    path = launch_failure_path(config)
+    if not path.is_file():
+        return dict(blank)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return dict(blank)
+    if not isinstance(data, dict):
+        return dict(blank)
+    try:
+        streak = int(data.get("streak") or 0)
+        prompted = int(data.get("prompted_streak") or 0)
+    except (TypeError, ValueError):
+        streak, prompted = 0, 0
+    return {
+        "streak": max(0, streak),
+        "prompted_streak": max(0, prompted),
+        "history": list(data.get("history") or [])[-_LAUNCH_FAILURE_HISTORY:],
+    }
+
+
+def _write_launch_failures(config: AppConfig, state: dict[str, Any]) -> bool:
+    import json
+
+    path = launch_failure_path(config)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(state, ensure_ascii=False, indent=2),
+                        encoding="utf-8", newline="\n")
+        return True
+    except OSError:
+        return False
+
+
+def record_launch_result(config: AppConfig, evidence: dict[str, Any], *,
+                         log: Callable[[str], None] | None = None) -> dict[str, Any]:
+    """游戏退出后记一笔：**跑通就清零、失败就 +1**。
+
+    ⚠️ 成功判据必须用 `combo_succeeded`，**不能**拿"没检测到崩溃"当成功 ——
+    那一档也可能是静默闪退（本函数存在的理由就是这个）。
+    """
+    state = read_launch_failures(config)
+    if combo_succeeded(evidence):
+        if state["streak"]:
+            _log(config, f"启动结果: 这次跑通了 → 连续失败计数清零（原为 {state['streak']} 次）")
+        cleared = {"streak": 0, "prompted_streak": 0, "history": state["history"]}
+        _write_launch_failures(config, cleared)
+        return {**cleared, "ok": True, "failed": False}
+
+    try:
+        alive = int(float((evidence.get("process") or {}).get("alive_seconds") or 0))
+    except (TypeError, ValueError):
+        alive = 0
+    streak = int(state.get("streak") or 0) + 1
+    history = (list(state.get("history") or []) + [{
+        "at": int(time.time()),
+        "alive_seconds": alive,
+        "crash": bool(is_crash(evidence)),
+        "modules": [str(m) for m in (evidence.get("wer_modules") or [])][:3],
+    }])[-_LAUNCH_FAILURE_HISTORY:]
+    state = {"streak": streak, "prompted_streak": int(state.get("prompted_streak") or 0),
+             "history": history}
+    _write_launch_failures(config, state)
+    _log(config, f"启动结果: 第 {streak} 次连续失败（存活 {alive} 秒）"
+                 + ("—— 已达阈值，界面会提示「强力修复」" if streak >= STRONG_REPAIR_THRESHOLD else ""))
+    return {**state, "ok": True, "failed": True}
+
+
+def strong_repair_status(config: AppConfig) -> dict[str, Any]:
+    """前端轮询用：连续失败够阈值、且**这一档还没提示过**时 `ready=True`。
+
+    为什么要有 `prompted_streak`：这是防骚扰判据 —— 弹过一次之后同一档不再弹；
+    等用户修好、计数清零，**再**攒到 3 次才会重新提示（而不是每次启动都弹）。
+    """
+    state = read_launch_failures(config)
+    streak = int(state.get("streak") or 0)
+    prompted = int(state.get("prompted_streak") or 0)
+    return {
+        "streak": streak,
+        "threshold": STRONG_REPAIR_THRESHOLD,
+        "ready": streak >= STRONG_REPAIR_THRESHOLD and streak > prompted,
+        "prompted_streak": prompted,
+        "history": state.get("history") or [],
+    }
+
+
+def mark_strong_repair_prompted(config: AppConfig) -> dict[str, Any]:
+    """把"已提示过"钉在当前这一档上（前端弹窗后立刻调，保证只弹一次）。"""
+    state = read_launch_failures(config)
+    state["prompted_streak"] = int(state.get("streak") or 0)
+    _write_launch_failures(config, state)
+    return state
+
+
+def reset_launch_failures(config: AppConfig) -> dict[str, Any]:
+    """清零（"强力修复"成功后调：已经重头来过了，旧的失败计数不该继续压着用户）。"""
+    cleared = {"streak": 0, "prompted_streak": 0,
+               "history": (read_launch_failures(config).get("history") or [])}
+    _write_launch_failures(config, cleared)
+    return cleared
+
+
 def forget_crashes_for_combo(config: AppConfig, mods: list[str] | None = None) -> list[dict[str, Any]]:
     """这套 Mod **这次成功跑通、没崩** ⇒ 把记忆里匹配它的条目移出（返回被移出的那些）。
 
@@ -1690,6 +1814,16 @@ def start_watch(config: AppConfig, *, timeout: float = 6 * 3600.0,
             path = write_report(config, evidence)
             crashed = is_crash(evidence)
             _emit(f"崩溃监控: {'检测到崩溃' if crashed else '未检测到崩溃（正常退出）'}，报告: {path.name}")
+
+            # ③-a **记一笔"这次启动算成功还是失败"**（2026-10-05 用户要求）：
+            #     连续 3 次失败 ⇒ 前端弹「强力修复」。判据在 `record_launch_result` 里
+            #     复用 `combo_succeeded`，所以"静默闪退"也计数（不能只数崩溃 —— 反馈者那台
+            #     一条 WER 都没有，只数崩溃就永远等不到这个弹窗）。
+            try:
+                outcome = record_launch_result(config, evidence, log=_emit)
+                _WATCH["launch_failure"] = outcome
+            except Exception as exc:  # noqa: BLE001 —— 记账失败绝不影响崩溃取证
+                _emit(f"崩溃监控: 记录启动结果失败（忽略）: {exc}")
             try:
                 bundle = make_bundle(config, evidence, log=_emit)
                 # 只有真的崩了才让前端弹窗提示反馈；正常退出只留日志与包，不打扰用户

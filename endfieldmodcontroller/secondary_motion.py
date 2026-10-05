@@ -319,6 +319,28 @@ def _pick(candidates: list[Path], *relative: str) -> Path | None:
     return None
 
 
+def _same_file(left: Path, right: Path) -> bool:
+    """两份文件内容是否一致（先比大小、再比字节；插件本体 ~139 KB，开销可忽略）。"""
+    try:
+        if left.stat().st_size != right.stat().st_size:
+            return False
+        return left.read_bytes() == right.read_bytes()
+    except OSError:
+        return False
+
+
+def _backup_plugin(path: Path) -> Path | None:
+    """给将被替换的插件留一份**只增不删**的备份（名字唯一，绝不覆盖上一次那份）。"""
+    from . import fsutil
+
+    try:
+        target = fsutil.unique_sibling(path.with_name(path.name + ".bak"))
+        shutil.copy2(path, target)
+        return target
+    except OSError:
+        return None
+
+
 def ensure_injection(config: AppConfig, log: Callable[[str], None] | None = None) -> dict[str, Any]:
     """补齐乳摇注入：两个 proxy + plugin\\sbm.dll + 插件数据。已装的不动，缺失才补。"""
     actions: list[str] = []
@@ -370,10 +392,36 @@ def ensure_injection(config: AppConfig, log: Callable[[str], None] | None = None
 
     plugin_target = game / "plugin" / PLUGIN_NAME
     plugin_source = _pick(candidates, "plugin", PLUGIN_NAME)
-    if not plugin_target.is_file() and plugin_source is not None:
+    # ⚠️⚠️ **不能只"缺了才铺"**（2026-10-05 用户实测暴露的问题）。
+    #
+    # 原逻辑是 `if not plugin_target.is_file()`，于是**游戏目录里那份一旦存在就永不再更新**
+    # —— 用户把乳摇工具包更新到 3.1.2（插件本体 108 KB → 142 KB）之后，游戏里跑的仍然是
+    # 旧的 108 KB。两条硬证据：① `plugin\sbm.dll` 大小一直是 108,032；② v3 的迁移标记
+    # `SecondaryMotion\data\.jump_defaults_v3` 从未生成（说明新插件从没在游戏里跑过）
+    # ⇒ 新版的跳跃 / 惯性系统一律进不去。
+    #
+    # 现在补一条：**源里那份与游戏目录里那份内容不同 ⇒ 备份旧的、换上**。
+    # 源本身仍是"随包 assets 优先、乳摇工具目录其次"（`_source_candidates`），
+    # 而随包那份就是照上游 3.1.2 取的，所以两条路都通向同一个新版。
+    if plugin_source is not None and (
+        not plugin_target.is_file() or not _same_file(plugin_source, plugin_target)
+    ):
         plugin_target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(plugin_source, plugin_target)
-        actions.append(f"安装插件 plugin\\{PLUGIN_NAME}")
+        replacing = plugin_target.is_file()
+        if replacing:
+            # 备份**只增不删**（复用全项目统一的不覆盖命名），换错了能放回去。
+            backup = _backup_plugin(plugin_target)
+            if backup is not None:
+                actions.append(f"备份旧插件 {PLUGIN_NAME} -> {backup.name}")
+            else:
+                warnings.append(f"备份旧 {PLUGIN_NAME} 失败（仍继续替换）")
+        try:
+            shutil.copy2(plugin_source, plugin_target)
+            actions.append(
+                f"更新插件 plugin\\{PLUGIN_NAME}（换了新版）" if replacing
+                else f"安装插件 plugin\\{PLUGIN_NAME}")
+        except OSError as exc:
+            warnings.append(f"写入 plugin\\{PLUGIN_NAME} 失败: {exc}")
 
     # 插件的数据目录也必须保证在位，否则插件启动即自我禁用（见 status() 的注释）。
     # 只补"缺失的关键文件"，不覆盖用户已有的 presets / 调参结果。
@@ -664,7 +712,10 @@ def import_pack(config: AppConfig, archive: Path, log: Callable[[str], None] | N
         _log(log, f"未装过，将安装到 {tool}")
 
     keep = ("logs", "presets", "data", "runtime")
-    keep_files = ("settings.json", "default_lang.txt")
+    # ⚠️ `version.txt` **必须留在原地**（2026-10-05）：版本检测优先读它，
+    # 而下面那个"把不认识的旧文件移去 `_replaced`"的循环会把它一起搬走
+    # ⇒ 检测退回目录名、目录名里又没有版本号 ⇒ **更新完照样报"有新版本"**。
+    keep_files = ("settings.json", "default_lang.txt", "version.txt")
     stamp = time.strftime("%Y%m%d-%H%M%S")
     backup = tool.parent / f"_backup_{stamp}"
 
@@ -705,5 +756,28 @@ def import_pack(config: AppConfig, archive: Path, log: Callable[[str], None] | N
     except (OSError, zipfile.BadZipFile) as exc:
         return {"ok": False, "message": f"更新失败: {exc}"}
 
+    # ⚠️⚠️ **必须把新版本号写进 `version.txt`**（2026-10-05 用户实测报的 bug）。
+    #
+    # 版本检测（本文件的 `_tool_version` 与 `updates._sbm_local_version`）**优先读
+    # `version.txt`**、读不到才退回目录名 —— 而全项目**只有读、从来没人写它**
+    # ⇒ 目录里一旦留着旧版本号（例如从 v2.3.5 升上来），就**永远**被认成旧版：
+    # **每次启动都报"有新版本"，点更新也永远好不了**。用户原话：
+    # 「**我启动说依赖要更新，然后更新完启动还是要更新**」。
+    #
+    # 版本号从**安装包文件名**抠（`ShakingBreastManager-v3.1.2-ZH-win-x64.zip`）；
+    # 抠不到就**什么都不写** —— 留着旧值总比写一个错的强，而且日志会说明白。
+    version = _version_from_name(archive.name)
+    if version:
+        for base in {tool, tool.parent}:
+            try:
+                base.mkdir(parents=True, exist_ok=True)
+                (base / "version.txt").write_text(version, encoding="utf-8", newline="")
+            except OSError as exc:
+                _log(log, f"WARN 写版本号失败 {base / 'version.txt'}: {exc}")
+        _log(log, f"SecondaryMotion 版本号已记为 {version}（version.txt）")
+    else:
+        _log(log, f"WARN 从安装包名里认不出 SecondaryMotion 版本号（{archive.name}）—— "
+                  "version.txt 保持原样，下次启动可能仍然提示有新版")
     _log(log, f"SecondaryMotion 已更新，旧版备份在 {backup}")
-    return {"ok": True, "backup": str(backup), "tool_dir": str(tool), "archive": str(archive)}
+    return {"ok": True, "backup": str(backup), "tool_dir": str(tool), "archive": str(archive),
+            "version": version}

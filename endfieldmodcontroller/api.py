@@ -691,6 +691,87 @@ class EndfieldModControllerApi:
             "watch": crashwatch.watch_state(),
             "fresh": fresh or None,
             "latest": crashwatch.latest_bundle(self.config),
+            # 连续启动失败的计数 —— 与崩溃包**同一个轮询**里带出去，
+            # 免得前端为它再开一条定时器（用户 2026-10-05 要求"连续 3 次失败就弹窗"）。
+            "strong_repair": crashwatch.strong_repair_status(self.config),
+        }
+
+    def mark_strong_repair_prompted(self) -> dict[str, Any]:
+        """前端弹过「强力修复」窗之后**立刻**调 —— 同一档不再重复弹。"""
+        from . import crashwatch
+
+        return crashwatch.mark_strong_repair_prompted(self.config)
+
+    def launch_failure_status(self) -> dict[str, Any]:
+        """连续启动失败的当前档位（设置页/排查时看，也给测试用）。"""
+        from . import crashwatch
+
+        return crashwatch.strong_repair_status(self.config)
+
+    def force_repair(self) -> dict[str, Any]:
+        """**强力修复**：还原终末地（含第三方注入）→ 清空依赖并重新下载。
+
+        用户原话（2026-10-05）：「**如果连续启动三次失败，加个弹窗，做个强力修复功能，
+        一键还原终末地，然后清空依赖并重新下载**，注意：**还原终末地需要把其他第三方的
+        也还原掉**」。
+
+        两步，**顺序不能反**：
+          ① **还原终末地**：走 `game_clean.backup_and_clean` —— 它的判据是"原版会不会有
+             这个文件"，所以**不管是谁铺的**（本程序铺的、别的工具铺的、整合包残留）
+             一律备份移走、并把系统原版模块补回游戏目录 ⇒ 目录回到纯原版。
+             这正是用户强调的"把其他第三方的也还原掉"。
+          ② **清空依赖并重新下载**：复用 `reset_dependencies_and_redownload`，但
+             `restore_first=False`（①已经净化过，再"还原"会把第三方注入放回去）、
+             `keep_game_backup=True`（保留①的净化备份，用户仍能「撤销清除」）。
+
+        ① 失败就**中止**、不许往下清 —— 数据安全红线：失败保留原状。
+        """
+        from . import crashwatch, game_clean
+
+        launcher._append_log(self.config, "强力修复: 开始（还原终末地 → 清空依赖重下）")
+
+        # 游戏在跑就不许动游戏目录：净化要搬走它正占用的 dll，必然失败并留半截现场
+        try:
+            if self.game_running().get("running"):
+                return {"ok": False, "aborted": "game_running",
+                        "message": "游戏正在运行 —— 请先完全退出游戏，再点「强力修复」。"}
+        except Exception:  # noqa: BLE001 —— 判不出来时不拦，交给净化自己处理占用
+            pass
+
+        # ① 还原终末地（把不管谁铺的第三方注入都搬走 + 补回系统原版）
+        try:
+            cleaned = game_clean.backup_and_clean(
+                self.config, log=lambda message: launcher._append_log(self.config, message))
+        except Exception as exc:  # noqa: BLE001
+            launcher._append_log(self.config, f"强力修复: 中止 —— 净化游戏目录出错（{exc}）")
+            return {"ok": False, "aborted": "clean_failed",
+                    "message": f"已中止：净化游戏目录时出错（{exc}）。没有清空任何东西。"}
+        if not cleaned.get("ok", True):
+            detail = cleaned.get("message") or "未知原因"
+            launcher._append_log(self.config, f"强力修复: 中止 —— {detail}")
+            return {"ok": False, "aborted": "clean_failed", "clean": cleaned,
+                    "message": f"已中止：没能把游戏目录还原成原版（{detail}）。没有清空任何东西。"}
+
+        moved = cleaned.get("moved") or []
+        launcher._append_log(
+            self.config,
+            f"强力修复: 游戏目录已还原成原版（移走第三方注入 {len(moved)} 项，"
+            f"备份 {cleaned.get('backup_dir') or '（本次无需备份）'}）")
+
+        # ② 清空依赖并重新下载（前端负责第三步：跳依赖页 + 开始一键下载）
+        reset = self.reset_dependencies_and_redownload(restore_first=False, keep_game_backup=True)
+        crashwatch.reset_launch_failures(self.config)
+        return {
+            "ok": bool(reset.get("ok")),
+            "clean": cleaned,
+            "reset": reset,
+            "moved": len(moved),
+            "backup_dir": cleaned.get("backup_dir") or "",
+            "message": (
+                f"强力修复完成：游戏目录已还原成原版（移走 {len(moved)} 项第三方注入，"
+                f"备份在 {cleaned.get('backup_dir') or '（本次无需备份）'}），"
+                f"依赖已清空（{len(reset.get('removed') or [])} 项）—— 接下来重新下载依赖。"
+            ),
         }
 
     def open_path_in_explorer(self, target: str) -> dict[str, Any]:
@@ -2015,6 +2096,17 @@ class EndfieldModControllerApi:
 
         **表不存在**（旧版本 exe 没有这个文件）⇒ 返回空列表 ⇒ 前端直接跳过。
         """
+        # ⚠️ **同一轮里被连调两次时，不要重算、更不要重复写日志**（2026-10-05 用户报
+        # 「**下载完成会有两个一样的动态**」）。日志铁证：同一秒两条一模一样的
+        # `版本表比对：secondary_motion 2.3.5→3.1.2`（18:47:18.564 与 .615）——
+        # 前端于是把同一条"有新版本"提示弹了两遍，用户看到的就是"两个一样的动态"。
+        # 判据：结果缓存 3 秒；缓存命中直接返回，**不再打日志**（日志重复才是用户看见的那份）。
+        import time as _time
+
+        cached = getattr(self, "_pending_updates_cache", None)
+        if cached and (_time.monotonic() - cached[0]) < 3.0:
+            return dict(cached[1])
+
         from . import component_versions
 
         installed: dict[str, str] = {}
@@ -2053,7 +2145,9 @@ class EndfieldModControllerApi:
                 self.config,
                 "版本表比对：" + "、".join(
                     f"{o['key']} {o['current']}→{o['latest']}" for o in outdated))
-        return {"ok": True, "outdated": outdated, "installed": installed}
+        result = {"ok": True, "outdated": outdated, "installed": installed}
+        self._pending_updates_cache = (_time.monotonic(), dict(result))
+        return result
 
     def get_dependency_progress(self) -> dict[str, Any]:
         if self._dep_task is None:
@@ -4581,7 +4675,9 @@ class EndfieldModControllerApi:
         launcher._append_log(self.config, result.get("message", ""))
         return result
 
-    def reset_dependencies_and_redownload(self) -> dict[str, Any]:
+    def reset_dependencies_and_redownload(
+        self, *, restore_first: bool = True, keep_game_backup: bool = False,
+    ) -> dict[str, Any]:
         """**依赖清空重新下载**（设置页最上面那个红按钮，用户 2026-10-02 要求）。
 
         用户原话：「设置页做一个依赖清空重新下载，**红色**，放在最上面，按了之后**清空除了
@@ -4600,17 +4696,29 @@ class EndfieldModControllerApi:
           * **路径不许丢**：删 `config.json` 前先把库/备份仓/游戏目录这些记下来、马上写回 ——
             否则把库放在自定义盘的用户重启后会发现"库没了"（数据根换了、路径回到默认）。
         （用户 2026-10-02 追加：「assets\\ 也要删」—— 那 130 MB 随包资产会在下一步重新下载展开。）
+
+        ⚠️ 两个参数是给**强力修复**（`force_repair`）复用的，界面按钮仍按默认值走：
+          * `restore_first=False` —— 调用方**已经先把游戏目录净化成原版**了，
+            这里再"还原"等于把刚搬走的第三方注入**又放回去**（方向正好相反）；
+          * `keep_game_backup=True` —— **别把净化备份一起删掉**：那是用户唯一能
+            「撤销清除」的东西，清依赖不必连它一起清（备份语义红线：可找到、可还原）。
         """
         import shutil
+
+        from . import game_clean
 
         base = Path(self.config.base_dir)
         runtime = Path(self.config.runtime_path)
 
         # ① 还原游戏本体（没有过净化备份时它自己会如实报"无需还原"）
-        try:
-            restore_info: dict[str, Any] = self.game_clean_restore("")
-        except Exception as exc:  # noqa: BLE001
-            restore_info = {"ok": False, "message": f"还原时出错：{exc}"}
+        if restore_first:
+            try:
+                restore_info: dict[str, Any] = self.game_clean_restore("")
+            except Exception as exc:  # noqa: BLE001
+                restore_info = {"ok": False, "message": f"还原时出错：{exc}"}
+        else:
+            restore_info = {"ok": True, "skipped": True,
+                            "message": "调用方已先净化过游戏目录，这里不再还原（否则会把第三方注入放回）"}
 
         # ⚠️⚠️ **还原失败就不许往下清**（2026-10-04 审计发现的 P0）。
         #
@@ -4673,14 +4781,16 @@ class EndfieldModControllerApi:
 
         removed: list[str] = []
         failed: list[str] = []
+        # `keep_game_backup=True`：**别把净化备份一起删掉**（强力修复用）。
+        # 那条路径刚刚把游戏目录里的第三方注入搬进了 `runtime\game_backup\<时间戳>\`，
+        # 那是用户唯一能「撤销清除」的东西 —— 清依赖不必连它一起清。
+        keep_names = {game_clean.BACKUP_DIR_NAME} if keep_game_backup else set()
         if runtime.is_dir():
-            try:
-                shutil.rmtree(runtime)
-                removed.append(str(runtime))
-            except OSError:
-                # 本进程还占着的文件（比如当前正在写的日志）删不掉 —— 逐个再试一遍，
-                # 真删不掉的如实列出来，别假装清干净了
+            if keep_names:
                 for item in sorted(runtime.iterdir(), key=lambda path: (path.is_file(), path.name)):
+                    if item.name in keep_names:
+                        removed.append(f"{item.name}（保留：净化备份，可在设置页「撤销清除」还原）")
+                        continue
                     try:
                         if item.is_dir():
                             shutil.rmtree(item)
@@ -4689,6 +4799,22 @@ class EndfieldModControllerApi:
                         removed.append(item.name)
                     except OSError:
                         failed.append(item.name)
+            else:
+                try:
+                    shutil.rmtree(runtime)
+                    removed.append(str(runtime))
+                except OSError:
+                    # 本进程还占着的文件（比如当前正在写的日志）删不掉 —— 逐个再试一遍，
+                    # 真删不掉的如实列出来，别假装清干净了
+                    for item in sorted(runtime.iterdir(), key=lambda path: (path.is_file(), path.name)):
+                        try:
+                            if item.is_dir():
+                                shutil.rmtree(item)
+                            else:
+                                item.unlink()
+                            removed.append(item.name)
+                        except OSError:
+                            failed.append(item.name)
         for cfg in list(base.glob("config.json*")):
             try:
                 cfg.unlink()

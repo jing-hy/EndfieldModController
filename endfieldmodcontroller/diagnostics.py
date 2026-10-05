@@ -432,6 +432,12 @@ def _open_process_handle(pid: int) -> int | None:
     return int(handle) if handle else None
 
 
+# `GetExitCodeProcess` 在"进程还活着"时返回的就是这个值（`STILL_ACTIVE`）。
+# 进程监视靠"进程名消失"作为退出判据时会有竞态：可能刚好在它还没退干净的瞬间读码，
+# 这时必须**把它当成"没读到"**而不是一个退出码（259 不是任何真实退出码）。
+_STILL_ACTIVE = 259
+
+
 def _process_exited(handle: int) -> bool:
     if os.name != "nt":
         return True
@@ -448,6 +454,22 @@ def _process_exit_code(handle: int) -> int | None:
     if _kernel32().GetExitCodeProcess(handle, ctypes.byref(code)):
         return int(code.value)
     return None
+
+
+def _gone_reason(handle: int | None) -> tuple[str, int | None]:
+    """进程**已经不在进程表里**时，尽量用句柄补一个退出码，返回 `(reason, code)`。
+
+    ⚠️ 为什么单独抽出来（2026-10-05）：退出码这条判据以前**只挂在"句柄报退出"那条路径**上，
+    而那条路径几乎永远轮不到 —— 进程一退出，`_find_process_ids` 下一次轮询就返回空，
+    直接落到"进程名消失"分支 ⇒ 退出码永远读不到，包里只剩 `process_disappeared`。
+    实测证据：2026-10-05 反馈者那台（Intel Arc）**六次启动全判 `process_disappeared`**，
+    而控制器从头到尾**握着有效句柄** —— 缺的不是能力，是判据顺序。
+    抽成纯函数是为了能离线测：**句柄还在 ⇒ 必须给出 `exit_code=…`**。
+    """
+    code = _process_exit_code(handle) if handle is not None else None
+    if code is not None and code != _STILL_ACTIVE:
+        return f"exit_code={code}", code
+    return "process_disappeared", None
 
 
 def _close_handle(handle: int | None) -> None:
@@ -1292,6 +1314,53 @@ def game_dir_inventory_text(config: Any, game_dir: Path | None, *, limit: int = 
                 rel = entry.name
             lines.append(f"        {stat.st_size:>12,} B  "
                          f"{datetime.fromtimestamp(stat.st_mtime).isoformat(timespec='seconds')}  {rel}")
+    # ── 游戏自有文件**本次运行写过没有**（2026-10-05 加）────────────────────────
+    # 这是「游戏走到哪一步才死的」最省事的一眼判据。本次那份诊断包里，游戏跑了 20 秒
+    # 却**一帧都没渲染**，而 `sdklogs\HGEventLog.log` 与 `eld_Endfield.db` 的 mtime
+    # 全停在**上一次运行**（10-04 22:45 / 22:49）⇒ 游戏连「写自己的 SDK 事件、
+    # 落自己的库」这一步都没到。以前这个结论要人肉把清单里每个时间戳跟启动时刻对一遍，
+    # 现在直接列出来，并且把「一次都没写过」的排在最前面。
+    lines.append("")
+    lines.append("== 游戏自有文件：本次运行写过没有（判断「走到哪一步」最省事的一眼）==")
+    if not _LAST_GAME_START:
+        lines.append("    （没记录到本次游戏启动时刻 —— 进程监视没发现过游戏，本段不适用）")
+    else:
+        lines.append("    本次游戏启动时刻: "
+                     + datetime.fromtimestamp(_LAST_GAME_START).isoformat(timespec="seconds"))
+        watch_files: list[Path] = []
+        for pattern in ("sdklogs/*.log", "sdklogs/**/*.log", "*.db", "mmkv/*", "U8Data/config/*",
+                        "HGEventLog_Encrypted/*", "plugin/*.txt", "CefView/*.log"):
+            try:
+                watch_files.extend(p for p in game.glob(pattern) if p.is_file())
+            except OSError:
+                continue
+        seen_paths: set[str] = set()
+        rows: list[tuple[bool, float, str]] = []
+        for path in watch_files:
+            key = str(path).lower()
+            if key in seen_paths:
+                continue
+            seen_paths.add(key)
+            try:
+                mtime = path.stat().st_mtime
+            except OSError:
+                continue
+            try:
+                rel = path.relative_to(game).as_posix()
+            except ValueError:
+                rel = path.name
+            rows.append((_is_fresh(mtime) is True, mtime, rel))
+        if not rows:
+            lines.append("    （这些位置一个文件都没有）")
+        else:
+            rows.sort(key=lambda row: (not row[0], -row[1]))
+            for fresh, mtime, rel in rows[:40]:
+                flag = "✔ 本次写过" if fresh else "· 本次没写"
+                lines.append(f"    {flag}  "
+                             f"{datetime.fromtimestamp(mtime).isoformat(timespec='seconds')}  {rel}")
+            wrote = sum(1 for row in rows if row[0])
+            lines.append(f"    → 共 {len(rows)} 个游戏自有文件，其中**本次运行写过 {wrote} 个**"
+                         "（连 sdklogs / *.db 都「本次没写」时，说明游戏死得非常早）")
     return "\n".join(lines) + "\n"
 
 
@@ -1542,6 +1611,26 @@ def _monitor_process(config: Any, game_dir: Path | None, image_name: str, timeou
                               # 读不到就把原因写出来（否则"命令行是空的"永远是个谜 ——
                               # 原来那条 wmic 兜底在新系统上必然失败且不留痕迹）
                               command_line=command_line or (_LAST_COMMAND_LINE_ERROR or "（读不到命令行）"))
+                    # **NR 自动开启**：游戏进程刚出现 ⇒ 记下生效那份 ReShade.log 的当前位置，
+                    # 只盯本次运行新增的内容（2026-10-05 定案：NR 若抢在「第一人称插件的
+                    # 相机 hook」之前激活，那个 hook 会 error 8 装不上；启动前已把
+                    # NeuralUplift 压成 0，这里负责在相机 hook 装好后替用户按一次 NR 键）。
+                    try:
+                        from . import nr_autostart
+
+                        nr_autostart.arm(config, log=lambda message: log_event(
+                            config, message, category="dlss5"))
+                    except Exception as exc:  # noqa: BLE001 —— 补开失败不该影响崩溃取证
+                        log_event(config, f"NR 自动开启: 就位失败（忽略）: {exc}",
+                                  category="dlss5", level="WARN")
+                # **NR 自动开启**：每轮顺带看一眼（轻量 —— 没有新增日志就立刻返回）。
+                try:
+                    from . import nr_autostart
+
+                    nr_autostart.poll(config, log=lambda message: log_event(
+                        config, message, category="dlss5"))
+                except Exception:  # noqa: BLE001 —— 补开失败绝不影响崩溃取证
+                    pass
                 if handle is None and found_pid is not None and not degraded_logged:
                     # ⚠️⚠️ **`OpenProcess` 拿不到句柄时必须降级**（2026-10-04 修）。
                     # 游戏以管理员运行时，非提权的我们 `OpenProcess` 会 Access denied
@@ -1564,9 +1653,23 @@ def _monitor_process(config: Any, game_dir: Path | None, image_name: str, timeou
                     _capture_postmortem(config, game_dir, f"exit_code={code}")
                     return
             elif found_pid is not None:
-                log_event(config, "游戏进程已结束", category="crash", image=image_name, pid=found_pid)
+                # ⚠️⚠️ **进程消失时也必须读退出码**（2026-10-05 修，反馈者 HUAWEI 那台暴露）。
+                # 上面那个"用句柄判退出"的分支**几乎永远轮不到**：进程一退出，
+                # `_find_process_ids` 下一次轮询就返回空 ⇒ `if ids:` 不成立 ⇒ 直接落在这里
+                # ⇒ 只会写 `process_disappeared`，**退出码永远拿不到**。
+                # （2026-10-05 那份包里就是 `note=auto-postmortem: process_disappeared`，
+                #   而控制器明明一直握着有效句柄 —— 判据缺的不是能力，是顺序。）
+                # 关键事实：**句柄在进程退出后依然有效**（只要没 CloseHandle），
+                # `GetExitCodeProcess` 照样读得出退出码 —— 所以先读码，读不到才降级。
+                reason, code = _gone_reason(handle)
+                if code is not None:
+                    extra: dict[str, Any] = {"exit_code": code, "exit_text": describe_exit_code(code)}
+                else:
+                    extra = {"note": "句柄不可用或进程仍在退出中，只能按「进程名消失」判定 —— 退出码缺失"}
+                log_event(config, "游戏进程已结束", category="crash", image=image_name,
+                          pid=found_pid, **extra)
                 _close_handle(handle)
-                _capture_postmortem(config, game_dir, "process_disappeared")
+                _capture_postmortem(config, game_dir, reason)
                 return
             time.sleep(0.5 if time.monotonic() - started < 60 else 1.0)
         log_event(config, "进程监视超时", category="monitor", image=image_name, timeout=timeout)
@@ -2460,6 +2563,22 @@ def create_diagnostic_bundle(
                 for entry in ac_files[:20]:
                     arc = "game/AntiCheatExpert/" + entry.relative_to(anticheat).as_posix()
                     _zip_tracked(archive, entry, arc, manifest, max_bytes=1024 * 1024)
+            # ①f **游戏 SDK 自己写的事件日志**（`sdklogs\HGEventLog.log`，2026-10-05 补）。
+            #     为什么必须有：反馈者那台（Intel Arc）游戏只活 20 秒、**一帧都没渲染**、
+            #     Windows 侧一条 WER 都没有 —— 那种现场里唯一能回答"游戏到底走到哪一步
+            #     才死的"就是游戏自己的 SDK 日志（登录 / 资源 / 平台初始化分别会写不同事件）。
+            #     以前只把 `sdklogs\` 列在"值得看的子目录"里（只有文件名和大小），
+            #     等于知道那儿有东西却看不到内容 ⇒ 判据又断一次。
+            sdklogs = game_path / "sdklogs"
+            if sdklogs.is_dir():
+                try:
+                    sdk_files = sorted((p for p in sdklogs.rglob("*") if p.is_file()),
+                                       key=lambda p: p.stat().st_mtime, reverse=True)
+                except OSError:
+                    sdk_files = []
+                for entry in sdk_files[:5]:
+                    arc = "game/sdklogs/" + entry.relative_to(sdklogs).as_posix()
+                    _zip_tracked(archive, entry, arc, manifest, max_bytes=4 * 1024 * 1024)
 
         # ①g 面板 addon 自己的日志（**多候选**：dlss5 目录 / runtime\reshade / 游戏目录 / %TEMP%）
         #     与**目录枚举**。两者都是 2026-10-04「ReShade 没注入」那次最缺的判据：

@@ -1202,6 +1202,18 @@ def _check_dlss5_feed_redundant(config: AppConfig, report: Report,
     * 不自带 DLSS 但它是被"上次按开关停用"的 → **自动放回**（换了游戏/换了版本也能自愈）；
     * 设置页把 `auto_disable_feed_on_native_dlss` 关掉 → 整项跳过（用户自己决定）。
     """
+    # ⚠️ **DLSS5 总开关关着 ⇒ 本项整项跳过**（2026-10-05 补）。
+    # 原来这里只看 `auto_disable_feed_on_native_dlss`，**完全不看 `dlss5_addon_enabled`** ——
+    # 于是"非 50 系显卡 → 自动关掉 DLSS5"之后，这段自愈又会以「游戏跑在 D3D11、喂帧组件是
+    # DLSS5 的必需环节」为理由把 `dlss5-feed.addon64` **放回顶层**。DLSS5 都关了，
+    # "给 DLSS5 喂帧是必需的"这句话本身自相矛盾；后果是一台控制器**自己判定**
+    # "没 N 卡、DLSS5 用不了"的机器，NGX 喂帧链却一直活着（还会预加载 165 MB 的
+    # `nvngx_dlssnr.dll`）。2026-10-05 反馈者现场：`dlss5_addon_enabled=False`，
+    # 而 ReShade 实载 5 个 addon（含 DLSS 5 Neural Rendering 与 feed）。
+    if not getattr(config, "dlss5_addon_enabled", True):
+        report.add("dlss5:feed", True,
+                   "DLSS5 已在启动页关闭 → 喂帧组件一并保持停用（跳过「自带 DLSS」自愈）")
+        return
     if not getattr(config, "auto_disable_feed_on_native_dlss", True):
         report.add("dlss5:feed", True,
                    "已在设置页关闭「游戏自带 DLSS 时自动停用喂帧组件」（跳过）")
@@ -1391,6 +1403,67 @@ def _check_reshade_ini(config: AppConfig, report: Report, log: Callable[[str], N
         else "ReShade.ini 就绪（含 [endfield-enhancer] 段，路径正确）",
         fixed=did_rebuild,
     )
+
+
+# ── NR 必须等「第一人称插件的相机 hook」装好之后再开（2026-10-05 定案）────────────
+# 生效那份 ini 的段/键名（ReShade 读的是 `RESHADE_BASE_PATH_OVERRIDE` 指向的那份）。
+NR_SECTION = "RenoDX.DLSS5"
+NR_KEY = "NeuralUplift"
+
+
+def _check_defer_nr_until_camera_hook(config: AppConfig, report: Report,
+                                      log: Callable[[str], None] | None) -> None:
+    """把生效那份 `ReShade.ini` 的 `[RenoDX.DLSS5] NeuralUplift` 压成 **0**。
+
+    **为什么（2026-10-05 用户在自己机器上实测定案）**：DLSS5 的 NR 若**抢在**
+    「RenoDX Endfield Enhancer 装相机 hook」**之前**激活，那次 hook 会
+    `error 8`（分配 hook trampoline 内存失败）装不上 ⇒ 第一人称面板报
+    「不支持相机控制」。把 NR 推到相机 hook 装好之后再开，两边就都能用 ——
+    用户实测原话：「现在可以使用第一人称了，而且我进游戏开了 dlss5，
+    nr 帧在增加，第一人称也能用」。
+
+    对照证据（同一台机器两次运行）：
+      * 失败那次：`feature 18 created` 在 18:05:42，相机 hook 18:06:28 ❌；
+      * 成功那次：相机 hook 18:22:33，`feature 18 created` 18:23:23 ✅。
+
+    **补开 NR 的那一半**由 `nr_autostart` 在游戏运行期间自动做掉（它从 ReShade 日志里
+    读出 NR 的实际快捷键，等 `Camera controls installed.` 出现后按一次）。
+
+    ⚠️ **必须每次启动都压**：用户在游戏里开 NR 之后，插件会把 `NeuralUplift=1`
+    **写回** ini，下次启动就又变成「NR 先上」⇒ 第一人称又坏（本机实测复现）。
+    """
+    if not getattr(config, "auto_enable_nr_after_camera_hook", True):
+        report.add("dlss5:nr_defer", True,
+                   "「神经渲染延迟到相机 hook 之后自动打开」已在设置页关闭（跳过）")
+        return
+    if not getattr(config, "dlss5_addon_enabled", True):
+        report.add("dlss5:nr_defer", True, "DLSS5 神经渲染已在启动页关闭（跳过）")
+        return
+    ini = Path(config.reshade_runtime_path) / "ReShade.ini"
+    if not ini.is_file():
+        report.add("dlss5:nr_defer", True, "生效那份 ReShade.ini 还不存在（跳过）")
+        return
+    try:
+        if ini.stat().st_size > 1_048_576:
+            report.add("dlss5:nr_defer", False, "ReShade.ini 异常巨大，跳过（疑损坏）", manual=True)
+            return
+        text = ini.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        report.add("dlss5:nr_defer", False, f"读取生效 ReShade.ini 失败: {exc}", manual=True)
+        return
+    updated, changed = _set_ini_key(text, NR_SECTION, NR_KEY, "0")
+    if not changed:
+        report.add("dlss5:nr_defer", True, "神经渲染已处于「延迟到相机 hook 之后」状态")
+        return
+    try:
+        ini.write_text(updated.replace("\r\n", "\n").replace("\n", "\r\n"),
+                       encoding="utf-8", newline="")
+    except OSError as exc:
+        report.add("dlss5:nr_defer", False, f"写入生效 ReShade.ini 失败: {exc}", manual=True)
+        return
+    report.add("dlss5:nr_defer", True,
+               "已把神经渲染压到相机 hook 之后（NeuralUplift=0）—— 这样第一人称的相机 hook "
+               "才装得上；进游戏后会自动补开 NR", fixed=True)
 
 
 def _set_ini_key(text: str, section: str, key: str, value: str) -> tuple[str, bool]:
@@ -2397,6 +2470,9 @@ def ensure_all(config: AppConfig, log: Callable[[str], None] | None = None) -> d
     _check_bundled_assets(config, report, log)
     _check_dlss5_dir(config, report, log)
     _check_reshade_ini(config, report, log)
+    # NR 必须等「第一人称插件的相机 hook」装好之后再开（2026-10-05 定案）——
+    # 放在 ini 处理**之后**：这一步直接改生效那份 `ReShade.ini` 的 `[RenoDX.DLSS5]`。
+    _check_defer_nr_until_camera_hook(config, report, log)
     # shader 依赖要先补齐，否则 preset 里启用的 technique 编不过（"编译出错"）
     _check_dlss5_shaders(config, report, log)
     _check_dlss5_preset(config, report, log)
@@ -2431,6 +2507,35 @@ def ensure_all(config: AppConfig, log: Callable[[str], None] | None = None) -> d
     # 两个 loader 都在位之后再查"原版备份在不在"（proxy 是它们铺的）：
     # 缺 .bak 时**自动从 System32 补**，补不到就明确告诉用户"先别点还原"。
     _check_proxy_backups(config, report, log)
+
+    # ⚠️⚠️ **总开关关着时，最后再按开关归位一次 addon 位置**（2026-10-05 补，必须放最后）。
+    # 为什么非要在最后：本函数**第 1 步** `_check_bundled_assets` 会把随包 addon
+    # **无条件展开到 `runtime\dlss5\` 顶层**（它不认识开关），而 `launcher` 按开关做的
+    # 停用**发生在本函数之前** ⇒ 展开动作把刚停用的 `renodx-dlss5*.addon64` /
+    # `trans-zh.addon64` **又放回了顶层**，ReShade 下次启动照样加载它们。
+    # 现场（2026-10-05 反馈者，Intel Arc、无 N 卡）：配置 `dlss5_addon_enabled=False`，
+    # launch.log 里却是「停用 → 展开内置资产」的顺序，ReShade 最终实载 5 个 addon。
+    # 放在最后还有一个好处：它同时兜住「别的步骤、以后的改动」又把 addon 放回的情况。
+    if not getattr(config, "dlss5_addon_enabled", True):
+        try:
+            from . import launcher as _launcher
+
+            parked = _launcher.set_component_addons(config, "dlss5", False)
+            parked_names = list(parked.get("moved") or []) + [
+                f"{name}（清掉多余副本）" for name in (parked.get("removed") or [])
+            ]
+            if parked_names:
+                report.add("dlss5:addons_parked", True,
+                           "DLSS5 已在启动页关闭 → 已把 DLSS5 相关 addon 移出底座目录（"
+                           + "、".join(parked_names) + "），ReShade 下次不会加载它们",
+                           fixed=True)
+            else:
+                report.add("dlss5:addons_parked", True,
+                           "DLSS5 已在启动页关闭 → DLSS5 相关 addon 均已处于停用位置")
+        except Exception as exc:  # noqa: BLE001
+            report.add("dlss5:addons_parked", False,
+                       f"DLSS5 已关闭，但按开关停用相关 addon 失败（ReShade 可能仍会加载它们）: {exc}",
+                       manual=True)
 
     payload = report.to_dict()
     for action in payload["actions"]:

@@ -68,6 +68,23 @@ async function pollCrash() {
   try {
     const r = await call("crash_bundle_status");
     const fresh = r && r.fresh;
+    // ── 连续启动失败 → 「强力修复」（用户 2026-10-05 要求）───────────────────
+    // 用户原话：「**如果连续启动三次失败，加个弹窗，做个强力修复功能，一键还原终末地，
+    //            然后清空依赖并重新下载**，注意：**还原终末地需要把其他第三方的也还原掉**」。
+    // 判据在后端（`crashwatch.strong_repair_status`）：**崩了**或**静默闪退**都计数，
+    // 连续 3 次、且这一档还没提示过时 `ready=true`。
+    // ⚠️ 顺序是先 `mark_strong_repair_prompted` 再弹 —— 万一弹窗期间轮询又跑一轮，也不会重复弹。
+    const sr = r && r.strong_repair;
+    if (sr && sr.ready) {
+      try { await call("mark_strong_repair_prompted"); } catch (e) { /* 忽略 */ }
+      const repairChoice = await strongRepairModal(sr, !!fresh);
+      if (repairChoice === "bundle") {
+        // 用户想先看诊断包 → 继续往下走原来的崩溃包逻辑（不 return）
+      } else {
+        if (repairChoice) await forceRepair();
+        return;
+      }
+    }
     if (fresh) {
       const path = String(fresh.path || fresh.bundle || "");
       const reason = String(fresh.reason || "process_disappeared");
@@ -177,6 +194,67 @@ async function redownloadDependencies() {
     return;
   }
   showToast("已清空 runtime 与 assets，正在跳到依赖页重新下载…", "success");
+  store.autoStartDeps = true;
+  store.tab = "dependencies";
+}
+
+// 「连续启动失败」的说明窗（用户 2026-10-05 要求）。
+// 返回值：主按钮 → truthy（去修）；`"bundle"` → 用户想先看诊断包；取消 → falsy。
+async function strongRepairModal(sr, hasBundle) {
+  const lines = [
+    `终末地已经**连续 ${sr.streak} 次**启动失败了（每次启动后很快就退出）。`,
+    "",
+    "这种时候多半不是某个开关没开对，而是组件本身坏了、或者被第三方文件搅了。",
+    "「强力修复」会依次做两件事：",
+    "",
+    "① **还原终末地**：把游戏目录里的第三方注入**全部**搬走（**不管是谁装的** —— 别的工具、" +
+      "整合包残留都算），并把系统原版文件补回去，游戏目录回到纯原版；",
+    "② **清空依赖并重新下载**：runtime 与 assets 整个重装一遍。",
+    "",
+    "你的 Mod 库、Mod 备份与路径设置都不受影响；被搬走的第三方文件会留备份，" +
+      "设置页的「撤销清除」可以原样放回。",
+    "重下要花点时间（国内建议先把加速器打开）。",
+  ];
+  const extraButtons = [];
+  if (hasBundle) extraButtons.push({ text: "先看诊断包", value: "bundle" });
+  return await showModalDialog({
+    title: "连续启动失败 —— 建议强力修复",
+    message: lines.join("\n"),
+    okText: "强力修复",
+    cancelText: "暂时不要",
+    focusCancel: true,
+    extraButtons,
+  });
+}
+
+// 「强力修复」本体：与后端 `force_repair` 一一对应（还原终末地含第三方 → 清空依赖重下）。
+// 破坏性动作 ⇒ **二次确认 + 默认聚焦取消**（用户定的规矩）。
+async function forceRepair() {
+  const ok = await showModalDialog({
+    title: "强力修复",
+    message: [
+      "会依次做两件事：",
+      "① 还原终末地：把游戏目录里的第三方注入全部搬走（不管是谁装的），" +
+        "并把系统原版文件补回去；",
+      "② 清空 runtime 与 assets，然后重新下载并展开（接着会自动跳到「依赖」页开跑）。",
+      "",
+      "被搬走的第三方文件会留备份，设置页「撤销清除」可以原样放回。",
+      "游戏正在运行时请先完全退出游戏 —— 否则这一步会被拒绝。",
+    ].join("\n"),
+    okText: "开始强力修复",
+    cancelText: "取消，什么都不做",
+    focusCancel: true,
+  });
+  if (!ok) return;
+  let result = null;
+  try {
+    result = await call("force_repair");
+  } catch (e) { /* call 已经弹过错误窗了 */ }
+  if (!result || result.ok === false) {
+    showToast((result && result.message) || "强力修复失败，详情见运行日志", "danger");
+    return;
+  }
+  showToast(result.message || "强力修复完成，正在跳到依赖页重新下载…", "success");
   store.autoStartDeps = true;
   store.tab = "dependencies";
 }

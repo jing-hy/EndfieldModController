@@ -323,6 +323,12 @@ class AppConfig:
     dlss5_injection: bool = True
     # 底座下两个插件可独立启停（同一 ReShade 底座，靠移动 addon 文件实现）
     dlss5_addon_enabled: bool = True          # RenoDX-DLSS5 神经渲染
+    # **神经渲染延迟到「相机 hook 装好之后」再自动打开**（2026-10-05 定案，默认开）。
+    # 为什么：NR 若抢在第一人称插件装相机 hook 之前激活，那个 hook 会 `error 8`
+    # （分配 trampoline 失败）装不上 ⇒ 面板报「不支持相机控制」。压成 0 让相机 hook 先上，
+    # 再由 `nr_autostart` 在游戏里替用户按一次 NR 快捷键补开 ⇒ 两者共存、用户零操作。
+    # 见 `initialize._check_defer_nr_until_camera_hook` 与 `nr_autostart`。
+    auto_enable_nr_after_camera_hook: bool = True
     firstperson_addon_enabled: bool = True    # Endfield Enhancer 第一人称
     # 是否把 EFMI 的 d3d11.dll（服装 Mod 引擎）也写进 XXMI 注入库
     # ⚠️ **语义已改（2026-10-02 用户实测后的要求）**：这个开关**不再**控制"要不要注入

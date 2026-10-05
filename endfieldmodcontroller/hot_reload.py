@@ -418,3 +418,67 @@ def send_f10(config: AppConfig, *, log: Callable[[str], None] | None = None,
     note("热重载: 完成（3DMigoto 会重新加载配置/重扫 Mod）")
     return {"ok": True, "hwnd": hwnd, "window": title, "keywords": list(keys),
             "focused": True, "sent": sent}
+
+
+def send_key(config: AppConfig, vk: int, *, label: str = "按键",
+             keywords: tuple[str, ...] | None = None,
+             log: Callable[[str], None] | None = None,
+             repeat: int = 2, gap: float = 0.45) -> dict[str, Any]:
+    """给游戏主窗口发一次**真实按键**（复用 `send_f10` 那套：选窗口 → 拉前台 → `SendInput`）。
+
+    与 `send_f10` 的唯一区别：**不做 F10 特有的"`d3dx_user.ini` 有没有被更新"验证** ——
+    那个判据只对 3DMigoto 的 `config_reload` 成立，对 **addon 自己的快捷键**（比如 DLSS5 的
+    NR 开关）不适用。所以这里的成功判据只到"窗口确实在前台 + 键已发出"，其余如实回报。
+
+    用途：`nr_autostart` 用它替用户在游戏里按一次 NR 开关（用户 2026-10-05 要求「全自动」）。
+    仍然**必须 `SendInput` + 窗口在前台**（两条硬约束见模块头），并且按 `repeat` 补发一次
+    —— 轮询 `GetAsyncKeyState` 的程序偶尔整帧错过（`HOLD_SECONDS` 的注释里有实测教训）。
+    """
+    def note(message: str) -> None:
+        if log is not None:
+            log(message)
+
+    if not _is_windows():
+        return {"ok": False, "message": "发键只支持 Windows"}
+
+    keys = keywords or window_keywords(config)
+    rows = list_game_windows(keys)
+    best = pick_game_window(rows, keys)
+    if best is None:
+        detail = "；".join(
+            f"{row['title'] or '(无标题)'}[{row['cls']}|{row['width']}x{row['height']}"
+            f"{'|已排除' if row['excluded'] else ''}]" for row in rows[:5]
+        ) or "（Endfield.exe 进程下一个可见窗口都没有）"
+        return {"ok": False, "message": f"{label}: 没找到可发键的游戏窗口 —— 候选：{detail}",
+                "keywords": list(keys), "candidates": rows}
+    hwnd = int(best["hwnd"])
+    title = str(best.get("title") or "")
+    note(f"{label}: 目标主窗口 {title!r} (hwnd={hwnd}, class={best.get('cls')}, "
+         f"{best.get('width')}x{best.get('height')})")
+    try:
+        focused = _force_foreground(hwnd)
+    except Exception as exc:  # noqa: BLE001 - 拉前台失败仍然试一次发键
+        note(f"{label}: 拉前台失败（仍尝试发键）: {exc}")
+        focused = False
+    time.sleep(FOREGROUND_SETTLE_SECONDS)
+    if not focused:
+        focused = int(_user32.GetForegroundWindow() or 0) == hwnd
+    if not focused:
+        return {"ok": False, "hwnd": hwnd, "window": title, "focused": False, "sent": 0,
+                "message": f"{label}: 游戏窗口**没能拿到前台** —— 按键多半被丢掉"
+                           "（把游戏切到前台后会自己重试）"}
+    sent = 0
+    attempts = max(1, int(repeat))
+    try:
+        for attempt in range(1, attempts + 1):
+            _send_key(vk)
+            sent += 1
+            note(f"{label}: 已发送（第 {attempt} 次，按下保持 {int(HOLD_SECONDS * 1000)}ms）")
+            if attempt < attempts:
+                time.sleep(gap)
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "message": f"{label}: 发送失败: {exc}", "hwnd": hwnd,
+                "window": title, "focused": True, "sent": sent}
+    note(f"{label}: 完成（目标窗口 {title!r}）")
+    return {"ok": True, "hwnd": hwnd, "window": title, "focused": True, "sent": sent,
+            "keywords": list(keys)}

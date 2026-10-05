@@ -177,3 +177,61 @@ def test_make_bundle_puts_advice_into_result_and_report(env, monkeypatch, wer_di
     crashwatch._WATCH["bundle"] = bundle
     assert (crashwatch.take_bundle() or {}).get("advice", {}).get("action") \
         == "reset_dependencies_and_redownload"
+
+
+# ---------------------------------------------------------------------------
+# ⑤ 「进程消失」也必须给出退出码（2026-10-05 反馈者 Intel Arc 那台暴露的判据缺口）
+#
+# 现场：那份包里 `note=auto-postmortem: process_disappeared`，而控制器**从头到尾握着
+# 有效句柄**。根因是判据顺序 —— 退出码只挂在"句柄报退出"那条路径上，而进程一退出，
+# `_find_process_ids` 下一次轮询就返回空，于是永远落到"进程名消失"分支。
+# 关键事实：句柄在进程退出后**依然有效**（只要没 CloseHandle），`GetExitCodeProcess`
+# 照样读得出退出码 —— 缺的不是能力，是顺序。
+# ---------------------------------------------------------------------------
+
+
+def test_gone_reason_prefers_exit_code(monkeypatch):
+    monkeypatch.setattr(diagnostics, "_process_exit_code", lambda handle: 3221225781)
+    reason, code = diagnostics._gone_reason(1234)
+    assert reason == "exit_code=3221225781"
+    assert code == 3221225781
+    assert "0xC0000135" in diagnostics.describe_exit_code(code)
+
+
+def test_gone_reason_treats_still_active_as_no_code(monkeypatch):
+    """`259` = `STILL_ACTIVE`，**不是退出码** —— 竞态里读到它只能降级。"""
+    monkeypatch.setattr(diagnostics, "_process_exit_code", lambda handle: diagnostics._STILL_ACTIVE)
+    reason, code = diagnostics._gone_reason(1234)
+    assert reason == "process_disappeared" and code is None
+
+
+def test_gone_reason_without_handle_degrades(monkeypatch):
+    """拿不到句柄（游戏以管理员运行、而我们没提权）时才允许降级。"""
+    monkeypatch.setattr(diagnostics, "_process_exit_code",
+                        lambda handle: pytest.fail("拿不到句柄时不该去读退出码"))
+    reason, code = diagnostics._gone_reason(None)
+    assert reason == "process_disappeared" and code is None
+
+
+def test_monitor_reports_exit_code_when_process_vanishes(env, monkeypatch):
+    """钉住**调用点**：走"进程名消失"那条路径时，取证收到的必须已经是退出码。"""
+    calls = {"find": 0}
+
+    def fake_find(image_name):
+        calls["find"] += 1
+        return [4242] if calls["find"] == 1 else []
+
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(diagnostics, "_find_process_ids", fake_find)
+    monkeypatch.setattr(diagnostics, "_process_command_line", lambda pid: "")
+    monkeypatch.setattr(diagnostics, "_open_process_handle", lambda pid: 99)
+    monkeypatch.setattr(diagnostics, "_process_exited", lambda handle: False)
+    monkeypatch.setattr(diagnostics, "_process_exit_code", lambda handle: 0)
+    monkeypatch.setattr(diagnostics, "_close_handle", lambda handle: None)
+    monkeypatch.setattr(diagnostics.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(diagnostics, "_capture_postmortem",
+                        lambda config, game_dir, reason: captured.setdefault("reason", reason))
+
+    diagnostics._monitor_process(env.config, env.tmp, "Endfield.exe", timeout=30.0)
+
+    assert captured.get("reason") == "exit_code=0", captured

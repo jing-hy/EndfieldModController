@@ -138,3 +138,80 @@ def test_no_feed_component_at_all_is_skipped(tmp_path):
     initialize._check_dlss5_feed_redundant(config, report, None)
     checks = [c for c in report.checks if c["key"] == "dlss5:feed"]
     assert checks and "不在位" in checks[0]["message"]
+
+
+# ------------------------------------------------- DLSS5 总开关优先（2026-10-05 补）
+def test_master_switch_off_wins_over_feed_selfheal(tmp_path):
+    """`dlss5_addon_enabled=False` 时，「自带 DLSS」自愈**不许**把喂帧组件放回。
+
+    2026-10-05 反馈者现场（Intel Arc、无 N 卡）：控制器**自己**判定 DLSS5 用不了
+    （启动页开关已关），这段自愈却以「游戏跑在 D3D11、喂帧组件是 DLSS5 的必需环节」
+    为由把 `dlss5-feed.addon64` 放回顶层 —— DLSS5 都关了，这句话本身自相矛盾。
+    结果是 ReShade 实载 5 个 addon（含 DLSS 5 Neural Rendering 与 feed）。
+    反向验证：去掉总开关那一段 ⇒ 本测试变红（feed 会被放回根目录）。
+    """
+    config, _game, dlss5 = _env(tmp_path, native_dlss=False, feed_enabled=False)
+    config.dlss5_addon_enabled = False
+    report = initialize.Report()
+
+    initialize._check_dlss5_feed_redundant(config, report, None)
+
+    checks = [c for c in report.checks if c["key"] == "dlss5:feed"]
+    assert checks and "DLSS5 已在启动页关闭" in checks[0]["message"], checks
+    assert not (dlss5 / "dlss5-feed.addon64").exists(), "总开关关着，不许把 feed 放回根目录"
+
+
+def _stub_ensure_all(monkeypatch) -> None:
+    """把 `ensure_all` 里所有会碰网络/游戏目录/本机真实环境的检查换成空实现。
+
+    只留"按总开关归位 addon"这条链 —— 本组测试要验的就是它。
+    """
+    for name in ("_check_bundled_assets", "_check_dlss5_dir", "_check_reshade_ini",
+                 "_check_dlss5_shaders", "_check_dlss5_preset", "_check_dlss5_gpu_support",
+                 "_check_dlss5_ngx_consumer", "_check_panel_hotkey_conflicts",
+                 "_check_panel_protocol_lint", "_check_dlss5_nr_binding",
+                 "_check_dlss5_feed_redundant", "_check_dlss5_nrstyle", "_check_game_libs",
+                 "_check_bundled_versions", "_check_controller", "_check_hotkey_panel",
+                 "_check_staging", "_check_mod_conflicts", "_check_poser",
+                 "_check_secondary_motion", "_check_proxy_backups"):
+        monkeypatch.setattr(initialize, name, lambda *a, **k: None)
+
+
+def test_ensure_all_parks_dlss5_addons_when_master_switch_off(tmp_path, monkeypatch):
+    """钉住**最后那道归位**：随包资产展开会把 addon 放回顶层，`ensure_all` 结束前必须归位。
+
+    真实顺序就是坑所在：`launcher` 按开关做的停用发生在本函数**之前**，而本函数
+    **第 1 步** `_check_bundled_assets` 会把随包 addon **无条件展开到顶层**
+    ⇒ 刚停用的 `renodx-dlss5*` / `trans-zh` 又被放回去了（launch.log 里是
+    「停用 → 展开内置资产」的顺序，ReShade 最终实载 5 个 addon）。
+    这里把"展开后的状态"直接摆好，再验 `ensure_all` 结束时它们回到了 `_disabled`。
+    """
+    config, _game, dlss5 = _env(tmp_path, native_dlss=False, feed_present=False)
+    config.dlss5_addon_enabled = False
+    # 模拟"展开内置资产"把 DLSS5 那一组又摊回顶层
+    (dlss5 / "renodx-dlss5-4.7_hanhua.addon64").write_bytes(b"dlss5")
+    (dlss5 / "trans-zh.addon64").write_bytes(b"zh")
+    (dlss5 / "translations.txt").write_text("x", encoding="utf-8")
+    _stub_ensure_all(monkeypatch)
+
+    payload = initialize.ensure_all(config, log=None)
+
+    for name in ("renodx-dlss5-4.7_hanhua.addon64", "trans-zh.addon64", "translations.txt"):
+        assert not (dlss5 / name).exists(), f"{name} 仍留在底座目录，ReShade 还会加载它"
+        assert (dlss5 / "_disabled" / name).is_file(), f"{name} 没有停到位"
+    checks = [c for c in payload["checks"] if c["key"] == "dlss5:addons_parked"]
+    assert checks and checks[0]["ok"] is True, payload["checks"]
+
+
+def test_ensure_all_keeps_switched_on_addons_alone(tmp_path, monkeypatch):
+    """反向对照：总开关**开着**时，这一步一个字都不许动（别把用户开着的 DLSS5 弄停）。"""
+    config, _game, dlss5 = _env(tmp_path, native_dlss=False, feed_present=False)
+    config.dlss5_addon_enabled = True
+    (dlss5 / "renodx-dlss5-4.7_hanhua.addon64").write_bytes(b"dlss5")
+    (dlss5 / "dlss5-feed.addon64").write_bytes(b"feed")
+    _stub_ensure_all(monkeypatch)
+
+    initialize.ensure_all(config, log=None)
+
+    assert (dlss5 / "renodx-dlss5-4.7_hanhua.addon64").is_file()
+    assert (dlss5 / "dlss5-feed.addon64").is_file()
