@@ -4,13 +4,13 @@
 > 目的：让「当时为什么这么改、踩过什么坑」跟着源码一起留在仓库里。
 > 想改内容 → 改记忆库（用记忆工具），再跑一次本脚本；不要直接编辑本文件。
 
-- 生成时间：2026-10-05 21:27:32
+- 生成时间：2026-10-06 00:54:32
 - 来源：`.dsh-meow/memory.db`
-- 条目：554 条（已跳过 archived / 其它项目的条目）
+- 条目：567 条（已跳过 archived / 其它项目的条目）
 
 ---
 
-## 设计原则 / 行为准则（19 条）
+## 设计原则 / 行为准则（22 条）
 
 ### 用户准则（原话）：「不是，你直接去官网拉」—— **一手…
 *2026-09-27 18:53*
@@ -246,7 +246,40 @@
 
 `关键词：["issue 先给他检查再回","回复只要三件事","能不能确定问题 有没有修 按哪几个键","不要让别人移动文件改配置","不要结构式 用自然语言","处理掉就 close","reopen 或另开","个人小问题直接说","纯答疑 vs 等实测","gh issue close completed"]`
 
-## 项目记忆（结构 / 决策 / 部署 / 待办）（31 条）
+### 【导入本地 zip 的两条硬要求（用户 2026-10-…
+*2026-10-05 22:23*
+
+【导入本地 zip 的两条硬要求（用户 2026-10-05 原话：「那个导入本地 zip 需要写明是依赖的随包 zip，而且也要检查」）】
+① **文案处处写明这是"依赖的随包 zip"** —— 依赖页那个入口只收**依赖组件**（完整 `assets-bundle.zip`，或单份组件 zip），**不收 Mod 压缩包**（Mod 走 Mod 库那条路）。界面标题、按钮文字、文件框 title、失败提示都要写清；`asset_report` 的 display 直接写成"依赖的随包资产包（assets-bundle.zip）· 不是 Mod 包"。
+② **导入前必须逐条检查**（不是只看有没有 `assets/` 目录）：manifest 要能解析、它列出的**每个文件的全部分卷都得在包里**；缺一卷就**拒绝导入**、列出缺什么、且**一个文件都不落盘** —— 否则会留下"导入看着成功、之后解压到处报错"这种最难查的状态（同族教训：构造/校验离线素材时**只看文件数或总体积一定会翻车**）。
+落地：`runtime_assets.inspect_assets_zip()` + `import_bundle()`；测试 `tests/test_assets_bundle_import.py`（12 条，含缺分卷被拒、目录穿越被拦、Mod 包被拒、单份运行库按 fatbin 识别变体）。
+
+`关键词：["导入本地zip要求","写明是依赖的随包zip","不收Mod压缩包","导入前逐条检查","缺分卷拒绝导入","inspect_assets_zip","assets-bundle.zip","目录穿越防护","失败提示给全地址"]`
+
+### 【下载线路规则（用户 2026-10-05 原话：「只要…
+*2026-10-05 22:42*
+
+【下载线路规则（用户 2026-10-05 原话：「只要直连不达到单片 1.5MB/s，而且没有 ghtoken，就直接进动态抢块测试，如果抢块比直连快就继续，比直连慢就恢复直连」＋「**抢块不包含直连**」）】
+① **抢块（多线路动态抢块）永远不含直连** —— 无 token 的直连**无论多快都不许自己开多连接**（未认证并发只会撞 GitHub 限流）；有 token 才允许。
+② 无 token 时直连的判死门槛提到 `SLOW_MBPS`(1.5)：慢到 1.5 以下**直接换线路去镜像抢块**，不在直连上单连接磨（续传同理，用线路缓存里上次的直连速度判）。
+③ 后面的线路以「**直连实测速度**」为下限：抢块不如直连快就判死；
+④ 所有线路都不如直连 ⇒ **回直连、用单连接（`policy="never"`、`dead_mbps=0`）把它下完**，不因为"都慢"直接失败。
+落点：`fastnet._parallel_gate()` / `_direct_last_mbps()` / `download()` 里的 `line_dead` 与循环外兜底；测试 `tests/test_fastnet_direct_slow.py`（5 条）。
+
+`关键词：["下载线路规则","抢块不包含直连","无token直连不并发","1.5MB/s门槛","SLOW_MBPS判死","镜像抢块","抢块慢就回直连","parallel_gate","direct_last_mbps","多线路动态抢块"]`
+
+### 【排查纪律（用户 2026-10-05 原话：「**以后…
+*2026-10-06 00:27*
+
+【排查纪律（用户 2026-10-05 原话：「**以后你第一轮排查只允许看收进日志包的，看没有收的必须先改收包范围**（特别大文件可以节选你要的）」）】
+① **第一轮排查只允许用诊断包里已收的东西** —— 不许去翻开发机/用户机器上的本地文件。理由：反馈者的机器我们根本碰不到，靠"本地随手能读"养成习惯，到真反馈者那里就抓瞎（这次我就是这么干的：直接读 `ReShade.log`、`Player.log`、XXMI 配置、`assets` 目录）。
+② **发现需要看未收的文件 ⇒ 先改采集范围再继续排查**（顺序不能反）。落点 = `crashwatch.collect_diagnosis_files()`（**崩溃包与手动诊断包共用同一入口**），改完它再往下查。
+③ **特别大的文件可以节选**（只收判据相关的那部分，包内注明被截断）—— 例如 `ReShade.log` 真正要看的只有"相机 hook 装没装 / NR 有没有建帧 / addon 注册 / 报错"那几类行 ⇒ 另给一份 `reshade-keylines.txt`。
+**本质**：这是"诊断包必须一次抓齐、不要搞好几轮"的**可执行版本** —— 每发现一个"排查需要但包里没有"的文件，就把采集范围推进一格。
+
+`关键词：["第一轮只看日志包","未收先改收包范围","大文件可以节选","collect_diagnosis_files","两个打包通道共用","reshade-keylines","诊断包一次抓齐","别翻本地文件","反馈者机器碰不到"]`
+
+## 项目记忆（结构 / 决策 / 部署 / 待办）（35 条）
 
 ### 项目概述
 
@@ -388,6 +421,44 @@ runtime\dlss5                      38 字符  ❌ 崩
 
 `关键词：["clear_game_injections_on_launch","一键还原终末地","清除第三方注入","backup_and_clean","先净化后补齐","game_backup","backup_ok","System32 补齐","默认开","启动前净化","proxy"]`
 
+### 【DLSS5 方案换代：按显卡架构自动选运行库（2026…
+*2026-10-05 22:23*
+
+【DLSS5 方案换代：按显卡架构自动选运行库（2026-10-05 落地，v1.0.15-beta）】
+用户原话：「把目前管理器采用的 dlss5 方案换成现在这个，去掉所有对非 50 系的锁，换成对 a 卡和 10 系及以下和核显」+「还要改造随包内容和下载链路，针对不同 gpu 自动切换下载内容」+「不论任何支持的型号，都能相同步骤一键启动」。
+**根因（实测定案）**：DLSS5 神经渲染跑在 `nvngx_dlssnr.dll` 里，那份运行库**按 CUDA 架构分别编译**；随包那份 30 条 fatbin **全是 sm_120**，所以 40/30/20 系必然 `feature 18 create failed 0xbad00001`。
+**三变体**：`official`(sm_120，官方 310.8.0) / `sf`(sm_75/86/89/120，社区 310.8.SF-v2) / `rtx40`(sm_89/120，社区 310.8.0-RTX40，依赖页可选下载)。来源＝社区镜像 `RankFTW/rhi-repo`。
+**随包 `official`+`sf` 两份**即覆盖全部受支持型号 ⇒ 一键启动零下载、且**只展开选中那一份**（各代次步骤与耗时同量级）。目标名**永远是** `runtime\dlss5\nvngx_dlssnr.dll`（NGX 只认这个名），变体只体现在源文件名与内容上。
+**支持判据**：NVIDIA + 型号名含 `RTX`（=有 tensor core）⇒ RTX 20 系及以上；锁 GTX 10 系、**GTX 16 系**（sm_75 但无 tensor core）、A 卡、核显。
+
+`关键词：["DLSS5按架构选运行库","去掉非50系锁","RTX20系及以上支持","official-sf-rtx40变体","nvngx_dlssnr目标名不变","随包两份覆盖全代次","一键启动零下载","tensor core判据","GTX16系锁定","社区镜像rhi-repo"]`
+
+### 【重大架构发现：取证链只挂在一个监视器上，主路径从未执行…
+*2026-10-06 00:19*
+
+【重大架构发现：取证链只挂在一个监视器上，主路径从未执行（2026-10-05 从反馈者包里查出）】
+项目里有**两套**进程监视器：
+① `diagnostics._monitor_process`（**主路径唯一在跑的那个**：读退出码、命令行采集、句柄降级、**NR 自动开启**）；
+② `crashwatch.start_watch`（**只在"以系统默认方式 os.startfile 启动 XXMI"那条分支**的末尾被调用，全项目仅此一处）。
+而整套取证**只长在 ② 身上** ⇒ 主路径下**从来没有**：5 秒运行时采样、注入快照、崩溃归因、崩溃记忆与跑通台账、**「连续三次失败 → 强力修复」计数**。旁证：反馈者的诊断包里**连 `watch-samples.jsonl` 都不存在**，他崩了 5 次+"重装两轮"也从没弹过那个窗。
+**修法（用户选定"一个监视器干完"）**：抽 `crashwatch.on_game_exit()`（证据→报告→归因→记账→崩溃包→建议）+ `arm_runtime_watch()`/`poll_runtime_watch()`（采样与注入时间线）两个共用入口，**两边都调**；并把它们装进 `_monitor_process`。
+⚠️ **不是**把主路径切到 `start_watch` —— 那会丢掉退出码、命令行、句柄降级和 **NR 自动开启**。
+**同时修掉**：随包资产**并发展开**（`ensure_file` 的临时文件原先固定名 `<目标>.mc-tmp`，两条路径同时展开 ⇒ 互踩 ⇒ 日志假报「sha256 校验失败（得到 2d8b3e2f…，期望 e16bcf15…）」，极端情况把半成品落位）⇒ 现在 `ensure_all` 串行化 + 临时文件带 `pid-threadid` 唯一命名。
+
+`关键词：["取证链只挂在一个监视器","两套进程监视器","_monitor_process主路径","start_watch只在os.startfile分支","采样从未跑过","强力修复计数失效","on_game_exit统一入口","arm_runtime_watch共用","资产并发展开","临时文件固定名互踩","sha256假失败","ensure_all串行化"]`
+
+### 【相机 hook 与 NR 的共存条件（2026-10-…
+*2026-10-06 00:42*
+
+【相机 hook 与 NR 的共存条件（2026-10-06 用户实测定案，**修正 10-05 那条旧结论**）】
+**新事实**（用户原话「**都正常了，就这样**」）：`CameraFirstPerson=1` 时，`NeuralUplift=1`（**启动就开 DLSS5**）与相机 hook **可以共存** —— 日志里 `Camera controls installed.`（arm 后 18 秒）先出现，`feature 18 created` + `inline feature 18 evaluation succeeded` 紧随其后。
+**这次才看清的机制**：**`CameraFirstPerson=0` 时 enhancer 根本不去装相机 hook** ⇒ 日志里永远没有 `Camera controls installed.` ⇒ `nr_autostart`（等这句话才按 F6）**永远不动作** —— 用户现象「又测了一次，就是没自动开 nr」的真因就是它（当时 ini 里是 addon 写的出厂值 0）。
+**因此修正 2026-10-05 那条**「NR 抢在 hook 前激活 ⇒ hook 装不上（error 8）」：那天失败/成功的对照里 `NeuralUplift` **不是唯一变量**（`CameraFirstPerson` 一直是 0、hook 靠用户按 F1 才触发）⇒ 真正决定 hook 装不装的是 **`CameraFirstPerson`**。
+**实测可用的一组**：`runtime\reshade\ReShade.ini` 里 `NeuralUplift=1` + config `auto_enable_nr_after_camera_hook=False`（后者让 `_check_defer_nr_until_camera_hook` 完全跳过、`nr_autostart` 整体停用 —— 因为 NR 已在启动时开好，不需要模拟按键）。
+**用户明确要求**：**不许覆写他的第一人称开启状态配置** —— `CameraFirstPerson` 已从 `launcher._sync_enhancer_section` 的同步列表里**撤掉**，测试钉住「用户设的 0 必须原样保留」。
+
+`关键词：["CameraFirstPerson决定hook","Camera controls installed不出现","启动就开DLSS5可行","NeuralUplift=1与hook共存","修正NR抢trampoline结论","nr_autostart等不到hook","auto_enable_nr_after_camera_hook关闭","不许覆写第一人称开关","同步列表撤掉CameraFirstPerson"]`
+
 ### 部署与数据
 
 ### 乳摇插件（SecondaryMotion / Shaki…
@@ -509,17 +580,35 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 
 `关键词：["发布流程","build_release prepare_release push","自己 commit 别忘","draft 转正 latest","按 release id 核对 digest","资产不带版本号","vite build 再打包","RELEASE_NOTES 先确认版本","check_component_versions --strict","pytest -n 4 attempts"]`
 
+### 【DLSS5 变体机制：代码落点速查（2026-10-0…
+*2026-10-05 22:23*
+
+【DLSS5 变体机制：代码落点速查（2026-10-05）】
+判据唯一入口 = `deviceinfo.best_rtx_sm()`（**从 adapters 现算**，别读 `collect()` 的派生字段，否则打桩/精简调用方会得到"不支持"的错误结论）；`nvidia_sm()` 卡名→sm（工作站卡：`RTX Axxxx`→86、名含 ADA→89、`TITAN RTX`/`Quadro RTX`→75）；`dlss5_runtime_variant()` sm→首选变体。
+选择与落盘 = `runtime_assets.select_dlssnr_variant()`（快路径读 marker `.dlssnr_variant.json`，对不上才扫 fatbin）+ `ensure_dlssnr()`（**唯一落点**，一键启动/自检/修复都调它）+ `dll_architectures()`（扫 CUDA fatbin，165 MB 实测 0.1 秒）+ `import_bundle()`/`inspect_assets_zip()`（依赖页导入，逐条校验分卷）。
+迁移 = `config.dlss5_gpu_scope_applied`（**只**打开"旧判据不支持、新判据支持"那部分机器；50 系用户自己的选择不动）。
+自检项 = `dlss5:nr_arch`（架构不符→自动换变体并留 `.bak`）。
+⚠️ `baseline_mismatches`/`repair_mismatched` **必须按"本机生效的变体"判**，否则 40 系上刚装好的 `sf` 会被判偏离基线 → 换回 `official` → 再判不符 → **每次启动来回替换 165 MB**（已有测试钉住）。
+打包 = `scripts/pack_nvngx_assets.py`：nvngx 组 patterns 加 `nvngx_dlssnr.sf.dll`，写 `install_as`/`variant`/`arch`，`arch` 用 fatbin **实测覆盖**声明值。
+依赖页新增项 = `asset_report()` 的 `bundle` 行 + `dlss5_fetcher.dlssnr_variant_component()`（仅 sm_89 显示 `dlssnr_rtx40`，`needed` 固定 False）。
+
+`关键词：["变体机制落点","best_rtx_sm唯一入口","select_dlssnr_variant","ensure_dlssnr","dll_architectures扫fatbin","dlssnr_variant.json marker","baseline按变体判防抖","dlss5:nr_arch自检","dlss5_gpu_scope_applied迁移","pack_nvngx_assets变体字段"]`
+
 ### 【modecontroller 当前状态唯一真源】（20…
-*2026-10-05 21:20*
+*2026-10-05 23:09*
 
-【modecontroller 当前状态唯一真源】（2026-10-05 21:20 更新）
-**Latest Release = `v1.0.13`**（tag `v1.0.13`、release id `403719169`、tag 打在 main `912235755a49`；资产 `EndfieldModController.exe` 30,051,790 B / sha256 `9b0e1d14ca93eb6b…`、`assets-bundle.zip` 144,685,157 B / sha256 `cae7f963bec031705069…`，digest 已按 release id 核对）。
-**本地现在 = `1.0.14-beta`（未发版，比 Release 领先一个）**：已构建 `dist\EndfieldModController.exe` **30,053,866 B / sha256 `e82bf385e87afed6eac9…`**（21:20:19），modtest 已同步（哈希一致）；**未 commit、未推、未发版**，等用户发话。
-**v1.0.14-beta 内容（相对 v1.0.13）**：① 「⋯ 更多」菜单改成**悬停即出 + 离开收起**（180ms 宽限）—— 服装页本来就有悬停、辅助页没有、两页都没有离开收起，这次统一；② **VC++ 运行库接进依赖安装流程**：依赖页多一行「VC++ 运行库（系统组件）」带版本号、`runtime_deps.ensure_all` 末尾追加一条 `needs_install` 检查（已进 `ok_status`，不会被当失败重试）、依赖页与启动页共用 `frontend/src/lib/vcRuntime.js` 弹「安装（推荐）/ 跳过」（**缺了才弹**）；③ `install_vc_runtime` 补**管理员检查**（非管理员明确提示，不再只回一个退出码）。
-**v1.0.13 内容**：Mod 卡片三件（彻底删除/重命名/更换预览图）、菜单浮层自适应定位、自检 `vc_runtime` 判据、设置页一键装 VC 运行库。
-**issue**：#16 已回两条，反馈者已回报「只开 DLSS5 / 只开第一人称崩、全关能进」+ 退出码 `0xC0000135`；等下一步结论。
+【modecontroller 当前状态唯一真源】（2026-10-05 23:09 更新）
+**Latest Release = `v1.0.14`**（tag `v1.0.14`，2026-10-05T13:27Z）。
+**本地现在 = `1.0.15-beta`（未发版，比 Release 领先一个）**，本轮四批改动都已构建：
+1. **DLSS5 方案换代**：按显卡架构自动选运行库（`official`+`sf` 随包、`rtx40` 依赖页可选）；换锁（RTX 20 系及以上支持；A 卡 / GTX 10 系 / GTX 16 系 / 核显锁定）；`dlss5_gpu_scope_applied` 迁移；自检 `dlss5:nr_arch`。
+2. **依赖页「导入随包 zip」**（逐条校验分卷，缺卷拒绝）；**去掉「从 Release 下载」按钮**。
+3. **下载线路新规则**：无 token 的直连永不开多连接（抢块不含直连）；直连 <1.5 MB/s 换镜像抢块；抢块不如直连快就回直连单连接下完。
+4. **崩溃取证**：新增 `pedeps.py`（PE 静态导入表预检，诊断包加「注入 DLL 依赖检查」段，缺 DLL 直接点名）+ 「净化后按当前开关重新铺设了 N 项」的显式说明（`game_clean.injection_snapshot()` + `launcher` 前后差集）。
+**当前产物**：`dist\EndfieldModController.exe` **30,099,652 B / sha256 `0257f30ca9e41c54000b…`**（23:08:53；modtest 已同步、哈希一致）；`dist\assets-bundle.zip` 261,962,034 B / sha256 `84606649d19698e6884323f8142f643be70d6670239ab2c76aede595915d0f90`。**未 commit、未推、未发版**，等用户发话。
+**测试**：全量 894 + `tests/test_pedeps.py` 13 条；反向验证 10/10。
+**诊断包（`diagnostics-20261005-223225.zip`）结论**：机主用户名 `HUAWEI`、数据根 `C:\Users\<user>\Downloads\runtime`、游戏 `D:\Endfield Game`、**Intel Arc 无 N 卡**；游戏 5 次以 `0xC0000135 STATUS_DLL_NOT_FOUND` 极早期退出（一帧未渲染、无 WER/dump、CrashSightLog 停在 13:58 没新增）；**XXMI 与被证正常**（注入成功 → 游戏没了 → 自收尾 App Exit，用户说的"启动器闪退"=它跟关）；**实例锁没触发**（`app.single_instance` 机制这次无记录）；包里两条该有却没有：`game/d3dx.ini`、`game/d3dx_user.ini`。**对照包仍缺**（用户 Downloads 里那份 222113 是"没启动过游戏"的现场，不算对照）。
 
-`关键词：["当前状态唯一真源","Latest v1.0.12","release id 403652800","main 01b3ec6","exe 30037944 sha256 53c607a2","assets-bundle 144685157 570f9fcb","快照 1.0.12-20261005-194334","下一个号 1.0.13-beta","v1.0.12 内容速览","issue 0 open"]`
+`关键词：["当前状态唯一真源","Latest-v1.0.14","本地1.0.15-beta","exe-30099652","sha256-0257f30c","DLSS5按架构选运行库","崩溃取证pedeps","净化后铺回说明","0xC0000135诊断包结论","未推未发版"]`
 
 ### 待办
 
@@ -555,7 +644,7 @@ issue #16（xingluo667，游戏加载过程中闪退）：已追加评论，让�
 
 `关键词：["issue 16","开关组合测试","全关再逐项加回","DLSS5 神经渲染","ShakingBreastManager","皮肤 Mod","Endfield Poser","v1.0.12 开关生效","等反馈者回报","游戏加载过程中闪退"]`
 
-## 话题（一件事的前因后果）（22 条）
+## 话题（一件事的前因后果）（23 条）
 
 ### 诊断并稳定终末地换装 Mod 的 DX11/EFMI 路线
 *2026-09-27 18:24*
@@ -767,6 +856,18 @@ issue #16（xingluo667，游戏加载过程中闪退）：已追加评论，让�
 【issue #16 本机对照实验：复现不了】2026-10-05 20:01~20:04 用 injector.py 自启动+注入（照 XXMI：Endfield.exe -force-d3d11 → 注入 dlss5\d3d12.dll → EFMI\d3d11.dll，带 RESHADE_BASE_PATH_OVERRIDE）在本机跑两次：① 原配置（Poser loader 35,840/56,832 + poser.dll）→ 能进、正常退出；② 原样换成失败者那套（sbm loader 14,336/35,328 + 移走 poser.dll，sbm.dll 都是 108,032）→ 照样能进、正常退出。⇒「我们的注入组合必然导致该闪退」被证伪，问题落在反馈者机器环境（可查到的差异：他们 System32 的 d3dcompiler_47.dll 是 2026-09-06 的 4,669,440 版，本机是 2026-01-24 的 4,524,496 版）。已还原游戏目录并 sha256 校验一致。下一步只能等玩家在 v1.0.12 复现取退出码+sdklogs（本机实测退出码判据有效：19:04 记到 exit_code=0）。
 
 `关键词：["issue 16","游戏加载过程中闪退","本机复现不了","injector.py 自启动注入","RESHADE_BASE_PATH_OVERRIDE","sbm loader 14336","Poser loader 35840","exit_code=0","退出码判据有效","System32 d3dcompiler_47 版本差异","sdklogs","对照实验"]`
+
+### 确定并落地"非50系显卡在《终末地》DX11 下开启 DLSS5"的整套方案
+*2026-10-05 22:25*
+
+【非50系开 DLSS5·终末地 DX11 方案研究（2026-10-05，**已落地成 v1.0.15-beta**）】
+**起因**：用户给 B站 BV1KJtJ6uEqw（4分P，UP 真心只为他，4070TiS 实测），要求「只做终末地、只做 DX11，不做 Vulkan」；随后要求把方案落进项目、去掉非 50 系的锁、换成一键启动步骤一致。
+**关键结论**：① 非50系能否跑 = `nvngx_dlssnr.dll` 里有没有该卡的 CUDA 内核（**实测随包那份只有 sm_120**，所以 40 系必然 `0xBAD00001`）；40系→社区 `310.8.0-RTX40`(sm_89)、20-30系→`310.8.SF-v2`(FP16)，来源 `RankFTW/rhi-repo`；② 终末地 DX11（`Player.log`＝`Forcing GfxDevice: Direct3D 11`）建不出自己的 DLSS 特性 ⇒ 必须走 **feeder** 路线（ReShade + `dlss5-feed.addon64` + LumeniteFX 运动矢量 + 消费者 `renodx-dlss5`）；③ feeder 与 bridge **不要同装**；④ **DX11 拿不到多帧生成**（MFG 仅 D3D12/Vulkan）。
+**风险（未变）**：终末地联网+反作弊；runtime 与 addon 闭源无公开许可；该生态有挂马分发（`dlss5bridge.com` 的 exe 被判 Malicious、DLSS5-Manager 走 PowerShell iex 拉第三方脚本）—— 只从 GitHub Releases 取文件并核对 sha256。
+**未实测**：40/30/20 系真机端到端（本机只有 5080）。报告落 `D:\zmdmod\_dlss5_research\DLSS5-非50系-终末地DX11方案.md`。
+**落地**：见 project decisions「DLSS5 方案换代」与 ops「变体机制代码落点速查」。
+
+`关键词：["DLSS5非50系方案","终末地DX11","DLSS5-Feeder","dlss5-feed.addon64","renodx-dlss5","LumeniteFX运动矢量","bridge与feeder分工","DX11无多帧生成","Forcing-GfxDevice-Direct3D-11","DLSS5-Autopilot","按架构选runtime"]`
 
 ## 经验教训（被纠正过的、踩过的坑）（384 条）
 
@@ -4283,7 +4384,7 @@ Mod 卡片的「⋯ 更多」在服装页与辅助页各有一套，加动作必
 
 `关键词：["ensure_all","追加结果","ok_status","重试逻辑","既有断言","恰好 N 项","消费方","内置组件"]`
 
-## 事实（细碎的原子信息）（80 条）
+## 事实（细碎的原子信息）（85 条）
 
 ### modecontroller：游戏目录 loader_l…
 *2026-09-27 14:58*
@@ -4594,15 +4695,6 @@ issue #8（作者 59478658）里那个"**辅助 mod**"= **Hide UI＆UID**（用�
 **教训**：发现测试环境数据变化时，**先问用户、再查代码** —— 这个工作区里用户自己也在动手（清库、改配置、开程序），别默认"只有我在写"。（与另一条 lesson 同族：替换 exe / 清理测试目录前先确认他在不在跑。）
 
 `关键词：["modtest library 是用户清空的","build_release 第6步只换 exe","sync_to_modtest 不动 library","别默认只有我在写","rmtree 清的是 onedir 残留","测试环境数据变化先问用户"]`
-
-### **DLSS 5 的硬件门槛（2026-10-01 定案…
-*2026-10-01 15:01*
-
-**DLSS 5 的硬件门槛（2026-10-01 定案，用来回答"我这卡能不能用"）**：DLSS 5 **首发只支持 RTX 50 系（Blackwell）**（2026-09-04 定档，[17173 报道](https://news.17173.com/content/09022026/080619827.shtml)）；英伟达随后确认**会扩展到 RTX 40 系（Ada）**，但**当前驱动/签名 NR 运行库尚未放开**（[guru3d](https://www.guru3d.com/story/nvidia-reverses-course-dlss-5-is-now-officially-coming-to-rtx-40series-gpus/)）。
-**实测印证**：RTX 5080（50 系）正常出帧；RTX 4060 Laptop 与 RTX 4070 Laptop（40 系）在**同驱动版本、同 nvngx 运行库 sha256** 下都得到 `feature 18 create failed with 0xbad00001`（NGX FeatureNotSupported）。
-**判据与话术**：40 系机器上"面板成功NR帧 0 + 0xBAD00001"**属于支持范围问题，不是故障**——别让用户重装、改画质档位、降分辨率、关加速器或动驱动（这些都被实测排除过）；等官方放开即可。更早的 RTX（30/20 系）与 GTX 同样不支持。我们自己的设备自检（`deviceinfo._verdict()` / 诊断包 summary 的"DLSS5 前提"行）已按代次给出这个结论，不要再写"检测到 RTX 即可"。
-
-`关键词：["DLSS5 硬件要求","RTX 50 系独占","40 系以后支持","Blackwell","Ada","0xBAD00001 FeatureNotSupported","哪些显卡能用DLSS5","DLSS5 前提","deviceinfo 代次判断"]`
 
 ### 【「Hide UI＆UID」（辅助 Mod，快捷键 `a…
 *2026-10-01 15:22*
@@ -5139,6 +5231,51 @@ Steam++（Watt Toolkit）加速内核 = **FastGithub 2.1.4 的移植**：本地�
 VC++ 运行库：官方 https://aka.ms/vs/17/release/vc_redist.x64.exe（302 到 download.visualstudio.microsoft.com，非 GitHub）。**2026-10-05 在本机端到端实测**：管理员下下载 25,635,768 B 用时 24.5s（国内直连）、`/install /quiet /norestart` 静默安装 **退出码 1638**（= 已装相同/更高版本，幂等成功）、0.9s，版本前后都是 14.51.36247.0。⇒ 参数与退出码语义（0/3010/1638）确认可用。
 
 `关键词：["VC++ 运行库","vc_redist.x64.exe","aka.ms","visualstudio.microsoft.com","国内可直连","MSVCP140","VCRUNTIME140","0xC0000135","STATUS_DLL_NOT_FOUND","静默安装参数"]`
+
+### **DLSS 5 硬件门槛（2026-10-05 按实测…
+*2026-10-05 21:51*
+
+**DLSS 5 硬件门槛（2026-10-05 按实测重写）**：NVIDIA 官方路径不变 —— DLSS 5 首发只支持 RTX 50（Blackwell），官方 NR 运行库只有 FP8/sm_120 内核。
+**但根因已精确定位**：`nvngx_dlssnr.dll` 是按 CUDA 架构编译的，跑不跑得起来取决于**文件里有没有你显卡的内核**。2026-10-05 实测三份文件：我们随包那份（165,840,496 B）**30 条 fatbin 全是 sm_120**；社区镜像 `RankFTW/rhi-repo` 的 `310.8.0-RTX40` 含 **sm_89×15**；`310.8.SF-v2` 含 **sm_75/86/89**（FP16 路径）。
+⇒ 40/30/20 系不是"硬件不支持"，而是**我们给的文件里没有它们的机器码**。换对应构建即可（40 系中等开销；20/30 系满模型分辨率约掉一半帧率）。此前的"等官方放开即可、别让用户折腾"应改成"**换按架构重定向的社区构建**"。
+AMD/Intel 需另走 HIP 重实现（DLSS-NR-on-AMD 等），与此无关。
+
+`关键词：["DLSS5","非50系","40系支持","sm_120","sm_89","nvngx_dlssnr","fatbin架构","310.8.0-RTX40","310.8.SF-v2","rhi-repo社区镜像","重定向运行库","0xBAD00001"]`
+
+### 项目随包的 nvngx_dlssnr.dll（165,8…
+*2026-10-05 21:51*
+
+项目随包的 nvngx_dlssnr.dll（165,840,496 B，sha256 e16bcf15…）实测 30 条 fatbin 全是 sm_120，所以 40/30/20 系必然 feature 18 create failed 0xBAD00001。
+
+`关键词：["随包运行库","nvngx_dlssnr.dll","只有sm_120","165840496","0xBAD00001根因","40系失败","assets-nvngx分卷","fatbin扫描","sha256 e16bcf15"]`
+
+### 社区镜像 RankFTW/rhi-repo 的 Rele…
+*2026-10-05 21:51*
+
+社区镜像 RankFTW/rhi-repo 的 Releases 按显卡架构分发 DLSS5 运行库：dlssnr-310.8.0（50系FP8）、310.8.0-RTX40（sm_89）、310.8.SF-v2（20/30系FP16，下载41万+）；另有 renodx-dlss5 addon 各版本。
+
+`关键词：["RankFTW-rhi-repo","DLSS5运行库下载","按架构重定向","310.8.0-RTX40","310.8.SF-v2","Lecram","renodx-dlss5版本","社区镜像releases","FP16路径"]`
+
+### DLSS5 feeder 路线 50 系可用：本机 50…
+*2026-10-05 21:53*
+
+DLSS5 feeder 路线 50 系可用：本机 5080/驱动 617.14 实测 renodx-dlss5 4.7 成功 hook NGX，signed NR runtime 在 device init 时 pre-loaded。
+
+`关键词：["50系DLSS5可用","feeder路线50系","RTX5080","617.14驱动","renodx-dlss5-4.7-hook","signed-NR-runtime-preloaded","官方310.8.0"]`
+
+### 日志里 `Failed to find NVSDK_NG…
+*2026-10-05 21:53*
+
+日志里 `Failed to find NVSDK_NGX_D3D12_EvaluateFeature_C` 在能正常出帧的机器上同样存在，不是故障判据（该 _C 变体不在运行库里）。
+
+`关键词：["EvaluateFeature_C报错","ReShade.log误判","Failed to find NVSDK","驱动616.64说明","不是故障判据","renodx日志排除项"]`
+
+### 50 系机器上 DLSS5 的行为**故意不变**（同一…
+*2026-10-05 22:42*
+
+50 系机器上 DLSS5 的行为**故意不变**（同一份 official 运行库、开关默认开、效果一致）—— 方案换代的可见变化只有三处：① 依赖页多一行「依赖的随包资产包（assets-bundle.zip）· 不是 Mod 包」+「导入随包 zip…」；② 自检多一条 `dlss5:nr_arch`；③「RTX 40 优化版」那一行只在 40 系机器出现。用户问"怎么没变化"时，先照这个答，别怀疑没生效（可查 `runtime\dlss5\.dlssnr_variant.json` 与 config 的 `dlss5_gpu_scope_applied` 证明新版跑过）。
+
+`关键词：["50系DLSS5不变","用户问怎么没变化","可见变化只有依赖页","dlssnr_variant marker","dlss5_gpu_scope_applied","官方运行库同字节","40系才有优化行","换代故意不动50系"]`
 
 ## 用户偏好与环境（**含个人信息，公开前请自行取舍**）（18 条）
 
