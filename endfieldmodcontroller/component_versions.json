@@ -27,7 +27,7 @@
       "repo": "SpectrumQT/EFMI-Package"
     },
     "Poser": {
-      "latest": "0.5.18",
+      "latest": "0.5.31",
       "repo": "OedoSoldier/Endfield-Poser"
     }
   },
@@ -37,7 +37,7 @@
       "note": "官方新版可能与 DLSS5 插件不兼容"
     },
     "secondary_motion": {
-      "latest": "2.3.5"
+      "latest": "3.1.2"
     }
   }
 }

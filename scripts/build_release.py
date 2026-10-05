@@ -411,26 +411,34 @@ def check_component_version_table(args: list[str]) -> None:
     更新提示**只读它、不联网**（用户 2026-10-03 定的，联网要干等 6.1 秒）。所以它过期就会
     误导用户 —— 提示了并不存在的新版，或漏掉真正的新版。发版是它唯一的刷新时机。
 
-    **联网**（几秒），而且**只提示、不中止**（离线/限流不该卡住构建）；
-    想彻底跳过用 `--skip-version-table-check`。
+    **联网**（几秒）。有差异就**中止构建**（这是"发版前检查"的本意，用户 2026-10-04
+    要的就是这个）；离线/限流查不到时不算过期、不阻断（脚本本身不误报）。
+    确实要带着过期表发版，用 `--skip-version-table-check` 显式跳过。
     """
     if "--skip-version-table-check" in args:
         print("[组件版本表] 已按 --skip-version-table-check 跳过核对", flush=True)
-        return
+        return True
     print("[组件版本表] 核对随包快照 vs 上游最新（联网）…", flush=True)
     try:
         result = subprocess.run(
-            [sys.executable, "scripts/check_component_versions.py"],
+            # ⚠️ **必须带 `--strict`**（2026-10-05 修）：脚本默认"永远 return 0"，
+            #    原来这里没传 ⇒ 下面那段 `returncode != 0` 的警告**从来没打印过**，
+            #    过期表就这么静默跟着 Release 发出去了（v1.0.11 就是这么漏的：
+            #    Poser 0.5.18→0.5.31、乳摇 2.3.5→3.1.2 两项过期）。
+            [sys.executable, "scripts/check_component_versions.py", "--strict"],
             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180,
         )
     except Exception as exc:  # noqa: BLE001
         print(f"[组件版本表] 检查没跑起来（忽略，不阻断构建）: {exc}", flush=True)
-        return
+        return True
     for line in (result.stdout or "").strip().splitlines():
         print("  " + line, flush=True)
     if result.returncode != 0:
         print("[组件版本表] ⚠ 有组件对不上 —— 请先更新 "
-              "`endfieldmodcontroller/component_versions.json`（本步不阻断构建）", flush=True)
+              "`endfieldmodcontroller/component_versions.json` 再重跑；"
+              "确实要跳过就加 `--skip-version-table-check`。**本轮构建已中止**。", flush=True)
+        return False
+    return True
 
 
 def main() -> int:
@@ -443,8 +451,9 @@ def main() -> int:
     # 只推了源码没发 Release 时不动号。查不到只提示、不中止（这条是软约束）。
     report_version_rule()
     # 随包组件版本表核对（用户 2026-10-04：「每次 release 要检查内置的依赖版本表是否最新」）：
-    # 联网比一遍上游最新版，对不上就打出"该改成什么"（不阻断；--skip-version-table-check 跳过）。
-    check_component_version_table(args)
+    # 联网比一遍上游最新版，**对不上就中止构建**（--skip-version-table-check 显式跳过）。
+    if not check_component_version_table(args):
+        return 1
 
     # [0] 先编译统一控制面板（ReShade addon）：它要随进 exe，构建晚于它就等于带了旧面板。
     if "--skip-addon" in args:
