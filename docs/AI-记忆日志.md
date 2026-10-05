@@ -4,13 +4,13 @@
 > 目的：让「当时为什么这么改、踩过什么坑」跟着源码一起留在仓库里。
 > 想改内容 → 改记忆库（用记忆工具），再跑一次本脚本；不要直接编辑本文件。
 
-- 生成时间：2026-10-05 09:41:24
+- 生成时间：2026-10-05 10:09:12
 - 来源：`.dsh-meow/memory.db`
-- 条目：536 条（已跳过 archived / 其它项目的条目）
+- 条目：537 条（已跳过 archived / 其它项目的条目）
 
 ---
 
-## 设计原则 / 行为准则（17 条）
+## 设计原则 / 行为准则（18 条）
 
 ### 用户准则（原话）：「不是，你直接去官网拉」—— **一手…
 *2026-09-27 18:53*
@@ -220,6 +220,19 @@
 实现：`endfieldmodcontroller/version.py` 是**全项目唯一版本口径** —— `parse_version()` 把"是否预发布"编码进比较键最后一维（正式=1、beta=0），另有 `strip_prerelease()` / `is_newer()` / `same_release()`；原来散在 `updates` / `selfupdate` / `github` / `alerts` / `dlss5_fetcher` 的 **5 份同款 `_version_tuple`** 全部委托它（漏一处就会"更新检测时灵时不灵"）。配套：`scripts/release_version.py` 比对前先剥后缀、提示写成"未发版写成 `<号>-beta`"；`scripts/prepare_release.py` 的 `tag = f"v{_release_version(version)}"` 自动去 beta。⚠️ 退化口径必须保住：**一个数字都取不出来时返回 `(0,)`**（`alerts.version_applies` 靠"取不出数字"判"未知版本 ⇒ 不挡"，返回 `(0,0)` 会让它失效 —— 实测弄红 1 个既有测试）。
 
 `关键词：["版本号约定","beta 后缀","1.0.11-beta","发完版写正式号","预发布语义","正式版更新","release 不带 beta","parse_version","strip_prerelease","release_version.py","版本比较退化口径"]`
+
+### 【用户准则】「**所有修过的 bug 都要测试定住**」…
+*2026-10-05 09:41*
+
+【用户准则】「**所有修过的 bug 都要测试定住**」（2026-10-05 原话：「有没有测试定住这个bug，所有修过的bug都要测试定住」）。
+**落地形态（本次示范，照此办理）**：
+① **按主题建测试文件**，不要按版本号命名 —— 本次三份：`tests/test_reshade_download.py`（ReShade 下载 4 处同族 + 500 容错 + 无 7z）、`tests/test_crash_evidence.py`（WER 判据 + 崩溃建议）、`tests/test_clean_and_backup_judgements.py`（净化判据 + 备份语义 + 依赖清空放行/中止）；
+② **全离线**：项目没有 conftest.py，每个文件自带 `env` fixture = `AppConfig()` + `monkeypatch.setattr(AppConfig, "runtime_path", property(lambda self: tmp_path/"runtime"))` 这类桩；**绝不碰真实游戏目录 / WER 目录 / 线路缓存**（`fastnet._remember_line` 也要打桩，否则测试会改开发机的 `lines.json`）；
+③ **断言要钉"判据"而不只是"结果"**：例：抓版本号的测试必须断言 `tolerate_error_status is True` 被**传下去了**（忘了传等于没修）；"没有 7z"用 `monkeypatch.setattr(reshade, "_find_7z", 必抛)` 来等价模拟那台机器；
+④ **必须做反向验证**：把每处修复**临时退回去**，确认对应测试**变红**，再恢复（脚本用 try/finally 保证恢复，跑完 `git diff` 为空）。本次 4/4 全部变红 ⇒ 证明测试真的能抓住回归。
+**为什么值得**：`747 → 781 passed`，而这次修的多数是"开发机复现不出来"的缺陷（开发机有 7z、开发机没有那种坏备份），**没有测试就只能靠用户下次再踩一遍**。
+
+`关键词：["所有修过的bug都要测试定住","回归测试","反向验证","测试要钉判据","全离线测试","AppConfig monkeypatch property","test_reshade_download","test_crash_evidence","test_clean_and_backup_judgements","必须打桩 fastnet 线路缓存","没有 conftest"]`
 
 ## 项目记忆（结构 / 决策 / 部署 / 待办）（32 条）
 
