@@ -40,6 +40,7 @@ class MissingLibraryFileTests(unittest.TestCase):
         self.staging.mkdir(parents=True)
         self.config_path = self.root / "config.json"
         self.config = AppConfig(
+            data_root=str(self.root),   # 未显式指定的路径一律落 tmp，绝不碰真实工作区
             library_dir=str(self.library),
             runtime_dir=str(self.runtime),
             staging_mods_dir=str(self.staging),
@@ -179,6 +180,7 @@ class ManualModsSafetyTests(unittest.TestCase):
         (self.staging / "MC_杰哥_杰哥").mkdir()
         config_path = self.root / "config.json"
         config = AppConfig(
+            data_root=str(self.root),   # 同上
             library_dir=str(self.library),
             runtime_dir=str(self.runtime),
             staging_mods_dir=str(self.staging),

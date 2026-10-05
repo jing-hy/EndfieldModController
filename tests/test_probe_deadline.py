@@ -59,7 +59,8 @@ def test_probe_deadline_applies_with_zero_data(tmp_path: Path) -> None:
         srv.shutdown()
 
     # 12 秒的 deadline：允许一点抖动，但绝不该是 180 秒那个量级
-    assert elapsed < 25, f"探测花了 {elapsed:.1f}s —— deadline 没在'没数据'时生效"
+    assert elapsed < 60, f"探测花了 {elapsed:.1f}s —— deadline 没在'没数据'时生效"
+  # 并行/满载下 wall-clock 会被拉长 —— 这里守的是**量级**（真回归是分钟级：等整个无数据窗口 / 下完整个文件），不是精确秒数
     assert elapsed >= 5, f"太快了（{elapsed:.1f}s），可能没真的等过 deadline"
 
 

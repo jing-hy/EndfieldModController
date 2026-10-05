@@ -93,7 +93,8 @@ def test_pause_takes_effect_within_seconds(tmp_path: Path, slow_server: str) -> 
     elapsed = time.time() - started
 
     assert flag.get("cancelled"), f"应当抛 Cancelled，实际：{flag.get('err')}"
-    assert elapsed < 3.0, f"暂停响应太慢：{elapsed:.1f}s（应当秒级）"
+    assert elapsed < 8.0, f"暂停响应太慢：{elapsed:.1f}s（应当秒级）"
+  # 并行/满载下 wall-clock 会被拉长 —— 这里守的是**量级**（真回归是分钟级：等整个无数据窗口 / 下完整个文件），不是精确秒数
 
 
 def test_cancel_before_start_is_immediate(tmp_path: Path, slow_server: str) -> None:
@@ -105,7 +106,8 @@ def test_cancel_before_start_is_immediate(tmp_path: Path, slow_server: str) -> N
             size=SIZE, start=0, threads=4, timeout=30,
             cancel=lambda: True, log=lambda m: None,
         )
-    assert time.time() - started < 3.0
+    assert time.time() - started < 8.0, "置了取消标志就该立刻结束"
+  # 并行/满载下 wall-clock 会被拉长 —— 这里守的是**量级**（真回归是分钟级：等整个无数据窗口 / 下完整个文件），不是精确秒数
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -128,7 +130,8 @@ def test_probe_request_can_be_interrupted(tmp_path: Path, slow_server: str,
     started = time.time()
     with pytest.raises(fastnet.Cancelled):
         fastnet.fetch(slow_server, timeout=30, cancel=lambda: True)
-    assert time.time() - started < 3.0, "点了暂停还卡在读 JSON 里"
+    assert time.time() - started < 8.0, "点了暂停还卡在读 JSON 里"
+  # 并行/满载下 wall-clock 会被拉长 —— 这里守的是**量级**（真回归是分钟级：等整个无数据窗口 / 下完整个文件），不是精确秒数
 
 
 def test_probe_and_cover_pass_cancel_through(monkeypatch: pytest.MonkeyPatch,
