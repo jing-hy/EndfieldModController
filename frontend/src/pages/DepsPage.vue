@@ -18,6 +18,7 @@ import {
   showToast, showAlert, showModalDialog, showProgressToast, hideProgressToast,
 } from "../lib/dialog.js";
 import Card from "../components/ui/Card.vue";
+import { needsVcRuntime, promptVcRuntimeInstall } from "../lib/vcRuntime.js";
 import Btn from "../components/ui/Btn.vue";
 import Badge from "../components/ui/Badge.vue";
 
@@ -542,6 +543,12 @@ async function pollProgress() {
         showToast(`安装失败：${message}`, "danger");
       } else {
         showToast("依赖安装/更新完成", "success");
+      }
+      // 缺 VC++ 运行库（后端在结果里补的那条 `needs_install`）⇒ 问一次
+      // 「安装（推荐）/ 跳过」—— 跳过不挡任何流程，装完刷新一次组件清单。
+      if (needsVcRuntime(results)) {
+        await promptVcRuntimeInstall();
+        await refresh();
       }
     }
     wasRunning = nowRunning;

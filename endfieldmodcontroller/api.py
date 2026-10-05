@@ -16,6 +16,18 @@ from typing import Any
 from . import activation, core, dependencies, diagnostics, dlss5_fetcher, fsutil, hot_reload, integrity, launcher, moddl, reshade, reshade_integration, runtime_assets, runtime_deps, selfupdate
 from .config import AppConfig, auto_detect_migoto_loader, auto_detect_official_launcher, auto_detect_xxmi, cached_detect
 
+
+def _is_admin() -> bool:
+    """当前进程是不是管理员（**判不出来就当作是** —— 别拿它挡正常流程）。"""
+    if os.name != "nt":
+        return True
+    try:
+        import ctypes
+
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:  # noqa: BLE001
+        return True
+
 # 拖进 Mod 库页面的压缩包格式（用户 2026-10-01：「需要增加支持拖入 7z」「rar 也要」）。
 # zip 走标准库（自带 zip-slip 防护），7z/rar 走外部解压器（见 dependencies.find_archive_tool）。
 IMPORT_SUFFIXES = (".zip", ".7z", ".rar")
@@ -4502,6 +4514,17 @@ class EndfieldModControllerApi:
         不经过任何第三方站点。
         """
         from . import fastnet, initialize as _initialize
+
+        # ⚠️ **先确认是管理员**：静默安装系统组件必须提权，否则只会拿回一个
+        # 看不懂的退出码（1603 之类）。正式 exe 带 `--uac-admin`、正常跑就是管理员；
+        # 源码模式 / 手动 python 跑的时候不是 ⇒ 这里明确说清该怎么办，别糊一个错误码。
+        if not _is_admin():
+            return {
+                "ok": False,
+                "message": ("装 VC++ 运行库需要管理员权限。请用 EndfieldModController.exe 启动"
+                            "（它会自动请求提权），或右键「以管理员身份运行」；也可以手动装："
+                            + _initialize.VC_RUNTIME_URL),
+            }
 
         dest_dir = Path(self.config.runtime_path) / "downloads"
         try:

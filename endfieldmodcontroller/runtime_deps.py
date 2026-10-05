@@ -8,6 +8,7 @@ and update config.json so the launcher can use them.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import tempfile
 from dataclasses import dataclass
@@ -449,7 +450,10 @@ def ensure_all(config: AppConfig, progress: Progress = None, byte_progress: Byte
     total = len(steps)
     # ⚠️ `update_available` 也算"正常结束"（它是"等用户决定"，不是失败）——
     # 否则关掉自动更新时 `ensure_all` 会把每一项都当失败并重试 3 次（2026-10-03）。
-    ok_status = {"installed", "up_to_date", "skipped", "present", "update_available"}
+    # `needs_install`（2026-10-05 加）：VC++ 运行库那条用的状态 —— 它是「等用户决定装不装」，
+    # 跟 `update_available` 同性质，**不算失败**（不然会被重试 3 次）。
+    ok_status = {"installed", "up_to_date", "skipped", "present", "update_available",
+                 "needs_install"}
     if progress:
         progress(0, total, "builtin", "start")
 
@@ -485,6 +489,14 @@ def ensure_all(config: AppConfig, progress: Progress = None, byte_progress: Byte
             results.append(payload)
         else:
             results.append(BuiltinResult(key=key, status="error", message=str(payload)))
+    # VC++ 运行库（2026-10-05 加）：**它不是我们的组件**（得跑微软官方安装器，不是解压包），
+    # 所以不进 `steps` —— 免得被上面那套"下载失败就重试 3 次"的逻辑折腾；只在结果里**补一条**。
+    # 前端看到 `status == "needs_install"` 就弹「安装 / 跳过（建议安装）」。
+    try:
+        results.append(vc_runtime_result())
+    except Exception as exc:  # noqa: BLE001
+        results.append(BuiltinResult(key=VC_RUNTIME_KEY, status="present",
+                                     message=f"检查跳过：{exc}"))
     if progress:
         progress(total, total, "builtin", "complete")
     return results
@@ -504,13 +516,59 @@ def dry_run_results(config: AppConfig) -> list[BuiltinResult]:
     return results
 
 
+VC_RUNTIME_KEY = "VC++ 运行库"
+
+
+def _vc_runtime_state() -> tuple[bool, str]:
+    """(缺不缺, 版本摘要)。**读不到就当"不缺"** —— 别让检查本身变成故障。"""
+    try:
+        from . import initialize  # 延迟导入：避免 initialize ↔ runtime_deps 互相引
+
+        found = initialize._vc_runtime_versions()
+        missing = any(v.get("missing") for v in found.values())
+        return missing, initialize.vc_runtime_summary(found)
+    except Exception:  # noqa: BLE001
+        return False, ""
+
+
+def vc_runtime_result() -> BuiltinResult:
+    """VC++ 运行库这条**不是组件**：缺了要走微软安装器，所以只报"要不要装"。"""
+    from . import initialize
+
+    missing, summary = _vc_runtime_state()
+    if missing:
+        mine = [n for n, v in initialize._vc_runtime_versions().items() if v.get("missing")]
+        return BuiltinResult(
+            key=VC_RUNTIME_KEY, status="needs_install",
+            message=f"缺少 {'、'.join(mine)} —— ReShade 的插件需要它，建议安装（微软官方）",
+            version=summary, path=initialize.VC_RUNTIME_URL,
+        )
+    return BuiltinResult(key=VC_RUNTIME_KEY, status="present", message="present",
+                         version=summary)
+
+
 def builtin_report(config: AppConfig) -> dict[str, dict]:
     xxmi_root = config.builtin_runtime_path / "XXMI"
+    vc_missing, vc_summary = _vc_runtime_state()
     efmi_root = xxmi_root / "EFMI"
     xxmi_exe = _find_xxmi_exe(xxmi_root)
     xxmi_marker = _read_marker(xxmi_root)
     efmi_marker = _read_marker(efmi_root)
     return {
+        # VC++ 运行库（2026-10-05 加）：**系统组件**，装法与我们自己的包不同
+        # （跑微软官方安装器），所以带 `system_component=True` 让前端认出来。
+        VC_RUNTIME_KEY: {
+            "display": "VC++ 运行库（系统组件）",
+            "source": "system",
+            "system_component": True,
+            "install_dir": str(Path(os.environ.get("SystemRoot") or r"C:\Windows") / "System32"),
+            "present": not vc_missing,
+            "required": False,
+            "needed": True,
+            "status": "已安装" if not vc_missing else "缺失",
+            "version": vc_summary,
+            "enabled": True,
+        },
         "XXMI": {
             "display": "XXMI Launcher",
             "source": "builtin",

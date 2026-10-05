@@ -14,6 +14,7 @@ import { refreshState } from "../store.js";
 import { loadSettings } from "../lib/settings.js";
 import { useLogAutoScroll } from "../lib/autoscroll.js";
 import { settings, saveSetting, syncConfig } from "../lib/settings.js";
+import { promptVcRuntimeInstall } from "../lib/vcRuntime.js";
 import { store } from "../store.js";
 import Card from "../components/ui/Card.vue";
 import Btn from "../components/ui/Btn.vue";
@@ -553,6 +554,13 @@ async function oneClick() {
       }
     }
   } catch (e) { /* 查不到就照常启动，绝不因为它挡住用户 */ }
+
+  // 缺 VC++ 运行库 ⇒ 先问一次（**建议安装**；跳过也照常启动，绝不挡流程）。
+  // 依赖页那条走的是 `ensure_all` 的结果，这里走主动查询 —— 两条路共用同一个弹窗。
+  try {
+    const vc = await call("vc_runtime_status");
+    if (vc && Array.isArray(vc.missing) && vc.missing.length) await promptVcRuntimeInstall();
+  } catch (e) { /* 查不到就别挡启动 */ }
 
   running.value = true;
   try {

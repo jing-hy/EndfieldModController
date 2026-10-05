@@ -120,3 +120,50 @@ def test_unreadable_versions_do_not_claim_failure(monkeypatch):
 def test_summary_lists_missing_and_present(monkeypatch):
     summary = initialize.vc_runtime_summary(_all("14.42.34438.0", missing=("msvcp140.dll",)))
     assert "msvcp140.dll" in summary and "14.42.34438.0" in summary
+
+
+# --------------------------------------------------------------- 接进"依赖安装"（2026-10-05）
+def test_builtin_report_has_vc_entry(monkeypatch, tmp_path):
+    """依赖页列表里要有这一行（带版本号），并标成**系统组件** —— 前端据此换装法。"""
+    from endfieldmodcontroller import runtime_deps
+    from endfieldmodcontroller.config import AppConfig
+
+    monkeypatch.setattr(initialize, "_vc_runtime_versions", lambda: _all("14.51.36247.0"))
+    config = AppConfig(
+        runtime_dir=str(tmp_path / "runtime"),
+        builtin_runtime_dir=str(tmp_path / "runtime" / "builtin"),
+        library_dir=str(tmp_path / "library"),
+    )
+    entry = runtime_deps.builtin_report(config).get("VC++ 运行库")
+    assert entry, "依赖页少了 VC++ 运行库这一行"
+    assert entry["system_component"] is True
+    assert entry["status"] == "已安装" and "14.51.36247.0" in entry["version"]
+
+
+def test_vc_runtime_result_states(monkeypatch):
+    """缺 ⇒ `needs_install`（前端据此弹「安装/跳过」）；在位 ⇒ `present`（不打扰）。"""
+    from endfieldmodcontroller import runtime_deps
+
+    monkeypatch.setattr(initialize, "_vc_runtime_versions",
+                        lambda: _all("14.51.0", missing=("msvcp140.dll",)))
+    missing_result = runtime_deps.vc_runtime_result()
+    assert missing_result.status == "needs_install"
+    assert "msvcp140.dll" in missing_result.message
+
+    monkeypatch.setattr(initialize, "_vc_runtime_versions", lambda: _all("14.51.0"))
+    assert runtime_deps.vc_runtime_result().status == "present"
+
+
+def test_ensure_all_treats_needs_install_as_ok_and_appends_vc():
+    """钉住两件事（都是"忘了就静默失效"的那种）：
+
+    ① `needs_install` 必须在 `ok_status` 里 —— 否则它会被当成失败项**重试 3 次**；
+    ② `ensure_all` 结束前要把这条检查**追加进结果** —— 否则前端永远看不到、也就不会弹窗。
+    """
+    import inspect
+
+    from endfieldmodcontroller import runtime_deps
+
+    src = inspect.getsource(runtime_deps.ensure_all)
+    assert "needs_install" in src, "needs_install 没进 ok_status ⇒ 会被当失败重试 3 次"
+    assert "vc_runtime_result()" in src, "ensure_all 没把 VC 检查追加进结果"

@@ -95,7 +95,12 @@ class RuntimeDepsTests(unittest.TestCase):
             runtime_deps._download_extract = original_extract
             runtime_deps._release_info = original_release
             runtime_deps._asset_url = original_asset
-        self.assertEqual([r.key for r in results], ["XXMI", "XXMI-Libs", "EFMI", "Poser"])
+        # ⚠️ 2026-10-05 起：`ensure_all` 末尾会**追加一条 VC++ 运行库检查** —— 它**不是我们的
+        # 组件**（不是解压包，得跑微软官方安装器），所以不进 `steps`，只在结果里报"要不要装"。
+        # 因此这里改成两段断言：前四个仍是"装好的组件"，最后一条是**环境检查**。
+        keys = [r.key for r in results]
+        self.assertEqual(keys[:4], ["XXMI", "XXMI-Libs", "EFMI", "Poser"])
+        self.assertEqual(keys[4:], ["VC++ 运行库"], "VC++ 运行库那条检查必须还在（前端靠它弹窗）")
         self.assertTrue(self.config.xxmi_launcher.endswith("XXMI Launcher.exe"))
         efmi_root = self.config.builtin_runtime_path / "XXMI" / "EFMI"
         self.assertTrue((efmi_root / "Core" / "EFMI" / "main.ini").is_file())
