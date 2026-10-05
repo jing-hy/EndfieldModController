@@ -1188,11 +1188,26 @@ def game_dir_inventory_text(config: Any, game_dir: Path | None, *, limit: int = 
         except Exception as exc:  # noqa: BLE001
             is_proxy, kind = False, f"判定失败: {exc}"
         size = path.stat().st_size if path.is_file() else 0
+        # 「与 System32 原版一模一样的副本」要**点名**（2026-10-05）：它不是第三方注入，
+        # 所以净化**不会动它**（搬走还可能让启动器 `verify_files.json` 校验失败），
+        # 但它会让进程里出现**同名不同路径的两份模块**（d3d11 按 exe 目录优先命中它，
+        # 而 ReShade 用完整路径 hook System32 那份）⇒ 图形 hook 打偏、注入链错位。
+        # 这类文件以前在这里只显示"（不是 proxy）归属=未知"，等于什么也没说。
+        note = ""
+        if path.is_file() and not is_proxy:
+            try:
+                if reshade_integration.duplicate_of_system_module(path):
+                    note = ("  ⚠️ **与 System32 原版内容完全一致（系统模块副本）**："
+                            "净化不会动它（不是第三方注入、搬走可能让启动器校验失败），"
+                            "但它会让进程里出现同名不同路径的两份模块，注入链的 hook 可能打偏")
+            except Exception:  # noqa: BLE001 —— 判不出来就别乱说
+                note = ""
         lines.append(
             f"{name}: {'**loader proxy**' if is_proxy else '（不是 proxy）'} "
             f"归属={kind or '未知'} size={size:,} B "
             f"原版备份={backup.name + '（在）' if backup.is_file() else '**缺失（无法安全还原）**'}"
             + (f" 另有停用副本 {parked.name}" if parked.is_file() else "")
+            + note
         )
     lines.append("")
     lines.append("== plugin 目录（会被 proxy 全部加载）==")

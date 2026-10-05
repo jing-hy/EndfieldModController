@@ -45,8 +45,14 @@ POSER_DATA_PATHS = (
     "plugin/mmd",
     "plugin/poser_layout.ini",
 )
-# ReShade 的痕迹（本方案承诺不写游戏目录，出现就是残留）
-RESHADE_MARKERS = ("d3d12.dll", "ReShade.ini", "ReShade.log", "ReShadePreset.ini", "reshade-shaders")
+# ReShade 的痕迹（本方案承诺不写游戏目录，出现就是残留）。
+# ⚠️ **2026-10-05 补 `dxgi.dll`**（用户批准）：反馈者那台游戏目录里就躺着一份
+# `dxgi.dll`(1,294,864 B) + `d3d12.dll`(146,152 B)（同为 9-14 生成），而这份名单里**只有
+# `d3d12.dll`** —— 于是 `dxgi.dll` 从来没人管（诊断包里它的归属一直是"未知"）。
+# 补进来是安全的：`.dll` 一律走 `_looks_like_reshade_payload()` 的**内容级**判定
+# （loader 标记 / OptiScaler 特征 / 与 System32 原版不同 / 正文里有 `ReShade`/`crosire`），
+# **同名但是官方原版的模块一个都不会动** —— 这正是"同名的官方文件一律不动"那条承诺。
+RESHADE_MARKERS = ("d3d12.dll", "dxgi.dll", "ReShade.ini", "ReShade.log", "ReShadePreset.ini", "reshade-shaders")
 # DLSS5 专属运行库：游戏原版**没有**这个文件
 DLSS5_ONLY_LIBS = ("nvngx_dlssnr.dll",)
 # 方案里的"新版"nvngx（出现即说明游戏原版被替换过）
@@ -245,6 +251,12 @@ def audit(config: AppConfig, *, log: Log = None) -> dict[str, Any]:
 
     for name in RESHADE_MARKERS:
         path = game_dir / name
+        # ⚠️ **去重**（2026-10-05）：`d3d12.dll` / `dxgi.dll` 这些名字**同时**出现在
+        # ① 段的 `LOADER_PROXY_MODULES` 里 —— 一个文件既被判"第三方 proxy"（① 段）、
+        # 内容又像 ReShade 载荷（这一段）时会被报**两次**，净化清单里同一份文件出现两条
+        # （备份/还原时两边互相打架）。同相对路径只留先出现的那条。
+        if any(item.relative == name for item in findings):
+            continue
         if path.is_file():
             # dll 走内容级判定（见 _looks_like_reshade_payload）：只有真的像
             # ReShade 载荷才移走，避免误伤游戏自带/他方的 d3d12.dll。
@@ -259,6 +271,15 @@ def audit(config: AppConfig, *, log: Log = None) -> dict[str, Any]:
             total = sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
             findings.append(Finding(
                 "reshade", name, str(path), is_dir=True, size=total, detail="ReShade shader 目录残留",
+            ))
+    # ReShade 的**轮转日志**（`ReShade.log1` / `ReShade.log2`…）：`RESHADE_MARKERS` 只能列精确名，
+    # 于是"游戏目录里装过 ReShade"的铁证会一直留着（2026-10-05 反馈者的包里就有 `ReShade.log1`，
+    # 净化完全不认它）。按 `ReShade.log<数字>` 扫，一并备份移走；`ReShade.log` 本身由上面那段管。
+    for extra in sorted(game_dir.glob("ReShade.log[0-9]*")):
+        if extra.is_file():
+            findings.append(Finding(
+                "reshade", extra.name, str(extra), size=extra.stat().st_size, sha256=_sha256(extra),
+                detail="ReShade 的轮转日志（说明游戏目录里装过 ReShade）",
             ))
     for name in DLSS5_ONLY_LIBS:
         path = game_dir / name
@@ -702,6 +723,32 @@ def list_backups(config: AppConfig) -> list[dict[str, Any]]:
             continue
         data = fsutil.read_json(manifest)
         if not data:
+            # ⚠️⚠️ **清单在、但读不出来（JSON 写坏 / 只写了一半）也要列出来**（2026-10-05 补）。
+            #    上面那段处理的是"**没有**清单"，这里处理的是"**有**清单但解析失败"——
+            #    两者都可能是"备份搬到一半被打断"。而备份语义第一条就是「**备份必须能被找到**」：
+            #    漏掉这一类的后果非常具体 —— `restore()` 会说"没有找到任何游戏目录备份"，
+            #    于是「依赖清空重新下载」把 `runtime\` 连同这份**唯一的备份**一起删掉
+            #    （2026-10-04 那条 P0 保护的判据正好因此失效）。
+            #    判据与上面保持同一口径：**`files\` 里真的有东西才列**（空壳删了没损失，
+            #    列出来反而会让"清空"永远被拦下）。
+            files_dir = item / "files"
+            try:
+                has_payload = files_dir.is_dir() and any(files_dir.rglob("*"))
+            except OSError:
+                has_payload = False
+            if not has_payload:
+                continue
+            rows.append({
+                "stamp": item.name,
+                "kind": "ngx_conflict" if item.name.startswith("ngx-conflict-") else "clean",
+                "status": "unknown",
+                "incomplete": True,
+                "created_at": 0,
+                "entries": 0,
+                "game_dir": "",
+                "path": str(item),
+                "note": "这份备份的清单读不出来（写坏或写了一半），内容在 files\\ 下，可手动取回",
+            })
             continue
         kind = str(data.get("kind") or "")
         if not kind:

@@ -1515,21 +1515,67 @@ def native_dlss_present(game_dir: Path | None) -> dict[str, Any]:
     return result
 
 
-def system_module_differs(name: str, path: Path) -> bool:
-    """游戏目录里这个模块与 `System32` 的原版**是不是不同的东西**（被第三方换过）。
-
-    只比大小（够用且便宜）：OptiScaler 这类工具正是把 `winhttp.dll` 放在游戏目录
-    顶替系统模块 —— 大小必然不同。系统里没有这个名字时返回 False（不据此判定，
-    免得误伤游戏自带的同名文件）。
-    """
+def _system_module_path(name: str) -> Path | None:
+    """同名系统模块在 `System32` 里的位置（没有返回 None）。"""
     root = os.environ.get("SystemRoot") or r"C:\Windows"
     original = Path(root) / "System32" / name
     try:
-        if not original.is_file():
-            return False
-        return original.stat().st_size != path.stat().st_size
+        return original if original.is_file() else None
+    except OSError:
+        return None
+
+
+def _file_digest(path: Path) -> str:
+    """sha256（读不到返回空串，调用方据此判"算不出来"）。"""
+    from . import fsutil
+
+    try:
+        return fsutil.sha256_file(path)
+    except OSError:
+        return ""
+
+
+def system_module_differs(name: str, path: Path) -> bool:
+    """游戏目录里这个模块与 `System32` 的原版**是不是不同的东西**（被第三方换过）。
+
+    ⚠️ **2026-10-05 升级：大小相同也要比内容。** 原先**只比大小** —— 于是"被换成同大小的
+    另一份 dll"这种顶替**完全判不出来**，净化会把它当成"游戏自带"留在游戏目录里；
+    而它照样会让进程里出现**同名不同路径的两份模块**（`d3d11.dll` 按 exe 目录优先加载到
+    游戏目录那份，ReShade 却用完整路径 hook `System32` 那份）⇒ 图形 hook 打在"另一份"上、
+    注入链错位（用户 2026-10-05 那份诊断包里，游戏目录就躺着一份 `dxgi.dll`）。
+    现在：**大小不同 ⇒ 不同；大小相同再比 sha256**（1 MB 级文件，代价可忽略）。
+    系统里没有这个名字时返回 False（不据此判定，免得误伤游戏自带的同名文件）。
+    """
+    original = _system_module_path(name)
+    if original is None:
+        return False
+    try:
+        if original.stat().st_size != path.stat().st_size:
+            return True
     except OSError:
         return False
+    return _file_digest(original) != _file_digest(path)
+
+
+def duplicate_of_system_module(path: Path) -> bool:
+    """这份同名模块是不是 `System32` 原版**一模一样的副本**（大小 + sha256 都相同）。
+
+    为什么要单独判它（2026-10-05）：这种副本**不是**第三方注入 —— 净化**不该动它**
+    （它可能就是启动器/游戏更新铺的，`verify_files.json` 还认它，搬走会让官方校验失败），
+    但它会让进程里出现**同名不同路径的两份模块** ⇒ 注入链的 hook 可能打偏。
+    所以口径是：**不搬，但要报**（诊断包里点名 + 建议）。判不出来（读不到 / System32 没这名字）
+    一律 False —— 宁可漏报，不可误报。
+    """
+    original = _system_module_path(path.name)
+    if original is None:
+        return False
+    try:
+        if original.stat().st_size != path.stat().st_size:
+            return False
+    except OSError:
+        return False
+    left, right = _file_digest(original), _file_digest(path)
+    return bool(left) and left == right
 
 
 def is_third_party_proxy(path: Path) -> str:

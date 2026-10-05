@@ -85,6 +85,12 @@ async function pollCrash() {
       // **也带 conflicts 列表**（crashwatch 特意把"显卡编译器崩"与"Mod 冲突"分开，
       // 就是为了避免让用户白折腾去清 Mod）—— 多加这两个条件等于把它又合并回去了。
       const isConflict = kind === "mod_conflict";
+      // 崩溃后的**建议动作**（用户 2026-10-05：「崩溃不要卸掉功能，应该弹窗建议清空依赖
+      // 并重新下载重试」）。后端只在"崩在图形/注入链那层"时才给 advice（实测判据：
+      // WER 故障模块 / DLSS5 插件自己的崩溃记录落在 dxgi / d3d11 / d3d12 / nvngx…），
+      // 所以这里不自己判断"该不该重装"，只负责把它摆出来 + 给一个能点的按钮。
+      const advice = (fresh.advice && typeof fresh.advice === "object") ? fresh.advice : {};
+      const canRedownload = String(advice.action || "") === "reset_dependencies_and_redownload";
       const lines = [
         `游戏进程在启动后异常结束了（${reason}）。`,
         "",
@@ -99,6 +105,9 @@ async function pollCrash() {
       } else if (cause.detail || cause.reason) {
         lines.push(`归因：${cause.detail || cause.reason}`, "");
       }
+      if (advice.message) {
+        lines.push(String(advice.message), "");
+      }
       lines.push(
         `管理器已经把现场收集成一个诊断包：`,
         path || "（路径读取失败）",
@@ -106,14 +115,20 @@ async function pollCrash() {
       );
       if (mods.length) lines.push(`当时启用的 Mod：`, `· ${mods.join("\n· ")}`, "");
       lines.push("把这个 zip 发到 Issues 或 QQ 群，就能定位原因。");
+      const extraButtons = [];
+      if (isConflict) extraButtons.push({ text: "去清理冲突", value: "conflict" });
+      if (canRedownload) extraButtons.push({ text: "清空依赖并重新下载", value: "redownload" });
       const choice = await showModalDialog({
         title: isConflict ? "终末地异常退出（疑似 Mod 冲突）" : "终末地异常退出",
         message: lines.join("\n"),
         okText: "打开诊断包", cancelText: "知道了",
-        // 冲突时多给一个"去清理"的按钮（0.9.5 的主路径）
-        extraButtons: isConflict ? [{ text: "去清理冲突", value: "conflict" }] : [],
+        // 冲突时多给一个"去清理"的按钮（0.9.5 的主路径）；
+        // 崩在注入链时多给一个"清空依赖重下"的按钮（2026-10-05 加，见 `redownloadDependencies`）。
+        extraButtons,
       });
-      if (choice === "conflict") {
+      if (choice === "redownload") {
+        await redownloadDependencies();
+      } else if (choice === "conflict") {
         // 跳到 Mod 库并让那边自己把冲突窗弹出来（它读 `conflict_groups`）
         store.tab = "library";
         try {
@@ -129,6 +144,41 @@ async function pollCrash() {
   } catch (e) { /* 忽略轮询错误 */ } finally {
     crashPolling = false;
   }
+}
+
+// 「清空依赖并重新下载」——崩溃弹窗里的建议动作（用户 2026-10-05：
+// 「**崩溃不要卸掉功能，应该弹窗建议清空依赖并重新下载重试**」）。
+// 与设置页那个红按钮走**同一条后端路径**（`reset_dependencies_and_redownload`），
+// 也照它一样：先确认（破坏性动作）→ 清空 → 跳依赖页自动开跑。
+// ⚠️ 这里**不动任何插件开关**：用户的功能照旧开着，只是把整套组件重装一遍再试。
+async function redownloadDependencies() {
+  const ok = await showModalDialog({
+    title: "清空依赖并重新下载",
+    message: [
+      "会依次做三件事：",
+      "① 从备份区还原终末地本体（没做过净化就跳过）；",
+      "② 清掉 runtime 与 assets，然后重新下载并展开；",
+      "③ 跳到「依赖」页开始一键下载。",
+      "",
+      "你的 Mod 库、Mod 备份与路径设置都不受影响。",
+      "清完到装好之间，组件列表会先变空，属于正常现象。",
+    ].join("\n"),
+    okText: "清空并重新下载",
+    cancelText: "取消，什么都不做",
+    focusCancel: true,
+  });
+  if (!ok) return;
+  let result = null;
+  try {
+    result = await call("reset_dependencies_and_redownload");
+  } catch (e) { /* call 已经弹过错误窗了 */ }
+  if (!result || result.ok === false) {
+    showToast((result && result.message) || "清空失败，详情见运行日志", "danger");
+    return;
+  }
+  showToast("已清空 runtime 与 assets，正在跳到依赖页重新下载…", "success");
+  store.autoStartDeps = true;
+  store.tab = "dependencies";
 }
 
 // 公告消费（**幂等**）：后端公告由后台线程拉取，且要等首屏就绪（最多 15 秒）才请求，

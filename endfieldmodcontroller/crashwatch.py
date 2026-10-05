@@ -134,8 +134,14 @@ def is_crash(evidence: dict[str, Any]) -> bool:
         就是"正常退出也弹异常退出"的根因。
       * **`uploadCrash` 才是崩溃证据**（会上传崩溃转储）。实测：真崩溃 18:13/18:16
         有 uploadCrash，用户关窗口 18:21/18:25 没有。
+      * **WER 报告也是崩溃证据**（2026-10-05 补）：进程真崩时 Windows 会在
+        `%LOCALAPPDATA%\\Microsoft\\Windows\\WER\\ReportArchive\\AppCrash_*` 留一份报告，
+        里面直接写着"故障模块 + 异常代码"。这条补上的直接原因：2026-10-05 那份诊断包里
+        8 次真崩（`dxgi.dll` + `0xA816`，WER 齐全）却**每次都被判成"未发现崩溃迹象"** ——
+        因为终末地的崩溃处理器把异常吞了、CrashSight 没上传转储，而我们只看 uploadCrash。
 
-    判定顺序：uploadCrash → normal_exit → Player.log 崩溃标记。
+    判定顺序：uploadCrash → 正常退出统计 → WER 报告 → Player.log 崩溃标记。
+    （"有正常退出统计"排在 WER 之前：真崩不会有卸载统计，反过来能挡住时间窗没卡准的旧报告。）
     """
     # ① 真正上传了崩溃转储 —— 最可靠的崩溃证据
     if evidence.get("crash_upload"):
@@ -143,8 +149,58 @@ def is_crash(evidence: dict[str, Any]) -> bool:
     # ② 有正常退出卸载统计 —— 正常退出
     if evidence.get("normal_exit"):
         return False
-    # ③ 两者都没有时，再看 Player.log 里有没有崩溃标记
+    # ③ 本次运行时段里留下了 WER 应用程序错误报告
+    if evidence.get("wer_crash"):
+        return True
+    # ④ 都没有时，再看 Player.log 里有没有崩溃标记
     return bool(evidence.get("player_log_crash"))
+
+
+# ---------------------------------------------------------------------------
+# WER 报告：Windows 自己写的崩溃记录（"故障模块 + 异常代码"最硬的一手材料）
+# ---------------------------------------------------------------------------
+def _wer_text(path: Path) -> str:
+    """WER 报告是 UTF-16LE（带 BOM）；读不出来时退回 utf-8，别让编码问题吃掉证据。"""
+    for encoding in ("utf-16", "utf-8"):
+        try:
+            return path.read_text(encoding=encoding, errors="replace")
+        except (OSError, UnicodeError):
+            continue
+    return ""
+
+
+def wer_crash_modules(since: float | None = None) -> list[str]:
+    """本次运行时段内 WER 报告里的**故障模块名**（小写，去重）。
+
+    `since` = 游戏进程启动时刻；只认 `mtime >= since - 5s` 的报告，
+    否则会把上一次崩溃的报告算到这一次头上（同 `dlss5_crash_record` 的口径）。
+    """
+    out: list[str] = []
+    try:
+        from . import diagnostics
+
+        paths = diagnostics.wer_report_paths()
+    except Exception:  # noqa: BLE001 —— 拿不到就当没有，绝不影响主流程
+        return out
+    for path in paths:
+        try:
+            if since is not None and path.stat().st_mtime < float(since) - 5:
+                continue
+        except OSError:
+            continue
+        text = _wer_text(path)
+        name = ""
+        for line in text.splitlines():
+            # Sig[3] = 故障模块名称；Sig[0..2] 是应用程序名/版本/时间戳
+            if line.startswith("Sig[3].Value="):
+                name = line.split("=", 1)[1].strip()
+                break
+        if not name:
+            continue
+        name = Path(name).name.lower()
+        if name and name not in out:
+            out.append(name)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -553,6 +609,72 @@ def conflict_pair_proven(config: AppConfig, a: str, b: str) -> bool:
     return False
 
 
+# ---------------------------------------------------------------------------
+# 崩溃后的**下一步建议**（只给建议，绝不擅自改用户的功能开关）
+# ---------------------------------------------------------------------------
+# 用户 2026-10-05 定调（先说"我需要能自动处理，不像就直接不加载"，随即纠正为）：
+# 「**崩溃不要卸掉功能，应该弹窗建议清空依赖并重新下载重试**」。
+# ⇒ 崩溃之后我们**不动任何插件开关**，只做两件事：
+#   ① 把"这次崩在哪一层"用实测证据说清楚（WER 故障模块 / DLSS5 插件自己的 CRASH RECORDED）；
+#   ② 判据指向"图形/注入链"时，在弹窗里给出**「清空依赖并重新下载」**这个现成动作
+#      （`api.reset_dependencies_and_redownload`，设置页那个红按钮同一条路），由用户点。
+# 为什么不自动关插件：那是**卸功能** —— 用户少了一样他本来要用的东西，而且多半治不到根因
+# （组件配套坏了的时候，关掉插件游戏照样起不来，只是白白少了个功能）。
+GRAPHICS_FAULT_MODULES = frozenset({
+    "dxgi.dll", "d3d11.dll", "d3d12.dll", "d3d12core.dll", "d3dcompiler_47.dll",
+    "vulkan-1.dll", "nvngx.dll", "nvngx_dlss.dll", "nvngx_dlssnr.dll",
+    "nvngx_dlssd.dll", "nvngx_dlssg.dll", "nvngx_deepdvc.dll", "nvapi64.dll",
+    "sl.interposer.dll", "sl.common.dll", "nvgpucomp64.dll",
+})
+
+
+def fault_modules(config: AppConfig, evidence: dict[str, Any]) -> list[str]:
+    """这次崩溃的故障模块（小写 basename，去重）—— 只用实测证据，不猜。
+
+    两个来源：① DLSS5 插件自己写在 `dlss5-feed.log` 里的 `### CRASH RECORDED ###`
+    （它就在游戏进程里，记下了 faulting module）；② Windows 的 WER 报告
+    （`Sig[3]` = 故障模块名称）。都没有就返回空 —— 空 ≠ 没崩，只是**没拿到是谁崩的**。
+    """
+    out: list[str] = []
+    record = evidence.get("dlss5_crash")
+    if not isinstance(record, dict):
+        record = dlss5_crash_record(config, evidence.get("_started_at")) or {}
+    module = str(record.get("module") or "").strip()
+    if module:
+        out.append(Path(module).name.lower())
+    for name in (evidence.get("wer_modules") or []):
+        name = Path(str(name)).name.lower()
+        if name and name not in out:
+            out.append(name)
+    return out
+
+
+def crash_advice(config: AppConfig, evidence: dict[str, Any]) -> dict[str, Any]:
+    """崩溃后给用户的下一步建议（**空 dict = 这次给不出具体建议**）。
+
+    只在"真崩了 + 崩在图形/注入链那层"时给：这两条都是实测判据，够格让人去重装组件；
+    崩在游戏自己模块（unityplayer / GameAssembly）上时不建议重装依赖 —— 那是白折腾，
+    老实让他把诊断包发出去。
+    """
+    if not is_crash(evidence):
+        return {}
+    hit = [m for m in fault_modules(config, evidence) if m in GRAPHICS_FAULT_MODULES]
+    if not hit:
+        return {}
+    return {
+        "kind": "rebuild_dependencies",
+        "title": "建议：清空依赖并重新下载",
+        "action": "reset_dependencies_and_redownload",
+        "fault_modules": hit,
+        "message": (
+            "这次是崩在 **" + "、".join(hit) + "**（图形 / 注入链那一层），不是游戏自己的逻辑。\n\n"
+            "这种情况最常见的原因是组件配套坏了、或者注入链被别的工具改过一遍。"
+            "建议**清空依赖并重新下载**之后重试："
+            "它会重装整套组件、重新展开随包资产，**你的 Mod 库、Mod 备份与路径设置都会保留**。"
+        ),
+    }
+
+
 def prelaunch_risks(config: AppConfig) -> dict[str, Any]:
     """一键启动前的风险检查：这套 Mod 会不会崩（静态冲突 + 崩溃记忆）。
 
@@ -780,6 +902,9 @@ def collect_evidence(config: AppConfig, *, started_at: float | None = None,
                      exit_time: float | None = None,
                      alive_seconds: float | None = None) -> dict[str, Any]:
     """收集一次完整的崩溃现场。"""
+    # WER 故障模块要取两次（`wer_crash` 判"崩没崩"、`wer_modules` 给归因/自动降级用），
+    # 算一次共享（读的是同一批文件，别重复 IO）。
+    wer_modules = wer_crash_modules(started_at)
     evidence: dict[str, Any] = {
         "collected_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "process": {"name": GAME_PROCESS, "started_at": None, "exit_time": None, "alive_seconds": alive_seconds},
@@ -788,6 +913,11 @@ def collect_evidence(config: AppConfig, *, started_at: float | None = None,
         "crash_sight": _crash_sight_lines(config, since=started_at),
         "crash_upload": _crash_sight_upload_lines(config, since=started_at),
         "normal_exit": _normal_exit_marker(),
+        # 两张"是谁崩的"硬证据（2026-10-05 加）：DLSS5 插件自己写的崩溃记录，
+        # 以及 Windows 的 WER 报告。`is_crash` 与"注入链自动降级"都要用。
+        "dlss5_crash": dlss5_crash_record(config, started_at),
+        "wer_modules": wer_modules,
+        "wer_crash": bool(wer_modules),
         "crashes": [],
         "player_log_tail": [],
         "game_errors": _extract_game_errors(config),
@@ -1181,9 +1311,18 @@ def make_bundle(config: AppConfig, evidence: dict[str, Any] | None = None,
     if evidence is None:
         evidence = collect_evidence(config)
 
+    # 崩溃后的建议（算一次，报告正文与前端弹窗共用）—— 见 `crash_advice`。
+    advice = crash_advice(config, evidence)
+
     # ① 崩溃报告正文
     try:
         report_text = _render_report(evidence)
+        if advice:
+            # 建议也要落在报告里：用户把 zip 发出去、或自己翻日志时，
+            # 一眼就该看到"下一步该做什么"，而不是只有一堆现场数据。
+            report_text += ("\n" + "=" * 72 + "\n崩溃后的建议\n" + "=" * 72 + "\n"
+                            + str(advice.get("title") or "") + "\n\n"
+                            + str(advice.get("message") or "") + "\n")
         (bundle_dir / "controller-crash-report.log").write_text(report_text, encoding="utf-8")
     except Exception as exc:  # noqa: BLE001
         (bundle_dir / "controller-crash-report.log").write_text(f"报告生成失败: {exc}\n", encoding="utf-8")
@@ -1315,6 +1454,10 @@ def make_bundle(config: AppConfig, evidence: dict[str, Any] | None = None,
         "game_logs": game_logs,
         "crashed": is_crash(evidence),
         "cause": cause,
+        # 崩溃后的**下一步建议**（2026-10-05）：崩在图形/注入链那层时给
+        # 「清空依赖并重新下载」这条路（前端弹窗据此多一个按钮）。空 dict = 这次没有具体建议。
+        "advice": advice,
+        "fault_modules": fault_modules(config, evidence),
         "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
     _log(config, f"崩溃包已生成: {zip_path.name if ok_zip else bundle_dir.name}（含终末地日志 {len(game_logs)} 份）")
@@ -1537,7 +1680,12 @@ def start_watch(config: AppConfig, *, timeout: float = 6 * 3600.0,
             _emit(f"崩溃监控: 游戏已退出（存活 {alive:.0f} 秒），正在收集现场…")
 
             # ③ 收集现场 + 写报告 + 打崩溃包
-            time.sleep(3.0)   # 等崩溃报告落盘
+            # ⚠️ 等 **6 秒**（2026-10-05 由 3 秒加长）：Windows 的 **WER 报告**
+            #    （`AppCrash_*.wer`，里面写着"故障模块 + 异常代码"）是崩溃取证里最硬的一手材料，
+            #    而它由 WerFault 在进程终止后**几秒内**才落盘；等 3 秒时常常还没写完，
+            #    于是"真崩了"被判成"未发现崩溃迹象"（2026-10-05 那份诊断包里 8 次真崩
+            #    全是这个下场）。多等这 3 秒只影响崩溃包生成时间，换的是判据不再漏。
+            time.sleep(6.0)   # 等崩溃报告（CrashSight / WER / 游戏自身的 Crash_* 目录）落盘
             evidence = collect_evidence(config, started_at=started, exit_time=exit_time, alive_seconds=alive)
             path = write_report(config, evidence)
             crashed = is_crash(evidence)
@@ -1551,6 +1699,19 @@ def start_watch(config: AppConfig, *, timeout: float = 6 * 3600.0,
                       + ("" if crashed else "，正常退出不提示"))
             except Exception as exc:  # noqa: BLE001
                 _emit(f"崩溃监控: 打包失败 {exc}")
+
+            # ③-b 崩溃后的**建议**（用户 2026-10-05：「崩溃不要卸掉功能，应该弹窗建议清空
+            #      依赖并重新下载重试」）。这里**只产出建议、不动任何开关**；
+            #      前端弹窗据此多给一个「清空依赖并重新下载」按钮，点不点由用户决定。
+            try:
+                advice = crash_advice(config, evidence)
+                if advice:
+                    _WATCH["advice"] = advice
+                    if isinstance(bundle, dict):
+                        bundle["advice"] = advice
+                    _emit("崩溃监控: 建议 —— " + str(advice.get("title") or ""))
+            except Exception as exc:  # noqa: BLE001 —— 建议算不出来不该影响崩溃包本身
+                _emit(f"崩溃监控: 生成建议失败（忽略）: {exc}")
         except Exception as exc:  # noqa: BLE001
             _emit(f"崩溃监控异常: {exc}")
         finally:

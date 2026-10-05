@@ -414,6 +414,7 @@ def fetch(
     headers: dict[str, str] | None = None,
     line_mode: str = "",
     cancel: Callable[[], bool] | None = None,
+    tolerate_error_status: bool = False,
 ) -> tuple[str, bytes]:
     """按线路取一小段内容（HTML/JSON 这类小请求），返回 ``(最终 URL, 内容)``。
 
@@ -426,6 +427,13 @@ def fetch(
     「**探测期间无法暂停**」「点了**终止也还是探测中**」）。
     现在复用本项目已有那套"短超时轮询 + `select()` 可读探测"：每秒醒一次检查 `cancel()`，
     被叫停就抛 `Cancelled`（**不是**线路故障，所以不要因此去换下一条线路）。
+
+    *tolerate_error_status*（2026-10-05 加，默认关）：**站点用 4xx/5xx 也能带正文**时别把
+    正文丢掉。加它的直接起因：`reshade.me` 首页现在恒定返回 **HTTP 500**，但正文里带着
+    `ReShade_Setup_<版本>_Addon.exe` —— 我们据此取版本号的那条链于是全断，
+    依赖页里「ReShade 底座 (d3d12.dll)」**永远装不上**（用户原话：「别的都没问题，
+    就 d3d12 下不来」）。开启后：只要响应体读到了内容就当成功返回，**错误码照旧记账**，
+    由调用方自己判断正文够不够用。默认 False = 维持"非 2xx 即线路失败"的老行为。
     """
     mode = (line_mode or get_line_mode() or "auto").lower()
     if mode not in LINE_MODES:
@@ -465,6 +473,19 @@ def fetch(
             return final, b"".join(chunks)
         except Cancelled:
             raise                                   # 用户停的，别当线路故障去换下一条
+        except urllib.error.HTTPError as exc:
+            # ⚠️ 必须排在 `URLError` 之前（`HTTPError` 是它的子类）。
+            if tolerate_error_status:
+                try:
+                    body = exc.read()
+                except OSError:
+                    body = b""
+                if body:
+                    _remember_line(line.name, True, 0.0)
+                    return (exc.geturl() or url), body
+            last_error = exc
+            _remember_line(line.name, False, 0.0)
+            continue
         except (urllib.error.URLError, OSError, TimeoutError) as exc:
             last_error = exc
             _remember_line(line.name, False, 0.0)

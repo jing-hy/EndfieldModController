@@ -132,6 +132,7 @@ def _http_get(
     policy: str = "",
     dead_mbps: float | None = None,
     cancel: Callable[[], bool] | None = None,
+    tolerate_error_status: bool = False,
 ) -> bytes | Path:
     # **一律走 fastnet**：它是唯一会在直连不通时自动换镜像线路的通道。
     # 这里以前是裸 urllib，于是 XXMI Libraries 的 `Manifest.json`（走本函数下载）
@@ -147,7 +148,8 @@ def _http_get(
         # `cancel` **静默丢了** —— 而「探测香蕉网信息」（`gamebanana_profile` 读 JSON）
         # 正是走这里，于是用户点「暂停 / 终止」在探测期间完全无效（他的原话：
         # 「探测期间无法暂停」「点了终止也还是探测中」）。`fastnet.fetch` 现已支持中途叫停。
-        _final, body = fastnet.fetch(url, timeout=timeout, cancel=cancel)
+        _final, body = fastnet.fetch(url, timeout=timeout, cancel=cancel,
+                                     tolerate_error_status=tolerate_error_status)
         if expected_sha256:
             actual = hashlib.sha256(body).hexdigest()
             expected = fastnet.norm_sha256(expected_sha256)

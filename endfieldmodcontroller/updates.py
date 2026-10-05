@@ -20,6 +20,7 @@ import subprocess
 import tempfile
 import urllib.error
 import urllib.request
+import zipfile
 from pathlib import Path
 from typing import Any, Callable
 
@@ -318,16 +319,22 @@ def check_updates(config: AppConfig, log: Callable[[str], None] | None = None) -
                               "builtin": {}, "errors": []}
 
     # ReShade 官方最新版
+    # ⚠️ **2026-10-05：版本号统一走 `dlss5_fetcher.reshade_latest_version()`**。
+    #    这里原来是**第二份独立实现**（裸 urllib 抓首页 + 自己写正则），而 `reshade.me/`
+    #    现在恒定返回 HTTP 500 ⇒ 这一处照样报 `ReShade 检查失败: HTTP Error 500`，
+    #    用户看到的"检查更新"里 ReShade 永远失败（反馈者日志里 `reshade: null` 就是它）。
+    #    统一之后：首页抽风时容忍 500 读正文、连正文都没有就退回内置基线版本，不再整项失败。
     try:
-        req = urllib.request.Request(RESHADE_HOMEPAGE, headers={"User-Agent": USER_AGENT})
-        with urllib.request.urlopen(req, timeout=25) as response:
-            html = response.read().decode("utf-8", errors="replace")
-        matches = re.findall(r"ReShade_Setup_(\d+\.\d+\.\d+)_Addon\.exe", html)
+        from . import dlss5_fetcher
+
+        latest = dlss5_fetcher.reshade_latest_version(log)
         current = component_versions(config)["reshade"]["version"]
-        latest = matches[0] if matches else ""
         report["reshade"] = {
             "current": current,
             "latest": latest,
+            # ⚠️ 这个表达式**别"化简"成 `latest != current`**：`current` 来自 dll 的
+            #    `FileVersion`（形如 `6.8.0.2155`，带 build 段），而 `latest` 只有 `6.8.0` ——
+            #    直接比会**永远判成"有更新"**。原来就是截前两段来比的，保持不变。
             "update_available": bool(latest and current and latest != current.split(".")[0] + "." + ".".join(current.split(".")[1:3])),
             "download_url": RESHADE_SETUP_URL.format(version=latest) if latest else "",
             "note": "官方新版可能与 DLSS5 插件不兼容（本方案实测版本为 6.8.0），更新前会备份旧底座。",
@@ -456,10 +463,13 @@ def _version_tuple(value: str) -> tuple[int, ...]:
 # 执行更新
 # ---------------------------------------------------------------------------
 def update_reshade_base(config: AppConfig, version: str = "", log: Callable[[str], None] | None = None) -> dict[str, Any]:
-    """下载官方 ReShade Addon 并替换 DLSS5 目录里的 d3d12.dll（旧版备份）。"""
-    seven = _find_7z()
-    if not seven:
-        return {"ok": False, "message": "需要 7z.exe 才能解包 ReShade 安装器"}
+    """下载官方 ReShade Addon 并替换 DLSS5 目录里的 d3d12.dll（旧版备份）。
+
+    ⚠️ **2026-10-05 修（同族第四处）**：原来开头就是 `_find_7z()`，没有 7z 的机器上
+    直接返回「需要 7z.exe 才能解包 ReShade 安装器」—— 与 `reshade.download_reshade()`
+    是同一个错（用户实测「reshade 下不下来」）。官方安装器是标准 ZIP，
+    `zipfile` 直接能读 ⇒ 改成**标准库优先、7z 只作兜底**。
+    """
     version = version or "6.8.0"
     target_dir = config.dlss5_path
     target_dll = config.dlss5_dll_path
@@ -470,22 +480,39 @@ def update_reshade_base(config: AppConfig, version: str = "", log: Callable[[str
         with tempfile.TemporaryDirectory(prefix="mc-reshade-") as tmp:
             tmp_path = Path(tmp)
             setup = download_file(url, tmp_path / f"ReShade_Setup_{version}_Addon.exe", log=log, timeout=600)
-            extract = tmp_path / "extract"
-            extract.mkdir()
-            result = subprocess.run(
-                [seven, "x", "-y", f"-o{extract}", str(setup)],
-                capture_output=True, text=True, encoding="utf-8", errors="replace",
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
-            if result.returncode != 0:
-                return {"ok": False, "message": f"解包失败: {result.stderr or result.stdout}"}
-            source = extract / "ReShade64.dll"
-            if not source.is_file():
-                return {"ok": False, "message": "安装器里没有 ReShade64.dll"}
+            payload: bytes | None = None
+            try:
+                with zipfile.ZipFile(setup) as archive:
+                    lookup = {Path(name).name.lower(): name
+                              for name in archive.namelist() if not name.endswith("/")}
+                    member = lookup.get("reshade64.dll")
+                    if member:
+                        payload = archive.read(member)
+            except (zipfile.BadZipFile, OSError):
+                payload = None
+            if payload is None:
+                # 兜底：老版本安装器可能是 7z SFX —— **到这里才需要 7z**。
+                seven = _find_7z()
+                if not seven:
+                    return {"ok": False,
+                            "message": "解包 ReShade 安装器失败：它不是标准 ZIP，且这台机器上没有 7z.exe"}
+                extract = tmp_path / "extract"
+                extract.mkdir()
+                result = subprocess.run(
+                    [seven, "x", "-y", f"-o{extract}", str(setup)],
+                    capture_output=True, text=True, encoding="utf-8", errors="replace",
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+                if result.returncode != 0:
+                    return {"ok": False, "message": f"解包失败: {result.stderr or result.stdout}"}
+                source = extract / "ReShade64.dll"
+                if not source.is_file():
+                    return {"ok": False, "message": "安装器里没有 ReShade64.dll"}
+                payload = source.read_bytes()
             stamp = _stamp()
             if target_dll.is_file():
                 shutil.copy2(target_dll, target_dll.with_suffix(f".dll.bak-{stamp}"))
-            shutil.copy2(source, target_dll)
+            target_dll.write_bytes(payload)
     except (urllib.error.URLError, OSError) as exc:
         return {"ok": False, "message": f"下载/替换失败: {exc}"}
     _log(log, f"ReShade 底座已更新到 {version}")

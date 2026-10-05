@@ -4622,23 +4622,47 @@ class EndfieldModControllerApi:
         # 同时被删掉的还有 `_state\crash_memory.json` / `proven_combos.json` / `file_watch.json`。
         # 这里的取舍很明确：**宁可让用户手动再点一次，也不能把唯一的还原点清掉。**
         if not restore_info.get("ok", True) or restore_info.get("errors"):
-            detail = restore_info.get("message") or "；".join(
-                str(x) for x in (restore_info.get("errors") or [])) or "未知原因"
+            # ⚠️⚠️ **"没有备份可还原" ≠ "还原失败"**（2026-10-05 修 —— 用户实测
+            # 「依赖清空并重新下载按了报错」，日志原话：
+            # `依赖清空: 已中止 —— 游戏本体还原未成功（没有找到任何游戏目录备份）`）。
+            #
+            # 为什么必然发生：这个按钮**第一次**跑的顺序是「① 还原游戏本体 → ② `rmtree(runtime)`」，
+            # 而唯一的还原点 `runtime\game_backup\` **就在 runtime 里，被第 ② 步一起删掉**。
+            # 于是第二次点就变成"没有找到任何游戏目录备份"，撞上下面这条保护 ⇒ 报错中止，
+            # 用户从此再也点不动这个按钮；可这时游戏目录**本来就是上次还原过的样子**
+            # （没有任何"该还原却还原不了"的东西）。
+            #
+            # 这条保护的目的是「**别把唯一还原点删掉**」（见下面的注释）。而
+            # **没有备份 ⇒ 没有还原点可删** ⇒ 直接放行；只有"确实还有备份、却还原不了"
+            # （清单损坏 / 文件被占用 / 备份源缺失）才继续中止。
+            backups_left: list[Any] = []
+            try:
+                from . import game_clean
+
+                backups_left = game_clean.list_backups(self.config)
+            except Exception:  # noqa: BLE001 —— 判不出来时保守按"有备份"处理（保持原保护）
+                backups_left = [{"unknown": True}]
+            if backups_left:
+                detail = restore_info.get("message") or "；".join(
+                    str(x) for x in (restore_info.get("errors") or [])) or "未知原因"
+                launcher._append_log(
+                    self.config, f"依赖清空: 已中止 —— 游戏本体还原未成功（{detail}）")
+                return {
+                    "ok": False,
+                    "aborted": "restore_failed",
+                    "message": (
+                        "已中止：**没能把游戏本体还原成原版**，所以这次没有清空任何东西。\n\n"
+                        f"原因：{detail}\n\n"
+                        "为什么必须中止：`runtime\\game_backup` 里是你唯一一份「净化前」的备份，"
+                        "清空 runtime 会把它一起删掉 —— 那样游戏目录就再也回不去了。\n\n"
+                        "可以先把游戏目录里被移走的文件手动放回（备份就在 runtime\\game_backup 下），"
+                        "或者点「一键还原游戏本体」成功之后再回来清空。"
+                    ),
+                    "restore": restore_info,
+                }
             launcher._append_log(
-                self.config, f"依赖清空: 已中止 —— 游戏本体还原未成功（{detail}）")
-            return {
-                "ok": False,
-                "aborted": "restore_failed",
-                "message": (
-                    "已中止：**没能把游戏本体还原成原版**，所以这次没有清空任何东西。\n\n"
-                    f"原因：{detail}\n\n"
-                    "为什么必须中止：`runtime\\game_backup` 里是你唯一一份「净化前」的备份，"
-                    "清空 runtime 会把它一起删掉 —— 那样游戏目录就再也回不去了。\n\n"
-                    "可以先把游戏目录里被移走的文件手动放回（备份就在 runtime\\game_backup 下），"
-                    "或者点「一键还原游戏本体」成功之后再回来清空。"
-                ),
-                "restore": restore_info,
-            }
+                self.config,
+                "依赖清空: 没有游戏目录备份可还原（游戏目录已是上次还原过的状态）→ 继续清空")
 
         # ② 先记住关键路径（删完配置要原样写回）
         preserved: dict[str, Any] = {}

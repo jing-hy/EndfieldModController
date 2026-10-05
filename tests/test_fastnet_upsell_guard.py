@@ -98,6 +98,13 @@ def test_download_skips_direct_when_tcp_unreachable(monkeypatch, tmp_path: Path)
     monkeypatch.setattr(fastnet, "_line_blocked", lambda name, cache: False)
     monkeypatch.setattr(fastnet, "_tcp_reachable", lambda url, **kwargs: False)
     monkeypatch.setattr(fastnet, "_attempt_line", fake_attempt)
+    # ⚠️ **线路成绩缓存必须隔离**（2026-10-05 修随机红）：`_load_lines_cache()` 读的是
+    #    磁盘上的真实状态 `runtime\_net\lines.json` —— 里面只要记着"直连实测很慢"
+    #    （`direct_mbps < DEAD_MBPS`，**这是设计行为**：直连慢就该先试镜像），
+    #    `resolve_lines()` 就会**根本不把直连排进去**，于是本测试断言的那条
+    #    「直连不可达」日志不会出现 ⇒ 随机失败（实测：跑过一次真实网络探测之后必红）。
+    #    这个测试要验的是"TCP 不可达时跳过直连"，与缓存无关 ⇒ 显式给一份空缓存。
+    monkeypatch.setattr(fastnet, "_load_lines_cache", lambda: {})
 
     logs: list[str] = []
     report = fastnet.download(

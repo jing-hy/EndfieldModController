@@ -34,6 +34,9 @@ from .config import AppConfig
 USER_AGENT = "EndfieldModController/0.1"
 RESHADE_HOMEPAGE = "https://reshade.me/"
 RESHADE_ASSET_URL = "https://reshade.me/downloads/ReShade_Setup_{version}_Addon.exe"
+# 首页抓不到版本号时的兜底（2026-10-05 加）：这是**随包那份 `d3d12.dll` 的版本**，
+# 实测该 URL 直接下载 → 解包 `ReShade64.dll` = 5,592,064 B，与现网一致。
+RESHADE_FALLBACK_VERSION = "6.8.0"
 FEEDER_REPO = "jlrouzies-fr/DLSS5-Feeder"
 IMMERSE_REPO = "martymcmodding/iMMERSE"
 IMMERSE_BRANCH = "main"
@@ -245,12 +248,34 @@ def _pick_asset(release: dict[str, Any], pattern: str, suffix: str) -> dict[str,
 # 下载 / 解包工具
 # ---------------------------------------------------------------------------
 def reshade_latest_version(log: Callable[[str], None] | None = None) -> str:
-    raw = dependencies._http_get(RESHADE_HOMEPAGE)
-    assert isinstance(raw, bytes)
-    html = raw.decode("utf-8", errors="replace")
-    versions = re.findall(r"ReShade_Setup_(\d+\.\d+\.\d+)_Addon\.exe", html)
+    """从 reshade.me 首页解析 Addon 安装器版本号；**取不到就退回内置基线版本**。
+
+    ⚠️ **2026-10-05 修（用户反馈「下载日志都是别的没问题，就 d3d12 下不下来」）**：
+    这条链原先只有"抓首页 → 正则找版本号"一条路，而 `reshade.me/` 现在**恒定返回
+    HTTP 500**（实测：本机 curl / 我们的 fastnet 都是 500，带浏览器 UA 也一样；
+    响应体 26,786 B 里**其实带着** `ReShade_Setup_6.8.0_Addon.exe`）。于是
+    `_http_get` 按 500 判线路失败 → 换镜像 → 镜像也只是转发、源站照样 500 →
+    `OSError: 所有线路都取不到 https://reshade.me/：HTTP Error 500` ⇒ 依赖页里
+    「ReShade 底座 (d3d12.dll)」**永远装不上**，而其它组件（XXMI / Poser /
+    DLSS5-Feeder / iMMERSE）的 URL 都来自 GitHub API、不抓页面，所以"别的都没问题"。
+
+    两处一起改才成立：
+      ① 抓取时 **容忍非 2xx**（`tolerate_error_status=True`）—— 正文里能解析出版本号就用；
+      ② 连正文都没有时**退回内置基线** `RESHADE_FALLBACK_VERSION`（= 我们随包那份
+         `d3d12.dll` 的版本，实测直接下载 + 解包 `ReShade64.dll` 得到 5,592,064 B，
+         与现网一致），让"装 d3d12"这件事不至于因为官网首页抽风而彻底做不了。
+    """
+    versions: list[str] = []
+    try:
+        raw = dependencies._http_get(RESHADE_HOMEPAGE, tolerate_error_status=True)
+        assert isinstance(raw, bytes)
+        html = raw.decode("utf-8", errors="replace")
+        versions = re.findall(r"ReShade_Setup_(\d+\.\d+\.\d+)_Addon\.exe", html)
+    except Exception as exc:  # noqa: BLE001 - 抓不到就退回基线，不让整条安装链失败
+        _log(log, f"ReShade 首页取版本号失败（{exc}）→ 改用内置基线 {RESHADE_FALLBACK_VERSION}")
     if not versions:
-        raise RuntimeError("reshade.me 上没有找到 Addon 安装器版本号")
+        _log(log, f"ReShade 首页里没有解析到 Addon 安装器版本号 → 改用内置基线 {RESHADE_FALLBACK_VERSION}")
+        return RESHADE_FALLBACK_VERSION
     return max(versions, key=_version_tuple)
 
 
