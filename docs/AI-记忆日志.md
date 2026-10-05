@@ -4,9 +4,9 @@
 > 目的：让「当时为什么这么改、踩过什么坑」跟着源码一起留在仓库里。
 > 想改内容 → 改记忆库（用记忆工具），再跑一次本脚本；不要直接编辑本文件。
 
-- 生成时间：2026-10-05 09:26:46
+- 生成时间：2026-10-05 09:41:24
 - 来源：`.dsh-meow/memory.db`
-- 条目：535 条（已跳过 archived / 其它项目的条目）
+- 条目：536 条（已跳过 archived / 其它项目的条目）
 
 ---
 
@@ -4129,7 +4129,7 @@ poser/sbm 的 loader proxy（`d3dcompiler_47.dll` / `vulkan-1.dll`，35~56 KB）
 
 `关键词：["依赖清空并重新下载","reset_dependencies_and_redownload","没有找到任何游戏目录备份","还原失败不许清空","P0 保护误伤","list_backups 盲区","清单损坏备份","game_backup 被删","判据区分无可保护对象","restore_failed 中止"]`
 
-## 事实（细碎的原子信息）（75 条）
+## 事实（细碎的原子信息）（76 条）
 
 ### modecontroller：游戏目录 loader_l…
 *2026-09-27 14:58*
@@ -4940,6 +4940,17 @@ Steam++（Watt Toolkit）加速内核 = **FastGithub 2.1.4 的移植**：本地�
 实测三场景：纯副本 → duplicate=True / payload=False（**不动**）；同大小被改一字节 → differs=True / payload=True（**搬走**）；内容含 ReShade → payload=True（**搬走**）。
 
 `关键词：["净化名单","RESHADE_MARKERS","dxgi.dll 纳入净化","system_module_differs","sha256 比大小","duplicate_of_system_module","同名双实例","游戏目录系统模块副本","ReShade.log1","audit 去重","verify_files.json 校验"]`
+
+### **v1.0.11 已发布（当前 Latest）**：t…
+*2026-10-05 09:28*
+
+**v1.0.11 已发布（当前 Latest）**：tag `v1.0.11`、`isDraft=false`/`isPrerelease=false`，发布时刻 2026-10-05T01:27:46Z（北京 09:27），release id `403295115`，tag 打在 main `5195301`。
+两个资产（digest 与本地逐字节一致）：`EndfieldModController.exe` 30,014,947 B / `sha256:121719782efb82b5a9561d70eca02bc28b56c0e212c047ef168ba049d6a19304`；`assets-bundle.zip` 144,699,465 B / `sha256:44eb9e70b72206c772336a27f3ae955d1a1806c7ee93adafce01fee5b0cba8ea`。
+内容：ReShade 下载四处同族修复（**issue #14**，已回复并关闭）、「依赖清空并重新下载」第二次执行误报中止、崩溃取证补 WER 判据 + 崩溃弹窗给"清空依赖重下"建议（**不卸功能**）、净化补 `dxgi.dll` 且 `system_module_differs` 升级为 sha256、随机红测试隔离。
+发布流程照旧：commit → `build_release.py` → `prepare_release.py` → `push.py`（先快照再推 main）→ `gh release create --draft` → `upload_release_assets.py --tag` → `gh release edit --draft=false --latest` → 按 **release id** 核对 digest。快照：`D:\zmdmod\_snapshot_1.0.11-20261005-092646`。
+⚠️ **本地 `version.py` 现在 = `1.0.11`，与 Release 同号 ⇒ 下次攒到实质改动时要升成 `1.0.12-beta`**（发正式版时去掉 beta）。
+
+`关键词：["v1.0.11 发布","release latest","issue 14 关闭","assets-bundle.zip","sha256 核对","draft 转正","release id 403295115","build_release prepare_release push","snapshot 1.0.11","1.0.12-beta 下一个号"]`
 
 ## 用户偏好与环境（**含个人信息，公开前请自行取舍**）（18 条）
 
