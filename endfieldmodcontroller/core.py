@@ -872,6 +872,26 @@ def infer_kind_and_group(
         # 后者看的是"有没有换装资源"，而壁纸包整个都是 .dds 贴图 ⇒ 会被误判成皮肤。
         # 这类 Mod 不属于任何角色，**共用一个 group** ⇒ 同组互斥 = 同时只能开一个
         #（用户 2026-10-03：「这个算辅助性 mod，而且不能同时开多个」）。
+        # ★★ **作者填的网站分类压过"按名字猜"**（2026-10-06 两个实例定案）：
+        #    名字里带 `background` 不等于"游戏加载页/壁纸" ——
+        #    「AI generated)Background Image Alteration」（原始文件名 `changescreens_182.zip`，
+        #    香蕉网分类 = `UI`）改的是**界面里的图**，却被 `WALLPAPER_DIR_HINTS` 的
+        #    `background` 误判成"加载页与壁纸"。网站分类是**作者投稿时自己选的**一手信息，
+        #    这里让它优先（`looks_like_assist` 里那条同类判据管不到带 .dds 的包：
+        #    它第一关"有换装资源 ⇒ 不是辅助"就先返回了）。
+        #    ⚠️⚠️ **但两个否决项必须先生效**（`tests/test_site_category_inference.py`
+        #    专门钉着这两条，我第一版就是这么弄红的）：网站分类是**作者填的表单、会填错**，
+        #    而误判的代价是"Mod 从服装页消失、用户以为 mod 不见了"：
+        #      ① **有模型（换装资源）** ⇒ 它就是在换装，永远留在角色库；
+        #      ② **能识别出角色** ⇒ 去掉某部件的小 Mod 结构上像辅助，但它属于那个角色，
+        #         要留在角色库参与同角色互斥。
+        #    `looks_like_texture_only()` 为真 = "只有贴图、没有网格"（正好表达 ①），
+        #    认得出角色的用 `matched` 挡掉。
+        elif (str(meta.get("site_category_root") or "").strip().lower() == "ui"
+              and not matched
+              and looks_like_texture_only(path, rel_parts, meta, matched)):
+            kind = "assist"
+            group = ASSIST_GROUP_HIDE
         elif looks_like_wallpaper(path, rel_parts):
             kind = "assist"
             group = WALLPAPER_GROUP
@@ -959,7 +979,11 @@ TEXTURE_EXTS = (".dds", ".png", ".jpg", ".jpeg", ".tga")
 # 不纳入「贴图替换类」（2026-10-03：`莱万汀泳装` 只有贴图没有网格，
 # 但它是那个角色的衣服，必须留在角色库参与同角色互斥）。
 GARMENT_HINTS = (
-    "泳装", "旗袍", "内衣", "内裤", "服装", "皮肤", "外套", "上衣", "下装",
+    # ⚠️ 2026-10-06 补「紧身衣 / 连体衣 / 打底」这一族：漏了它们会让
+    #    「萤石去紧身衣+z键尾巴…」（只有 .dds 贴图、没有网格）被判成辅助里的
+    #    「贴图替换类」——而它其实就是那个角色的衣服，该留在角色库。
+    "泳装", "旗袍", "内衣", "内裤", "紧身衣", "紧身", "连体衣", "打底",
+    "bodysuit", "leotard", "服装", "皮肤", "外套", "上衣", "下装",
     "裙子", "连衣裙", "制服", "礼服", "婚纱", "和服", "汉服", "战斗服",
     "装扮", "套装", "全身", "发型", "头发", "脸部", "鞋子", "袜子",
     "swimsuit", "bikini", "dress", "outfit", "costume", "skin", "cloth",
