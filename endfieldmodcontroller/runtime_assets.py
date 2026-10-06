@@ -398,7 +398,16 @@ def _installed_matches(config: AppConfig, sm: int | None, *, rescan: bool = Fals
     if not rescan:
         marker = read_dlssnr_marker(config)
         if marker and int(marker.get("size") or 0) == target.stat().st_size:
-            if int(marker.get("sm") or 0) == sm or sm in _marker_archs(marker):
+            # ⚠️⚠️ **只能看 `arch`，绝不能看 `marker["sm"]`**（2026-10-06 定案，两个 40 系对照包）：
+            #   marker 里两个字段的语义**完全不同** ——
+            #     `sm`   = **这台机器**的代次（`89`）；
+            #     `arch` = **这份 dll 真正带的架构**（`official` 那份是 `[120]`）。
+            #   旧写法 `int(marker["sm"]) == sm or sm in archs` 里，前半段**恒真**
+            #   ⇒ 任何"已就位"的 dll 都被判成"含本机架构" ⇒ **永不换变体** ⇒
+            #   40 系机器上会一直跑着只有 sm_120 内核的 `official` ⇒ **feature 建不出来、
+            #   DLSS5 打不开**（对照包铁证：能开的 marker 是 `rtx40 / arch=[89,120]`，
+            #   开不了的是 `official / arch=[120]`，两者 `sm` 都是 89）。
+            if sm in _marker_archs(marker):
                 return True
     return sm in dll_architectures(target)
 
