@@ -1359,7 +1359,13 @@ def feed_addon_status(config: AppConfig) -> dict[str, Any]:
 
 
 def component_addon_status(config: AppConfig) -> dict[str, Any]:
-    """两个插件的 addon 是否在位。"""
+    """各插件的 addon 是否在位。
+
+    ⚠️ **必须覆盖 `set_component_addons` 支持的每一个组件**（2026-10-06 的教训）：
+    `ensure_injections` 会按组件名取 `status[component]`，这里少登记一个就是 `KeyError`
+    ⇒ 用户看到「**launch failed: 'mfg'**」，而且**一键启动直接失败**。
+    新增组件时**两处一起加**（本函数 + `ensure_injections` 的组件循环）。
+    """
     base = config.dlss5_path
     disabled = base / ADDON_DISABLED_DIR
 
@@ -1371,7 +1377,11 @@ def component_addon_status(config: AppConfig) -> dict[str, Any]:
             inactive.extend(p.name for p in disabled.glob(pattern))
         return {"active": sorted(active), "disabled": sorted(inactive), "on": bool(active)}
 
-    return {"dlss5": probe(DLSS5_ADDON_GLOBS), "firstperson": probe(FIRSTPERSON_ADDON_GLOBS)}
+    return {
+        "dlss5": probe(DLSS5_ADDON_GLOBS),
+        "firstperson": probe(FIRSTPERSON_ADDON_GLOBS),
+        "mfg": probe(MFG_ADDON_GLOBS),
+    }
 
 
 def active_efmi_loader(config: AppConfig) -> Path | None:
