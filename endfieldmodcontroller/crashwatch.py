@@ -731,14 +731,74 @@ _STREAMLINE_MANIFEST_MARKERS = (
 )
 
 
+def _player_log_candidates(config: AppConfig) -> list[Path]:
+    """可能藏着"**游戏自己写的** Player.log"的位置（按可信度排序）。
+
+    ⚠️ **必须把 `_endfield_local_low()` 放第一位**（那才是游戏真正落盘的地方）。
+    2026-10-06 的教训：我一开始只拼了 `runtime\\logs\\player\\Player.log` ——
+    **该路径根本不存在** ⇒ 判据一次都没命中 ⇒ v1.0.22 的自动修复从未执行
+    （反馈者升级到 v1.0.22 后仍带同样的 `parseServerManifest` 报错）。
+    `runtime\\player\\*` 那几份是我们自己归档出来的副本，只作兜底。
+    """
+    out: list[Path] = []
+    low = _endfield_local_low()
+    if low is not None:
+        out += [low / "Player.log", low / "Player-prev.log"]
+    runtime = Path(config.runtime_path)
+    for sub in ("player", "logs"):
+        out += [
+            runtime / sub / "Player.log",
+            runtime / sub / "Endfield-Player.log",
+            runtime / sub / "Endfield-Player-prev.log",
+            runtime / sub / "player-Player.log",
+        ]
+    return out
+
+
+def _broken_config_file(path: Path) -> str:
+    r"""这份 NGX / Streamline 配置是不是**坏到读不了**（返回原因，正常则空串）。
+
+    为什么按内容判而不是按文件名（2026-10-06 两位反馈者对照，报的是同一条
+    `parseServerManifest` 错，但坏的文件不同）：
+      * 一位 `nvngx_server_config.txt` = **0 字节**，`nvngx_mapping.json` = 700 B（正常）；
+      * 另一位 `nvngx_server_config.txt` = 5,296 B（正常），**`nvngx_mapping.json` = 0 字节**。
+    判据只认三种**确定**的坏：空文件 / `.json` 解析失败 / 含 NUL 或大量不可打印字节。
+    """
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return ""
+    if size == 0:
+        return "空文件"
+    if size > 4 * 1024 * 1024:                       # 大文件不动（那不是"读不懂的清单"）
+        return ""
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return ""
+    if b"\x00" in raw:
+        return "含 NUL 字节（不是文本清单）"
+    if path.suffix.lower() == ".json":
+        import json as _json
+
+        try:
+            _json.loads(raw.decode("utf-8", errors="strict"))
+        except Exception as exc:  # noqa: BLE001
+            return f"JSON 解析失败（{type(exc).__name__}）"
+    else:
+        printable = sum(1 for b in raw if 9 <= b <= 13 or 32 <= b < 127 or b >= 128)
+        if printable < len(raw) * 0.9:
+            return "大量不可打印字节（不是文本清单）"
+    return ""
+
+
 def streamline_manifest_broken(config: AppConfig) -> str:
     """游戏 `Player.log` 里有没有"Streamline 读不懂它的 server manifest"。
 
     为什么要它：这类失败**不是崩溃**（没有 WER、面板 addon 也正常 detach），
     表现是"游戏启动后很快就自己退出"，光看崩溃取证什么都抓不到。
     """
-    for name in ("Player.log", "Endfield-Player.log", "player-Player.log"):
-        path = Path(config.runtime_path) / "logs" / "player" / name
+    for path in _player_log_candidates(config):
         if not path.is_file():
             continue
         try:
@@ -765,6 +825,13 @@ def streamline_ota_files(config: AppConfig) -> list[Path]:
     out: list[Path] = []
     ngx = home / "NVIDIA" / "NGX"
     if ngx.is_dir():
+        # ① **按内容判坏**（2026-10-06 改）：两位反馈者坏的文件不同（一位空的是
+        #    `nvngx_server_config.txt`、另一位空的是 `nvngx_mapping.json`），而报的是
+        #    同一条 `parseServerManifest` 错 ⇒ 只按文件名挑会漏掉一半。
+        for item in sorted(ngx.glob("models/config/versions/*/files/*")):
+            if item.is_file() and _broken_config_file(item):
+                out.append(item)
+        # ② 名字直接对应报错函数的那份（server manifest）——内容看着正常也一并搬走
         out.extend(sorted(ngx.glob("models/config/versions/*/files/nvngx_server_config.txt")))
     streamline = home / "NVIDIA" / "Streamline"
     if streamline.is_dir():
@@ -775,7 +842,15 @@ def streamline_ota_files(config: AppConfig) -> list[Path]:
             name = item.name.lower()
             if any(key in name for key in ("manifest", "server", "ota", "cache")):
                 out.append(item)
-    return out
+    # 去重（①② 可能命中同一个文件）
+    seen: set[str] = set()
+    unique: list[Path] = []
+    for path in out:
+        key = str(path).lower()
+        if key not in seen:
+            seen.add(key)
+            unique.append(path)
+    return unique
 
 
 def repair_streamline_manifest(config: AppConfig, *,
