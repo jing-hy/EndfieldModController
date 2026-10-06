@@ -970,6 +970,13 @@ def sign_xxmi_setting(config_path: Path, value: str) -> str:
 # 正确的"拆开"方式是各自启停 addon 文件——ReShade 只加载底座**根目录**里的
 # *.addon64，把文件移进 _disabled 子目录就等于停用。
 DLSS5_ADDON_GLOBS = ("renodx-dlss5.addon64", "dlss5-feed.addon64", "trans-zh.addon64", "translations.txt")
+# ⚠️ **停用与放回的 glob 故意不对称**（2026-10-06）：
+#   * **放回（启用）**只认精确名 —— 退役的旧 NR 引擎（`renodx-dlss5-4.7*`，已被官方
+#     7.0.0-rc8 取代）**绝不能放回**：两个 neural addon 同装时两个都不工作
+#     （DLSS5-Feeder 原话：Never install two neural add-ons … it does nothing at all）；
+#   * **停用**还要覆盖这些退役旧名 —— 关掉 DLSS5 时，残留在底座目录里的旧引擎也必须
+#     一起移进 `_disabled\`，否则 ReShade 照样加载它。
+DLSS5_RETIRED_GLOBS = ("renodx-dlss5-4.7*.addon64",)
 FIRSTPERSON_ADDON_GLOBS = ("renodx-endfield-enhancer.addon64",)
 # 「喂帧组件」单独一档（2026-10-01）：它平时跟 DLSS5 组件一起启停，但在**游戏自带 DLSS**
 # 的机器上会与游戏自己的 DLSS 抢同一条 NGX 链路 —— `dlss5-feed` 组件自己在日志里就写着
@@ -1154,6 +1161,9 @@ def set_component_addons(config: AppConfig, component: str, enabled: bool) -> di
     component: "dlss5" | "firstperson"
     """
     globs = DLSS5_ADDON_GLOBS if component == "dlss5" else FIRSTPERSON_ADDON_GLOBS
+    if component == "dlss5" and not enabled:
+        # 停用要盖住退役旧名（放回**不盖**）—— 见 `DLSS5_RETIRED_GLOBS` 的说明。
+        globs = tuple(globs) + DLSS5_RETIRED_GLOBS
     base = config.dlss5_path
     disabled = base / ADDON_DISABLED_DIR
     disabled.mkdir(parents=True, exist_ok=True)

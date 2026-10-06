@@ -939,6 +939,8 @@ def _is_dlssnr_item(item: tuple[str, Path, str, dict[str, Any]]) -> bool:
 # （Feeder issue #54，官方矩阵 0/300）。用户升级后旧文件会留在原地
 # ⇒ 不搬走就等于"升级了还是坏的"。
 RETIRED_NR_ADDONS = ("renodx-dlss5-4.7.addon64", "renodx-dlss5-4.7_汉化.addon64")
+# 匹配用的通配（覆盖中文/拼音等历史命名：`_汉化` / `_hanhua` / 无后缀）
+RETIRED_NR_GLOB = "renodx-dlss5-4.7*.addon64"
 RETIRED_DIR = "_retired_addons"
 
 
@@ -949,10 +951,14 @@ def retire_stale_nr_addons(config: AppConfig, *,
     if not base.is_dir():
         return []
     moved: list[str] = []
-    for name in RETIRED_NR_ADDONS:
-        source = base / name
-        if not source.is_file():
-            continue
+    found: list[Path] = []
+    for pattern in (RETIRED_NR_GLOB, *RETIRED_NR_ADDONS):
+        for path in sorted(base.glob(pattern)):
+            if path.is_file() and path not in found:
+                found.append(path)
+    for source in found:
+        name = source.name
+
         target_dir = base / RETIRED_DIR
         try:
             target_dir.mkdir(parents=True, exist_ok=True)
