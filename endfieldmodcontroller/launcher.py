@@ -1159,17 +1159,24 @@ def _sync_addon_location(source_dir: Path, target_dir: Path,
     return moved, removed
 
 
+# ★★ **「有哪些插件组件」的唯一真源**（2026-10-06）。
+# 为什么要有它：新加一个组件时，需要同步的地方曾经散落在三处 ——
+#   ① `api.set_component_addon()` 开头的白名单；
+#   ② 本函数的 globs 分支；
+#   ③ `component_addon_status()` 的状态登记。
+# 加 DLSS4(`mfg`) 那次就漏了 ① ⇒ 点开关被"未知组件: mfg"直接拒掉（用户看到的
+# 是"开了没反应"）。现在三处**都从这里派生**，加组件只需改这一个字典。
+COMPONENT_ADDON_GLOBS: dict[str, tuple[str, ...]] = {}
+
+
 def set_component_addons(config: AppConfig, component: str, enabled: bool) -> dict[str, Any]:
     """单独启停 DLSS5 或第一人称插件（移动 addon 文件，可逆）。
 
     component: "dlss5" | "firstperson" | "mfg"
     """
-    if component == "dlss5":
-        globs = DLSS5_ADDON_GLOBS
-    elif component == "mfg":
-        globs = MFG_ADDON_GLOBS
-    else:
-        globs = FIRSTPERSON_ADDON_GLOBS
+    globs = COMPONENT_ADDON_GLOBS.get(component)
+    if globs is None:
+        return {"ok": False, "message": f"未知组件: {component}"}
     if component == "dlss5" and not enabled:
         # 停用要盖住退役旧名（放回**不盖**）—— 见 `DLSS5_RETIRED_GLOBS` 的说明。
         globs = tuple(globs) + DLSS5_RETIRED_GLOBS
@@ -1358,6 +1365,14 @@ def feed_addon_status(config: AppConfig) -> dict[str, Any]:
     }
 
 
+# 唯一真源的内容在这里登记（放在 globs 三兄弟都定义好之后）。
+COMPONENT_ADDON_GLOBS.update({
+    "dlss5": DLSS5_ADDON_GLOBS,
+    "firstperson": FIRSTPERSON_ADDON_GLOBS,
+    "mfg": MFG_ADDON_GLOBS,
+})
+
+
 def component_addon_status(config: AppConfig) -> dict[str, Any]:
     """各插件的 addon 是否在位。
 
@@ -1377,11 +1392,7 @@ def component_addon_status(config: AppConfig) -> dict[str, Any]:
             inactive.extend(p.name for p in disabled.glob(pattern))
         return {"active": sorted(active), "disabled": sorted(inactive), "on": bool(active)}
 
-    return {
-        "dlss5": probe(DLSS5_ADDON_GLOBS),
-        "firstperson": probe(FIRSTPERSON_ADDON_GLOBS),
-        "mfg": probe(MFG_ADDON_GLOBS),
-    }
+    return {name: probe(globs) for name, globs in COMPONENT_ADDON_GLOBS.items()}
 
 
 def active_efmi_loader(config: AppConfig) -> Path | None:

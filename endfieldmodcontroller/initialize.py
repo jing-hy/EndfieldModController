@@ -712,7 +712,20 @@ def _check_dlss5_preset(config: AppConfig, report: Report, log: Callable[[str], 
     # 这种日志只会把用户和排查的人一起带偏。
     # 顺序不对时**只提示**：真出问题时面板与 `dlss5-feed.log` 会写明
     # `enable it above DLSS 5 Feed`，那时再按提示手动调。
-    if enabled_map.get(launchpad_name) == "1" and enabled_map.get(feed_name) == "1":
+    # ★★ **还必须检查 `DLSS5_MV_PROVIDER=1` 那一行**（2026-10-06 两机对照定案）。
+    #    它是**编译预处理宏**（写在 preset 的 `PreprocessorDefinitions=` 行里），决定
+    #    DLSS5_Feed.fx 按哪个"运动矢量来源"编译：`1` = iMMERSE Launchpad。
+    #    丢了它就按默认值 `0`（texMotionVectors）编译，而那个 provider 并没装 ⇒
+    #    `motion vectors will be zero (still images only)` ⇒ NGX 建不出 feature。
+    #    ⚠️ 光查 `Techniques` 检查不出这个状态（把那行删掉，`Techniques` 两项照样完好），
+    #    所以必须单独判 —— 这正是"更新后仍然开不了"的那位的现场。
+    preset_pp = ""
+    for line in body.splitlines():
+        if line.strip().startswith("PreprocessorDefinitions="):
+            preset_pp = line.split("=", 1)[1]
+            break
+    mv_ok = f"DLSS5_MV_PROVIDER={DLSS5_MV_PROVIDER_LAUNCHPAD}" in preset_pp.replace(" ", "")
+    if enabled_map.get(launchpad_name) == "1" and enabled_map.get(feed_name) == "1" and mv_ok:
         if not (order_ok and effect_order_ok):
             _log(log, "DLSS5 preset 顺序提示："
                       f"technique 顺序正确={order_ok}、effect 顺序正确={effect_order_ok} —— "
@@ -721,12 +734,14 @@ def _check_dlss5_preset(config: AppConfig, report: Report, log: Callable[[str], 
                       "（enable it above DLSS 5 Feed），再把 MartysMods_Launchpad 排到 DLSS 5 Feed 之前")
         report.add("dlss5:preset", True,
                    f"{preset_path.name} 已启用 MartysMods_Launchpad + DLSS5_Feed"
+                   "（含 DLSS5_MV_PROVIDER=1）"
                    + ("（顺序也正确）" if (order_ok and effect_order_ok)
                       else "（顺序由 ReShade 自行重排，不影响启用）"))
         return
     _log(log, "DLSS5 preset 需要修复："
               f"MartysMods_Launchpad={enabled_map.get(launchpad_name, '缺失')}、"
               f"DLSS5_Feed={enabled_map.get(feed_name, '缺失')}、"
+              f"DLSS5_MV_PROVIDER={'有' if mv_ok else '★缺失'}、"
               f"technique 顺序正确={order_ok}、effect 顺序正确={effect_order_ok}")
 
     techniques = ",".join(DLSS5_PRESET_TECHNIQUES)
@@ -1775,7 +1790,13 @@ BUILTIN_RESHADE_INI_BASE = (
     "KeyScreenshot=44,0,0,0\n"
     "\n"
     "[OVERLAY]\n"
-    "AutoSavePreset=1\n"
+    # ⚠️⚠️ **必须是 0**（2026-10-06 从两份 40 系对照包定案）：ReShade 在游戏退出时会把
+    # 面板状态**回写 preset**，而我们增补进去的 `PreprocessorDefinitions=DLSS5_MV_PROVIDER=1`
+    # 会随之被抹掉 ⇒ 下次启动 DLSS5_Feed 按默认值 0（texMotionVectors）编译 ⇒
+    # 找不到运动矢量 provider ⇒ `motion vectors will be zero` ⇒ NGX 建不出 feature ⇒
+    # 面板 `成功NR帧 0` + `0xBAD00007`。
+    # 代价：面板里调的效果参数不再保存（那是可选调优）；换来的是"能不能出帧"的前提不被破坏。
+    "AutoSavePreset=0\n"
     "ClockFormat=0\n"
     "FPSPosition=1\n"
     "Language=\n"

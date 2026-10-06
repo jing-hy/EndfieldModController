@@ -32,12 +32,44 @@ def env(tmp_path, monkeypatch):
     return AppConfig()
 
 
+def test_api_accepts_every_known_component(env, monkeypatch):
+    """★★ **`api.set_component_addon()` 必须接受真源里的每一个组件。**
+
+    2026-10-06 用户现场：点「DLSS4 多帧生成」弹 `没能改这个开关 / 未知组件: mfg`
+    ⇒ 开关**被后端直接拒掉**、配置没改 ⇒ 感受就是"开了没反应"。
+    根因是那个方法开头有一张**写死的白名单** `("dlss5", "firstperson")`，
+    加组件时漏改（同一天 `component_addon_status` 漏登记是同一类错误）。
+    现在白名单从 `launcher.COMPONENT_ADDON_GLOBS` 派生 —— 这条测试遍历真源，
+    **以后再加组件会自动被覆盖**，不会再出现"某个入口不认新组件"。
+    """
+    import inspect
+
+    from endfieldmodcontroller import api as apimod
+
+    cls = next(o for _n, o in vars(apimod).items()
+               if inspect.isclass(o) and hasattr(o, "get_state"))
+    inst = cls.__new__(cls)                      # 跳过 __init__ 的重活
+    cfg_file = env.dlss5_path.parent / "config.json"
+    env.save(cfg_file)                           # 给配置一个真实落点（接口内部会 save）
+    inst._config = env
+    inst._config_path = cfg_file
+    inst._config_mtime = None
+
+    for component in launcher.COMPONENT_ADDON_GLOBS:
+        result = inst.set_component_addon(component, False)
+        assert "未知组件" not in str(result.get("message") or ""), (
+            f"api 不认组件 {component!r} ⇒ 用户点那个开关会看到「未知组件」"
+        )
+    # 未知名仍要拒绝（别把白名单变成"什么都收"）
+    assert inst.set_component_addon("definitely-not-a-component", False).get("ok") is False
+
+
 def test_status_registers_every_known_component(env):
     """★ 每个组件都要在 `component_addon_status()` 里有一份 —— 少一个就是 KeyError。"""
     status = launcher.component_addon_status(env)
-    missing = [c for c in KNOWN_COMPONENTS if c not in status]
+    missing = [c for c in launcher.COMPONENT_ADDON_GLOBS if c not in status]
     assert not missing, f"这些组件没登记 ⇒ 一键启动会 KeyError：{missing}（现有 {sorted(status)}）"
-    for name in KNOWN_COMPONENTS:
+    for name in launcher.COMPONENT_ADDON_GLOBS:
         assert set(status[name]) >= {"active", "disabled", "on"}, status[name]
 
 

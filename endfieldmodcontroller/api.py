@@ -665,7 +665,10 @@ class EndfieldModControllerApi:
         """单独启停 DLSS5 / 第一人称插件，并同步 XXMI 注入库。"""
         from . import launcher
 
-        if component not in ("dlss5", "firstperson"):
+        # ⚠️ **白名单必须从 `launcher` 的真源派生**（2026-10-06）：
+        #    这里原先是写死的 `("dlss5", "firstperson")`，加 `mfg` 时漏改 ⇒
+        #    点「DLSS4 多帧生成」被"未知组件: mfg"直接拒掉，用户看到的是"开了没反应"。
+        if component not in launcher.COMPONENT_ADDON_GLOBS:
             return {"ok": False, "message": f"未知组件: {component}"}
         # **按显卡支持范围闸门**（用户 2026-10-01 要求「开启时检测机器，不是 50 系就默认关、
         # 开启时弹窗说明拒绝」；**2026-10-05 范围扩大**：原话「去掉所有对非 50 系的锁，
