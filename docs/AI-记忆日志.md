@@ -4,7 +4,7 @@
 > 目的：让「当时为什么这么改、踩过什么坑」跟着源码一起留在仓库里。
 > 想改内容 → 改记忆库（用记忆工具），再跑一次本脚本；不要直接编辑本文件。
 
-- 生成时间：2026-10-06 15:30:47
+- 生成时间：2026-10-06 15:43:47
 - 来源：`.dsh-meow/memory.db`
 - 条目：573 条（已跳过 archived / 其它项目的条目）
 
@@ -632,18 +632,20 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 `关键词：["变体机制落点", "best_rtx_sm唯一入口", "select_dlssnr_variant", "ensure_dlssnr", "dll_architectures扫fatbin", "dlssnr_variant.json marker", "baseline按变体判防抖", "dlss5:nr_arch自检", "dlss5_gpu_scope_applied迁移", "pack_nvngx_assets变体字段"]`
 
 ### 【modecontroller 当前状态唯一真源】（20…
-*2026-10-06 15:08*
+*2026-10-06 15:31*
 
-【modecontroller 当前状态唯一真源】（2026-10-06 15:12 更新）
-**Latest Release = `v1.0.23`**（2026-10-06T07:07:03Z，已转正 `--latest`）。**本地 = `1.0.23`（与 Release 同号、不欠号）**。main = `84d0295`（已推；结构树镜像/记忆日志已同步）。
-**v1.0.23 内容（修我自己的 bug）**：`crashwatch.streamline_manifest_broken()` 的判据**读错了日志位置** —— 上一版（v1.0.22）写的 `runtime\logs\player\Player.log` **根本不存在**，真正的位置是 **`_endfield_local_low() / "Player.log"`**（`%USERPROFILE%\AppData\LocalLow\Hypergryph\…`）⇒ **v1.0.22 那条自动修复从未执行**（反馈者升级后包里仍有 10 条 `parseServerManifest`，而我加的「Streamline：」一行压根没出现）。修法：新增 `_player_log_candidates()`（把 `_endfield_local_low()` 放第一位，`runtime\player\*` 兜底）；清理目标改**按内容判**（新增 `_broken_config_file()`：空文件 / JSON 解析失败 / 含 NUL），因为两位反馈者坏的**不是同一个文件**（一位 `nvngx_server_config.txt` 0 字节、另一位 `nvngx_mapping.json` 0 字节）却报同一条错。测试 `tests/test_streamline_manifest.py`（7 条，含"必须从游戏真正写日志的位置命中"）。
-**★ 流程变更（用户 2026-10-06 要求）**：「**以后构建（哪怕是测试版），流程都要固化推 main**」，原因是**要两台电脑合作**。已固化：`scripts/build_release.py` 在产物清单之后**自动调用 `scripts/push.py`**（`[9/9]` 步；`push.py` 会先快照、只推 main、**不发 Release**），`--no-push` 可跳过。⇒ 以后**每次构建都会推 main**，无需再问。
-**附件（v1.0.23）**：`EndfieldModController.exe` 30,173,315 B / sha256 `dcc1fa522a9c00807f3203d397a5a697530ff70809955d758d5e837915aa6efb`；`assets-bundle.zip` 261,970,243 B / sha256 `90d0a5bf418e3d5ae394…`。
-**★ issue 状态（15:12）**：**#16（xingluo667）已追加回复**（[comment 6011232092](https://github.com/jing-hy/EndfieldModController/issues/16#issuecomment-6011232092)）—— 我核了他 **15:00:57** 那份包（下载存档 `D:\zmdmod\_reports\20261006-150057`）：形态与之前**完全相同**（内存 37.7 MB → 1093.8 MB、`parseServerManifest` 10 处、无 WER、`0xC0000135`、注入库已是对的），而他导出时 **v1.0.23 还没发布（15:07）** ⇒ 他拿到的仍是没有正确判据的版本。回复里承认了"上一版修复因路径写错从未跑起来，你两次说'还是不行'都是对的"，并要他更新到 v1.0.23 再试、说明了生效痕迹（自检里出现「Streamline 的 server manifest 读不懂」+ NGX 缓存被改名成 `.mc-backup-<时间戳>`）。**#16/#17 均未关闭**。
-**DLSS4 6 倍课题（已调研完毕，等用户拍板）**：报告 `D:\zmdmod\_video\dlss4_6x\研究报告.md`（441 行）。4P 视频 = `BV1KJtJ6uEqw`（P3 实为毁灭战士+通用步骤，**未找到终末地段落**）。结论分档：40 系开 **4x** = 能（★★★★）；6x 通用能（★★★）；**终末地 6x 零实测（★）**。官方 per-game override 表里 **Arknights: Endfield = `NV, 4X`**。40 系被挡 = **软件白名单**（`nvngx_dlssg.dll` 里与 `0x1b0`(Blackwell) 比架构 id），但**磁盘改字节会让帧生成消失**（签名校验）⇒ 只能改运行时内存；Ada 插值内核 blend 权重写死 0.5 ⇒ 光解锁只得"重复的中点帧"。**取证（我已自己做掉三项）**：本机驱动 **617.14**（≥595.41 ✓）；**终末地自带 `nvngx_dlssg.dll` = 310.5.2.0** ⇒ **在**上游白名单（310.1.0~310.9.1）内 ⇒ **不必换游戏目录的库，只需加一个 ReShade addon**（改动量骤降、不越界）；Streamline = **2.10.3**（既不在"已知可用"2.12.129 也不在"已知有问题"2.14.0 ⇒ 需实测）；我们随包 `nvngx_dlss.dll` = **310.7**（恰好是"已知可用"那一档）。**风险 ★最高 = 与 DLSS5 双 addon 共存**（上游 2.14.0+310.9 有卡顿报告）。**用户已表示"我是 50 系，查不出来，这个你先不管"** ⇒ **暂时搁置**。最小验证路径：把 `renodx-mfgunlock.addon64` 放进 modtest 的 `runtime\dlss5\`，只看 4x 出帧与 DLSS5 是否被搞坏。
-**待办**：① 等 #16 / #17 回报 ② DLSS4 6x 课题搁置（用户是 50 系、查不了 40 系）③ 下一版号 `1.0.24-beta`。
+【modecontroller 当前状态唯一真源】（2026-10-06 15:31 更新）
+**Latest Release = `v1.0.24`**（2026-10-06T07:23:16Z，release id `404428526`，已转正 `--latest`）。**本地 = `1.0.24`**。main = `ff4d718`（已推）。
+**v1.0.24 内容**：① **Streamline 清理只查了 6 个 NVIDIA 位置里的 1 个** —— v1.0.23 修好了"判据读哪份日志"（反馈者日志里确实出现命中提示），紧接着却是「**没找到可清理的缓存文件**」；根因是诊断采集列了 **6 个候选根**（`%LOCALAPPDATA%\NVIDIA\{Streamline,NGX}`、`%LOCALAPPDATA%\NVIDIA Corporation\NGX`、`%PROGRAMDATA%` 下三个），而清理只写了一个 `%LOCALAPPDATA%\NVIDIA\NGX`。修法：抽出 **`crashwatch.nvidia_config_roots()` 作唯一入口**，采集与清理共用（原则：**"发现的路径"与"动手的路径"只能有一处定义**）。**实测证实**：本机（以及反馈者）的 NGX 配置其实在 **`%PROGRAMDATA%\NVIDIA\NGX`**。② **组件版本表**：`builtin.Poser` 0.5.42 → 0.5.43（被构建闸拦下后更新；⚠️ 键路径是 `builtin.Poser.latest`，别写成顶层 `Poser`）。③ 附件：exe 30,170,853 B / sha256 `0f445fc90859564172d48d1fbae40e52ea6c8febcb365ddeb06b626a9fb18378`；assets 261,970,243 B / sha256 `8a8cd6df20d5ab678c3e8837d100e3ed95d0defa8604ab0c8fd0212474866632`。
+**★ 顺带修掉一个数据安全问题**：`tests/test_streamline_manifest.py` 的 fixture 原来**没打桩 `USERPROFILE`/`PROGRAMDATA`** ⇒ `nvidia_config_roots()` 读到真实路径 ⇒ **测试把开发机真实的 `%PROGRAMDATA%\NVIDIA\NGX\...\nvngx_server_config.txt` 搬成了 `.mc-backup-<时间戳>`**（实测发生两次）。已还原、并让 fixture 统一打桩两处环境变量 + 跑完复检"真实目录没被动过"。**教训：凡涉及"按环境变量枚举真实目录"的函数，测试必须把环境变量一起打桩。**
+**★ 发版脚本 bug 已修**（`scripts/upload_release_assets.py`）：v1.0.24 发版时它报 `找不到 tag v1.0.24 的 Release（含 draft）` ⇒ **附件没上传**（最后手工 `gh release upload` 补的）。根因：`gh release create <tag> --draft` 的 `tag_name` 是 `untagged-<hash>`（tag 到转正才建立），而 `push.py` **只推 main、不推 tag** ⇒ 列表里按 tag 名匹配不上。修法：匹配不上时**若只有一个 draft 就认它**，多个 draft 明确报错不猜。测试 `tests/test_upload_release_assets.py`（4 条）。⚠️ **澄清**：脚本本身是**正确报错中止**的，不是静默继续 —— 是 shell 里用 `;` 串命令才看起来继续跑了。全量 **1029 passed**，已推 main（脚本不进 exe ⇒ 版本号不动）。
+**★ 流程变更**：`scripts/build_release.py` **构建完自动推 main**（`[9/9]` 步，调 `push.py`，`--no-push` 可跳过）—— 用户要求（两台电脑合作）。
+**★ issue 状态**：**#16（xingluo667）**已多轮回复，**最新一条**（[comment 6011486651](https://github.com/jing-hy/EndfieldModController/issues/16#issuecomment-6011486651)）给他一个**只读诊断采集脚本**（纯 ASCII PowerShell，放桌面生成 `collect-result-*.zip`；采 6 个 NVIDIA 根的全部文件+内容预览、游戏目录 NGX/Streamline 版本、Player.log 报错、ReShade 日志、注入库配置；**本机已实跑验证只读**）。他历史上反馈过 v1.0.21/1.0.22/1.0.23 都"还是不行"（每次都发新包）。**#17（Madao553）**回复已发（comment 6009468044）。**两个都未关闭**。
+**★ 其他线索**：采集时发现 `%PROGRAMDATA%\NVIDIA\Streamline\Endfield\<...>\sl-sha-.dmp` —— **5 份 Streamline 自己的崩溃转储**（各约 2.6 MB），Streamline 确实崩过；若 v1.0.24 仍未解决，这是新线索。
+**DLSS4 6 倍课题（用户已澄清）**：他要的是 **DLSS 4.5 在 50 系上的 6x 能力**，而**终末地官方上限就是 4x**；**关键**：**40 系现在只有 2x** ⇒ **"提到 4x"仍有做的必要**。报告 `D:\zmdmod\_video\dlss4_6x\研究报告.md`；4P 视频 `BV1KtJtJ6uEqw`（P3 实为毁灭战士+通用步骤）。官方 per-game 表：`Arknights: Endfield = NV, 4X`。40 系被挡 = **软件白名单**（`nvngx_dlssg.dll` 与 `0x1b0`(Blackwell) 比架构 id），**磁盘改字节会让帧生成消失**（签名校验）⇒ 只能改运行时内存。取证已齐：驱动 **617.14** ✓；终末地自带 **`nvngx_dlssg.dll` = 310.5.2**（在上游白名单 310.1.0~310.9.1 内 ⇒ **不必换游戏目录的库，只需加一个 ReShade addon**）；Streamline **2.10.3**；我们随包 `nvngx_dlss.dll` = **310.7**。用户已定形态：**DLSS5 与 DLSS4 互斥**（不共存）⇒ 正好规避上游"双 addon 同载卡顿"的风险。**下一步待用户拍板是否做最小验证**（把 `renodx-mfgunlock.addon64` 放进 modtest 的 `runtime\dlss5\`，只看 4x 出帧 + DLSS5 是否被搞坏）。
+**待办**：① 等 #16 跑采集脚本回报 ② DLSS4 4x 功能待拍板 ③ 下一版号 `1.0.25-beta`。
 
-`关键词：["当前状态唯一真源","Latest v1.0.23","Streamline判据路径bug","Player.log真实位置","构建后自动推main","两台电脑合作","issue16已回复未关","DLSS4 6x课题搁置","nvngx_dlssg 310.5.2","终末地官方4X","main 84d0295","下一版1.0.24-beta"]`
+`关键词：["当前状态唯一真源","Latest v1.0.24","nvidia_config_roots唯一入口","PROGRAMDATA里的NGX","测试污染真实NVIDIA配置","发版脚本draft兜底","构建后自动推main","issue16采集脚本已给","sl-sha-dmp崩溃转储","DLSS4 40系2x提4x","DLSS5与DLSS4互斥","main ff4d718"]`
 
 ### 待办
 
