@@ -4,7 +4,7 @@
 > 目的：让「当时为什么这么改、踩过什么坑」跟着源码一起留在仓库里。
 > 想改内容 → 改记忆库（用记忆工具），再跑一次本脚本；不要直接编辑本文件。
 
-- 生成时间：2026-10-06 15:07:59
+- 生成时间：2026-10-06 15:18:04
 - 来源：`.dsh-meow/memory.db`
 - 条目：573 条（已跳过 archived / 其它项目的条目）
 
@@ -632,16 +632,18 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 `关键词：["变体机制落点", "best_rtx_sm唯一入口", "select_dlssnr_variant", "ensure_dlssnr", "dll_architectures扫fatbin", "dlssnr_variant.json marker", "baseline按变体判防抖", "dlss5:nr_arch自检", "dlss5_gpu_scope_applied迁移", "pack_nvngx_assets变体字段"]`
 
 ### 【modecontroller 当前状态唯一真源】（20…
-*2026-10-06 14:07*
+*2026-10-06 15:08*
 
-【modecontroller 当前状态唯一真源】（2026-10-06 14:12 更新）
-**Latest Release = `v1.0.22`**（2026-10-06T06:05:42Z，release id `404369955`，已转正 `--latest`）。**本地 = `1.0.22`（与 Release 同号、不欠号）**。main = `c32a32c`（已推，本地与远端一致；结构树镜像与记忆日志两个自动提交也已同步）。
-**v1.0.22 三个内容**：① **注入库列错 EFMI loader ⇒ 重复注入 ⇒ 启动中断**（`launcher.ensure_efmi_loader_deployed()`：写注入库**之前**把包目录那份 `d3d11.dll` 提前部署到 `EFMI\d3d11.dll`；接入 `ensure_injections` ⓪d 步；测试 `tests/test_efmi_loader_deploy.py` 4 条）② **NR 与第一人称相机 hook 抢位 ⇒ 按「要不要用第一人称」分流**（`reshade_integration.firstperson_camera_wanted()` 被 `initialize._check_defer_nr_until_camera_hook` 的 `immediate` 与 `nr_autostart.poll` 共用；用户已复测**通过**；测试 `tests/test_nr_firstperson_split.py` 5 条）③ **Streamline/NGX server manifest 损坏 ⇒ 判据 + 自动修复**（`crashwatch.streamline_manifest_broken()` + `repair_streamline_manifest()`，只搬不删；接入 `ensure_injections` ⓪c 步 + `crash_forensics`；测试 `tests/test_streamline_manifest.py` 4 条）。
-**附件（v1.0.22）**：`EndfieldModController.exe` 30,170,776 B / sha256 `3a78eb078d47335850a39d9950ab9901e23962f69d9913482d324d7ff3a35277`；`assets-bundle.zip` 261,970,243 B / sha256 `2a2607463bd534e5afbb2e973ccca36e9aa6e77bf…`（按 release id 核对一致）。
-**★ issue 状态（2026-10-06 14:12）**：**#16（xingluo667）已于 2026-10-06 14:11 回复**（[comment 6010444035](https://github.com/jing-hy/EndfieldModController/issues/16#issuecomment-6010444035)，**未关闭**，等他更新到 v1.0.22 后实测回报）—— 内容 = 根因是"注入库列到了错的那份 d3d11.dll（内容一样路径不同 ⇒ 去重不掉 ⇒ 同一个 DLL 注两遍 ⇒ 第二次失败并中断整个启动）"，已在 v1.0.22 修好、**不需要他改任何配置**；口径照定式（能不能确定/有没有修/更新后做什么，无表格）。**#17（Madao553）回复已发**（comment 6009468044，未关闭）。
-**待办**：① **modtest 的 exe 仍是 `15967bef…`（1.0.22-beta 那份）** —— 控制器被他开着，等他关掉后复制 `dist\EndfieldModController.exe`（30,170,776 B）② 等他回报 #16 / #17 ③ 下一版号 `1.0.23-beta`。
+【modecontroller 当前状态唯一真源】（2026-10-06 15:12 更新）
+**Latest Release = `v1.0.23`**（2026-10-06T07:07:03Z，已转正 `--latest`）。**本地 = `1.0.23`（与 Release 同号、不欠号）**。main = `84d0295`（已推；结构树镜像/记忆日志已同步）。
+**v1.0.23 内容（修我自己的 bug）**：`crashwatch.streamline_manifest_broken()` 的判据**读错了日志位置** —— 上一版（v1.0.22）写的 `runtime\logs\player\Player.log` **根本不存在**，真正的位置是 **`_endfield_local_low() / "Player.log"`**（`%USERPROFILE%\AppData\LocalLow\Hypergryph\…`）⇒ **v1.0.22 那条自动修复从未执行**（反馈者升级后包里仍有 10 条 `parseServerManifest`，而我加的「Streamline：」一行压根没出现）。修法：新增 `_player_log_candidates()`（把 `_endfield_local_low()` 放第一位，`runtime\player\*` 兜底）；清理目标改**按内容判**（新增 `_broken_config_file()`：空文件 / JSON 解析失败 / 含 NUL），因为两位反馈者坏的**不是同一个文件**（一位 `nvngx_server_config.txt` 0 字节、另一位 `nvngx_mapping.json` 0 字节）却报同一条错。测试 `tests/test_streamline_manifest.py`（7 条，含"必须从游戏真正写日志的位置命中"）。
+**★ 流程变更（用户 2026-10-06 要求）**：「**以后构建（哪怕是测试版），流程都要固化推 main**」，原因是**要两台电脑合作**。已固化：`scripts/build_release.py` 在产物清单之后**自动调用 `scripts/push.py`**（`[9/9]` 步；`push.py` 会先快照、只推 main、**不发 Release**），`--no-push` 可跳过。⇒ 以后**每次构建都会推 main**，无需再问。
+**附件（v1.0.23）**：`EndfieldModController.exe` 30,173,315 B / sha256 `dcc1fa522a9c00807f3203d397a5a697530ff70809955d758d5e837915aa6efb`；`assets-bundle.zip` 261,970,243 B / sha256 `90d0a5bf418e3d5ae394…`。
+**★ issue 状态（15:12）**：**#16（xingluo667）已追加回复**（[comment 6011232092](https://github.com/jing-hy/EndfieldModController/issues/16#issuecomment-6011232092)）—— 我核了他 **15:00:57** 那份包（下载存档 `D:\zmdmod\_reports\20261006-150057`）：形态与之前**完全相同**（内存 37.7 MB → 1093.8 MB、`parseServerManifest` 10 处、无 WER、`0xC0000135`、注入库已是对的），而他导出时 **v1.0.23 还没发布（15:07）** ⇒ 他拿到的仍是没有正确判据的版本。回复里承认了"上一版修复因路径写错从未跑起来，你两次说'还是不行'都是对的"，并要他更新到 v1.0.23 再试、说明了生效痕迹（自检里出现「Streamline 的 server manifest 读不懂」+ NGX 缓存被改名成 `.mc-backup-<时间戳>`）。**#16/#17 均未关闭**。
+**DLSS4 6 倍课题（已调研完毕，等用户拍板）**：报告 `D:\zmdmod\_video\dlss4_6x\研究报告.md`（441 行）。4P 视频 = `BV1KJtJ6uEqw`（P3 实为毁灭战士+通用步骤，**未找到终末地段落**）。结论分档：40 系开 **4x** = 能（★★★★）；6x 通用能（★★★）；**终末地 6x 零实测（★）**。官方 per-game override 表里 **Arknights: Endfield = `NV, 4X`**。40 系被挡 = **软件白名单**（`nvngx_dlssg.dll` 里与 `0x1b0`(Blackwell) 比架构 id），但**磁盘改字节会让帧生成消失**（签名校验）⇒ 只能改运行时内存；Ada 插值内核 blend 权重写死 0.5 ⇒ 光解锁只得"重复的中点帧"。**取证（我已自己做掉三项）**：本机驱动 **617.14**（≥595.41 ✓）；**终末地自带 `nvngx_dlssg.dll` = 310.5.2.0** ⇒ **在**上游白名单（310.1.0~310.9.1）内 ⇒ **不必换游戏目录的库，只需加一个 ReShade addon**（改动量骤降、不越界）；Streamline = **2.10.3**（既不在"已知可用"2.12.129 也不在"已知有问题"2.14.0 ⇒ 需实测）；我们随包 `nvngx_dlss.dll` = **310.7**（恰好是"已知可用"那一档）。**风险 ★最高 = 与 DLSS5 双 addon 共存**（上游 2.14.0+310.9 有卡顿报告）。**用户已表示"我是 50 系，查不出来，这个你先不管"** ⇒ **暂时搁置**。最小验证路径：把 `renodx-mfgunlock.addon64` 放进 modtest 的 `runtime\dlss5\`，只看 4x 出帧与 DLSS5 是否被搞坏。
+**待办**：① 等 #16 / #17 回报 ② DLSS4 6x 课题搁置（用户是 50 系、查不了 40 系）③ 下一版号 `1.0.24-beta`。
 
-`关键词：["当前状态唯一真源","Latest v1.0.22","issue16已回复未关","issue17已回复未关","注入库列错EFMIloader","ensure_efmi_loader_deployed","NR按第一人称分流","Streamline manifest修复","release404369955","main c32a32c","待换modtest exe","下一版1.0.23-beta"]`
+`关键词：["当前状态唯一真源","Latest v1.0.23","Streamline判据路径bug","Player.log真实位置","构建后自动推main","两台电脑合作","issue16已回复未关","DLSS4 6x课题搁置","nvngx_dlssg 310.5.2","终末地官方4X","main 84d0295","下一版1.0.24-beta"]`
 
 ### 待办
 
