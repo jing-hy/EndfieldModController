@@ -521,6 +521,23 @@ def main() -> int:
     else:
         sync_to_modtest(latest, artifact="latest")
 
+    # 记录**实际内嵌的版本**（2026-10-06 加）：`prepare_release.py` 靠它核对
+    # "要发布的这个 exe 到底自称哪一版"。v1.0.19 出过一次事故：exe 是用 `1.0.19-beta`
+    # 构建的、发版后才把源码版本号收成正式号 ⇒ 发出去的 exe 自称 beta ⇒
+    # 用户装上后自更新**无限提示**（「一直让我重启并更新，重启后还是 beta 版」）。
+    try:
+        import json as _json
+
+        (DIST / "build-info.json").write_text(_json.dumps({
+            "version": version,
+            "artifact": latest.name,
+            "sha256": sha256_of(latest),
+            "built_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        print(f"      已记录 dist/build-info.json（内嵌版本 = {version}）", flush=True)
+    except Exception as exc:  # noqa: BLE001
+        print(f"      !! build-info.json 写入失败：{exc}", flush=True)
+
     print("[7/7] 产物清单", flush=True)
     for item in (latest, versioned, DIST / f"{APP_NAME}-{FAKE_VERSION}-from-{version}.exe",
                  ROOT / f"{APP_NAME}-{FAKE_VERSION}-from-{version}.exe"):

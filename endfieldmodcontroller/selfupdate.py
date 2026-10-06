@@ -161,15 +161,28 @@ def check_update(
         try:
             detail = _fetch_json(LATEST_API, timeout=timeout)
             if isinstance(detail, dict):
-                by_name = {str(a.get("name") or ""): a for a in (detail.get("assets") or [])}
-                for asset in (release.get("assets") or []):
-                    extra = by_name.get(str(asset.get("name") or ""))
-                    if isinstance(extra, dict):
-                        asset["size"] = int(extra.get("size") or 0)
-                        asset["digest"] = str(extra.get("digest") or "")
-                for key in ("body", "name", "published_at", "html_url"):
-                    if detail.get(key):
-                        release.setdefault(key, detail[key])
+                # ⚠️⚠️ **只有两条路线指向同一个 release 时才补全**（2026-10-06 修）。
+                # `github.releases_latest`（网页/镜像路线）与官方 API 的 CDN 缓存**不同步**：
+                # 实测发版 4 分钟后，网页路线已给 v1.0.20，而 API 仍返回 v1.0.19
+                # ⇒ 于是拼出 `latest=1.0.20` + `asset_size=30,154,976`（v1.0.19 的大小）
+                # ⇒ `_payload_stale_reason` 把**真下载好的** v1.0.20 判成"不是最新版"
+                # ⇒ **永久拒绝安装**（用户现象：「一直让我重启并更新，重启后还是旧版」）。
+                # 宁可不补全（少一层校验），也绝不用**另一版**的 size/digest 去卡自己。
+                api_tag = str(detail.get("tag_name") or "").lstrip("vV")
+                web_tag = str(release.get("tag_name") or "").lstrip("vV")
+                if api_tag and web_tag and api_tag == web_tag:
+                    by_name = {str(a.get("name") or ""): a for a in (detail.get("assets") or [])}
+                    for asset in (release.get("assets") or []):
+                        extra = by_name.get(str(asset.get("name") or ""))
+                        if isinstance(extra, dict):
+                            asset["size"] = int(extra.get("size") or 0)
+                            asset["digest"] = str(extra.get("digest") or "")
+                    for key in ("body", "name", "published_at", "html_url"):
+                        if detail.get(key):
+                            release.setdefault(key, detail[key])
+                else:
+                    _log(log, f"检查更新：两条路线版本不一致（网页 v{web_tag or '?'} / "
+                              f"API v{api_tag or '?'}）→ 不补全 size/digest，只用版本号判断")
         except Exception:  # noqa: BLE001 —— 只是补全信息，失败不影响检查更新
             pass
     if not release:
@@ -421,6 +434,13 @@ On Error Resume Next
 fso.DeleteFile backup, True
 fso.DeleteFile newFile, True
 fso.DeleteFile target & ".new", True
+' Also delete the ORIGINAL download (newFile is "<payload>.new"): leaving it in
+' runtime\_update\ makes pending_payload() report a pending update forever,
+' so the UI keeps saying "restart to finish updating" after a successful swap
+' (2026-10-06, user: "clicked restart but it still says update finished").
+If InStr(newFile, ".new") > 0 Then
+  fso.DeleteFile Left(newFile, Len(newFile) - 4), True
+End If
 fso.DeleteFile WScript.ScriptFullName, True
 '''
 

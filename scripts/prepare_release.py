@@ -86,6 +86,34 @@ def main() -> int:
         print("\n   请先运行：python scripts/build_release.py", flush=True)
         return 1
 
+    # ⚠️ **发版闸**（2026-10-06 加）：要发出去的那个 exe 必须**自称正式号**。
+    # v1.0.19 的事故：exe 是用 `1.0.19-beta` 构建的，发版后才把源码版本号收成正式号
+    # ⇒ 发出去的 exe 自称 `1.0.19-beta` ⇒ 用户装上后自更新**无限提示**
+    # （原话：「1.0.19 的更新它一直让我重启并更新，但是重启后还是 beta 版」）。
+    # 核对面 = `dist/build-info.json`（构建时写下的内嵌版本）。
+    try:
+        import json as _json
+
+        info_path = DIST / "build-info.json"
+        if not info_path.is_file():
+            print("!! 缺少 dist/build-info.json —— 无法确认 exe 内嵌的是哪一版。", flush=True)
+            print("   请先运行：python scripts/build_release.py", flush=True)
+            return 1
+        embedded = str(_json.loads(info_path.read_text(encoding="utf-8")).get("version") or "")
+        target = _release_version(version)
+        if embedded != target:
+            print(f"!! **发版闸拦下**：exe 内嵌版本是 `{embedded}`，而这一版要发的是 `{target}`。", flush=True)
+            print("   exe 会自称 beta ⇒ 用户装上后自更新会无限提示（v1.0.19 出过这个事故）。", flush=True)
+            print("   正确顺序：① 把版本号收成正式号（去掉 -beta）→ ② build_release.py 重建"
+                  " → ③ 再跑本脚本。", flush=True)
+            return 1
+        print(f"[发版闸] ok：exe 内嵌版本 = {embedded}，与将要发布的 v{target} 一致", flush=True)
+    except SystemExit:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        print(f"!! 发版闸执行失败：{exc}", flush=True)
+        return 1
+
     print("[1/3] 生成随包资产包", flush=True)
     result = subprocess.run([sys.executable, "scripts/build_assets_bundle.py"], cwd=str(ROOT))
     if result.returncode != 0:
