@@ -1885,6 +1885,22 @@ def ensure_injections(config: AppConfig) -> dict[str, Any]:
     actions.extend(report.get("actions", []))
     warnings.extend(report.get("warnings", []))
 
+    # ★★ **展开随包资产之后必须再对齐一次插件位置**（2026-10-06，用户现场定案）——
+    #    上面的组件循环做的是"按配置把 addon 留在根目录 / 搬进 `_disabled\`"，
+    #    而 `ensure_all()` 展开资产时**只判断"根目录有没有这个文件"**：发现缺，
+    #    就**又解压一份回去** ⇒ 刚按配置禁用的插件被自己的展开动作撤销。
+    #    实测现场（50 系那台）：`mfg_unlock_enabled = False`，可根目录里
+    #    `renodx-mfgunlock.addon64`（1,191,424 B）**还在**、`_disabled\` 是空的
+    #    ⇒ ReShade 照样加载它 ⇒ 用户报的就是「**关了为什么还是注入了**」。
+    #    ⚠️ 受影响的不止 DLSS4：`dlss5` / `firstperson` 走的是同一条路。
+    for _component, _flag in (("dlss5", "dlss5_addon_enabled"),
+                              ("firstperson", "firstperson_addon_enabled"),
+                              ("mfg", "mfg_unlock_enabled")):
+        try:
+            set_component_addons(config, _component, bool(getattr(config, _flag, False)))
+        except Exception:  # noqa: BLE001 - 对齐失败不该拦住启动
+            pass
+
     for action in actions:
         _append_log(config, f"注入自检: {action}")
     # ⚠ **失败原因也必须落进日志文件**（rules：批处理失败原因不能只写在内存里）。

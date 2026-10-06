@@ -35,12 +35,14 @@ def env(tmp_path, monkeypatch):
     return AppConfig(), dlss5
 
 
-# ── 判据：只放 40 系 ────────────────────────────────────────────────────────
+# ── 判据：40 系与 50 系都放行，30/20 系与 A 卡锁 ────────────────────────────
+# ★ 2026-10-06 用户要求把 50 系的锁关掉（原话：「那说明 50 系也能用，你可以把 50 系的锁关掉，
+#   但是对 50 系说明提升不大」）—— 有 50 系的面板截图证实这个 addon 在 50 系上能正常加载。
 @pytest.mark.parametrize("card,expected", [
-    ("NVIDIA GeForce RTX 4060 Laptop GPU", True),      # 40 系 ⇒ 放行
+    ("NVIDIA GeForce RTX 4060 Laptop GPU", True),      # 40 系 ⇒ 放行（这是主要目标）
     ("NVIDIA GeForce RTX 4070 Ti SUPER", True),
-    ("NVIDIA GeForce RTX 5080", False),                # 50 系 ⇒ 锁（官方本来就有）
-    ("NVIDIA GeForce RTX 3080", False),                 # 30 系 ⇒ 锁
+    ("NVIDIA GeForce RTX 5080", True),                 # 50 系 ⇒ 也放行（提升不大，但能用）
+    ("NVIDIA GeForce RTX 3080", False),                 # 30 系 ⇒ 锁（没有对应插值内核）
     ("NVIDIA GeForce RTX 2060", False),                 # 20 系 ⇒ 锁
 ])
 def test_supported_only_for_ada(monkeypatch, card, expected):
@@ -48,6 +50,8 @@ def test_supported_only_for_ada(monkeypatch, card, expected):
     ok, reason = deviceinfo.mfg_unlock_supported()
     assert ok is expected, reason
     assert reason
+    if card.endswith("5080"):
+        assert "提升不大" in reason, "50 系要如实说明收益有限，不能只说'能用'"
 
 
 def test_locked_when_no_nvidia(monkeypatch):
@@ -59,11 +63,22 @@ def test_locked_when_no_nvidia(monkeypatch):
 
 
 def test_multi_gpu_takes_the_best(monkeypatch):
-    """双卡机器（一张 4060 + 一张 5080）⇒ 取最高代次 ⇒ **锁**（50 系不需要它）。"""
+    """双卡机器（一张 4060 + 一张 5080）⇒ 按**最高代次**判。
+
+    50 系放行之后，这条测的不再是"锁不锁"，而是"**有没有按最强那张算**"——
+    理由里必须体现它认的是 5080（而不是因为机器里恰好有张 4060 才放行）。
+    """
     monkeypatch.setattr(deviceinfo, "collect", lambda refresh=False: _fake_adapters(
         "NVIDIA GeForce RTX 4060", "NVIDIA GeForce RTX 5080"))
-    ok, _reason = deviceinfo.mfg_unlock_supported()
-    assert ok is False
+    ok, reason = deviceinfo.mfg_unlock_supported()
+    assert ok is True, reason
+    assert "50 系" in reason, f"应当按最高的那张（5080）来判，实际理由：{reason}"
+
+    # 反方向：只有 30 系 + 20 系时仍然锁（取最高 = 30 系，没有插值内核）
+    monkeypatch.setattr(deviceinfo, "collect", lambda refresh=False: _fake_adapters(
+        "NVIDIA GeForce RTX 3080", "NVIDIA GeForce RTX 2060"))
+    ok2, reason2 = deviceinfo.mfg_unlock_supported()
+    assert ok2 is False, reason2
 
 
 # ── 组件开关：搬文件（可逆）────────────────────────────────────────────────
