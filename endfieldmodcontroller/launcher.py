@@ -1900,6 +1900,14 @@ def ensure_injections(config: AppConfig) -> dict[str, Any]:
             set_component_addons(config, _component, bool(getattr(config, _flag, False)))
         except Exception:  # noqa: BLE001 - 对齐失败不该拦住启动
             pass
+    # ⚠️ **「统一管理器」的面板 addon 走的是另一条路**（`apply_minimal_injection`），
+    #    所以这里要**单独再对齐一次** —— 同一个病换了个函数（2026-10-06 用户现场：
+    #    「我除了 dlss4 全关，但是 **MOD 管理器**和第一人称还是注入了」，根目录里
+    #    `endfieldmodcontroller.addon64` 还在，而 `_disabled\` 里也有它）。
+    try:
+        apply_minimal_injection(config, log=lambda message: _append_log(config, message))
+    except Exception:  # noqa: BLE001 - 对齐失败不该拦住启动
+        pass
 
     for action in actions:
         _append_log(config, f"注入自检: {action}")

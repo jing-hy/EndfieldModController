@@ -69,6 +69,66 @@ def test_expand_is_followed_by_a_realign():
     )
 
 
+def test_unified_manager_panel_is_moved_out_when_off(env):
+    """★ 「统一管理器」关掉 ⇒ **面板 addon 不能留在根目录**（2026-10-06 用户现场）。
+
+    原话：「我除了 dlss4 全关，但是 **MOD 管理器**和第一人称还是注入了」——
+    面板 addon 走的是**另一条路**（`apply_minimal_injection`），和组件那套不是同一个函数，
+    所以对齐的时候必须**单独**再调它一次。
+    """
+    config, dlss5 = env
+    name = launcher.UNIFIED_PANEL_ADDON
+    config.minimal_injection = False                 # ⚠️ 默认是 True，必须显式关掉
+    (dlss5 / name).write_bytes(b"panel")            # 模拟"展开之后又被放回根目录"
+
+    launcher.apply_minimal_injection(config)
+
+    assert not (dlss5 / name).is_file(), "统一管理器关着，面板却还在根目录 ⇒ 照样会被加载"
+    assert (dlss5 / launcher.ADDON_DISABLED_DIR / name).is_file(), "应当被搬进 _disabled\\"
+
+
+def test_unified_manager_panel_comes_back_when_on(env):
+    """对照：打开统一管理器 ⇒ 面板回到根目录。"""
+    config, dlss5 = env
+    name = launcher.UNIFIED_PANEL_ADDON
+    disabled = dlss5 / launcher.ADDON_DISABLED_DIR
+    disabled.mkdir(parents=True, exist_ok=True)
+    (disabled / name).write_bytes(b"panel")
+
+    config.minimal_injection = True
+    launcher.apply_minimal_injection(config)
+
+    assert (dlss5 / name).is_file(), "打开后应当回到根目录"
+
+
+def test_panel_realign_also_happens_after_expand():
+    """★★ 顺序判据（第二处）：`ensure_all` 之后必须**也**再对齐一次面板。
+
+    面板走 `apply_minimal_injection`，与组件那套是两条路 ⇒ 只补组件那一半不够
+    （2026-10-06 实测：组件都归位了，面板还留在根目录）。
+    """
+    import ast as _ast
+
+    src = inspect.getsource(launcher.ensure_injections)
+    tree = _ast.parse(src)
+    ensure_all_lines: list[int] = []
+    panel_lines: list[int] = []
+    for node in _ast.walk(tree):
+        if isinstance(node, _ast.Call):
+            func = node.func
+            name = getattr(func, "attr", None) or getattr(func, "id", None)
+            if name == "ensure_all" and isinstance(func, _ast.Attribute):
+                ensure_all_lines.append(node.lineno)
+            if name == "apply_minimal_injection":
+                panel_lines.append(node.lineno)
+
+    assert ensure_all_lines, "ensure_injections 里没找到 ensure_all 调用"
+    last_ensure = max(ensure_all_lines)
+    assert [n for n in panel_lines if n > last_ensure], (
+        "★ 展开资产之后没有再对齐面板位置 ⇒ 「统一管理器」关掉后展开动作会把面板放回根目录"
+    )
+
+
 def test_enabling_puts_it_back(env):
     """对照：打开时应当把 addon 放回根目录。"""
     config, dlss5 = env
