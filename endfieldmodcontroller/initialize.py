@@ -1543,6 +1543,44 @@ NR_SECTION = "RenoDX.DLSS5"
 NR_KEY = "NeuralUplift"
 
 
+def _check_mfg_unlock(config: AppConfig, report: Report,
+                      log: Callable[[str], None] | None) -> None:
+    """自检「**DLSS4 多帧生成解锁（40 系）**」（2026-10-06 用户要求的功能）。
+
+    自检要能回答三件事：**这台机器能不能用**（判据）/ **开关现在什么状态** / **addon 真在不在位**。
+    实现在 `deviceinfo.mfg_unlock_supported()` 与 `launcher.MFG_ADDON_GLOBS`。
+    """
+    from . import deviceinfo, launcher
+
+    ok, reason = deviceinfo.mfg_unlock_supported()
+    try:
+        enabled = bool(getattr(config, "mfg_unlock_enabled", False))
+    except Exception:  # noqa: BLE001
+        enabled = False
+    base = config.dlss5_path
+    disabled = base / launcher.ADDON_DISABLED_DIR
+    present = [name for name in launcher.MFG_ADDON_GLOBS if (base / name).is_file()]
+    parked = [name for name in launcher.MFG_ADDON_GLOBS if (disabled / name).is_file()]
+
+    if not ok:
+        # 机器用不了（50 系 / 30-20 系 / 非 N 卡）⇒ 开关在界面上是禁用的，这里如实说明
+        report.add("dlss5:mfg_unlock", True, f"（不适用）{reason}")
+        return
+    if not enabled:
+        report.add("dlss5:mfg_unlock", True,
+                   f"已关闭（默认）—— {reason}需要时在启动页打开「DLSS4 多帧生成」。")
+        return
+    if not present:
+        report.add("dlss5:mfg_unlock", False,
+                   "开关开着，但 addon 不在 `runtime\\dlss5\\` 里"
+                   "（点一次「一键启动」会自动补齐；"+ (f"当前在停用区：{', '.join(parked)}" if parked else "两份都没有") + "）",
+                   manual=True)
+        return
+    report.add("dlss5:mfg_unlock", True,
+               f"已启用（{', '.join(present)}）—— {reason}"
+               "注意：它与「DLSS5 神经渲染」**互斥**，同时只能开一个。")
+
+
 def _check_defer_nr_until_camera_hook(config: AppConfig, report: Report,
                                       log: Callable[[str], None] | None) -> None:
     """把生效那份 `ReShade.ini` 的 `[RenoDX.DLSS5] NeuralUplift` 压成 **0**。
@@ -2716,6 +2754,7 @@ def ensure_all(config: AppConfig, log: Callable[[str], None] | None = None) -> d
     # NR 必须等「第一人称插件的相机 hook」装好之后再开（2026-10-05 定案）——
     # 放在 ini 处理**之后**：这一步直接改生效那份 `ReShade.ini` 的 `[RenoDX.DLSS5]`。
     _check_defer_nr_until_camera_hook(config, report, log)
+    _check_mfg_unlock(config, report, log)
     # shader 依赖要先补齐，否则 preset 里启用的 technique 编不过（"编译出错"）
     _check_dlss5_shaders(config, report, log)
     _check_dlss5_preset(config, report, log)

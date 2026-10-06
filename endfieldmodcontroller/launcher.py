@@ -977,6 +977,10 @@ DLSS5_ADDON_GLOBS = ("renodx-dlss5.addon64", "dlss5-feed.addon64", "trans-zh.add
 #   * **停用**还要覆盖这些退役旧名 —— 关掉 DLSS5 时，残留在底座目录里的旧引擎也必须
 #     一起移进 `_disabled\`，否则 ReShade 照样加载它。
 DLSS5_RETIRED_GLOBS = ("renodx-dlss5-4.7*.addon64",)
+# ★ **DLSS4 多帧生成解锁（40 系）**（2026-10-06 用户要求"单列开关、与 dlss5 互斥"）：
+#   上游 `MFGAdaUnlock-RenoDx` 是**一个 ReShade addon**（MIT 1.4.1，只改运行时内存），
+#   所以启停方式与 DLSS5 完全一样 —— 在 `runtime\dlss5\` 与 `_disabled\` 之间搬文件。
+MFG_ADDON_GLOBS = ("renodx-mfgunlock.addon64",)
 FIRSTPERSON_ADDON_GLOBS = ("renodx-endfield-enhancer.addon64",)
 # 「喂帧组件」单独一档（2026-10-01）：它平时跟 DLSS5 组件一起启停，但在**游戏自带 DLSS**
 # 的机器上会与游戏自己的 DLSS 抢同一条 NGX 链路 —— `dlss5-feed` 组件自己在日志里就写着
@@ -1158,9 +1162,14 @@ def _sync_addon_location(source_dir: Path, target_dir: Path,
 def set_component_addons(config: AppConfig, component: str, enabled: bool) -> dict[str, Any]:
     """单独启停 DLSS5 或第一人称插件（移动 addon 文件，可逆）。
 
-    component: "dlss5" | "firstperson"
+    component: "dlss5" | "firstperson" | "mfg"
     """
-    globs = DLSS5_ADDON_GLOBS if component == "dlss5" else FIRSTPERSON_ADDON_GLOBS
+    if component == "dlss5":
+        globs = DLSS5_ADDON_GLOBS
+    elif component == "mfg":
+        globs = MFG_ADDON_GLOBS
+    else:
+        globs = FIRSTPERSON_ADDON_GLOBS
     if component == "dlss5" and not enabled:
         # 停用要盖住退役旧名（放回**不盖**）—— 见 `DLSS5_RETIRED_GLOBS` 的说明。
         globs = tuple(globs) + DLSS5_RETIRED_GLOBS
@@ -1791,6 +1800,7 @@ def ensure_injections(config: AppConfig) -> dict[str, Any]:
     for component, key, label in (
         ("dlss5", "dlss5_addon_enabled", "DLSS5 神经渲染"),
         ("firstperson", "firstperson_addon_enabled", "第一人称 Endfield Enhancer"),
+        ("mfg", "mfg_unlock_enabled", "DLSS4 多帧生成（40 系解锁）"),
     ):
         want = bool(getattr(config, key, True))
         if bool(status[component]["on"]) != want:

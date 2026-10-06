@@ -346,6 +346,15 @@ class AppConfig:
     dlss5_injection: bool = True
     # 底座下两个插件可独立启停（同一 ReShade 底座，靠移动 addon 文件实现）
     dlss5_addon_enabled: bool = True          # RenoDX-DLSS5 神经渲染
+    # ★ **DLSS4 多帧生成解锁**（2026-10-06 用户定："单列开关，与 dlss5 互斥，
+    #   50 系和其他用不了的锁，**默认关**"）。把上游 `MFGAdaUnlock-RenoDx` 的 ReShade
+    #   addon（MIT 1.4.1，**只改运行时内存**）铺进 `runtime\dlss5\`，在 **Ada(40 系)**
+    #   上把多帧生成从 2x 提到 3x/4x（终末地官方上限就是 4X）。
+    #   * **只对 40 系开放**（`deviceinfo.mfg_unlock_supported()`）：50 系本来就支持、
+    #     30/20 系与 A 卡核显连 Ada 插值内核都没有；
+    #   * **与 `dlss5_addon_enabled` 互斥**：两者都是 ReShade addon，上游记录了
+    #     "双 addon 同载导致菜单严重卡顿"的未查清案例 ⇒ 界面上二选一。
+    mfg_unlock_enabled: bool = False
     # ★ **DLSS5 神经渲染：启动就开**（2026-10-06 定为默认）。
     # 用户 2026-10-06 原话：「**nr 我不是改了吗，现在应该是不用管 hook**，另外超分开不开没关系」。
     # 此前默认是"启动前把 `NeuralUplift` 压成 0 → 等 `Camera controls installed.`

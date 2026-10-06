@@ -268,6 +268,40 @@ def rtx_cards(adapters: list[dict[str, Any]]) -> list[tuple[str, int]]:
     return sorted(cards, key=lambda item: item[1])
 
 
+def mfg_unlock_supported(refresh: bool = False) -> tuple[bool, str]:
+    """这台机器能不能用「**DLSS4 多帧生成解锁**」（**只放 40 系**）。
+
+    用户 2026-10-06 定："50 系和其他用不了的锁"。判据（复用既有的 `rtx_cards()` 唯一入口，
+    按 **CUDA 架构**判而不是按名字猜）：
+      * **`sm_89`（RTX 40 系）⇒ 放行** —— 它被挡住纯粹是软件架构白名单
+        （`nvngx_dlssg.dll` 里与 `0x1b0`(Blackwell) 比架构 id），解锁后能从 2x 提到 3x/4x；
+      * **`sm_120`（RTX 50 系）⇒ 锁** —— 官方本来就有多帧生成（6X 只给 50 系），
+        不需要这个 hack；
+      * **30/20 系、GTX、A 卡、核显 ⇒ 锁** —— 连 Ada 的插值内核都没有，解锁也没意义。
+
+    返回 `(能用吗, 给用户看的一句话)`。多卡机器取"**最高代次**"（与 `dlss5_supported` 同一口径）。
+    """
+    try:
+        info = collect(refresh=refresh)
+    except Exception as exc:  # noqa: BLE001
+        return False, f"读不到设备信息（{exc}）—— 先按不支持处理"
+    per_card = rtx_cards(info.get("adapters") or [])
+    if not per_card:
+        return False, "没有可用的 NVIDIA RTX 显卡 —— 这个功能需要有 tensor core 的 NVIDIA 卡。"
+    # ⚠️ **取最高代次**（与 `dlss5_supported` 同一口径）：双卡机器（比如一张 4060 +
+    #    一张 5080）用户会用**最强那张**跑游戏 ⇒ 若最高是 50 系就该锁 —— 不能因为
+    #    "机器里恰好也有一张 40 系"就放行（那会让 50 系用户开一个没意义的 hack）。
+    top = max(sm for _name, sm in per_card)
+    if top == 89:
+        return True, ("检测到 RTX 40 系显卡 —— 这一档被挡在 2x 是软件白名单造成的，"
+                      "解锁后可以开到 3x/4x（本作官方上限是 4X）。")
+    if top >= 100:
+        return False, ("检测到 RTX 50 系显卡 —— 它本身就有官方多帧生成（本作上限 4X，"
+                       "6X 是 50 系专属），**不需要也不该用这个解锁**。")
+    return False, (f"检测到 RTX {top} 架构的显卡 —— 这个解锁是给 40 系（Ada）准备的，"
+                   f"这一档没有相应的插值内核，开了也不会有帧生成。")
+
+
 def dlss5_runtime_variant(sm: int | None) -> str:
     """sm → **首选**的 DLSS5 运行库变体（`official` / `rtx40` / `sf`）。
 

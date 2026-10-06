@@ -102,6 +102,16 @@ const SWITCHES = [
     apply: (v) => call("set_component_addon", "dlss5", v) },
   { k: "firstperson_addon_enabled", name: "第一人称视角", desc: "进游戏按 F1 切换第一人称",
     apply: (v) => call("set_component_addon", "firstperson", v) },
+  // ★ DLSS4 多帧生成解锁（2026-10-06 用户要求："单列开关，与 dlss5 互斥，
+  //   50 系和其他用不了的锁，默认关"）。
+  //   · **只对 40 系开放**：能不能用由后端判据决定（`mfg_unlock_available`），
+  //     不满足时这一行**禁用**并显示原因；
+  //   · **与 DLSS5 互斥**：后端在开关入口与保存配置两处都会自动关掉另一个，这里如实提示。
+  { k: "mfg_unlock_enabled", name: "DLSS4 多帧生成", 
+    desc: "40 系把多帧生成从 2x 解锁到 3x/4x（与 DLSS5 神经渲染互斥，同时只能开一个）",
+    apply: (v) => call("set_component_addon", "mfg", v),
+    locked: () => !settings.mfg_unlock_available,
+    lockReason: () => settings.mfg_unlock_reason || "这台机器用不了这个功能" },
   { k: "efmi_injection", name: "皮肤 Mod", desc: "EFMI 服装 Mod 注入（关掉后不加载任何皮肤）" },
   { k: "secondary_motion_injection", name: "ShakingBreastManager", desc: "乳摇物理效果",
     // 拨动即装卸（不止写配置）：开启走 `secondary_motion_install`（装 proxy + plugin\sbm.dll
@@ -135,6 +145,9 @@ const SWITCHES = [
 const pendingSwitches = new Set();
 async function toggleSwitch(sw) {
   if (pendingSwitches.has(sw.k)) return;       // 上一个动作还没落地，忽略这次点击
+  // ★ **锁住的开关点不动**（2026-10-06）：判据来自后端（`mfg_unlock_available`）；
+  //   后端在 `set_component_addon` 里还会再拒一次 —— 这里只是别让用户白点。
+  if (typeof sw.locked === "function" && sw.locked()) return;
   const next = !settings[sw.k];
   pendingSwitches.add(sw.k);
   settings[sw.k] = next;                       // 先动界面，避免点了没反应
@@ -741,14 +754,23 @@ useLogAutoScroll(logBox, () => consoleLog.value);
 
     <Card title="注入开关">
       <div class="divide-y" style="border-color: var(--border)">
-        <div v-for="sw in SWITCHES" :key="sw.k" class="switch-row" @click="toggleSwitch(sw)">
+        <div v-for="sw in SWITCHES" :key="sw.k" class="switch-row"
+             :style="sw.locked && sw.locked() ? 'opacity:.55;cursor:not-allowed' : ''"
+             @click="toggleSwitch(sw)">
           <div class="min-w-0">
-            <div class="font-medium">{{ sw.name }}</div>
-            <div class="text-xs mt-0.5" style="color: var(--text-muted)">{{ sw.desc }}</div>
+            <div class="font-medium">
+              {{ sw.name }}
+              <span v-if="sw.locked && sw.locked()" class="text-xs"
+                    style="color: var(--text-muted)">（本机不适用）</span>
+            </div>
+            <div class="text-xs mt-0.5" style="color: var(--text-muted)">
+              {{ sw.locked && sw.locked() ? sw.lockReason() : sw.desc }}
+            </div>
           </div>
           <div class="flex items-center gap-2 shrink-0">
             <span class="switch-state">{{ settings[sw.k] ? "已开启" : "已关闭" }}</span>
-            <Switch :model-value="!!settings[sw.k]" @update:model-value="() => toggleSwitch(sw)" />
+            <Switch :model-value="!!settings[sw.k]" :disabled="sw.locked && sw.locked()"
+                    @update:model-value="() => toggleSwitch(sw)" />
           </div>
         </div>
       </div>

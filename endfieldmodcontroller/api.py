@@ -644,6 +644,10 @@ class EndfieldModControllerApi:
             "status": launcher.component_addon_status(self.config),
             "config": {
                 "dlss5_addon_enabled": bool(getattr(self.config, "dlss5_addon_enabled", True)),
+            # 「DLSS4 多帧生成（40 系）」能不能用 —— 前端据此把那一行**锁住**并显示原因
+            # （判据唯一来源 = `deviceinfo.mfg_unlock_supported()`）。
+            "mfg_unlock_available": _mfg_available()[0],
+            "mfg_unlock_reason": _mfg_available()[1],
                 "firstperson_addon_enabled": bool(getattr(self.config, "firstperson_addon_enabled", True)),
             },
         }
@@ -660,6 +664,27 @@ class EndfieldModControllerApi:
         # **NVIDIA + 型号名含 RTX（= 有 tensor core）⇒ RTX 20 系及以上都支持**。
         # 不支持的机器上它一帧都出不来（NGX 回 `0xBAD00001`），与其"开着但没用"，
         # 不如明确拒绝并说明原因；**拒绝时不写配置**，前端会把开关弹回去。
+        # ★ **只对 40 系开放**（2026-10-06 用户定："50 系和其他用不了的锁"）。
+        #   口径与上面 DLSS5 那段一致：**拒绝时不写配置**，前端会把开关弹回去。
+        if component == "mfg" and enabled:
+            from . import deviceinfo
+
+            try:
+                mfg_ok, mfg_reason = deviceinfo.mfg_unlock_supported()
+            except Exception:  # noqa: BLE001 - 探测失败不拦人
+                mfg_ok, mfg_reason = False, "读不到设备信息"
+            if not mfg_ok:
+                launcher._append_log(self.config, f"DLSS4 多帧生成启用被拒绝: {mfg_reason}")
+                return {
+                    "ok": False,
+                    "rejected": "mfg_unsupported_gpu",
+                    "message": (f"{mfg_reason}\n\n"
+                                "所以这个开关不给你开。\n\n"
+                                "这个解锁是给 **RTX 40 系**准备的：40 系本身有对应的插值内核，"
+                                "只是被 NVIDIA 用软件架构白名单挡在 2x；"
+                                "50 系官方本来就支持多帧生成、不需要它；"
+                                "30/20 系与 A 卡核显没有那套内核，开了也不会出帧。"),
+                }
         if component == "dlss5" and enabled:
             from . import deviceinfo
 
@@ -682,10 +707,36 @@ class EndfieldModControllerApi:
                         "也不用重装或改画质档位。"
                     ),
                 }
-        key = "dlss5_addon_enabled" if component == "dlss5" else "firstperson_addon_enabled"
+        key = {"dlss5": "dlss5_addon_enabled",
+               "firstperson": "firstperson_addon_enabled",
+               "mfg": "mfg_unlock_enabled"}.get(component, "dlss5_addon_enabled")
         setattr(self.config, key, bool(enabled))
+        # ★ **DLSS5 与 DLSS4 互斥**（2026-10-06 用户定："单列开关，与 dlss5 互斥"）：
+        #   两者都是 ReShade addon，上游记录了"双 addon 同载导致菜单严重卡顿"的未查清案例。
+        #   用户开哪个，另一个**自动关掉**（在**真正执行动作的这一层**做，不只靠前端）。
+        #   ⚠️ 互斥文案先存变量 —— `result` 要到下面才存在（写在这里会引用未定义的名字，
+        #      `tests/test_undefined_names.py` 正是抓这个的）。
+        mutex_note = ""
+        if component == "mfg" and enabled:
+            if getattr(self.config, "dlss5_addon_enabled", True):
+                self.config.dlss5_addon_enabled = False
+                try:
+                    launcher.set_component_addons(self.config, "dlss5", False)
+                except Exception:  # noqa: BLE001
+                    pass
+                mutex_note = "已自动停用「DLSS5 神经渲染」（两者互斥）"
+        elif component == "dlss5" and enabled:
+            if getattr(self.config, "mfg_unlock_enabled", False):
+                self.config.mfg_unlock_enabled = False
+                try:
+                    launcher.set_component_addons(self.config, "mfg", False)
+                except Exception:  # noqa: BLE001
+                    pass
+                mutex_note = "已自动停用「DLSS4 多帧生成」（两者互斥）"
         self.config.save()
         result = launcher.set_component_addons(self.config, component, bool(enabled))
+        if mutex_note:
+            result["mutex"] = mutex_note
         # 两个都关 → 注入库里的底座会被移除；至少一个开 → 保持注入
         try:
             launcher.configure_dlss5_injection(self.config, enabled=True)
@@ -1501,6 +1552,18 @@ class EndfieldModControllerApi:
         # `dlss5_path` 就变成数据根，DLSS5 直接失效）。先按默认值回填，再让 `autofill`
         # 把能自动推导的（内置 XXMI / ReShade 底座 / 乳摇 / Poser）补上，最后把补好的
         # 值一起返回给前端回显 —— 用户看到的就是"清空后它自己填回该有的样子"。
+        # ★ **互斥兜底**（2026-10-06）：设置页保存时也要保证"两个不同时开" ——
+        #   只在开关入口判一次是不够的（准则：要在真正执行动作的那一层再判一次）。
+        if getattr(self.config, "mfg_unlock_enabled", False) and \
+                getattr(self.config, "dlss5_addon_enabled", True):
+            # 后声明为"开"的那个赢：这里以 **mfg** 为准（它是用户主动新开的那个开关）
+            self.config.dlss5_addon_enabled = False
+            try:
+                from . import launcher as _launcher
+
+                _launcher.set_component_addons(self.config, "dlss5", False)
+            except Exception:  # noqa: BLE001
+                pass
         self.config.normalize_blank_paths()
         self.config.autofill(deep=False)
         self.config.ensure_dirs()
@@ -5511,3 +5574,14 @@ class EndfieldModControllerApi:
             "controller": str(self.config.controller_dir),
             "reshade": str(self.config.reshade_runtime_path),
         }
+
+
+def _mfg_available() -> tuple[bool, str]:
+    """「DLSS4 多帧生成」在本机能不能用（给 `get_state` 用；判据唯一来源是 deviceinfo）。
+    探测失败按"不能用"处理 —— 这个功能是可选增强，宁可不给也不误导。"""
+    try:
+        from . import deviceinfo
+
+        return deviceinfo.mfg_unlock_supported()
+    except Exception:  # noqa: BLE001
+        return False, "读不到设备信息，暂时无法判断这台机器是否适用"
