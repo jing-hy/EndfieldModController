@@ -15,6 +15,15 @@
   ],
   "alerts": [
     {
+      "id": "v1.0.17-1.0.20-selfupdate-beta-loop",
+      "level": "warning",
+      "title": "v1.0.17 ~ v1.0.20 的「自动更新」会一直提示，请手动换一次 exe",
+      "min_version": "1.0.17",
+      "max_version": "1.0.20",
+      "body": "你装的是 v1.0.17 ~ v1.0.20 中的一个 —— 这几个版本发出去的 exe **自身带着 beta 标记**（出自我们的打包流程，不是你的操作问题）。\n\n带来的唯一问题很烦人：**「自动更新」会一直说有新版，点了重启更新也没用**。因为它更新完拿到的新 exe 仍然自称 beta，于是它又认为自己该更新，如此反复。\n\n（如果你是在 **2026-10-06 12:30 之后**从 Releases 页下载的 `v1.0.20`，那份已经重打修好了，可以忽略这条。）\n\n**请手动换一次 exe 即可（一分钟）：**\n\n1. 打开 https://github.com/jing-hy/EndfieldModController/releases/latest 下载最新的 `EndfieldModController.exe`；\n2. 把管理器**关掉**，用下载到的 exe **覆盖**你现在这个 exe 文件；\n3. 重新打开，就是最新版了。\n\n**你的 Mod 库、配置、注入备份都不会动** —— 数据都在 exe 旁边的 `library\\` 与 `runtime\\` 里，这里只是换一个 exe 文件。\n\n打包流程与自更新逻辑都已修好，换到最新版之后不会再出现这个循环。",
+      "url": "https://github.com/jing-hy/EndfieldModController/releases/latest"
+    },
+    {
       "id": "v1.0.0-1.0.1-selfupdate-broken",
       "level": "warning",
       "title": "v1.0.0 / v1.0.1 的「自动更新」是坏的，请手动换一次 exe",

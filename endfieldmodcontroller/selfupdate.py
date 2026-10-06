@@ -555,6 +555,8 @@ def apply_update(
     except OSError as exc:
         return _apply_fail(log, f"启动更新脚本失败（wscript 没起来）：{exc}")
 
+    # 记下"这一份装过"（见 `pending_payload` 里"装过却没生效"的判据）
+    _write_applied(config, payload, _pending_version(config))
     _log(log, "更新脚本已启动，程序将退出并在 2 秒后自动重启为新版")
     return {
         "ok": True,
@@ -600,6 +602,48 @@ def _payload_stale_reason(config: AppConfig, payload: Path, *, check_hash: bool 
     return ""
 
 
+APPLIED_NAME = "applied.json"
+
+
+def _applied_path(config: AppConfig) -> Path:
+    return config.runtime_path / UPDATE_DIR_NAME / APPLIED_NAME
+
+
+def _read_applied(config: AppConfig) -> dict[str, Any]:
+    """上一次"点重启安装"时到底装了哪一份载荷（没有记录就返回空 dict）。"""
+    try:
+        data = json.loads(_applied_path(config).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_applied(config: AppConfig, payload: Path, tag: str) -> None:
+    try:
+        stat = payload.stat()
+    except OSError:
+        return
+    try:
+        _applied_path(config).write_text(json.dumps({
+            "tag": tag,
+            "size": stat.st_size,
+            "mtime": int(stat.st_mtime),
+            "sha256": _sha256(payload),
+            "at": int(time.time()),
+        }, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _payload_identity(payload: Path) -> tuple[int, int] | None:
+    """载荷的轻量身份（size + mtime，微秒级）—— 判"是不是同一份"够用且不读大文件。"""
+    try:
+        stat = payload.stat()
+    except OSError:
+        return None
+    return (stat.st_size, int(stat.st_mtime))
+
+
 def pending_payload(config: AppConfig) -> dict[str, Any]:
     """有没有"已下载但还没安装"的更新包。
 
@@ -620,6 +664,16 @@ def pending_payload(config: AppConfig) -> dict[str, Any]:
     reason = _payload_stale_reason(config, payload)
     if reason:
         return {"pending": False, "stale": True, "latest": latest, "reason": reason}
+    # ⚠️ **"装过却没生效"就不再提示**（2026-10-06）：发布出去的那个 exe 可能**自身带着
+    #    beta 标识**（打包流程问题）⇒ 装上后版本号没变 ⇒ 又提示 ⇒ **无限循环**，用户
+    #    点多少次都没用。判据 = 这份载荷与**上次实际安装的那一份**完全相同（size + mtime）。
+    #    一旦发布方**重打了附件**（文件变了），判据自动失效 ⇒ **仍能正常更新**（自愈保留）。
+    applied = _read_applied(config)
+    identity = _payload_identity(payload)
+    if applied and identity is not None and (applied.get("size"), applied.get("mtime")) == identity:
+        return {"pending": False, "ineffective": True, "latest": latest,
+                "reason": "上一次安装的就是这一份，但装完版本号没有变 —— "
+                          "说明发布出来的这个版本自身带了 beta 标识，重复安装也没用"}
     return {"pending": True, "latest": latest, "path": str(payload),
             "size": payload.stat().st_size}
 
