@@ -243,6 +243,12 @@ class EndfieldModControllerApi:
         判据用 **mtime**（比每次都读文件便宜），只有真的变了才重新 load；
         load 会顺带做路径自愈与默认值迁移，与启动时走的是同一条路。
         """
+        # ★★ **内存里有未落盘的改动时，绝不重新加载**（2026-10-06）。
+        #    此刻磁盘上那份**必然比内存旧**；reload 会把刚改的值整份丢掉，
+        #    紧接着 save() 再把旧值写回去 —— 用户看到的就是"关掉之后过一会又自己打开"。
+        #    （`AppConfig` 在字段被赋值时置位、save() 成功时清除。）
+        if getattr(self._config, "has_unsaved_changes", None) and self._config.has_unsaved_changes():
+            return self._config
         mtime = self._config_file_mtime()
         path = getattr(self, "_config_path", None)
         if path and mtime and mtime != getattr(self, "_config_mtime", None):

@@ -665,6 +665,13 @@ class AppConfig:
                 cfg.save(path)
             except OSError:
                 pass
+        # ⚠️ **加载完成后必须清掉"有未落盘改动"标记**（2026-10-06 实测暴露）：
+        #    上面这些迁移/补齐都会走 `__setattr__` 把标记置为 True，可那**不是用户的改动**，
+        #    而是"从磁盘读出来再补齐"的结果。若不清掉，`api.config` 的脏保护会**永久生效**
+        #    ⇒「用户在设置页改了配置、运行中的进程能即时读到」这个能力就丢了
+        #    —— 那正是那个 property 存在的理由。
+        #    若上面没有执行 `save()`（无迁移），此刻内存与磁盘本来就一致，清掉同样正确。
+        object.__setattr__(cfg, "_has_unsaved_changes", False)
         return cfg
 
     def autofill(self, *, deep: bool = True) -> list[str]:
@@ -736,6 +743,22 @@ class AppConfig:
                 filled.append("migoto_loader")
         return filled
 
+    # ── 「有未落盘的改动」标记（2026-10-06）────────────────────────────────────
+    # 为什么需要：`api.EndfieldModControllerAPI.config` 这个 property 会在磁盘 mtime 变化时
+    # **整份重新 load 并替换内存对象**（为了让"用户在设置页改配置"对运行中的进程即时生效）。
+    # 但若此时内存里**有还没 save 的改动**，那次 reload 会把改动整份丢掉 —— 随后 save()
+    # 再把旧值写回磁盘，用户看到的就是"开关关掉之后过一会又自己打开了"。
+    # 这里让配置对象自己记住这个状态，判据就不必依赖每个调用方守规矩。
+    def __setattr__(self, name: str, value: Any) -> None:
+        object.__setattr__(self, name, value)
+        # 下划线开头的是运行期缓存（`_config_path` / `_relocated` …），不参与落盘
+        if not name.startswith("_"):
+            object.__setattr__(self, "_has_unsaved_changes", True)
+
+    def has_unsaved_changes(self) -> bool:
+        """内存里有没有**还没写进磁盘**的改动（见 `__setattr__` 的说明）。"""
+        return bool(getattr(self, "_has_unsaved_changes", False))
+
     def save(self, path: Path | None = None) -> None:
         if path is None:
             if not self._config_path:
@@ -760,6 +783,8 @@ class AppConfig:
         from . import fsutil
 
         fsutil.write_text_atomic(path, payload, newline="\n")
+        # 落盘成功 ⇒ 磁盘与内存一致，清掉"未落盘"标记（见 `__setattr__`）
+        object.__setattr__(self, "_has_unsaved_changes", False)
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
