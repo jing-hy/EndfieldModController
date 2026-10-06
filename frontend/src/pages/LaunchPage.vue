@@ -103,12 +103,16 @@ const SWITCHES = [
   { k: "firstperson_addon_enabled", name: "第一人称视角", desc: "进游戏按 F1 切换第一人称",
     apply: (v) => call("set_component_addon", "firstperson", v) },
   // ★ DLSS4 多帧生成解锁（2026-10-06 用户要求："单列开关，与 dlss5 互斥，
-  //   50 系和其他用不了的锁，默认关"）。
-  //   · **只对 40 系开放**：能不能用由后端判据决定（`mfg_unlock_available`），
-  //     不满足时这一行**禁用**并显示原因；
-  //   · **与 DLSS5 互斥**：后端在开关入口与保存配置两处都会自动关掉另一个，这里如实提示。
-  { k: "mfg_unlock_enabled", name: "DLSS4 多帧生成", 
-    desc: "40 系把多帧生成从 2x 解锁到 3x/4x（与 DLSS5 神经渲染互斥，同时只能开一个）",
+  //   50 系和其他用不了的锁，默认关"；随后又要求"**说明要跟随显卡改变**"）。
+  //   · **能不能用由后端判据决定**（`mfg_unlock_available`），不满足时这一行**禁用**并显示原因；
+  //   · **与 DLSS5 互斥**：后端在开关入口与保存配置两处都会自动关掉另一个，这里如实提示；
+  //   · ★ **说明跟随本机显卡**：后端的 `mfg_unlock_reason` 本来就是按显卡生成的
+  //     （40 系 = "被挡在 2x 是软件白名单造成的，解锁后可开 3x/4x"；
+  //      50 系 = "本身就有官方多帧生成，解锁提升不大"）—— 所以**别再写死"40 系"**，
+  //     否则 50 系解锁之后显示的就是错的那句（这正是用户提的"说明要跟随显卡"）。
+  { k: "mfg_unlock_enabled", name: "DLSS4 多帧生成",
+    desc: () => store.state.component_addon_status?.config?.mfg_unlock_reason
+      || "把多帧生成从 2x 解锁到更高倍率（与 DLSS5 神经渲染互斥，同时只能开一个）",
     apply: (v) => call("set_component_addon", "mfg", v),
     // ⚠️ 能不能用**不在 `settings` 里**（`settings` = `store.state.config` = AppConfig 的字段），
     //    而在 `store.state.component_addon_status.config`。2026-10-06：我第一版用 settings 读，
@@ -147,6 +151,15 @@ const SWITCHES = [
 //   ② 装卸要动游戏目录里的文件，一次点击要跑几百毫秒到几秒；**处理期间再点一下就变成
 //      "关了又开"**（日志里能看到同一秒内 uninstall 和 install 交替）。加一把互斥锁。
 const pendingSwitches = new Set();
+function swText(sw) {
+  // ★ 开关的说明文字：**允许写成函数**（2026-10-06 用户要求"DLSS4 的说明要跟随显卡改变"）
+  //    —— 例如 DLSS4 那条要显示后端按本机显卡生成的理由（40 系 = 解锁到 3x/4x；
+  //    50 系 = 提升不大），写死一句"40 系…"在 50 系上就是错的。
+  //    其它开关仍可直接写字符串，这里兼容两种写法。
+  if (!sw) return "";
+  return typeof sw.desc === "function" ? (sw.desc() || "") : (sw.desc || "");
+}
+
 async function toggleSwitch(sw) {
   if (pendingSwitches.has(sw.k)) return;       // 上一个动作还没落地，忽略这次点击
   // ★ **锁住的开关点不动**（2026-10-06）：判据来自后端（`mfg_unlock_available`）；
@@ -768,7 +781,7 @@ useLogAutoScroll(logBox, () => consoleLog.value);
                     style="color: var(--text-muted)">（本机不适用）</span>
             </div>
             <div class="text-xs mt-0.5" style="color: var(--text-muted)">
-              {{ sw.locked && sw.locked() ? sw.lockReason() : sw.desc }}
+              {{ sw.locked && sw.locked() ? sw.lockReason() : swText(sw) }}
             </div>
           </div>
           <div class="flex items-center gap-2 shrink-0">

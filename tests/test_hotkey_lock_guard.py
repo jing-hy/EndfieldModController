@@ -106,3 +106,33 @@ def test_injection_targets_follow_the_same_verdict(env):
     assert not any(t.endswith("d3d12.dll") for t in launcher.dlss5_injection_targets(env))
     env.minimal_injection = True                       # 统一管理器开着 ⇒ 底座必列
     assert any(t.endswith("d3d12.dll") for t in launcher.dlss5_injection_targets(env))
+
+
+def test_only_dlss4_still_injects_the_base(env):
+    """★★ **只开 DLSS4 时也必须注入 ReShade 底座**（2026-10-06 用户现场）。
+
+    原话：「**我现在只开 dlss4 根本不注入**」。原因：`renodx-mfgunlock.addon64`
+    **本身就是个 ReShade addon**，它和 DLSS5 / 第一人称**共用同一个底座**；而
+    **DLSS4 与 DLSS5 互斥**（开一个就关另一个）⇒ "只开 DLSS4"时前两项必然都是关的
+    ⇒ 旧判据直接返回"不要底座" ⇒ addon 没有宿主 ⇒ 用户看到的就是"根本不注入"。
+    """
+    env.minimal_injection = False
+    env.dlss5_addon_enabled = False                 # 互斥 ⇒ DLSS5 必关
+    env.firstperson_addon_enabled = False
+    env.mfg_unlock_enabled = True
+
+    want, reason = reshade_integration.reshade_base_wanted(env)
+    assert want is True, f"只开 DLSS4 却不注入底座 ⇒ addon 没有宿主（原因：{reason}）"
+    assert any(t.endswith("d3d12.dll") for t in launcher.dlss5_injection_targets(env)), (
+        "注入库里必须有 ReShade 底座，否则 MFG Unlock 不会被加载"
+    )
+
+
+def test_all_three_off_means_no_base(env):
+    """对照：三个入口都关着 ⇒ 底座确实不该注入（判据没有被放水成"永远 True"）。"""
+    env.minimal_injection = False
+    env.dlss5_addon_enabled = False
+    env.firstperson_addon_enabled = False
+    env.mfg_unlock_enabled = False
+    assert reshade_integration.reshade_base_wanted(env)[0] is False
+    assert not any(t.endswith("d3d12.dll") for t in launcher.dlss5_injection_targets(env))

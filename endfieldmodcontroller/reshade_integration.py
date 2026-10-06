@@ -113,14 +113,23 @@ def reshade_base_wanted(config: AppConfig) -> tuple[bool, str]:
     于是注入库里只剩 EFMI 的 `d3d11.dll`、**没有一个 ReShade 底座** ⇒ 游戏里根本没有面板；
     而「Mod 快捷键锁定」照样把 Mod 的 `[Key*]` 改写成 `VK_F24` ⇒ **键被锁死、面板却不存在**
     （用户感受就是「皮肤打不进去」）。这正是 2026-10-01 那次事故的翻版，只是换了一条路径。
+
+    ★★ **DLSS4（多帧生成解锁）也必须算进来**（2026-10-06 用户现场：「**我现在只开 dlss4
+    根本不注入**」）：`renodx-mfgunlock.addon64` **本身就是个 ReShade addon**，它与 DLSS5、
+    第一人称**共用同一个底座** —— 而 **DLSS4 与 DLSS5 是互斥的**（开一个就关另一个），
+    所以"只开 DLSS4"时**前两项必然是关的** ⇒ 旧判据直接返回 False ⇒ 底座不注入 ⇒
+    addon 没有宿主，用户看到的就是"开了没反应/根本没注入"。
+
+    三个入口（DLSS5 神经渲染 / 第一人称视角 / DLSS4 多帧生成）**任意一个开着**就要底座。
     """
     if bool(getattr(config, "minimal_injection", False)):
         return True, ""                      # 最小注入模式**就是**只要底座 + 面板
     if (bool(getattr(config, "dlss5_addon_enabled", True))
-            or bool(getattr(config, "firstperson_addon_enabled", True))):
+            or bool(getattr(config, "firstperson_addon_enabled", True))
+            or bool(getattr(config, "mfg_unlock_enabled", False))):
         return True, ""
-    return False, ("「DLSS5 神经渲染」和「第一人称视角」都关着 ⇒ ReShade 底座不会被注入，"
-                   "游戏里没有面板")
+    return False, ("「DLSS5 神经渲染」「第一人称视角」「DLSS4 多帧生成」三者都关着 "
+                   "⇒ ReShade 底座不会被注入，游戏里没有面板")
 
 
 def firstperson_camera_wanted(config: Any) -> bool:
