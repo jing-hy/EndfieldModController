@@ -3825,8 +3825,11 @@ class EndfieldModControllerApi:
         path, error, slow = moddl.download(
             url, dest_dir, progress=progress, name=item.get("name") or "",
             cancel=cancelled,
-            # 暂停要留断点（下次能续），终止不留
-            keep_partial=bool(self._mod_dl.get("pause")),
+            # 暂停要留断点（下次能续），终止不留。
+            # ⚠️ **必须传函数、不能传值**（2026-10-06 修）：传值 = 在"进入下载"那一刻就
+            # 定死了，而用户是在下载**跑起来之后**才点暂停/终止的 ⇒ 点暂停也会被当成终止
+            # （半成品被清、弹窗报「已终止」）。详见 `moddl.download` 里那段说明。
+            keep_partial=lambda: bool(self._mod_dl.get("pause")),
             log=lambda message: launcher._append_log(self.config, message))
         # ⚠️ **配套小文件一并下载**（2026-10-03）：作者单独发的 `_Core.ini` 这类文件
         # 主包缺它根本不工作（实测那个 UI Mod 就是），而它一直没被下载过。

@@ -244,7 +244,9 @@ def sync(
     for repo_path, local_parts, label in FILES:
         try:
             text = fetch_text(repo, ref, repo_path, timeout=timeout)
-            upstream = json.loads(text)
+            from . import fsutil
+
+            upstream = fsutil.loads_tolerant(text)
             if not isinstance(upstream, dict):
                 raise ValueError("不是 JSON 对象")
         except Exception as exc:  # noqa: BLE001

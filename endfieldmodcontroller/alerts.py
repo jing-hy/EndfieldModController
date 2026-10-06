@@ -109,8 +109,10 @@ def decode_contents(payload: Any) -> dict[str, Any]:
     raw = payload.get("content")
     if isinstance(raw, str) and raw.strip():
         try:
+            from . import fsutil
+
             text = base64.b64decode(raw, validate=False).decode("utf-8", errors="replace")
-            document = json.loads(text)
+            document = fsutil.loads_tolerant(text)
         except (binascii.Error, ValueError, json.JSONDecodeError) as exc:
             raise ValueError(f"alerts.json 内容无法解析：{exc}") from exc
     elif isinstance(payload.get("alerts"), list):
@@ -238,7 +240,9 @@ def fetch_document(*, timeout: int = 20) -> dict[str, Any]:
     raw_url = f"https://github.com/{REPO}/raw/main/{FILE_NAME}"
     try:
         _final, body = fastnet.fetch(raw_url, headers={"Accept": "text/plain"}, timeout=timeout)
-        document = json.loads(body.decode("utf-8", errors="replace"))
+        from . import fsutil
+
+        document = fsutil.loads_tolerant(body.decode("utf-8", errors="replace"))
         if not isinstance(document, dict) or document.get("alerts") is None:
             raise ValueError("raw 路线拿到的不是合法的 alerts 文档")
         return document

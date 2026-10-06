@@ -35,6 +35,8 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(AppConfig, "dlss5_path", property(lambda self: root / "dlss5"))
     monkeypatch.setattr(AppConfig, "reshade_runtime_path", property(lambda self: root / "reshade"))
     monkeypatch.setattr(AppConfig, "xxmi_launcher_path", property(lambda self: None))
+    monkeypatch.setattr(AppConfig, "staging_mods_path",
+                        property(lambda self: root / "builtin" / "XXMI" / "EFMI" / "Mods"))
     return root, config
 
 
@@ -106,6 +108,33 @@ def test_both_channels_use_the_same_collector():
     """★ 崩溃包与手动诊断包**共用这一个入口**（判据只有一处）。"""
     assert "collect_diagnosis_files" in inspect.getsource(crashwatch.make_bundle)
     assert "collect_diagnosis_files" in inspect.getsource(diagnostics)
+
+
+def test_staging_inventory_lists_mod_keys(env, monkeypatch, tmp_path):
+    """★ staging 的 Mod 清单与 `key =` 行必须进包（2026-10-06「皮肤打不进去」的判据）。
+
+    那次包里能回答"Mod 进没进 staging、键有没有被锁"的东西**一个都没收**，
+    只有控制器日志里一行 `staged inventory | mod_dirs=3 … sample=`（3 个名字），
+    于是第一轮只能靠推断 —— 这条就是把它补上并钉住。
+    """
+    root, config = env
+    staging = root / "builtin" / "XXMI" / "EFMI" / "Mods"
+    mod = staging / "MC_佩丽卡_OL装"
+    mod.mkdir(parents=True)
+    (mod / "0.ini").write_text("[KeyCoat]\nkey = no_modifiers vk_f23\n$coat = 0\n",
+                               encoding="utf-8")
+    (staging / "MC_Probe.ini").write_text("[Constants]\n", encoding="utf-8")
+    monkeypatch.setattr(crashwatch, "_collect_injection_files", lambda config, dest: None)
+    monkeypatch.setattr(runtime_assets, "manifest_entries", lambda config: [])
+
+    dest = tmp_path / "out"
+    taken = crashwatch.collect_diagnosis_files(config, dest)
+
+    assert "staging-inventory.txt" in taken, f"没收 staging 清单（收进去的是 {taken}）"
+    text = (dest / "staging-inventory.txt").read_text(encoding="utf-8")
+    assert "MC_佩丽卡_OL装" in text
+    assert "key = no_modifiers vk_f23" in text, "锁键现场就看这一行，不能漏"
+    assert "MC_Probe.ini" in text, "散落的 ini 也要列出来"
 
 
 def test_keylines_excerpt_for_big_log(env, monkeypatch, tmp_path):

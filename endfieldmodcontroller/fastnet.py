@@ -58,6 +58,12 @@ MAX_PIECES = 256
 # 若服务端是**按连接限速**，加连接能近似线性提速 ⇒ 提到 32（2026-10-03）。
 MAX_THREADS = 32
 READ_CHUNK = 262144
+# **单次 `read()` 的字节下限**（2026-10-06 加）。见 `_adaptive_read_size()`：
+# `read(n)` 会阻塞到"读满 n"或 socket 超时，而 socket 超时必须设得比"读满一块"更长
+# （超时后 `http.client` 的响应对象就不能再读了）⇒ **单次 read 的时长就是"点暂停后
+# 多久才真的停"**。固定 256 KB 在 0.008 MB/s 的线路上要 30 多秒 ⇒ 用户实测
+# 「10:43:29 点暂停 → 10:44:02 才 下载已终止」= 33 秒。慢线路上读小块即可秒级响应。
+MIN_READ_CHUNK = 16384
 # 单次读多久没数据算"抖动/卡死"，切并发续传
 # ⚠️ **"多久收不到数据算断流"的下限**（2026-10-03 再调）。
 # 它原来是硬性的 20 秒，但那只适合正常线路：香蕉网无 VPN 时实测 0.008 MB/s，
@@ -640,7 +646,8 @@ def _download_sequential(
                     _seq_waited = 0.0
                     # ⚠️ **同并行：读之前把预算放回去**（否则慢线路上每次 read 都 1 秒超时）
                     _restore_sock_timeout(response, _seq_window)
-                    chunk = response.read(READ_CHUNK)
+                    # 按当下速度决定这一次读多少（慢线路读小块 ⇒ 暂停秒级生效）
+                    chunk = response.read(_adaptive_read_size(_mbps))
                     _sock_timeout(response, POLL_SECONDS)
                     if not chunk:
                         break
@@ -952,7 +959,8 @@ def _download_parallel(
                         # 但 `read()` 要用**这个块的窗口**做预算 —— 慢线路上读满 256 KB
                         # 可能要几十秒，用 1 秒必然超时 ⇒ 每一块都被记成"失败"。
                         _restore_sock_timeout(response, _window)
-                        chunk = response.read(READ_CHUNK)
+                        # 按当下速度决定这一次读多少（慢线路读小块 ⇒ 暂停秒级生效）
+                        chunk = response.read(_adaptive_read_size(_live_mbps))
                         # 读完立刻收回短超时，下一轮轮询才能 1 秒内响应"暂停"
                         _sock_timeout(response, POLL_SECONDS)
                         if not chunk:
@@ -1070,6 +1078,25 @@ def _readable(response: Any, wait_seconds: float) -> bool:
         return bool(ready)
     except (OSError, ValueError):
         return True          # 探测本身出问题就别拦着读
+
+
+def _adaptive_read_size(mbps: float) -> int:
+    """这一次 `read()` 读多少字节：按"约 1.5 秒的数据量"自适应（2026-10-06 加）。
+
+    **为什么必须自适应**：`read(n)` 会阻塞到"读满 n"或 socket 超时，而 socket 超时
+    必须设得比"读满一块"更长 —— 因为 `http.client` 的响应对象**一旦超时就不能再读**
+    （见 `_readable` 的说明），所以不能靠"短超时 + 重试 read"来提升响应性。
+    ⇒ **单次 read 的时长 = 用户点「暂停 / 终止」后要等多久才真的停**。
+    固定 256 KB 在香蕉网那种 0.008 MB/s 的线路上要 30 多秒：实测
+    `10:43:29 点暂停 → 10:44:02 才「下载已终止」`（33 秒），用户反馈「按了暂停，实际没有暂停」。
+
+    改成"约 1.5 秒的量"之后：慢线路读小块（下限 `MIN_READ_CHUNK`）⇒ 暂停 1~2 秒级生效；
+    快线路照旧用满 `READ_CHUNK`（对本就毫秒级的读取没有影响）。
+    """
+    if mbps <= 0:
+        return READ_CHUNK
+    target = int(mbps * 1048576 * 1.5)
+    return max(MIN_READ_CHUNK, min(READ_CHUNK, target))
 
 
 def _stall_window(piece_bytes: int, mbps: float) -> float:

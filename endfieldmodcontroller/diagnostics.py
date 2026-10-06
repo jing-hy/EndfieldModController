@@ -2700,6 +2700,19 @@ def create_diagnostic_bundle(
     summary.extend(_xxmi_injection_summary(config))
     summary.extend(_ngx_consumer_summary(game_path))
     summary.extend(_nr_frames_summary(config))
+    # 崩溃取证一页结论（2026-10-06 加，用户「你加判据，多加一点」）：
+    # 各回答一个原本要人肉翻的问题 —— 异常是什么、自己退还是被强杀、崩在 addon 之前还是之后、
+    # 当时的 NR 档位。实现与口径见 `crashwatch.crash_forensics`。
+    try:
+        from . import crashwatch
+
+        forensics = crashwatch.crash_forensics(config)
+        if forensics:
+            summary.append("")
+            summary.append("-- 崩溃取证（异常 / 退出方式 / ReShade 日志 / NR 档位）--")
+            summary.extend(f"  {line}" for line in forensics)
+    except Exception as exc:  # noqa: BLE001
+        summary.append(f"（崩溃取证生成失败：{exc}）")
     summary.extend(_shader_summary(config))
     # ⚠️ 2026-10-04 补的四段（用户原话：「你能不能一次加完」）。
     #    这四段全是"数据本来就在现场、只是没人解析/没人列"，不是新采集：

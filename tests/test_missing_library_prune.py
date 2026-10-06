@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 from endfieldmodcontroller.api import EndfieldModControllerApi
@@ -39,6 +40,14 @@ class MissingLibraryFileTests(unittest.TestCase):
         self.staging = self.runtime / "builtin" / "XXMI" / "EFMI" / "Mods"
         self.staging.mkdir(parents=True)
         self.config_path = self.root / "config.json"
+        # ⚠️ 启动器路径必须打桩成 None（2026-10-06 加）：不打桩时它会**探测到开发机上那份
+        #    内置 XXMI**、并被当成"用户自己的外部 XXMI"，于是 `staging_mods_dir` 被改写成
+        #    工作区里的 `runtime\builtin\XXMI\EFMI\Mods` —— 测试随后**写/清的是真实工作区**
+        #    （产品侧那条误判也一并修了，见 `AppConfig._external_efmi_mods`）。
+        self._xxmi_patch = unittest.mock.patch.object(
+            AppConfig, "xxmi_launcher_path", property(lambda self: None)
+        )
+        self._xxmi_patch.start()
         self.config = AppConfig(
             data_root=str(self.root),   # 未显式指定的路径一律落 tmp，绝不碰真实工作区
             library_dir=str(self.library),
@@ -78,6 +87,7 @@ class MissingLibraryFileTests(unittest.TestCase):
         }, ensure_ascii=False), encoding="utf-8")
 
     def tearDown(self) -> None:
+        self._xxmi_patch.stop()
         self.tmp.cleanup()
 
     def _remove_library_mod(self, name: str) -> None:

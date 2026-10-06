@@ -298,7 +298,9 @@ def web_status(*, timeout: float = WEB_TIMEOUT) -> dict[str, Any]:
     def get(path: str) -> Any:
         request = urllib.request.Request(WEB_UI_URL + path, headers={"Accept": "application/json"})
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            return json.loads(response.read().decode("utf-8", errors="replace"))
+            from . import fsutil
+
+            return fsutil.loads_tolerant(response.read().decode("utf-8", errors="replace"))
 
     try:
         payload = get("/api/status")

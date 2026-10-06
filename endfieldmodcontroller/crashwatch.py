@@ -214,6 +214,289 @@ _CRASH_RECORD_RE = re.compile(r"###\s*CRASH RECORDED\s*###\s*(?P<rest>.+?)\s*$",
 _NRSTYLE_BAD_VALUE = "2"
 
 
+# ---------------------------------------------------------------------------
+# 崩溃取证：把"怎么崩的 / 崩在哪一层"解析成能读的结论（2026-10-06 加）
+# ---------------------------------------------------------------------------
+# 用户原话：「**你加判据，多加一点**」。起因是那份反馈包（勾选 DLSS5 神经渲染就闪退）：
+# 手里明明有 WER 的"异常代码 + 异常数据"和一份**戛然而止**的 ReShade 日志，要回答的问题却
+# 全靠人肉翻 —— ① 是不是空指针？② 自己退还是被强杀？③ 崩在 addon 加载之前还是之后？
+# ④ 故障模块到底有没有被定位到？这些数据现场都有，这里一次解析成结论。
+#
+# ⚠️ 本段**只如实陈述证据，不做任何因果归因** —— 尤其不碰 `NRStyle`
+#    （2026-10-02 已定案它不是本项目的崩因，见上面 `_NRSTYLE_BAD_VALUE` 的说明）。
+# 面板 addon 日志的文件名（与 `diagnostics.ADDON_LOG_NAME` 同一个值）
+_ADDON_LOG_NAME = "modecontroller.addon.log"
+_EXCEPTION_NAMES = {
+    "c0000005": "访问违例（ACCESS_VIOLATION）—— 读写了非法地址",
+    "c0000409": "栈保护 / CRT fail-fast（STATUS_STACK_BUFFER_OVERRUN）",
+    "c000001d": "非法指令（ILLEGAL_INSTRUCTION）",
+    "c00000fd": "栈溢出（STACK_OVERFLOW）",
+    "c0000374": "堆损坏（HEAP_CORRUPTION）",
+    "c0000135": "找不到依赖 DLL（STATUS_DLL_NOT_FOUND）",
+    "80000003": "断点（BREAKPOINT）",
+}
+_WER_PAIR_RE = re.compile(r"^(?:Dynamic)?Sig\[(\d+)\]\.(Name|Value)=(.*)$")
+
+
+def _wer_named_fields(text: str) -> dict[str, str]:
+    """把 WER 的 `Sig[n].Name=…` / `Sig[n].Value=…` **配对**成 `{名字: 值}`。
+
+    为什么不直接按 `Sig[7]` 取：不同 Windows 版本的编号会漂，而名字是稳定的。
+    """
+    names: dict[str, str] = {}
+    values: dict[str, str] = {}
+    for raw in text.splitlines():
+        match = _WER_PAIR_RE.match(raw.strip())
+        if not match:
+            continue
+        index, kind, value = match.group(1), match.group(2), match.group(3).strip()
+        (names if kind == "Name" else values)[index] = value
+    return {names[key]: value for key, value in values.items() if names.get(key)}
+
+
+def _recent_wer_texts(since: float | None) -> list[tuple[Path, str]]:
+    """`since` 之后的 WER 报告（(路径, 文本)），**新的在前**。"""
+    try:
+        from . import diagnostics
+
+        paths = list(diagnostics.wer_report_paths())
+    except Exception:  # noqa: BLE001 —— 拿不到就当没有，绝不影响主流程
+        return []
+    out: list[tuple[Path, str]] = []
+    for path in paths:
+        try:
+            if since is not None and path.stat().st_mtime < float(since) - 5:
+                continue
+        except OSError:
+            continue
+        out.append((path, _wer_text(path)))
+    out.sort(key=lambda item: item[0].stat().st_mtime, reverse=True)
+    return out
+
+
+def wer_exception_detail(since: float | None = None) -> dict[str, str]:
+    """最近一次 WER 的**异常代码 / 异常数据 / 故障模块**，并翻成人话。
+
+    为什么需要（2026-10-06 实测）：反馈包里 WER 写着 `异常代码=c0000005`、
+    `异常数据=0000000000000008` —— 那是"读 **null + 8**"（典型空指针访问对象成员）；
+    只说"崩了"是分不出"空指针 / 野指针 / 堆损坏 / 栈溢出"的。
+    另外 `故障模块 = StackHash_xxxx` 表示**Windows 连是哪个模块崩的都没定位到**
+    （栈上没有可用模块信息）—— 这本身就是一条判据，别当成"模块就叫 StackHash"。
+    """
+    for _path, text in _recent_wer_texts(since):
+        fields = _wer_named_fields(text)
+        if not fields:
+            continue
+        code = (fields.get("异常代码") or "").strip().lower()
+        data = (fields.get("异常数据") or "").strip().lower()
+        module = (fields.get("故障模块名称") or fields.get("故障模块") or "").strip()
+        parts: list[str] = []
+        if code:
+            known = _EXCEPTION_NAMES.get(code)
+            parts.append(f"异常代码 `{code}`" + (f" = {known}" if known else ""))
+        try:
+            address = int(data, 16) if data else -1
+        except ValueError:
+            address = -1
+        if address > 0:
+            if code == "c0000005" and address <= 0x1000:
+                parts.append(f"异常数据 `0x{address:x}` ⇒ **读/写 null + 0x{address:x}**"
+                             f"（空指针访问对象成员）")
+            else:
+                parts.append(f"异常数据 `0x{address:x}`（读写地址）")
+        if module:
+            if module.lower().startswith("stackhash"):
+                parts.append(f"故障模块 `{module}` ⇒ **没能定位到是哪个模块崩的**"
+                             f"（栈上没有可用模块信息）")
+            else:
+                parts.append(f"故障模块 `{module}`")
+        return {"exception_code": code, "exception_data": data, "fault_module": module,
+                "text": "；".join(parts)}
+    return {}
+
+
+def _addon_log_paths(config: AppConfig) -> list[Path]:
+    """面板 addon 日志的候选位置（`DllMain` 第一行就写它 ⇒ 能回答"走到哪一步"）。
+
+    ⚠️ **候选必须给全**（2026-10-06 实测教训）：第一版只列了 `reshade\\` 与 `dlss5\\`，
+    而反馈包里那份实际是从**游戏目录**收上来的 ⇒ 判据当场"判不出"（**等于没做这条判据**）。
+    这里与 `diagnostics._addon_log_summary` 的多候选口径对齐。
+    """
+    bases: list[Path] = []
+    for name in ("reshade_runtime_path", "dlss5_path", "runtime_path"):
+        base = getattr(config, name, None)
+        if base:
+            bases.append(Path(base))
+    game_exe = str(getattr(config, "game_exe", "") or "").strip()
+    if game_exe:
+        bases.append(Path(game_exe).parent)
+    candidates: list[Path] = []
+    for base in bases:
+        for path in (base / _ADDON_LOG_NAME, base / "Addons" / _ADDON_LOG_NAME):
+            if path not in candidates:
+                candidates.append(path)
+    return candidates
+
+
+def addon_exit_kind(config: AppConfig) -> str:
+    """"自己退出"还是"被强杀"—— 判据是**面板 addon 有没有收到 `DllMain detach`**。
+
+    2026-10-05 定的口径：收到 detach = 走了 `ExitProcess`（卸载流程跑到了）；
+    一条都没有 = 被 `TerminateProcess` 强杀（崩了，或被别的程序结束）。
+    """
+    seen_any = False
+    for path in _addon_log_paths(config):
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        seen_any = True
+        if "DllMain detach" in text:
+            return "自己退出（面板 addon 收到了 `DllMain detach` ⇒ 走到了正常卸载）"
+    if not seen_any:
+        return "判不出（没找到面板 addon 的日志）"
+    return "被强杀 / 中途消失（面板 addon **没有** `DllMain detach` ⇒ 不是正常退出）"
+
+
+def reshade_log_verdict(config: AppConfig, *, small_bytes: int = 8192) -> str:
+    """生效那份 `ReShade.log` 的"戛然而止"判据：崩在 addon 加载**之前**还是之后。
+
+    为什么要它（2026-10-06）：反馈者那三份崩掉的日志都只有 **2,775 B**、最后一行停在
+    `Redirecting Direct3DCreate9(…)`，**连一条 `Registered add-on` 都没有** —— 这既可能是
+    "崩在 addon 加载之前"，也可能是"崩溃时日志缓冲没落盘"。**两种含义必须一起说清楚**，
+    否则读的人会直接把"没有 addon 行"当成"跟 addon 无关"。
+    """
+    from . import nr_autostart
+
+    path = nr_autostart.reshade_log_path(config)
+    if not path.is_file():
+        legacy = Path(config.dlss5_path) / "ReShade.log"
+        path = legacy if legacy.is_file() else None
+    if path is None:
+        return "没有 ReShade 日志（没进过游戏？）"
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        size = path.stat().st_size
+    except OSError as exc:
+        return f"读不到 ReShade 日志：{exc}"
+    marker = "Initializing crosire's ReShade"
+    last = text.rfind(marker)
+    recent = text[last:] if last >= 0 else text
+    lines = [line for line in recent.splitlines() if line.strip()]
+    tail = lines[-1].strip() if lines else ""
+    registered = recent.count("Registered add-on")
+    verdict = f"{size:,} B / 本次运行 {len(lines)} 行"
+    if tail:
+        verdict += f"；最后一行：`{tail[:120]}`"
+    if registered == 0:
+        verdict += ("；**没有一条 `Registered add-on`** ⇒ 要么崩在 addon 加载之前，"
+                    "要么崩溃时日志缓冲还没落盘（这两者要靠转储区分）")
+    else:
+        verdict += f"；已注册 {registered} 个 add-on（崩在 addon 加载之后）"
+    if size < small_bytes:
+        verdict += "；日志极短（疑似启动早期就中断）"
+    return verdict
+
+
+def nr_settings_snapshot(config: AppConfig) -> str:
+    """崩溃当时 NR 的档位（`DLSS5 active settings:`，取最后一次运行的那行）。
+
+    ⚠️ **只记录、不归因** —— 见本段开头的说明。
+    """
+    from . import nr_autostart
+
+    path = nr_autostart.reshade_log_path(config)
+    if not path.is_file():
+        return ""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    marker = "Initializing crosire's ReShade"
+    recent = text[text.rfind(marker):] if text.rfind(marker) >= 0 else text
+    hits = [line.strip() for line in recent.splitlines() if "DLSS5 active settings:" in line]
+    if not hits:
+        return ""
+    return hits[-1].split("DLSS5 active settings:", 1)[1].strip()
+
+
+def nr_toggle_flap(config: AppConfig, *, window: float = 3.0) -> str:
+    """NR 有没有"**刚打开就被关掉**"（`toggled ON` 之后几秒内又 `toggled OFF`）。
+
+    为什么要它（2026-10-06，反馈者原话「**游戏内无法打开 dlss5 的神经渲染**」）——
+    他的日志长这样：
+
+        21:16:31 Endfield enhancer: Camera controls installed.
+        21:16:32.126 NR toggled ON via F6
+        21:16:32.760 NR toggled OFF via F6      ← 0.6 秒后
+
+    旧版（1.0.10）那条"等相机 hook 装好后**自动按一次 NR 键**"用的正是同一颗 **F6**
+    ⇒ "开"和"关"被连着触发 ⇒ 用户看到的就是"打不开"（1.0.16 起改成"启动即开"、
+    自动按键整条停用，这一类就不再发生）。
+
+    ⚠️ 本判据**只说"被开了又关"**，不猜是谁按的 —— 谁按的要靠当时的配置与日志对照。
+    """
+    from . import nr_autostart
+
+    path = nr_autostart.reshade_log_path(config)
+    if not path.is_file():
+        legacy = Path(config.dlss5_path) / "ReShade.log"
+        path = legacy if legacy.is_file() else None
+    if path is None:
+        return ""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    marker = "Initializing crosire's ReShade"
+    recent = text[text.rfind(marker):] if text.rfind(marker) >= 0 else text
+    stamp_re = re.compile(r"^(\d\d:\d\d:\d\d)[:.](\d\d\d)\s.*NR toggled (ON|OFF)")
+    last_on: float | None = None
+    for raw in recent.splitlines():
+        match = stamp_re.search(raw.strip())
+        if not match:
+            continue
+        clock = match.group(1).split(":")
+        seconds = int(clock[0]) * 3600 + int(clock[1]) * 60 + int(clock[2]) + int(match.group(2)) / 1000
+        if match.group(3) == "ON":
+            last_on = seconds
+            continue
+        if last_on is not None and 0 <= seconds - last_on <= window:
+            return (f"**NR 被打开后 {seconds - last_on:.1f} 秒又被关掉**"
+                    f"（`NR toggled ON via …` 紧跟 `NR toggled OFF via …`）"
+                    f"—— 用户感受就是「打不开」。看当时是不是有自动按键/重复触发（旧版的"
+                    f"`auto_enable_nr_after_camera_hook` 会替用户按一次 NR 键）")
+        last_on = None
+    return ""
+
+
+def crash_forensics(config: AppConfig, evidence: dict[str, Any] | None = None) -> list[str]:
+    """一次崩溃的**一页结论**（每条都只有一个问题、一个答案，且只陈述证据）。
+
+    用户 2026-10-06：「你加判据，**多加一点**」。这几条正好各回答一个原本要人肉翻的问题：
+    空指针还是别的？自己退还是被强杀？崩在 addon 之前还是之后？故障模块定位到了吗？
+    以及（连着"打不开 NR"那类反馈一起看）NR 有没有被开了又关掉？
+    """
+    evidence = evidence or {}
+    started = evidence.get("_started_at")
+    lines: list[str] = []
+    detail = wer_exception_detail(started)
+    if detail.get("text"):
+        lines.append(f"异常：{detail['text']}")
+    else:
+        lines.append("异常：本次时段内没有 WER 报告"
+                     "（被 TerminateProcess 结束不会留事件，见 `environment.txt` 的说明）")
+    lines.append(f"退出方式：{addon_exit_kind(config)}")
+    lines.append(f"ReShade 日志：{reshade_log_verdict(config)}")
+    snapshot = nr_settings_snapshot(config)
+    if snapshot:
+        lines.append(f"当时的 NR 档位（**只记录、不归因**）：{snapshot}")
+    flap = nr_toggle_flap(config)
+    if flap:
+        lines.append(f"NR 开关：{flap}")
+    return lines
+
+
 def dlss5_crash_record(config: AppConfig, started_at: float | None = None) -> dict[str, Any] | None:
     """读 `runtime\\dlss5\\dlss5-feed.log` 里 **DLSS5 插件自己写的**崩溃记录。
 
@@ -1513,6 +1796,56 @@ def collect_diagnosis_files(config: AppConfig, dest: Path, *,
             taken.append("reshade-keylines.txt")
     except Exception as exc:  # noqa: BLE001
         emit(f"排查素材: ReShade 关键行摘录失败（忽略）: {exc}")
+
+    # ⑩ **staging（EFMI Mods）的清单与 `key =` 行**（2026-10-06 加）。
+    #    起因：反馈者报「**皮肤打不进去**」，而当时包里能回答这个问题的东西**一个都没收** ——
+    #    `staged inventory` 只是控制器日志里的一行
+    #    `staged inventory | mod_dirs=3 ini_files=6 sample=MC_Controller, …`（只列 3 个名字），
+    #    看不到：每个 Mod 目录里到底有几个 ini、那些 `[Key*]` 的 `key =` 现在是什么
+    #    （**锁键会把它们改写成 `VK_F24`**）、有没有依赖包混在 staging 里。
+    #    于是第一轮只能靠控制器日志推断 —— 这就是「判据不够」。这里只收**清单与 key 行**，
+    #    Mod 本体（几百 MB）不收。
+    try:
+        # ⚠️ **必须走 `config.staging_mods_path`**（按数据根解析过的）—— 直接拿
+        #    `staging_mods_dir` 那个相对字符串去找，会相对**当前工作目录**解析，
+        #    换个 cwd 就指错地方（实测：测试里差点指到开发机真实的 staging 上）。
+        staging = Path(config.staging_mods_path)
+        if staging.is_dir():
+            lines = [
+                f"staging 目录: {staging}",
+                "说明：逐目录列出 ini 与其 `key =` 行 —— 锁键（Mod 快捷键锁定）会把 Mod 的键"
+                "改写成 `VK_F24`，所以这里能直接看出「键盘到底有没有被锁」。",
+                "",
+            ]
+            folders = sorted(path for path in staging.iterdir() if path.is_dir())
+            lines.append(f"共 {len(folders)} 个 Mod 目录：")
+            for folder in folders:
+                inis = sorted(folder.rglob("*.ini"))
+                lines.append(f"  {folder.name}/  （{len(inis)} 个 ini）")
+                for ini in inis[:12]:
+                    key_lines: list[str] = []
+                    try:
+                        for raw_line in ini.read_text(encoding="utf-8", errors="replace").splitlines():
+                            stripped = raw_line.strip()
+                            if stripped.lower().startswith("key") and "=" in stripped:
+                                key_lines.append(stripped)
+                            if len(key_lines) >= 12:
+                                break
+                    except OSError:
+                        continue
+                    try:
+                        shown = ini.relative_to(folder)
+                    except ValueError:
+                        shown = ini.name
+                    lines.append(f"      {shown}")
+                    lines.extend(f"          {item}" for item in key_lines)
+            loose = sorted(path.name for path in staging.iterdir() if path.is_file())
+            if loose:
+                lines.append(f"散落文件（{len(loose)}）：" + "、".join(loose[:20]))
+            (dest / "staging-inventory.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+            taken.append("staging-inventory.txt")
+    except Exception as exc:  # noqa: BLE001
+        emit(f"排查素材: staging 清单失败（忽略）: {exc}")
 
     # ⑨ **Streamline / NGX 的清单与配置**（2026-10-06 加 —— 反馈者 #16 的现场指到了这里）。
     #    他的 `Player.log` 里连着 10 次

@@ -202,7 +202,8 @@ MOD_DOWNLOAD_STALL_SECONDS = 300
 def download(url: str, dest_dir: Path, *, progress: Progress = None,
              timeout: int = 600, log: Callable[[str], None] | None = None,
              name: str = "", parallel: bool | None = None,
-             cancel=None, keep_partial: bool = False) -> tuple[Path | None, str, bool]:
+             cancel=None, keep_partial: bool | Callable[[], bool] = False
+             ) -> tuple[Path | None, str, bool]:
     """把 `url` 下到 `dest_dir`；返回 `(路径, 错误信息, 是否"网太慢/连不上")`。
 
     走 `dependencies._http_get` → `fastnet.download`：慢时自动并发分块、直连不通自动换镜像，
@@ -251,11 +252,23 @@ def download(url: str, dest_dir: Path, *, progress: Progress = None,
         # 用户点了「终止」/「暂停」（用户 2026-10-02 要求这两个按钮）：
         # **暂停保留半成品**（`.mcdownload` / `.parts`）以便「继续」时断点续传；
         # **终止则清干净**，不留垃圾。
-        if not keep_partial:
+        #
+        # ⚠️⚠️ **必须在这一刻现算**（2026-10-06 修）：`keep_partial` 以前只收 `bool`，
+        # 由调用方在**进入本函数时**求值（`api` 写的是
+        # `keep_partial=bool(self._mod_dl.get("pause"))`）—— 而用户点「暂停」是发生在
+        # 下载**已经跑起来之后**的 ⇒ 那个快照永远是 `False` ⇒ **点暂停也按「终止」处理**：
+        # 半成品被清掉、日志写「下载已终止」、弹窗说「已终止（半成品已清理）」。
+        # （用户 2026-10-06 实测原话：「我按的是暂停，弹窗告诉我终止了，而且清除半成品」。）
+        # 现在也接受**可调用**（`lambda: bool(...)`）—— 到这一刻现读才算得准。
+        def _keep_partial_now() -> bool:
+            value = keep_partial() if callable(keep_partial) else keep_partial
+            return bool(value)
+
+        if not _keep_partial_now():
             _cleanup_partial(target, log=log)
         if log:
-            log(f"下载已{'暂停（保留断点）' if keep_partial else '终止'}：{target.name}")
-        return None, ("已暂停" if keep_partial else "已终止"), False
+            log(f"下载已{'暂停（保留断点）' if _keep_partial_now() else '终止'}：{target.name}")
+        return None, ("已暂停" if _keep_partial_now() else "已终止"), False
     except Exception as exc:  # noqa: BLE001 —— 网络/校验/磁盘，一律如实回报
         message = str(exc)
         _cleanup_partial(target, log=log)      # 失败不留半成品
@@ -504,7 +517,9 @@ def gamebanana_updates(mod_id: int, *, timeout: int = EXTRA_TIMEOUT,
     except Exception as exc:  # noqa: BLE001 —— **更新记录拿不到不该让整次下载失败**
         return []
     try:
-        data = json.loads(raw.decode("utf-8", "replace"))
+        from . import fsutil
+
+        data = fsutil.loads_tolerant(raw.decode("utf-8", "replace"))
     except (ValueError, AttributeError):
         return []
     if not isinstance(data, dict):
@@ -594,7 +609,9 @@ def gamebanana_profile(mod_id: int, *, timeout: int = EXTRA_TIMEOUT, cancel=None
     except Exception as exc:  # noqa: BLE001 —— 网络层各种异常统一成"访问不上"
         raise GameBananaUnreachable(str(exc)) from exc
     try:
-        data = json.loads(raw.decode("utf-8", "replace"))
+        from . import fsutil
+
+        data = fsutil.loads_tolerant(raw.decode("utf-8", "replace"))
     except (ValueError, AttributeError) as exc:
         raise GameBananaUnreachable(f"返回的不是有效数据：{exc}") from exc
     if not isinstance(data, dict):

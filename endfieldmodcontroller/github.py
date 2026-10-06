@@ -161,6 +161,8 @@ def api_get(
         if isinstance(entry, dict) and now - float(entry.get("at") or 0) < ttl:
             return entry.get("data")
 
+    from . import fsutil
+
     headers = {"User-Agent": USER_AGENT, "Accept": "application/vnd.github+json"}
     secret, _source = token()
     if secret and _token_allowed_for(url):
@@ -168,7 +170,7 @@ def api_get(
     request = urllib.request.Request(url, headers=headers)
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            payload = json.loads(response.read().decode("utf-8", errors="replace"))
+            payload = fsutil.loads_tolerant(response.read().decode("utf-8", errors="replace"))
     except urllib.error.HTTPError as exc:
         raise GitHubError(_http_error_message(exc, bool(secret))) from exc
     except (urllib.error.URLError, OSError, TimeoutError) as exc:

@@ -266,6 +266,39 @@ def read_json(path: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def loads_tolerant(text: str) -> Any:
+    """解析"可能带前置杂质"的 JSON 文本（网络响应常见）。
+
+    **为什么要它（2026-10-06 本机实测复现）**：香蕉网
+    `https://gamebanana.com/apiv11/Mod/<id>/ProfilePage` 会在 JSON **前面**打出一条
+    PHP Warning ——
+
+        Warning: Undefined array key "oneclick_support" in .../TableRowCacher.php on line 87
+        { "_idRow": 690864, … }
+
+    直接 `json.loads(整段)` 会报 `Expecting value: line 2 column 1 (char 1)`，
+    用户看到的是「Mod 下载失败：返回的不是有效数据」，而它**与网络、代理、VPN 全无关系**
+    （带/不带代理、带/不带浏览器 UA，服务端返回逐字节一样）。
+
+    做法：先按正常 JSON 解析；失败则从第一个 `{` / `[` 起用 `raw_decode` 逐个候选位置重试
+    —— 只认**真能解析出 JSON** 的位置，不做"掐头去尾"的猜测。
+    """
+    try:
+        return json.loads(text)
+    except ValueError:
+        pass
+    decoder = json.JSONDecoder()
+    for index, char in enumerate(text):
+        if char not in "{[":
+            continue
+        try:
+            value, _end = decoder.raw_decode(text, index)
+        except ValueError:
+            continue
+        return value
+    raise ValueError("响应里没有可解析的 JSON")
+
+
 def write_json(path: Path, payload: Any) -> None:
     """原子写 JSON（临时文件 + ``os.replace``）；失败**抛 OSError**，由调用方决定。
 

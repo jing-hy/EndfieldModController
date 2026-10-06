@@ -919,6 +919,19 @@ class AppConfig:
                 continue                      # 内置那份不算外部
             except ValueError:
                 pass
+            # ★ **2026-10-06 加**：**工作区里那份内置 XXMI 也不算"外部"**。
+            #   以前只比 `builtin_runtime_path`（= 数据根下的 `runtime\builtin`），
+            #   于是在"数据根不是工作区"的场合（测试用的 tmp 数据根、或用户把 exe 放在
+            #   别处），`PROJECT_ROOT\runtime\builtin\XXMI` 会被**误判成用户自己的外部
+            #   XXMI** ⇒ `staging_mods_dir` 被悄悄改成工作区里那份 ⇒
+            #   ① 界面/清理动的是**真实工作区**的 staging（实测：测试环境里
+            #      `runtime\builtin\XXMI\EFMI\Mods` 被写入又清理）；
+            #   ② 用户的 Mod 被 stage 到不是他数据根的地方。
+            try:
+                parent.relative_to(PROJECT_ROOT)
+                continue                      # 我们自己带的（工作区/打包目录里那份）
+            except ValueError:
+                pass
             if (parent / "EFMI" / "d3d11.dll").is_file():
                 return parent / "EFMI" / "Mods"
         return None
