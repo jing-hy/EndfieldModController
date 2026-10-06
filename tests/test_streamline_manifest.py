@@ -39,6 +39,12 @@ def env(tmp_path, monkeypatch):
     low.mkdir(parents=True)
     monkeypatch.setattr(crashwatch, "_endfield_local_low", lambda: low)
     monkeypatch.setattr(AppConfig, "runtime_path", property(lambda self: runtime))
+    # ⚠️ **必须把两处环境变量也打桩**（2026-10-06 实测教训）：`nvidia_config_roots()` 读的是
+    #    `USERPROFILE` 与 `PROGRAMDATA` ⇒ 不打桩时测试会去动**开发机真实的 NVIDIA 配置**
+    #    （实测把 `<ProgramData>\NVIDIA\NGX\models\config\versions\2\files\nvngx_server_config.txt`
+    #    搬成了 `.mc-backup-<时间戳>`）。**测试永远不许碰真实环境。**
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "nohome"))
+    monkeypatch.setenv("PROGRAMDATA", str(tmp_path / "noprogramdata"))
     return AppConfig(), runtime, low
 
 
