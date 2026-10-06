@@ -1472,6 +1472,40 @@ def dlss5_injection_targets(config: AppConfig) -> list[str]:
     return targets
 
 
+def ensure_efmi_loader_deployed(config: AppConfig, *,
+                                 log: Callable[[str], None] | None = None) -> str:
+    """把 XXMI **包目录**里的 `d3d11.dll` 提前部署到 `EFMI\\d3d11.dll`（返回给人看的一句话）。
+
+    为什么必须提前（2026-10-06 反馈者两次运行对照）：
+      * `EFMI\\d3d11.dll` 还不存在时，`active_efmi_loader()` 会**回退到包目录那份**
+        `Resources\\Packages\\XXMI\\d3d11.dll`，于是注入库里写到的是**另一条路径**；
+      * 而 XXMI 随后**自己会把包目录那份部署到 `EFMI\\d3d11.dll` 并注入它** ⇒
+        同一份 DLL、两个路径 ⇒ XXMI **去重不掉** ⇒ 注入请求变成
+        `Inject('d3d11.dll, d3d12.dll, d3d11.dll')` ⇒ **第二次注入失败 + 整个启动中断**
+        （用户看到「注入额外库 …\\Packages\\XXMI\\d3d11.dll 失败：DLL 注入失败！」）。
+    表现是**时好时坏**：EFMI 已部署的那次就正常，所以"自检无缺失却打不开"。
+
+    这里只做"提前一步"：目标已存在就什么都不动；两份都没有就如实返回空串（交给上层照旧）。
+    """
+    efmi = config.efmi_dir
+    if efmi is None:
+        return ""
+    target = efmi / "d3d11.dll"
+    if target.is_file():
+        return ""
+    source = config.efmi_dll_path
+    if source is None or not source.is_file() or source == target:
+        return ""
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+    except OSError as exc:
+        return f"提前部署 EFMI loader 失败（{exc}）—— 注入库可能会列到错的那份"
+    message = (f"已把 XXMI 包目录里的 d3d11.dll 提前部署到 {target}"
+               f"（避免注入库列到另一条路径 ⇒ 重复注入导致启动中断）")
+    return message
+
+
 def configure_dlss5_injection(config: AppConfig, enabled: bool = True) -> dict[str, Any]:
     """开/关 DLSS5 注入：改写 XXMI 的 EFMI extra_libraries（可回滚）。
 
@@ -1766,6 +1800,17 @@ def ensure_injections(config: AppConfig) -> dict[str, Any]:
                 actions.append(f"{label} {'启用' if want else '停用'}: {detail}")
             except Exception as exc:  # noqa: BLE001
                 warnings.append(f"切换 {label} 失败: {exc}")
+
+    # ⓪d **写注入库之前，先把 EFMI 的 loader 部署到位**（2026-10-06 现场）：
+    #     否则 `active_efmi_loader()` 会回退到 XXMI 包目录那份，注入库里就写到**另一条路径**
+    #     ⇒ XXMI 去重不掉 ⇒ `Inject('d3d11.dll, d3d12.dll, d3d11.dll')` ⇒ 第二次注入失败
+    #     并且**中断整个启动**（"自检无缺失却打不开"就是这么来的）。
+    try:
+        deployed = ensure_efmi_loader_deployed(config, log=_log)
+        if deployed:
+            actions.append(deployed)
+    except Exception as exc:  # noqa: BLE001
+        warnings.append(f"提前部署 EFMI loader 失败: {exc}")
 
     if config.dlss5_injection:
         try:
