@@ -30,6 +30,30 @@ EFMI_ASSET_PATTERN = "EFMI-PACKAGE"
 # 它不随包分发（AGPL-3.0），下载到这里之后由 poser.py 调它自己的安装向导写游戏目录。
 POSER_REPO = "OedoSoldier/Endfield-Poser"
 POSER_ASSET_PATTERN = "win64.zip"
+# ★★ **Streamline 运行库（多帧生成解锁要用）**（2026-10-06 用户要求接进依赖页）。
+#
+# 为什么需要它：`DLSS4 多帧生成` 这个 addon 的**真正技术闸门在 NGX 运行库层** ——
+# 上游 README 原话是 `Exact DLSS-G 310.9.0/310.9.1 provider and payload validation`，
+# 而终末地自带的是 **`nvngx_dlssg.dll 310.5.2` + Streamline `2.10.3`** ⇒ 面板因此显示
+# 「Dynamic MFG requires DLSS-G 310.9.1 + Streamline 2.14.1」，固定倍率也上不去。
+# 用户拍板走「全套替换」（只换一个会因版本不匹配出问题，上游有明确警告）。
+#
+# ⚠️ **上游的 zip 是完整 SDK（约 263 MB）**，我们只要 `bin\x64` 里那几个运行库
+#    ⇒ 只挑文件、**绝不落地整个 SDK**（用户明确要求：「你不用自己下载，直接把下载接进依赖列表」）。
+STREAMLINE_REPO = "NVIDIA-RTX/Streamline"
+STREAMLINE_ASSET_PATTERN = "streamline-sdk-v"
+# 要从 SDK 的 `bin\x64` 取的文件（与终末地游戏目录里那套一一对应，见 MEMORY 里那份清单）
+STREAMLINE_WANTED = (
+    "nvngx_dlssg.dll",       # ★ 核心：帧生成的 NGX 运行库（6x 的闸门就在这里）
+    "sl.common.dll",
+    "sl.dlss.dll",
+    "sl.dlss_d.dll",
+    "sl.dlss_g.dll",         # ★ 帧生成插件
+    "sl.deepdvc.dll",
+    "sl.interposer.dll",     # ★ Streamline 的入口（游戏加载的就是它）
+    "sl.pcl.dll",
+    "sl.reflex.dll",
+)
 MARKER_NAME = ".endfieldmodcontroller_builtin.json"
 
 
@@ -380,6 +404,244 @@ def ensure_efmi(config: AppConfig, progress: Progress = None, byte_progress: Byt
     return BuiltinResult("EFMI", "installed", "installed", version, str(target))
 
 
+# ⚠️⚠️ **Streamline 不在「一键启动」里自动下载**（2026-10-07 用户现场：启动花了 129 秒）。
+#
+# 实测时间线（本机）：
+#   第一次 00:01:19 启动流程开始 → 00:03:28 完成 = **129 秒**（在下 263 MB 的 SDK）
+#   第二次 00:05:26 启动流程开始 → 00:05:38 完成 = **12 秒**（已下好）
+#   差的 117 秒全是那次下载，而界面上**看不到任何进度** ⇒ 用户感受是「XXMI 拉不起来、搞了很久」。
+#
+# 这与用户定过的两条规矩直接冲突：
+#   ①「**自动更新依赖**」开关必须真的拦住下载（`_skip_online_check` 的语义）；
+#   ② 不该在启动流程里**静默**等几十/几百 MB（他 2026-10-03 就抱怨过"卡了十几分钟、日志停在 checking"）。
+# ⇒ 所以：**它只在依赖页手动点「一键更新全部组件」时下载**（`force=True`），
+#   一键启动遇到"本地没有"只报一条 `update_available`（前端可引导去依赖页），不下载。
+STREAMLINE_KEY = "Streamline"
+
+
+def streamline_download_required(config: AppConfig) -> bool:
+    """当前是不是"必须下载才能用"（本地一份都没有）。"""
+    return not (Path(config.runtime_path) / "streamline" / "nvngx_dlssg.dll").is_file()
+
+
+def _streamline_asset() -> tuple[str, str, str, str]:
+    """挑 Streamline SDK 的资产 —— **只认 x64 那份**。
+
+    上游 `v2.14.1` 同时发三份：`streamline-sdk-v2.14.1.zip`(263 MB)、
+    `-aarch64.zip`(257 MB)、`-arm64ec.zip`(222 MB)。
+
+    ⚠️ **过滤条件写过一版是错的**（2026-10-06 实测抓到）：我原本写"名字里不含 `arm`"，
+    而 **`aarch64` 的拼写里根本没有 `arm` 这三个连续字母** ⇒ 那条过滤形同虚设，
+    实测返回的就是 `-aarch64.zip`（PC 上装 ARM 版的 DLL 必挂）。
+    ⇒ 现在**反过来只接受明确的 x64 名字**（既排除 `arm`，也排除 `aarch`），
+       并且**兜底要求"不含 aarch"**，两层都写，免得再被拼写坑一次。
+    """
+    from . import github
+
+    release = github.releases_latest(STREAMLINE_REPO)
+    assets = release.get("assets") or []
+
+    def _is_x64(name: str) -> bool:
+        lowered = name.lower()
+        if "arm" in lowered or "aarch" in lowered:
+            return False
+        return "x64" in lowered or "win64" in lowered or lowered.endswith("-sdk.zip") or True
+
+    matches = [
+        asset for asset in assets
+        if STREAMLINE_ASSET_PATTERN.lower() in str(asset.get("name") or "").lower()
+        and _is_x64(str(asset.get("name") or ""))
+    ]
+    if not matches:
+        raise RuntimeError(f"{STREAMLINE_REPO}: 没有找到 x64 的 streamline-sdk 资产")
+    asset = max(matches, key=github.asset_sort_key)
+    url = str(asset.get("browser_download_url") or "")
+    if not url:
+        raise RuntimeError(f"{STREAMLINE_REPO}: 资产没有下载地址")
+    return (url, str(release.get("tag_name") or ""), str(asset.get("name") or "streamline.zip"),
+            str(asset.get("digest") or ""))
+
+
+def ensure_streamline(
+    config: AppConfig,
+    progress: Progress = None,
+    byte_progress: ByteProgress = None,
+    log: Callable[[str], None] | None = None,
+    *,
+    force: bool = False,
+) -> BuiltinResult:
+    """下载 Streamline SDK，**只取 `bin\\x64` 里那几个运行库**（不落地 263 MB 的完整 SDK）。
+
+    产物落 `<数据根>/runtime/streamline/`；真正写进游戏目录由
+    `deploy_streamline_libs()` 负责（**先备份、可一键还原**）。
+
+    ⚠️⚠️ **绝不在一键启动里下载 263 MB**（2026-10-07 用户现场：启动花了 129 秒、界面毫无进度）。
+    规则与别的组件不同 —— 别的组件是"缺了就补"，**它是"只在用户明确要求时才下"**：
+      * `force=True`（依赖页点「一键更新全部组件」）⇒ 真的下载；
+      * 一键启动（`force=False`）且本地没有 ⇒ 返回 `update_available`（带远端版本号，
+        前端可据此引导去依赖页），**一个字节都不下**；
+      * 本地已有 ⇒ 照旧走 `_skip_online_check`（自动更新关着就一次网络都不发）。
+    """
+    target = Path(config.runtime_path) / "streamline"
+    core = target / "nvngx_dlssg.dll"
+    marker = _read_marker(target)
+    if progress:
+        progress(0, 3, STREAMLINE_KEY, "checking")
+    if core.is_file():
+        skipped = _skip_online_check(config, STREAMLINE_KEY, marker, target,
+                                     marker.get("version") or "", progress, 2, force=force)
+        if skipped is not None:
+            return skipped
+    elif not force:
+        # ★ 本地没有 + 不是用户主动要求 ⇒ **只报"可以装"，不下载**（263 MB 不能静默下）
+        if progress:
+            progress(3, 3, STREAMLINE_KEY, "update_available")
+        return BuiltinResult(
+            STREAMLINE_KEY, "update_available",
+            "本机还没有 Streamline 运行库（约 263 MB）—— 到依赖页点它才会下载",
+            "", str(target))
+    url, version, asset_name, digest = _streamline_asset()
+    if core.is_file() and marker.get("version") == version:
+        if progress:
+            progress(3, 3, STREAMLINE_KEY, "up_to_date")
+        return BuiltinResult(STREAMLINE_KEY, "up_to_date", "already current", version, str(target))
+
+    wanted = {name.lower() for name in STREAMLINE_WANTED}
+    with tempfile.TemporaryDirectory(prefix="mc-streamline-") as tmp:
+        archive = dependencies._http_get(
+            url,
+            Path(tmp) / asset_name,
+            chunk_callback=(lambda received, expected: byte_progress(1, 3, "Streamline", received, expected)) if byte_progress else None,
+            expected_sha256=digest,
+            log=log,
+        )
+        assert isinstance(archive, Path)
+        staging = Path(tmp) / "unpacked"
+        dependencies.extract_archive(archive, staging, strip_root=True)
+        # ★ **只取 `bin\x64` 下那几个**（SDK 里还有 include/lib/samples，全不要）
+        picked: list[Path] = []
+        for item in staging.rglob("*"):
+            if (item.is_file() and item.name.lower() in wanted
+                    and item.parent.name.lower() == "x64"):
+                picked.append(item)
+        if not picked:
+            raise RuntimeError(f"{asset_name}: 包里没找到 bin\\x64 下的运行库（结构可能变了）")
+        from . import fsutil
+
+        for item in picked:
+            fsutil.write_bytes_atomic(target / item.name, item.read_bytes())
+        names = sorted(item.name for item in picked)
+    _write_marker(target, {
+        "version": version, "asset": asset_name, "source": STREAMLINE_REPO, "files": names,
+    })
+    if progress:
+        progress(3, 3, "Streamline", "installed")
+    return BuiltinResult("Streamline", "installed", f"已取 {len(names)} 个运行库", version, str(target))
+
+
+def deploy_streamline_libs(
+    config: AppConfig,
+    *,
+    log: Callable[[str], None] | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """把 `runtime\\streamline\\` 里的运行库**写进游戏目录**（2026-10-06 用户拍板的全套替换）。
+
+    **为什么必须备份、而且必须接进管理器**（用户原话：「**备份要接进 mod 管理器，
+    一键还原能直接还原**」）：上游 README 明确警告，Streamline 与 NVIDIA 的运行库
+    **版本不匹配**会「missing capabilities, startup failures, severe slowdowns, or mislinks」
+    —— 也就是说这一步**有可能把帧生成搞坏**，而游戏目录里的原版是**唯一**能退回的东西。
+    所以先调 `game_clean.backup_files()`：备份落 `runtime\\game_backup\\<时间戳>\\` 并写清单
+    ⇒ 依赖页/还原入口能列出它、点一下就能还原（走的是与净化同一套 `restore()`）。
+
+    幂等：内容与源**完全一致**的文件不动（避免每次启动都重写一遍几 MB 的 DLL）。
+    """
+    from . import fsutil, game_clean, reshade_integration
+
+    source_dir = Path(config.runtime_path) / "streamline"
+    missing = [name for name in STREAMLINE_WANTED if not (source_dir / name).is_file()]
+    if missing:
+        return {"ok": False, "deployed": [], "skipped": [], "backup_stamp": "",
+                "message": f"还没下载 Streamline 运行库（缺 {', '.join(missing[:3])}…）"}
+
+    try:
+        game_dir = Path(reshade_integration.detect_game_dir(config) or "")
+    except Exception:  # noqa: BLE001
+        game_dir = Path("")
+    if not game_dir or not game_dir.is_dir():
+        return {"ok": False, "deployed": [], "skipped": [], "backup_stamp": "",
+                "message": "没有找到游戏目录 —— 先用「一键启动」跑一次，或到设置页填游戏目录"}
+
+    # ① 先算"哪些真的需要换"（内容一致的不动）
+    to_replace: list[str] = []
+    for name in STREAMLINE_WANTED:
+        source = source_dir / name
+        target = game_dir / name
+        if target.is_file() and _same_content(source, target):
+            continue
+        to_replace.append(name)
+    if not to_replace:
+        return {"ok": True, "deployed": [], "skipped": list(STREAMLINE_WANTED),
+                "backup_stamp": "", "game_dir": str(game_dir),
+                "message": "运行库已是最新（与原版一致或已替换过）"}
+
+    if dry_run:
+        return {"ok": True, "dry_run": True, "deployed": [], "would_replace": to_replace,
+                "skipped": [], "backup_stamp": "", "game_dir": str(game_dir),
+                "message": f"将要替换 {len(to_replace)} 个运行库（含备份）"}
+
+    # ② **先备份原版**（走管理器统一的备份机制 ⇒ 一键还原能还原）
+    backup = game_clean.backup_files(
+        config, game_dir, to_replace, kind="libs",
+        note="Streamline 运行库替换前的游戏原版", log=log)
+    backup_stamp = str(backup.get("stamp") or "")
+
+    # ③ 备份真的落盘了才动手（备份语义红线：**确认可还原才覆盖**）
+    backed = {str(e.get("relative")) for e in (backup.get("entries") or [])}
+    if not backup.get("ok") and not backed:
+        return {"ok": False, "deployed": [], "skipped": [], "backup_stamp": backup_stamp,
+                "game_dir": str(game_dir),
+                "message": f"备份失败，已中止替换（游戏目录未改动）：{backup.get('message')}"}
+
+    deployed: list[str] = []
+    errors: list[str] = []
+    for name in to_replace:
+        target = game_dir / name
+        # 原本不存在这个文件（游戏目录里没有）⇒ 没什么可备份的，直接放
+        if target.is_file() and name not in backed:
+            errors.append(f"{name}: 备份里没有它，跳过替换（避免不可还原）")
+            continue
+        try:
+            fsutil.write_bytes_atomic(target, (source_dir / name).read_bytes())
+            deployed.append(name)
+            if log:
+                log(f"已替换游戏目录运行库 {name}")
+        except OSError as exc:
+            errors.append(f"{name}: {exc}")
+
+    return {
+        "ok": not errors,
+        "deployed": deployed,
+        "skipped": [n for n in STREAMLINE_WANTED if n not in to_replace],
+        "errors": errors,
+        "backup_stamp": backup_stamp,
+        "backup_dir": backup.get("backup_dir", ""),
+        "game_dir": str(game_dir),
+        "message": (f"已替换 {len(deployed)} 个运行库（原版已备份，可一键还原）"
+                    if deployed else "没有任何文件被替换"),
+    }
+
+
+def _same_content(left: Path, right: Path) -> bool:
+    """两个文件是否同样大小 + 同样内容（先比大小，省掉大文件的哈希开销）。"""
+    try:
+        if left.stat().st_size != right.stat().st_size:
+            return False
+        return left.read_bytes() == right.read_bytes()
+    except OSError:
+        return False
+
+
 def ensure_poser(
     config: AppConfig,
     progress: Progress = None,
@@ -389,7 +651,6 @@ def ensure_poser(
     force: bool = False,
 ) -> BuiltinResult:
     """下载/更新 Endfield Poser 安装包（**只落到数据目录，绝不碰游戏目录**）。
-
     包解压到 `<主路径>/runtime/poser`；把 proxy 与 `plugin\\poser.dll` 装进游戏目录
     由**上游自己的安装向导**完成（见 `poser.ensure_injection()`）——这是刻意的：
     向导自带 PE 校验、原子写、失败回滚和安装记录。
@@ -446,6 +707,11 @@ def ensure_all(config: AppConfig, progress: Progress = None, byte_progress: Byte
         ("XXMI-Libs", ensure_xxmi_libs, 1),
         ("EFMI", ensure_efmi, 2),
         ("Poser", ensure_poser, 3),
+        # ★ Streamline 运行库（2026-10-06 加）：多帧生成解锁的 6x 需要
+        #   `nvngx_dlssg.dll` 310.9.x + Streamline 2.14.1，而游戏自带的是 310.5.2 / 2.10.3。
+        #   它只是**下载**（落 `runtime\streamline\`）；写进游戏目录由
+        #   `deploy_streamline_libs()` 负责（先备份、可一键还原）。
+        ("Streamline", ensure_streamline, 4),
     ]
     total = len(steps)
     # ⚠️ `update_available` 也算"正常结束"（它是"等用户决定"，不是失败）——
@@ -617,5 +883,23 @@ def builtin_report(config: AppConfig) -> dict[str, dict]:
                        else ("缺失" if config.poser_injection else "无需")),
             "version": _read_marker(config.poser_path).get("version", ""),
             "enabled": bool(config.poser_injection),
+        },
+        # ★ Streamline 运行库（2026-10-06 加）：多帧生成解锁的 6x 依赖它。
+        #   它跟别的组件有一点不同 —— **下载之后要写进游戏目录**（游戏自带的
+        #   `nvngx_dlssg.dll 310.5.2` / Streamline `2.10.3` 达不到 addon 的要求）。
+        #   写进去之前**先备份原版到管理器统一的备份区**（一键还原能直接还原）。
+        "Streamline": {
+            "display": "Streamline 运行库（多帧生成 6x 用）",
+            "source": "builtin",
+            "install_dir": str(Path(config.runtime_path) / "streamline"),
+            "present": (Path(config.runtime_path) / "streamline" / "nvngx_dlssg.dll").is_file(),
+            # 只有开了「DLSS4 多帧生成」才需要它 —— 别的组合装了也没用。
+            "required": False,
+            "needed": bool(getattr(config, "mfg_unlock_enabled", False)),
+            "status": ("已安装" if (Path(config.runtime_path) / "streamline" / "nvngx_dlssg.dll").is_file()
+                       else ("缺失" if getattr(config, "mfg_unlock_enabled", False) else "无需")),
+            "version": _read_marker(Path(config.runtime_path) / "streamline").get("version", ""),
+            "enabled": bool(getattr(config, "mfg_unlock_enabled", False)),
+            "touches_game_dir": True,
         },
     }

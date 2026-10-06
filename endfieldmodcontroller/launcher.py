@@ -1439,14 +1439,37 @@ def active_efmi_loader(config: AppConfig) -> Path | None:
     fallback = config.efmi_dll_path                     # 最后退回我们自己探测到的那份
     if fallback is not None:
         candidates.append(Path(fallback))
-    # ★★ **必须再验一道"它到底是不是 EFMI loader"**（2026-10-06，`C:\Users\lzh18` 现场）：
-    #    原先只判 `is_file()`，于是当 XXMI 配置里的 `importer_folder` 被指向**用户的 Mod 库**
+    # ★★ **必须再验"它到底是不是这个 XXMI 自己的 loader"**（2026-10-06，`C:\Users\lzh18` 现场）。
+    #
+    #    原先只判 `is_file()` ⇒ 当 XXMI 配置里的 `importer_folder` 被指向**用户的 Mod 库**
     #    （实测 `C:/Users/lzh18/Downloads/library`）时，库里某个 Mod 自带的同名 `d3d11.dll`
-    #    就被当成了 loader 列进注入库 ⇒ 注入它之后 Windows 报「dll 损坏」。
-    #    EFMI loader 的可靠标志是**它旁边有 `d3dx.ini`**（3DMigoto 的配置文件；
-    #    普通 Mod 或 Mod 库里不会有）—— 用它当判据，既挡得住误列、也不影响正常布局。
+    #    就被当成 loader 列进注入库 ⇒ 注入它之后游戏**极早期退出**：
+    #    现场日志 `note=auto-postmortem: exit_code=3221225781`（= `0xC0000135 STATUS_DLL_NOT_FOUND`，
+    #    那个 dll 自己依赖的东西找不到），`Player.log` 只写到 `Forcing GfxDevice` 就断了。
+    #
+    #    ⚠️ **第一版判据（"旁边有 d3dx.ini"）实测没挡住**（他 21:17 / 22:26 仍列着库里的那份）
+    #    —— Mod 库里也可能有 `d3dx.ini`（很多 Mod 自带），所以那条不够硬。
+    #
+    #    ⇒ 现在加一条**结构性**判据：**loader 必须位于这个 XXMI 自己的目录树内**
+    #      （`root` = XXMI 根）。EFMI 的 loader 只可能出现在 XXMI 的 `EFMI\` 或它的
+    #      `Resources\Packages\XXMI\` 下 —— 用户 Mod 库、桌面、任何 XXMI 之外的位置
+    #      一律不认。这条与"文件长什么样"无关，挡得住任何同名文件。
+    root_resolved = root.resolve()
     for candidate in candidates:
         if not candidate.is_file():
+            continue
+        try:
+            inside = candidate.resolve().is_relative_to(root_resolved)
+        except OSError:
+            inside = False
+        if not inside:
+            _append_log(
+                config,
+                f"注入自检: 跳过 {candidate} —— 它不在这个 XXMI 的目录里"
+                f"（{root_resolved}），不可能是它的 EFMI loader"
+                "。多半是 XXMI 设置里的 importer 目录被指到了 Mod 库，"
+                "把它改回 …\\XXMI\\EFMI 即可"
+            )
             continue
         if (candidate.parent / "d3dx.ini").is_file():
             return candidate
@@ -1884,6 +1907,27 @@ def ensure_injections(config: AppConfig) -> dict[str, Any]:
     report = initialize.ensure_all(config, log=lambda message: _append_log(config, message))
     actions.extend(report.get("actions", []))
     warnings.extend(report.get("warnings", []))
+
+    # ★★ **Streamline 运行库要写进游戏目录**（2026-10-06 用户拍板）。
+    #    为什么：多帧生成解锁的 6x 依赖 `nvngx_dlssg.dll` 310.9.x + Streamline 2.14.1
+    #    （上游 README：`Exact DLSS-G 310.9.0/310.9.1 provider and payload validation`），
+    #    而终末地自带的是 310.5.2 / 2.10.3 ⇒ 面板只会显示「Dynamic MFG requires …」。
+    #    ⚠️ **写游戏目录前先备份原版**，且备份走管理器统一的备份区（`game_backup\<时间戳>\`）
+    #       ⇒ 依赖页/还原入口能列出它、**一键还原能直接还原**（用户明确要求）。
+    #    幂等：内容一致就不动；没下载 / 没开多帧生成时整段跳过。
+    if bool(getattr(config, "mfg_unlock_enabled", False)):
+        try:
+            deployed = runtime_deps.deploy_streamline_libs(
+                config, log=lambda message: _append_log(config, message))
+            if deployed.get("deployed"):
+                actions.append(f"Streamline 运行库: {deployed.get('message')}")
+                _append_log(config, f"Streamline 运行库: {deployed.get('message')}"
+                                    f"（备份 {deployed.get('backup_stamp')}）")
+            elif not deployed.get("ok"):
+                warnings.append(f"Streamline 运行库未部署: {deployed.get('message')}")
+        except Exception as exc:  # noqa: BLE001 - 部署失败不该拦住启动
+            warnings.append(f"Streamline 运行库部署失败: {exc}")
+            _append_log(config, f"Streamline 运行库部署失败（忽略）: {exc}")
 
     # ★★ **展开随包资产之后必须再对齐一次插件位置**（2026-10-06，用户现场定案）——
     #    上面的组件循环做的是"按配置把 addon 留在根目录 / 搬进 `_disabled\`"，

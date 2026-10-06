@@ -801,20 +801,117 @@ def list_backups(config: AppConfig) -> list[dict[str, Any]]:
             "game_dir": data.get("game_dir", ""),
             "path": str(item),
         })
-    # **净化备份排前面**（同 kind 内保持上面的"名字降序 = 时间新在前"）—— Python 的 sort
-    # 是稳定的，所以这一句就够了，`restore()` 的"取第一个"永远取到该取的那份。
-    rows.sort(key=lambda row: row["kind"] != "clean")
+    # **净化备份 / 运行库备份排前面**（同 kind 内保持上面的"名字降序 = 时间新在前"）——
+    # Python 的 sort 是稳定的，所以这一句就够了，`restore()` 的"取第一个"永远取到该取的那份。
+    # ★ 2026-10-06：`libs`（Streamline 运行库替换前的原版）**也是"能一键还原"的备份**，
+    #   与 `clean` 同权；只有 `ngx_conflict`（装的是"要移走的东西"）才不许被当成还原源。
+    rows.sort(key=lambda row: row["kind"] not in ("clean", "libs"))
     return rows
 
 
+def backup_files(
+    config: AppConfig,
+    game_dir: Path,
+    relatives: list[str],
+    *,
+    kind: str = "libs",
+    note: str = "",
+    log: Log = None,
+) -> dict[str, Any]:
+    """把游戏目录里指定的若干文件**备份进 `runtime\\game_backup\\<时间戳>\\`**（通用入口）。
+
+    为什么要它（2026-10-06 用户要求：「**备份要接进 mod 管理器，一键还原能直接还原**」）：
+    原先"往游戏目录替换新版运行库"（`initialize` 的 `deploy_new_nvngx`）只在旁边存一份
+    `<名字>.game_original` —— 那对用户**不可见、也不在还原链路上**：管理器里点「还原」
+    不会碰它，用户根本不知道有这份东西。而 Streamline 替换**必须**可还原（上游明确警告
+    版本不匹配会让帧生成起不来），所以备份要走**与净化同一套清单机制** ⇒ `list_backups`
+    能列出、`restore()` 能一步还原。
+
+    ⚠️ 三条备份语义（项目红线，照 `backup_and_clean` 同款）：
+      ① **先写 `status=in_progress` 的清单再搬文件**，搬完改 `complete` —— 任何时刻都能被列出；
+      ② **复制成功后才覆盖原位置**（调用方负责），这里只保证"备份真的落盘了"；
+      ③ 文件不存在就跳过（不报错）—— 它本来就不在游戏目录里，没什么可备份的。
+    """
+    from . import fsutil
+
+    stamp = _stamp()
+    root = backup_root(config) / stamp
+    files_dir = root / "files"
+    entries: list[dict[str, Any]] = []
+    errors: list[str] = []
+    try:
+        files_dir.mkdir(parents=True, exist_ok=True)
+        fsutil.write_json(root / MANIFEST_NAME, {
+            "stamp": stamp,
+            "kind": kind,
+            "status": "in_progress",
+            "created_at": int(time.time()),
+            "game_dir": str(game_dir),
+            "entries": [],
+            "restored_modules": [],
+            "errors": [],
+            "note": note,
+        })
+    except OSError as exc:
+        return {"ok": False, "stamp": "", "backup_dir": "", "entries": [],
+                "message": f"创建备份目录失败: {exc}"}
+
+    for relative in relatives:
+        source = game_dir / relative
+        if not source.is_file():
+            continue
+        try:
+            dest = files_dir / relative
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, dest)
+            entries.append({
+                "relative": relative,
+                "category": "game_lib",
+                "size": source.stat().st_size,
+                "sha256": _sha256(source),
+                "backup_relative": relative,
+            })
+            _log(log, f"备份 [{kind}] {relative}（{source.stat().st_size:,} B）")
+        except OSError as exc:
+            errors.append(f"{relative}: {exc}")
+            _log(log, f"⚠ 备份 {relative} 失败: {exc}")
+
+    try:
+        fsutil.write_json(root / MANIFEST_NAME, {
+            "stamp": stamp,
+            "kind": kind,
+            "status": "complete",
+            "created_at": int(time.time()),
+            "game_dir": str(game_dir),
+            "entries": entries,
+            "restored_modules": [],
+            "errors": errors,
+            "note": note,
+        })
+    except OSError as exc:
+        errors.append(f"写清单失败: {exc}")
+
+    return {
+        "ok": bool(entries) and not errors,
+        "stamp": stamp,
+        "backup_dir": str(root),
+        "entries": entries,
+        "errors": errors,
+        "message": (f"已备份 {len(entries)} 个文件到 {stamp}" if entries
+                    else "游戏目录里没有需要备份的文件"),
+    }
+
+
 def restore(config: AppConfig, *, stamp: str = "", log: Log = None) -> dict[str, Any]:
-    """按备份清单把游戏目录还原成净化前的样子（**只认净化备份**）。"""
+    """按备份清单把游戏目录还原回去（**净化备份 或 运行库备份**）。"""
     backups = list_backups(config)
     if not backups:
         return {"ok": False, "message": "没有找到任何游戏目录备份", "restored": []}
-    # ⚠️ 只从 `clean` 里挑（见 list_backups 的说明）：ngx-conflict 那份装的是**被移走的**
+    # ⚠️ 只从 `clean` / `libs` 里挑（见 list_backups 的说明）：ngx-conflict 那份装的是**被移走的**
     #    第三方注入器文件，把它"还原"回游戏目录等于把问题装回去。
-    usable = [b for b in backups if b.get("kind") == "clean"] or backups
+    #    ★ 2026-10-06：`libs`（Streamline 运行库替换前的原版）**必须能还原** ——
+    #      用户要求「备份要接进 mod 管理器，一键还原能直接还原」。
+    usable = [b for b in backups if b.get("kind") in ("clean", "libs")] or backups
     if stamp:
         target = next((b for b in usable if b["stamp"] == stamp), None)
         if target is None:

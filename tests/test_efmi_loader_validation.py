@@ -73,3 +73,24 @@ def test_normal_layout_is_unaffected(env):
     picked = launcher.active_efmi_loader(cfg)
     assert picked is not None
     assert picked.resolve() == (real_efmi / "d3d11.dll").resolve()
+
+
+def test_mod_library_with_its_own_d3dx_ini_is_still_rejected(env):
+    """★★ **Mod 库里也有 `d3dx.ini` 时照样要挡住**（2026-10-06 现场，第一版判据就栽在这）。
+
+    第一版校验是"候选旁边有 `d3dx.ini` 才算 loader"—— 而很多 Mod 自带 `d3dx.ini`
+    ⇒ 实测**没挡住**（反馈者 21:17 / 22:26 的注入库仍列着 `…\\Downloads\\library\\d3d11.dll`），
+    后果是游戏**极早期退出**：`exit_code=3221225781`（`0xC0000135` STATUS_DLL_NOT_FOUND）。
+
+    现在的判据是**结构性**的：loader 必须位于**这个 XXMI 自己的目录树内**。
+    """
+    tmp_path, root, bin_dir, real_efmi, library = env
+    (library / "d3dx.ini").write_text("[Mod]\n", encoding="utf-8")   # ★ 库里也来一份
+    cfg = _config(tmp_path, bin_dir, library, point_importer_at=library)
+
+    picked = launcher.active_efmi_loader(cfg)
+    assert picked is not None
+    assert picked.resolve() == (real_efmi / "d3d11.dll").resolve(), (
+        f"★ 库里那个假 loader 又被当成 EFMI loader 了：{picked}"
+    )
+    assert picked.resolve().is_relative_to(root.resolve()), "选中的 loader 必须在 XXMI 目录树内"

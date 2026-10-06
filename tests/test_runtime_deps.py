@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+import pathlib
 import unittest
 import zipfile
 from pathlib import Path
@@ -84,6 +85,16 @@ class RuntimeDepsTests(unittest.TestCase):
         original_extract = runtime_deps._download_extract
         original_release = runtime_deps._release_info
         original_asset = runtime_deps._asset_url
+        # ★ Streamline（2026-10-06 加）：它**不走** `_latest_release_asset`（那会被
+        #   `max(asset_sort_key)` 选到 aarch64 那份），而是自己挑资产 ⇒ 单独打桩，
+        #   否则测试会去连真实 GitHub。
+        original_streamline = runtime_deps._streamline_asset
+        runtime_deps._streamline_asset = lambda: (
+            (self.xxmi_zip.parent / "streamline-fake.zip").as_uri(), "v-test", "efmi.zip", "")
+        # 造"本地已就位" ⇒ _skip_online_check 直接返回"已是最新"，一次网络都不发
+        streamline_dir = pathlib.Path(self.config.runtime_path) / "streamline"
+        streamline_dir.mkdir(parents=True, exist_ok=True)
+        (streamline_dir / "nvngx_dlssg.dll").write_bytes(b"fake")
         runtime_deps._latest_release_asset = fake_latest
         runtime_deps._download_extract = fake_extract
         runtime_deps._release_info = fake_release_info
@@ -95,12 +106,14 @@ class RuntimeDepsTests(unittest.TestCase):
             runtime_deps._download_extract = original_extract
             runtime_deps._release_info = original_release
             runtime_deps._asset_url = original_asset
+            runtime_deps._streamline_asset = original_streamline
         # ⚠️ 2026-10-05 起：`ensure_all` 末尾会**追加一条 VC++ 运行库检查** —— 它**不是我们的
         # 组件**（不是解压包，得跑微软官方安装器），所以不进 `steps`，只在结果里报"要不要装"。
-        # 因此这里改成两段断言：前四个仍是"装好的组件"，最后一条是**环境检查**。
+        # ★ 2026-10-06：`steps` 里多了 **Streamline**（多帧生成 6x 用的运行库，用户要求
+        #   "把下载接进依赖列表"）⇒ 前五项是组件、最后一项才是环境检查。
         keys = [r.key for r in results]
-        self.assertEqual(keys[:4], ["XXMI", "XXMI-Libs", "EFMI", "Poser"])
-        self.assertEqual(keys[4:], ["VC++ 运行库"], "VC++ 运行库那条检查必须还在（前端靠它弹窗）")
+        self.assertEqual(keys[:5], ["XXMI", "XXMI-Libs", "EFMI", "Poser", "Streamline"])
+        self.assertEqual(keys[5:], ["VC++ 运行库"], "VC++ 运行库那条检查必须还在（前端靠它弹窗）")
         self.assertTrue(self.config.xxmi_launcher.endswith("XXMI Launcher.exe"))
         efmi_root = self.config.builtin_runtime_path / "XXMI" / "EFMI"
         self.assertTrue((efmi_root / "Core" / "EFMI" / "main.ini").is_file())
