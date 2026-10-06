@@ -63,7 +63,9 @@ _WAIT_DIAG_SECONDS = 60.0
 _NR_ACTIVE_MARKS = ("feature 18 created", "evaluation succeeded")
 # addon 启动行里的快捷键声明，例如：
 #   ... DLSS5 Generic: RenoDX DLSS5 Generic v4.7 (...) loaded (hotkeys: NR toggle F6, screenshot F5) | ...
-_HOTKEY_RE = re.compile(r"hotkeys?\s*:\s*NR\s+toggle\s+([A-Za-z0-9]+)", re.I)
+# ⚠️ 字符类要**带上小键盘的符号**（2026-10-06）：以前只收 `[A-Za-z0-9]`，
+#    于是 `NUM+` / `NUM-` 只匹配到 `NUM`，解析成 NumLock 而不是加减号。
+_HOTKEY_RE = re.compile(r"hotkeys?\s*:\s*NR\s+toggle\s+([A-Za-z0-9+*/.\-]+)", re.I)
 
 VK_F6 = 0x75  # 兜底：读不到键位时用它（addon 的出厂默认就是 F6）
 
@@ -72,10 +74,18 @@ _VK_BY_NAME: dict[str, int] = {f"F{i}": 0x6F + i for i in range(1, 25)}   # F1=0
 _VK_BY_NAME.update({
     "INSERT": 0x2D, "DELETE": 0x2E, "HOME": 0x24, "END": 0x23,
     "PAGEUP": 0x21, "PAGEDOWN": 0x22, "SPACE": 0x20, "TAB": 0x09,
-    "NUMPAD0": 0x60, "NUMPAD1": 0x61, "NUMPAD2": 0x62, "NUMPAD3": 0x63,
-    "NUMPAD4": 0x64, "NUMPAD5": 0x65, "NUMPAD6": 0x66, "NUMPAD7": 0x67,
-    "NUMPAD8": 0x68, "NUMPAD9": 0x69,
+    # ⚠️ **小键盘一族要认全**（2026-10-06 修）：反馈者把 NR 快捷键改成了小键盘键，
+    #    而 addon 在日志里把它缩写成 `NUM`（原文 `hotkeys: NR toggle NUM`）。
+    #    以前表里只有 `NUMPAD0..9`，`NUM` 认不出 ⇒ **退回按了 F6** ⇒ NR 从未被打开
+    #    （他那台的现象是"能进游戏、面板停在成功NR帧 4" —— 那几帧就是这次误按留下的）。
+    "NUM": 0x90, "NUMLOCK": 0x90,
+    "NUM+": 0x6B, "NUM-": 0x6D, "NUM*": 0x6A, "NUM/": 0x6F, "NUM.": 0x6E, "NUM,": 0x6E,
+    "ADD": 0x6B, "SUBTRACT": 0x6D, "MULTIPLY": 0x6A, "DIVIDE": 0x6F, "DECIMAL": 0x6E,
+    "NUMPAD+": 0x6B, "NUMPAD-": 0x6D, "NUMPAD*": 0x6A, "NUMPAD/": 0x6F, "NUMPAD.": 0x6E,
 })
+for _i in range(10):
+    _VK_BY_NAME[f"NUMPAD{_i}"] = 0x60 + _i
+    _VK_BY_NAME.setdefault(f"NUM{_i}", 0x60 + _i)
 for _ch in "0123456789":
     _VK_BY_NAME[_ch] = 0x30 + int(_ch)
 for _ch in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":

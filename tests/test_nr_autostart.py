@@ -363,3 +363,16 @@ def test_immediate_mode_skips_autostart_entirely(env, monkeypatch):
 
     assert result["action"] == "skip" and "启动就开" in result["reason"], result
     assert calls == [], "启动就开时不该再模拟按键"
+
+
+def test_numpad_hotkey_names_are_recognised(env):
+    """★ 2026-10-06：小键盘键名要认全 —— 反馈者把 NR 键设成了小键盘键。
+
+    他的日志原文是 `hotkeys: NR toggle NUM`，而当时的键表里没有 `NUM` ⇒
+    **退回按了 F6** ⇒ NR 从未被打开（面板停在「成功NR帧 4」，那几帧是误按留下的）。
+    """
+    for name, want in (("NUM", 0x90), ("NUMLOCK", 0x90), ("NUM0", 0x60), ("NUM9", 0x69),
+                       ("NUMPAD5", 0x65), ("NUM+", 0x6B), ("NUM-", 0x6D)):
+        vk, why = nr_autostart._resolve_key(f"loaded (hotkeys: NR toggle {name}, screenshot F5)")
+        assert vk == want, f"{name} 应当解析成 0x{want:02X}，实际 0x{vk:02X}（{why}）"
+        assert "认不出" not in why, f"{name} 不该被当成认不出"
