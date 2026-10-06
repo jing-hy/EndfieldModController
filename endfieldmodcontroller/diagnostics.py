@@ -1989,6 +1989,51 @@ def _ngx_consumer_summary(game_dir: Path | None) -> list[str]:
     return lines
 
 
+def _injection_trace_summary(config: Any) -> list[str]:
+    """「注入现场时间线」段（2026-10-06 加）。
+
+    `injecttrace` 在**五个时机**各记一张注入列表（一键启动最开始 / XXMI 拉起后 /
+    终末地启动后 / 终末地关闭 / 崩溃后），写进 `runtime\\_state\\injection-trace.jsonl`。
+    这一段把它渲染进 `summary.txt` —— 排查时第一眼看的就是 summary，jsonl 埋在
+    `runtime-state/_state/` 下容易被漏掉（反馈者 1.0.15 的包里就是**有 jsonl、
+    summary 里却没这一段**，属于接线遗漏，实测抓到后补上）。
+
+    ⚠️ **读到几张就是几张**：崩得太快时「终末地关闭 / 崩溃」那两张赶不上自动包
+    （`on_game_exit` 要先等 6 秒收现场），这属正常，照实写明即可。
+    """
+    try:
+        from . import injecttrace
+
+        entries = injecttrace.read_all(config)
+    except Exception as exc:  # noqa: BLE001 —— 取证不能反噬打包
+        return ["-- 注入现场时间线 --", f"   读取失败: {exc}", ""]
+    lines = ["-- 注入现场时间线（五个时机各一张；缺的那张多半是崩得太快没赶上）--"]
+    if not entries:
+        lines += ["   没有记录（runtime\\_state\\injection-trace.jsonl 不存在或为空）", ""]
+        return lines
+    for entry in entries:
+        inj = entry.get("injection") or {}
+        proc = entry.get("process") or {}
+        note = f"  {entry.get('note')}" if entry.get("note") else ""
+        lines.append(f"   [{entry.get('at')}] {entry.get('phase_label')}{note}")
+        libs = inj.get("extra_libraries") or []
+        lines.append(f"      注入库 {len(libs)} 条（enabled={inj.get('enabled')}，"
+                     f"签名长度={inj.get('signature_len')}）")
+        for lib in libs:
+            lines.append(f"         {lib}")
+        if proc:
+            missing = proc.get("expect_missing") or []
+            verdict = ("该进进程的两条都在" if not missing
+                       else f"**缺 {', '.join(missing)}**（注入报告成功、进程里却没有）")
+            lines.append(f"      进程 pid={proc.get('pid')} 模块={proc.get('module_count')} "
+                         f"第三方={proc.get('third_party_count')} → {verdict}")
+        game_injections = entry.get("game_injections") or []
+        if game_injections:
+            lines.append(f"      游戏目录注入物：{', '.join(list(game_injections)[:10])}")
+    lines.append("")
+    return lines
+
+
 def _pe_deps_summary(config: Any, game_path: Any) -> list[str]:
     """**注入 DLL 的依赖预检** —— 把"缺哪个 DLL"变成诊断包里能直接读到的结论。
 
@@ -2544,6 +2589,7 @@ def create_diagnostic_bundle(
     # 注入 DLL 的依赖预检（2026-10-05 加）：把"**缺哪个 DLL**"直接写进包。
     # 起因：一台机器上游戏以 `0xC0000135` 极早期退出，而包里只能看出"它死得早"。
     summary.extend(_pe_deps_summary(config, game_path))
+    summary.extend(_injection_trace_summary(config))
     summary.extend(_nvngx_fingerprint(config))
     summary.extend(_xxmi_summary(config))
     # XXMI 自己的注入现场（启动参数 / work_dir / 每个 dll 的注入结果 / 它报的错）—— 2026-10-04 加

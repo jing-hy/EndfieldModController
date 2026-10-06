@@ -1521,7 +1521,8 @@ def _check_defer_nr_until_camera_hook(config: AppConfig, report: Report,
     ⚠️ **必须每次启动都压**：用户在游戏里开 NR 之后，插件会把 `NeuralUplift=1`
     **写回** ini，下次启动就又变成「NR 先上」⇒ 第一人称又坏（本机实测复现）。
     """
-    if not getattr(config, "auto_enable_nr_after_camera_hook", True):
+    immediate = bool(getattr(config, "start_dlss5_nr_immediately", True))
+    if not immediate and not getattr(config, "auto_enable_nr_after_camera_hook", True):
         report.add("dlss5:nr_defer", True,
                    "「神经渲染延迟到相机 hook 之后自动打开」已在设置页关闭（跳过）")
         return
@@ -1540,9 +1541,14 @@ def _check_defer_nr_until_camera_hook(config: AppConfig, report: Report,
     except OSError as exc:
         report.add("dlss5:nr_defer", False, f"读取生效 ReShade.ini 失败: {exc}", manual=True)
         return
-    updated, changed = _set_ini_key(text, NR_SECTION, NR_KEY, "0")
+    # ★ **启动就开**（2026-10-06 默认）：写 `NeuralUplift=1`，不再等相机 hook。
+    #   保守方案（新开关设 False 时）才写 0，并仍由 `nr_autostart` 在 hook 装好后补按。
+    want = "1" if immediate else "0"
+    updated, changed = _set_ini_key(text, NR_SECTION, NR_KEY, want)
     if not changed:
-        report.add("dlss5:nr_defer", True, "神经渲染已处于「延迟到相机 hook 之后」状态")
+        report.add("dlss5:nr_defer", True,
+                   "神经渲染已处于「启动就开」状态" if immediate
+                   else "神经渲染已处于「延迟到相机 hook 之后」状态")
         return
     try:
         ini.write_text(updated.replace("\r\n", "\n").replace("\n", "\r\n"),
@@ -1551,8 +1557,11 @@ def _check_defer_nr_until_camera_hook(config: AppConfig, report: Report,
         report.add("dlss5:nr_defer", False, f"写入生效 ReShade.ini 失败: {exc}", manual=True)
         return
     report.add("dlss5:nr_defer", True,
-               "已把神经渲染压到相机 hook 之后（NeuralUplift=0）—— 这样第一人称的相机 hook "
-               "才装得上；进游戏后会自动补开 NR", fixed=True)
+               ("已把神经渲染设为**启动就开**（NeuralUplift=1）—— 不再依赖"
+                "「相机 hook 装好」这个前提，不用第一人称的机器也能出帧")
+               if immediate else
+               ("已把神经渲染压到相机 hook 之后（NeuralUplift=0）—— 这样第一人称的相机 hook "
+                "才装得上；进游戏后会自动补开 NR"), fixed=True)
 
 
 def _set_ini_key(text: str, section: str, key: str, value: str) -> tuple[str, bool]:

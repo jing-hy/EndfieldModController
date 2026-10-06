@@ -160,6 +160,12 @@ def poll(config: AppConfig, *, log: Callable[[str], None] | None = None) -> dict
     """每次轮询调一次（轻量：没有新增日志就立刻返回）。"""
     if not _STATE.get("armed") or _STATE.get("sent"):
         return {"ok": True, "action": "skip", "sent": bool(_STATE.get("sent"))}
+    # ★ **启动就开时整条路都停用**（2026-10-06）：NR 已经在 `NeuralUplift=1` 下打开，
+    #   不需要再等相机 hook、也不需要模拟按键（这一路的唯一价值是"等 hook"，而它
+    #   只在第一人称启用时才会出现 —— 不用第一人称的机器会永远卡在这里）。
+    if getattr(config, "start_dlss5_nr_immediately", True):
+        _STATE["sent"] = True
+        return {"ok": True, "action": "skip", "reason": "NR 已设为启动就开，无需补按"}
     if not getattr(config, "auto_enable_nr_after_camera_hook", True):
         _STATE["sent"] = True
         return {"ok": True, "action": "skip", "reason": "开关已关闭"}

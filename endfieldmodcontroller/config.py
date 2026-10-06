@@ -346,7 +346,19 @@ class AppConfig:
     dlss5_injection: bool = True
     # 底座下两个插件可独立启停（同一 ReShade 底座，靠移动 addon 文件实现）
     dlss5_addon_enabled: bool = True          # RenoDX-DLSS5 神经渲染
-    # **神经渲染延迟到「相机 hook 装好之后」再自动打开**（2026-10-05 定案，默认开）。
+    # ★ **DLSS5 神经渲染：启动就开**（2026-10-06 定为默认）。
+    # 用户 2026-10-06 原话：「**nr 我不是改了吗，现在应该是不用管 hook**，另外超分开不开没关系」。
+    # 此前默认是"启动前把 `NeuralUplift` 压成 0 → 等 `Camera controls installed.`
+    # → 由 `nr_autostart` 替用户按一次 NR 键"。问题在于 **enhancer 只在第一人称启用
+    # （`CameraFirstPerson=1`）时才去装相机 hook** ⇒ 不用第一人称的用户**永远等不到那句话**
+    # ⇒ NR 永远打不开（反馈者那台：面板「成功NR帧 4」「超分: 请求ON|活动OFF」，
+    # 日志里 `NeuralUplift=0` —— 他看到的其实是游戏自己的 DLSS 输出）。
+    #   ① `CameraFirstPerson=1`：2026-10-05 实测定案"NR 启动就开与相机 hook **可以共存**"；
+    #   ② `CameraFirstPerson=0`：根本没有 hook 要保护；
+    # ⇒ 两种情况都该**启动就开**。
+    start_dlss5_nr_immediately: bool = True
+
+    # **（保守方案：仅当上面为 `False` 时才有意义）延迟到「相机 hook 装好之后」再打开**。
     # 为什么：NR 若抢在第一人称插件装相机 hook 之前激活，那个 hook 会 `error 8`
     # （分配 trampoline 失败）装不上 ⇒ 面板报「不支持相机控制」。压成 0 让相机 hook 先上，
     # 再由 `nr_autostart` 在游戏里替用户按一次 NR 快捷键补开 ⇒ 两者共存、用户零操作。

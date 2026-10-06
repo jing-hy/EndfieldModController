@@ -1440,6 +1440,13 @@ def dlss5_injection_status(config: AppConfig) -> dict[str, Any]:
         importer = data.get("Importers", {}).get("EFMI", {}).get("Importer", {})
         libs = str(importer.get("extra_libraries") or "")
         status["extra_libraries"] = libs
+        # ⚠️ **签名也要带出来**（2026-10-06 加）：XXMI 靠 `extra_libraries_signature`
+        # 判断注入库有没有被人动过，改坏了它会弹 Reset/Keep（点了 Reset 注入列表就空了）。
+        # 以前这个 dict 只给"条数"，于是 `injecttrace` 里读签名长度**恒为 0**，
+        # 时间线上那条判据等于没有（反馈者 1.0.15 的包里实测：jsonl 里 sig=0，
+        # 而 summary 另一段却读出 140 —— 同一份文件两个结论）。
+        status["extra_libraries_signature"] = str(importer.get("extra_libraries_signature") or "")
+        status["user_signature"] = str((data.get("Security") or {}).get("user_signature") or "")
         status["enabled"] = bool(importer.get("extra_libraries_enabled")) and bool(libs.strip())
         status["has_dlss5"] = str(config.dlss5_dll_path).lower() in libs.lower()
     except Exception as exc:  # noqa: BLE001
@@ -2755,6 +2762,15 @@ def launch(
 
     launcher_path = config.xxmi_launcher_path
     assert launcher_path is not None
+    # ★ **已在运行的 XXMI 不再重复拉起**（2026-10-06 修；实测"点一次启动出现 4 个 XXMI"）。
+    #   这一步以前无条件 `_spawn_command` ⇒ 重复送达的每一次请求都真的拉起一个实例，
+    #   每个实例各挂一套 EFMI。进程监视器那一步本来就有防重（日志里的"已在运行，
+    #   跳过重复启动"），唯独**真正拉起进程**这一步没有 —— 判据要放在执行动作的那一层。
+    if xxmi_process_running(config):
+        _append_log(config, "XXMI Launcher 已在运行 —— 本次不再重复拉起（避免多开）")
+        result["xxmi_already_running"] = True
+        diagnostics.start_process_monitor(config, game_dir=game_dir, timeout=1800.0)
+        return result
     process = _spawn_command(config, command, str(launcher_path.parent), env)
     if process is not None:
         result["pid"] = process.pid

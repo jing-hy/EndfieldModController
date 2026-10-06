@@ -2327,22 +2327,51 @@ class EndfieldModControllerApi:
     def launch_preview(self, start_game: bool = False) -> dict[str, Any]:
         return launcher.launch(self.config, dry_run=True, start_game=start_game)
 
+    def _launch_gate(self) -> Any:
+        """启动流程的**互斥闸**（模块级单例，进程内有效）。
+
+        ★ 2026-10-06 加：以前 `launch` / `launch_game` 谁调都直接往下跑，
+        前端在启动期间再次提交（按钮没挡住 / 请求重复送达）就会**各跑一遍完整流程**
+        —— 实测"点一次启动"出现 4 个 XXMI Launcher，日志里连着四条 `launch command`，
+        每个实例各挂一套 EFMI。这里用**非阻塞**锁：拿不到就如实回一句"正在进行中"，
+        不排队、不重复执行（排队反而会让用户点几次就启动几次）。
+        """
+        lock = getattr(type(self), "_launch_lock", None)
+        if lock is None:
+            lock = threading.Lock()
+            type(self)._launch_lock = lock
+        return lock
+
     def launch(self, start_game: bool = False) -> dict[str, Any]:
         launcher._append_log(self.config, f"launch requested from UI (start_game={start_game})")
+        lock = self._launch_gate()
+        if not lock.acquire(blocking=False):
+            launcher._append_log(self.config, "启动流程正在进行中 —— 已忽略这次重复请求")
+            return {"started": False, "duplicate": True,
+                    "message": "启动流程正在进行中（已忽略这次重复请求）"}
         try:
             return launcher.launch(self.config, dry_run=False, start_game=start_game)
         except Exception as exc:  # noqa: BLE001
             launcher._append_log(self.config, f"launch failed: {exc}")
             raise
+        finally:
+            lock.release()
 
     def launch_game(self) -> dict[str, Any]:
         """Explicitly start the game through XXMI/EFMI (`--nogui --xxmi EFMI`)."""
         launcher._append_log(self.config, "launch_game requested from UI")
+        lock = self._launch_gate()
+        if not lock.acquire(blocking=False):
+            launcher._append_log(self.config, "启动流程正在进行中 —— 已忽略这次重复请求")
+            return {"started": False, "duplicate": True,
+                    "message": "启动流程正在进行中（已忽略这次重复请求）"}
         try:
             return launcher.launch(self.config, dry_run=False, start_game=True)
         except Exception as exc:  # noqa: BLE001
             launcher._append_log(self.config, f"launch_game failed: {exc}")
             raise
+        finally:
+            lock.release()
 
     # ------------------------------------------------------------------
     # small utilities

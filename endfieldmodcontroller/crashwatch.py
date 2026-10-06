@@ -1507,6 +1507,53 @@ def collect_diagnosis_files(config: AppConfig, dest: Path, *,
             taken.append("reshade-keylines.txt")
     except Exception as exc:  # noqa: BLE001
         emit(f"排查素材: ReShade 关键行摘录失败（忽略）: {exc}")
+
+    # ⑨ **Streamline / NGX 的清单与配置**（2026-10-06 加 —— 反馈者 #16 的现场指到了这里）。
+    #    他的 `Player.log` 里连着 10 次
+    #    `[streamline][error] ota.cpp:329 [parseServerManifest] Unexpected line in manifest
+    #    file: …`，随后进程内存在 28 秒里从 36 MB 涨到 1.2 GB 然后退出。而那些 manifest
+    #    **以前一个都没收** ⇒「到底哪个文件坏了」只能靠猜。
+    #    按用户定的规矩：**要看没被收的东西，先把收包范围改掉**。这里只收**小清单/配置**
+    #    （json/ini/txt/cfg/dat/xml/log 且 ≤512 KB），大缓存一律跳过（节选原则）。
+    try:
+        home = Path(os.environ.get("USERPROFILE") or "")
+        local = home / "AppData" / "Local"
+        programdata = Path(os.environ.get("PROGRAMDATA") or r"C:\ProgramData")
+        for root in (
+            local / "NVIDIA" / "Streamline",
+            local / "NVIDIA" / "NGX",
+            local / "NVIDIA Corporation" / "NGX",
+            programdata / "NVIDIA" / "Streamline",
+            programdata / "NVIDIA Corporation" / "NGX",
+            programdata / "NVIDIA" / "NGX",
+        ):
+            if not root.is_dir():
+                continue
+            for item in sorted(root.rglob("*")):
+                try:
+                    if not item.is_file() or item.stat().st_size > 512 * 1024:
+                        continue
+                except OSError:
+                    continue
+                if item.suffix.lower() not in (".json", ".ini", ".txt", ".cfg", ".dat", ".xml", ".log"):
+                    continue
+                rel = str(item.relative_to(root)).replace(os.sep, "_")
+                take(item, f"nvidia-{root.parent.name}-{root.name}-{rel}"[:118])
+    except Exception as exc:  # noqa: BLE001
+        emit(f"排查素材: Streamline/NGX 清单失败（忽略）: {exc}")
+
+    # ⑩ **游戏目录下的小清单**（`Player.log` 说 manifest 内容乱码，先确认游戏侧有没有这类文件）
+    try:
+        from . import reshade_integration
+
+        game_dir = reshade_integration.detect_game_dir(config, prefer_actual=True)
+        if game_dir:
+            folder = Path(game_dir)
+            for pattern in ("*.json", "*.ini", "sl_*.txt", "nvngx*.json"):
+                for item in sorted(folder.glob(pattern)):
+                    take(item, f"game-{item.name}"[:118], limit=512 * 1024)
+    except Exception as exc:  # noqa: BLE001
+        emit(f"排查素材: 游戏侧清单失败（忽略）: {exc}")
     return taken
 
 
@@ -1997,13 +2044,18 @@ def poll_runtime_watch(config: AppConfig, pid: int, state: dict[str, Any], *,
         return False
     state["last"] = now
     try:
-        from . import watchsample
+        from . import nr_autostart, watchsample
 
         entry = watchsample.sample(
             pid,
             known_modules=state.get("known") or set(),
             feed_log=Path(config.dlss5_path) / "dlss5-feed.log",
-            reshade_log=Path(config.dlss5_path) / "ReShade.log",
+            # ⚠️ **必须用生效那份的路径**（2026-10-06 修）：ReShade 按
+            # `RESHADE_BASE_PATH_OVERRIDE` 把日志写在 `runtime\reshade\` 下，
+            # 而这里原先写的是 `runtime\dlss5\ReShade.log`（那是**部署源**目录，
+            # 通常根本没有这个文件）⇒ 采样里的 `reshade_lines` **恒为 0**，
+            # 那条判据等于从没生效过（反馈者 1.0.15 的包里 8 条采样全是 0，实测抓到）。
+            reshade_log=nr_autostart.reshade_log_path(config),
         )
         if not entry:
             return False

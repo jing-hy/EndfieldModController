@@ -32,6 +32,10 @@ from endfieldmodcontroller.config import AppConfig
 @pytest.fixture()
 def env(tmp_path, monkeypatch):
     config = AppConfig()
+    # ⚠️ 本文件测的是**保守模式**那条路（启动前压 0 → 等相机 hook → 自动按 F6）。
+    #    2026-10-06 起默认换成了 `start_dlss5_nr_immediately=True`（启动就开），
+    #    所以这里**显式退回保守模式**；"启动就开"另有两组专门测试（见文件末尾）。
+    config.start_dlss5_nr_immediately = False
     monkeypatch.setattr(AppConfig, "runtime_path", property(lambda self: tmp_path / "runtime"))
     (tmp_path / "runtime" / "reshade").mkdir(parents=True, exist_ok=True)
     nr_autostart.reset()
@@ -317,3 +321,45 @@ def test_wait_diagnostic_fires_once_after_timeout(env, monkeypatch):
     nr_autostart.poll(env.config, log=lines.append)
     assert sum(1 for line in lines if "已等" in line) == 1, "诊断只写一次，不许刷屏"
     assert calls == []
+
+
+# ---------------------------------------------------------------------------
+# ⑥ 2026-10-06 新默认：**DLSS5 神经渲染启动就开**（不再等相机 hook）
+#
+# 用户原话：「nr 我不是改了吗，现在应该是不用管 hook」。改成默认之后：
+#   * 自检把 `NeuralUplift` 写成 **1**（以前写 0）；
+#   * `nr_autostart` **整条停用**（NR 已开，不必等 hook、也不必模拟按键）。
+# 为什么可以直接这样：`CameraFirstPerson=1` 时 2026-10-05 已实测定案"NR 启动就开
+# 与相机 hook **可以共存**"；`CameraFirstPerson=0` 时 enhancer 根本不装相机 hook，
+# 没有东西需要保护（反馈者那台就是因此永远等不到那句话）。
+# ---------------------------------------------------------------------------
+def test_immediate_mode_writes_neural_uplift_one(env):
+    """★ 默认模式：自检把 `NeuralUplift` 写成 **1**（不是 0）。"""
+    env.config.start_dlss5_nr_immediately = True
+    ini = env.reshade_dir / "ReShade.ini"
+    _write_ini(ini, "[RenoDX.DLSS5]\nEnableHooks=2\nNeuralUplift=0\nNREnableUpscaling=0\n")
+    report = initialize.Report()
+
+    initialize._check_defer_nr_until_camera_hook(env.config, report, None)
+
+    text = ini.read_text(encoding="utf-8")
+    assert "NeuralUplift=1" in text, "启动就开必须写成 1"
+    assert "NeuralUplift=0" not in text
+    checks = [c for c in report.checks if c["key"] == "dlss5:nr_defer"]
+    assert checks and checks[0]["ok"] is True and checks[0]["fixed"] is True, checks
+    assert "EnableHooks=2" in text and "NREnableUpscaling=0" in text, "同段其它键不许动"
+
+
+def test_immediate_mode_skips_autostart_entirely(env, monkeypatch):
+    """★ 默认模式：`nr_autostart` 直接跳过（不再等 hook、不再模拟按键）。"""
+    calls = _fake_send(monkeypatch)
+    env.config.start_dlss5_nr_immediately = True
+    nr_autostart.arm(env.config)
+    env.log_path.write_text(
+        "12:00:02 | INFO | [RenoDX: Arknights Endfield Enhancer] Endfield enhancer: "
+        "Camera controls installed.\n", encoding="utf-8")
+
+    result = nr_autostart.poll(env.config)
+
+    assert result["action"] == "skip" and "启动就开" in result["reason"], result
+    assert calls == [], "启动就开时不该再模拟按键"
