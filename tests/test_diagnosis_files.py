@@ -136,3 +136,42 @@ def test_keylines_excerpt_for_big_log(env, monkeypatch, tmp_path):
     assert "feature 18 created" in text
     assert "something broke" in text
     assert "noise line 1" not in text, "噪音行不该进来 —— 节选的意义就在这里"
+
+
+def test_player_log_filter_drops_other_gryphline_games(tmp_path):
+    """★ 2026-10-06：只收**终末地自己**的 `Player.log`，别把同厂商的别的游戏收进来。
+
+    实测：某反馈者的诊断包里混进了一份 251 KB 的《明日方舟》PC 版日志
+    （`LocalLow\\Hypergryph\\Arknights\\Player.log`）—— 因为 token 里有 `hypergryph`。
+    兜底判据 = 文件头里 `[Subsystems] Discovering subsystems at path <...>_Data/...`。
+    """
+    ours = tmp_path / "LocalLow" / "Hypergryph" / "Endfield" / "Player.log"
+    ours.parent.mkdir(parents=True)
+    ours.write_text(
+        "[Physics::Module] Initialized MultithreadedJobDispatcher with {0} workers.\n"
+        "Initialize engine version: 2021.3.34f5 (0)\n"
+        "[Subsystems] Discovering subsystems at path "
+        "D:/Hypergryph Launcher/games/Arknights Endfield/Endfield_Data/UnitySubsystems\n",
+        encoding="utf-8")
+    theirs = tmp_path / "LocalLow" / "Hypergryph" / "Arknights" / "Player.log"
+    theirs.parent.mkdir(parents=True)
+    theirs.write_text(
+        "[Physics::Module] Initialized MultithreadedJobDispatcher with {0} workers.\n"
+        "Initialize engine version: 2021.3.39f1 (0)\n"
+        "[Subsystems] Discovering subsystems at path "
+        "D:/Arknights bilibili/games/Arknights/Arknights_Data/UnitySubsystems\n",
+        encoding="utf-8")
+
+    assert diagnostics._looks_like_our_game(ours) is True
+    assert diagnostics._looks_like_our_game(theirs) is False, "方舟的日志不该被当成终末地的"
+
+    # 读不到 / 没有那行的：一律放行（宁可多收，别漏现场）
+    blank = tmp_path / "blank.log"
+    blank.write_text("nothing here\n", encoding="utf-8")
+    assert diagnostics._looks_like_our_game(blank) is True
+    assert diagnostics._looks_like_our_game(tmp_path / "nope.log") is True
+
+    # 候选里也不该再带 `hypergryph` 这个过宽的 token
+    src = inspect.getsource(diagnostics.player_log_candidates)
+    assert 'tokens = ("endfield",)' in src
+    assert "hypergryph" not in src.split("def _looks_like_our_game")[0].split("tokens = (")[1][:40]

@@ -794,6 +794,33 @@ def _prefer_only(found: list[Path], tokens: tuple[str, ...], limit: int) -> list
     return (preferred or found)[:limit]
 
 
+def _looks_like_our_game(path: Path) -> bool:
+    """这个 `Player.log` 是不是**终末地**写的（看文件头里 Unity 子系统路径）。
+
+    ⚠️ **为什么不只看目录名**（2026-10-06 修）：`Hypergryph` 旗下不止一个游戏 ——
+    《明日方舟》PC 版的日志就在 `LocalLow\\Hypergryph\\Arknights\\Player.log`，
+    按"厂商名"筛会把它一起收进诊断包（实测某反馈者的包里混进了一份 251 KB 的
+    方舟日志，纯噪音、还把无关游戏的日志带进了要外发的包）。
+    游戏自己写的这行是**一手判据**：
+    `[Subsystems] Discovering subsystems at path <游戏目录>/<产品>_Data/UnitySubsystems`
+    —— 终末地那份里必然是 `Endfield_Data`。
+
+    读不到文件头时**一律放行**（宁可多收一份，也不要漏掉现场）。
+    """
+    try:
+        if not path.is_file() or path.stat().st_size > 8 * 1024 * 1024:
+            return True
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            head = handle.read(16384)
+    except OSError:
+        return True
+    marker = "Discovering subsystems at path"
+    for line in head.splitlines():
+        if marker in line:
+            return "endfield" in line.split(marker, 1)[1].lower()
+    return True      # 没写这行的（老版本 / 日志被截断）不拦
+
+
 def player_log_candidates(limit: int = 4) -> list[Path]:
     """Unity 的 `Player.log` / `Player-prev.log`（终末地在 `%USERPROFILE%\\AppData\\LocalLow\\<厂商>\\Endfield`）。
 
@@ -804,15 +831,22 @@ def player_log_candidates(limit: int = 4) -> list[Path]:
 
     ⚠️ 但**别把别的 Unity 游戏的日志也收进来**（2026-10-04 实测：搜索 `LocalLow` 时
     顺手收了《城市天际线》《Subnautica》的 `Player.log`）：那对排查没用，还会把无关的
-    隐私内容带进一个要往外发的包。所以命中"像终末地"的那些优先、且**只留它们**。
+    隐私内容带进一个要往外发的包。
+
+    ⚠️ **2026-10-06 再修一层**：那次只排除了**别的厂商**，而 token 里的 `hypergryph`
+    仍会把**同一家厂商的另一个游戏**（《明日方舟》PC 版）收进来 —— 实测某反馈者的包里
+    就混进了一份 251 KB 的方舟 `Player.log`。现在：
+    ① token 收紧成 `endfield`（终末地目录名就是 `Endfield`，国际服 Gryphline 那份路径里
+       同样含它）；② 再用 `_looks_like_our_game()` 按**文件头里的 Unity 子系统路径**兜底。
     """
     dirs = _user_dirs()
-    tokens = ("endfield", "hypergryph", "gryphline")
+    tokens = ("endfield",)
     pool = _find_named_files(
         dirs.get("locallow"), ("player.log", "player-prev.log"),
         depth=3, limit=max(limit * 4, 12), prefer=tokens,
     )
-    return _prefer_only(pool, tokens, limit)
+    picked = [path for path in _prefer_only(pool, tokens, limit * 2) if _looks_like_our_game(path)]
+    return picked[:limit]
 
 
 def unity_crash_logs(limit: int = 8) -> list[Path]:
