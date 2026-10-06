@@ -49,14 +49,32 @@ def test_find_game_window_only_matches_game_process() -> None:
 
 
 @pytest.mark.skipif(os.name != "nt", reason="SendInput 只在 Windows 上有意义")
-def test_send_f10_reports_reason_when_no_game() -> None:
-    """没有游戏进程时必须**明确报原因**（绝不能静默成功）。"""
+def test_send_f10_reports_reason_when_no_game(monkeypatch) -> None:
+    """**确实没有游戏窗口**时必须明确报原因（绝不能静默成功）。
+
+    ⚠️ **必须打桩**（2026-10-06 修）：原来直接调 `send_f10()` 依赖开发机状态 ——
+    开发机上很可能真的开着游戏（实测踩到：跑全量时红、单独跑又绿，因为**前面的用例
+    刚抢过前台**，`send_f10` 会真的抢前台 ⇒ 测试之间互相影响）。项目准则要求测试
+    不碰真机，所以这里把"窗口枚举"打桩成空。
+    """
+    monkeypatch.setattr(hot_reload, "list_game_windows", lambda keys: [])
     result = hot_reload.send_f10(AppConfig())
     assert isinstance(result, dict)
-    if result.get("ok"):
-        # 本机真在跑游戏（少见）—— 那就至少要有窗口信息
-        assert result.get("hwnd") and result.get("window") is not None
-    else:
-        assert result.get("message"), "失败时必须带原因"
-        assert "没找到" in str(result["message"]), "失败原因要说清是「没找到窗口」"
-        assert result.get("candidates") == [] or isinstance(result.get("candidates"), list)
+    assert result.get("ok") is False, f"没有窗口时不该报成功：{result}"
+    assert "没找到" in str(result.get("message")), (
+        f"失败原因要说清是「没找到窗口」，实际：{result.get('message')}"
+    )
+
+
+@pytest.mark.skipif(os.name != "nt", reason="SendInput 只在 Windows 上有意义")
+def test_send_f10_reports_foreground_failure(monkeypatch) -> None:
+    """**找到了窗口但抢不到前台**时，也要给出可自解释的原因（另一种失败形态）。"""
+    fake = [{"hwnd": 1234, "title": "Endfield", "cls": "UnityWndClass",
+             "width": 1920, "height": 1080, "excluded": False, "pid": 1}]
+    monkeypatch.setattr(hot_reload, "list_game_windows", lambda keys: fake)
+    monkeypatch.setattr(hot_reload, "pick_game_window", lambda rows, keys: fake[0])
+    monkeypatch.setattr(hot_reload, "focus_window", lambda hwnd: False, raising=False)
+
+    result = hot_reload.send_f10(AppConfig())
+    if result.get("ok") is False:
+        assert result.get("message"), "失败必须带原因"
