@@ -4,7 +4,7 @@
 > 目的：让「当时为什么这么改、踩过什么坑」跟着源码一起留在仓库里。
 > 想改内容 → 改记忆库（用记忆工具），再跑一次本脚本；不要直接编辑本文件。
 
-- 生成时间：2026-10-06 14:05:59
+- 生成时间：2026-10-06 15:04:39
 - 来源：`.dsh-meow/memory.db`
 - 条目：573 条（已跳过 archived / 其它项目的条目）
 
@@ -632,18 +632,16 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 `关键词：["变体机制落点", "best_rtx_sm唯一入口", "select_dlssnr_variant", "ensure_dlssnr", "dll_architectures扫fatbin", "dlssnr_variant.json marker", "baseline按变体判防抖", "dlss5:nr_arch自检", "dlss5_gpu_scope_applied迁移", "pack_nvngx_assets变体字段"]`
 
 ### 【modecontroller 当前状态唯一真源】（20…
-*2026-10-06 13:52*
+*2026-10-06 14:07*
 
-【modecontroller 当前状态唯一真源】（2026-10-06 13:55 更新）
-**Latest Release = `v1.0.21`**（2026-10-06T04:38:57Z）。**本地 = `1.0.22-beta`（已构建、未发版）**。main = `ec6d352`（**已 commit、未推**）。
-**`1.0.22-beta` 这批（自 v1.0.21 起）**：
-① **Streamline/NGX server manifest 损坏 ⇒ 判据 + 自动修复**（反馈者 `lzh18`，`C:\Users\<user>\Downloads`，i9-13980HX + Win11 25H2 + **RTX 40 系 sm_89**）：现场 = 游戏启动后 **15 毫秒**连打 10 条 `[streamline][error] ota.cpp:329[parseServerManifest] Unexpected line in manifest file: <乱码>`，随后**内存 627 MB → 1694 MB**、线程掉到 1、进程自己退出（**无 WER**、ReShade 卸载未走完）；包内 `%LOCALAPPDATA%\NVIDIA\NGX\models\config\versions\2\files\nvngx_server_config.txt` **是 0 字节**（与报错函数名直接对应）。落点：`crashwatch.streamline_manifest_broken()`（读游戏 `Player.log`）+ `streamline_ota_files()` / `repair_streamline_manifest()`（**只搬不删**到 `.mc-backup-<时间戳>`，只取名字含 manifest/server/ota/cache 的），接入 `launcher.ensure_injections` 的 ⓪c 步 + `crash_forensics`。
-② **NR 开启时机按「要不要用第一人称」分流**（2026-10-06，用户原话「**第一视角和相机都不能用**」）：enhancer 的**相机 hook 与 NR 抢同一位置** —— NR 先激活 ⇒ hook 装不上（`Camera hook installation failed (error 8)`）⇒ **第一人称与相机控制都不能用**（modtest 实测：`CameraFirstPerson=1` + `NeuralUplift=1` ⇒ error 8）。**`start_dlss5_nr_immediately`（"启动就开"）是 `d1d2d1a`（v1.0.16）才引入并默认为 True** —— 这解释了「之前都没问题」。修法：新增 `reshade_integration.firstperson_camera_wanted()`（读**生效那份** ReShade.ini 的 `[endfield-enhancer] CameraFirstPerson`），`initialize._check_defer_nr_until_camera_hook` 的 `immediate` 与 `nr_autostart.poll` 的"整条跳过"判据**共用它** ⇒ 用第一人称 ⇒ 压 `NeuralUplift=0` + 等 hook + 自动补按 NR 键；不用 ⇒ 保持启动就开。测试 `tests/test_nr_firstperson_split.py`（5 条）。
-**本会话早先的改动（1.0.20/1.0.21 已发）**：NR 引擎换官方 `7.0.0-rc8`（自带中文 ⇒ 汉化版退役）、崩溃取证（空指针判定 / StackHash / CRT 弹窗 / NR provider 冲突 / NR evaluate 崩在 nvngx_dlssnr / NR 开了又关）、自更新取证（`self-update-forensics.txt` + `apply_update` 十条失败落日志）、香蕉网宽松 JSON、暂停被当成终止 / 暂停延迟、`_external_efmi_mods` 误判、`staging-inventory.txt`、发版闸（`build-info.json` 内嵌版本核对）。
-**★ normify 结构树四步已在本会话完成**（此前几条记忆写着"本会话无该插件工具、未做"—— **已作废**）：结构数据目录 `C:\Users\<user>\.dsh\profiles\desktop\normify-modecontroller\`；① `python scripts\normify_realign.py --apply`（115 模块 / 583 行号）② `normify_module_refresh(all=true, activate=true, repoRoot=D:\zmdmod\modecontroller)`（167 模块，全部 active）③ `normify_validate` = **0 error / 33 warning**（叶子过粗、57 条箭头可锚定未锚定、3 处 order 不全、根模块无 source）④ `normify_build`（163 模块 / 145 叶子 / 369 API / 79 依赖）+ `normify_render`（`normify.html` 577,091 B）。**仓库镜像 `docs\structure\` 未同步**（要跑 `push.py` 才会刷新并单独提交，而 push 会推 main ⇒ **等用户明确说推**）。
-**待办**：① **modtest 的新 exe 还没换**（他开着控制器，`Copy-Item` 被占用）⇒ 他关掉后复制 `dist\EndfieldModController.exe`（30,169,487 B / sha256 `15967befac6476249b5c`）② **等他复测第一人称**（看 `Camera controls installed.` 出现 + 第一人称可用 + NR 帧在涨）③ **#16（xingluo667，`0xC0000135` 缺 DLL、开 DLSS5/第一人称就崩）仍未定位**（已建议补"进程模块清单"采集）④ **#17（Madao553）回复已发**（comment 6009468044）⑤ 发版 `1.0.22`（**先收正式号 → 构建 → 过发版闸 → 推 → 发**）⑥ 下一版号 `1.0.23-beta`。
+【modecontroller 当前状态唯一真源】（2026-10-06 14:12 更新）
+**Latest Release = `v1.0.22`**（2026-10-06T06:05:42Z，release id `404369955`，已转正 `--latest`）。**本地 = `1.0.22`（与 Release 同号、不欠号）**。main = `c32a32c`（已推，本地与远端一致；结构树镜像与记忆日志两个自动提交也已同步）。
+**v1.0.22 三个内容**：① **注入库列错 EFMI loader ⇒ 重复注入 ⇒ 启动中断**（`launcher.ensure_efmi_loader_deployed()`：写注入库**之前**把包目录那份 `d3d11.dll` 提前部署到 `EFMI\d3d11.dll`；接入 `ensure_injections` ⓪d 步；测试 `tests/test_efmi_loader_deploy.py` 4 条）② **NR 与第一人称相机 hook 抢位 ⇒ 按「要不要用第一人称」分流**（`reshade_integration.firstperson_camera_wanted()` 被 `initialize._check_defer_nr_until_camera_hook` 的 `immediate` 与 `nr_autostart.poll` 共用；用户已复测**通过**；测试 `tests/test_nr_firstperson_split.py` 5 条）③ **Streamline/NGX server manifest 损坏 ⇒ 判据 + 自动修复**（`crashwatch.streamline_manifest_broken()` + `repair_streamline_manifest()`，只搬不删；接入 `ensure_injections` ⓪c 步 + `crash_forensics`；测试 `tests/test_streamline_manifest.py` 4 条）。
+**附件（v1.0.22）**：`EndfieldModController.exe` 30,170,776 B / sha256 `3a78eb078d47335850a39d9950ab9901e23962f69d9913482d324d7ff3a35277`；`assets-bundle.zip` 261,970,243 B / sha256 `2a2607463bd534e5afbb2e973ccca36e9aa6e77bf…`（按 release id 核对一致）。
+**★ issue 状态（2026-10-06 14:12）**：**#16（xingluo667）已于 2026-10-06 14:11 回复**（[comment 6010444035](https://github.com/jing-hy/EndfieldModController/issues/16#issuecomment-6010444035)，**未关闭**，等他更新到 v1.0.22 后实测回报）—— 内容 = 根因是"注入库列到了错的那份 d3d11.dll（内容一样路径不同 ⇒ 去重不掉 ⇒ 同一个 DLL 注两遍 ⇒ 第二次失败并中断整个启动）"，已在 v1.0.22 修好、**不需要他改任何配置**；口径照定式（能不能确定/有没有修/更新后做什么，无表格）。**#17（Madao553）回复已发**（comment 6009468044，未关闭）。
+**待办**：① **modtest 的 exe 仍是 `15967bef…`（1.0.22-beta 那份）** —— 控制器被他开着，等他关掉后复制 `dist\EndfieldModController.exe`（30,170,776 B）② 等他回报 #16 / #17 ③ 下一版号 `1.0.23-beta`。
 
-`关键词：["当前状态唯一真源","Latest v1.0.21","本地1.0.22-beta","Streamline manifest损坏","parseServerManifest","NR按第一人称分流","firstperson_camera_wanted","error8相机hook","v1.0.16引入启动就开","normify四步已完成","modtest待换exe","待复测第一人称"]`
+`关键词：["当前状态唯一真源","Latest v1.0.22","issue16已回复未关","issue17已回复未关","注入库列错EFMIloader","ensure_efmi_loader_deployed","NR按第一人称分流","Streamline manifest修复","release404369955","main c32a32c","待换modtest exe","下一版1.0.23-beta"]`
 
 ### 待办
 
