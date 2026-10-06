@@ -740,6 +740,21 @@ class EndfieldModControllerApi:
         result = launcher.set_component_addons(self.config, component, bool(enabled))
         if mutex_note:
             result["mutex"] = mutex_note
+        # ★★ **必须把落盘后的配置回传给前端**（2026-10-06 用户反馈「开关关掉之后过一会
+        #    又自己打开了」）：
+        #    前端 `toggleSwitch()` 是"**乐观更新 + 后台刷新**"——它先按你的点击画面，
+        #    再 `refreshState()+loadSettings()` 整份重灌。它判断"后端到底存了什么"的
+        #    唯一依据就是返回值里的 `config`（`persisted = ... && sw.k in r.config`）。
+        #    ⚠️ 这里以前**不回传** ⇒ 前端只能信自己记的值 ⇒ 后台刷新一旦读到的仍是旧值
+        #    （写盘时序、或 `self.config` 那次"按 mtime 重新加载"），界面就被**弹回原样**
+        #    —— 用户看到的就是"关了，过一会又开了"。
+        #    `set_minimal_injection()` 一直是回传的（所以那个开关没这个毛病）；这里补齐。
+        #    包含**互斥时一起被改掉的另一个键**：前端据此把它们一起显示对。
+        result["config"] = {
+            "dlss5_addon_enabled": bool(getattr(self.config, "dlss5_addon_enabled", True)),
+            "firstperson_addon_enabled": bool(getattr(self.config, "firstperson_addon_enabled", True)),
+            "mfg_unlock_enabled": bool(getattr(self.config, "mfg_unlock_enabled", False)),
+        }
         # 两个都关 → 注入库里的底座会被移除；至少一个开 → 保持注入
         try:
             launcher.configure_dlss5_injection(self.config, enabled=True)
