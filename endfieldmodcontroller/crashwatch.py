@@ -755,6 +755,29 @@ def _player_log_candidates(config: AppConfig) -> list[Path]:
     return out
 
 
+def nvidia_config_roots() -> list[Path]:
+    r"""NVIDIA 落"清单 / 配置"的那几个根（**采集与清理共用的唯一入口**）。
+
+    ⚠️ **为什么必须是共用入口**（2026-10-06 第二次踩坑）：诊断包由这里列出 6 个候选根
+    （`%LOCALAPPDATA%\NVIDIA\NGX`、`%LOCALAPPDATA%\NVIDIA Corporation\NGX`、
+    `%PROGRAMDATA%` 下三个…），而"清理损坏配置"那边一度**只写了一个**
+    `%LOCALAPPDATA%\NVIDIA\NGX` ⇒ 反馈者那台的文件在别的根里 ⇒ 日志报
+    "判据命中、但没找到可清理的缓存文件"，**修复实际没做**。
+    凡是"发现的路径"与"动手的路径"，只能有一处定义。
+    """
+    home = Path(os.environ.get("USERPROFILE") or "")
+    local = home / "AppData" / "Local"
+    programdata = Path(os.environ.get("PROGRAMDATA") or r"C:\ProgramData")
+    return [
+        local / "NVIDIA" / "Streamline",
+        local / "NVIDIA" / "NGX",
+        local / "NVIDIA Corporation" / "NGX",
+        programdata / "NVIDIA" / "Streamline",
+        programdata / "NVIDIA Corporation" / "NGX",
+        programdata / "NVIDIA" / "NGX",
+    ]
+
+
 def _broken_config_file(path: Path) -> str:
     r"""这份 NGX / Streamline 配置是不是**坏到读不了**（返回原因，正常则空串）。
 
@@ -821,27 +844,30 @@ def streamline_ota_files(config: AppConfig) -> list[Path]:
     与 Streamline 用户目录下的小文件。**不碰** `nvngx_config.txt` / `sl_sdk_*` 这些
     内容正常、驱动需要的表。
     """
-    home = Path(os.environ.get("LOCALAPPDATA") or os.environ.get("USERPROFILE") or "")
     out: list[Path] = []
-    ngx = home / "NVIDIA" / "NGX"
-    if ngx.is_dir():
-        # ① **按内容判坏**（2026-10-06 改）：两位反馈者坏的文件不同（一位空的是
-        #    `nvngx_server_config.txt`、另一位空的是 `nvngx_mapping.json`），而报的是
-        #    同一条 `parseServerManifest` 错 ⇒ 只按文件名挑会漏掉一半。
-        for item in sorted(ngx.glob("models/config/versions/*/files/*")):
-            if item.is_file() and _broken_config_file(item):
-                out.append(item)
-        # ② 名字直接对应报错函数的那份（server manifest）——内容看着正常也一并搬走
-        out.extend(sorted(ngx.glob("models/config/versions/*/files/nvngx_server_config.txt")))
-    streamline = home / "NVIDIA" / "Streamline"
-    if streamline.is_dir():
-        for item in sorted(streamline.rglob("*")):
-            if not item.is_file():
-                continue
-            # **只取与 manifest / OTA 缓存有关的**（更保守：别把整个目录内容都搬走）
-            name = item.name.lower()
-            if any(key in name for key in ("manifest", "server", "ota", "cache")):
-                out.append(item)
+    # ⚠️ **必须遍历 `nvidia_config_roots()` 的全部候选根**（2026-10-06 第二次踩坑）：
+    #   采集列出了 6 个根，而这里一度只写 `%LOCALAPPDATA%\NVIDIA\NGX` 一个 ⇒
+    #   反馈者的坏配置在别的根里 ⇒ 判据命中但"没找到可清理的缓存文件"，修复没做。
+    for root in nvidia_config_roots():
+        if not root.is_dir():
+            continue
+        if root.name.lower() == "ngx":
+            # ① **按内容判坏**：两位反馈者坏的文件不同（一位空的是 `nvngx_server_config.txt`、
+            #    另一位空的是 `nvngx_mapping.json`），报的却是同一条 `parseServerManifest` 错
+            #    ⇒ 只按文件名挑会漏掉一半。
+            for item in sorted(root.glob("models/config/versions/*/files/*")):
+                if item.is_file() and _broken_config_file(item):
+                    out.append(item)
+            # ② 名字直接对应报错函数的那份（server manifest）——内容看着正常也一并搬走
+            out.extend(sorted(root.glob("models/config/versions/*/files/nvngx_server_config.txt")))
+        else:
+            for item in sorted(root.rglob("*")):
+                if not item.is_file():
+                    continue
+                # **只取与 manifest / OTA 缓存有关的**（更保守：别把整个目录内容都搬走）
+                name = item.name.lower()
+                if any(key in name for key in ("manifest", "server", "ota", "cache")):
+                    out.append(item)
     # 去重（①② 可能命中同一个文件）
     seen: set[str] = set()
     unique: list[Path] = []
@@ -2323,17 +2349,9 @@ def collect_diagnosis_files(config: AppConfig, dest: Path, *,
     #    按用户定的规矩：**要看没被收的东西，先把收包范围改掉**。这里只收**小清单/配置**
     #    （json/ini/txt/cfg/dat/xml/log 且 ≤512 KB），大缓存一律跳过（节选原则）。
     try:
-        home = Path(os.environ.get("USERPROFILE") or "")
-        local = home / "AppData" / "Local"
-        programdata = Path(os.environ.get("PROGRAMDATA") or r"C:\ProgramData")
-        for root in (
-            local / "NVIDIA" / "Streamline",
-            local / "NVIDIA" / "NGX",
-            local / "NVIDIA Corporation" / "NGX",
-            programdata / "NVIDIA" / "Streamline",
-            programdata / "NVIDIA Corporation" / "NGX",
-            programdata / "NVIDIA" / "NGX",
-        ):
+        # 根列表由 `nvidia_config_roots()` 统一给出 —— **与"清理损坏配置"用的是同一份**，
+        # 否则会出现"包里收得到、清理时却找不到"这种自相矛盾（2026-10-06 实测踩到）。
+        for root in nvidia_config_roots():
             if not root.is_dir():
                 continue
             for item in sorted(root.rglob("*")):

@@ -76,16 +76,18 @@ def test_repair_moves_files_and_keeps_them(env, monkeypatch, tmp_path):
     """★ 修复：**只搬不删**（备份留在原地、可还原），并且不动内容正常的表。"""
     config, _runtime, _low = env
     fake_home = tmp_path / "home"
-    ngx_dir = (fake_home / "NVIDIA" / "NGX" / "models" / "config" / "versions" / "2" / "files")
+    local = fake_home / "AppData" / "Local"
+    ngx_dir = local / "NVIDIA" / "NGX" / "models" / "config" / "versions" / "2" / "files"
     ngx_dir.mkdir(parents=True)
     ngx_file = ngx_dir / "nvngx_server_config.txt"
     ngx_file.write_bytes(b"")                       # 就是那个 0 字节的坏文件
     keep = ngx_dir / "nvngx_config.txt"
     keep.write_text("[dlss]\napp_X = 1.0.0\n", encoding="utf-8")
-    stream = fake_home / "NVIDIA" / "Streamline" / "cache" / "ota-manifest.bin"
+    stream = local / "NVIDIA" / "Streamline" / "cache" / "ota-manifest.bin"
     stream.parent.mkdir(parents=True)
     stream.write_bytes(b"garbage")
-    monkeypatch.setenv("LOCALAPPDATA", str(fake_home))
+    monkeypatch.setenv("USERPROFILE", str(fake_home))
+    monkeypatch.setenv("PROGRAMDATA", str(tmp_path / "ProgramData"))
 
     moved = crashwatch.repair_streamline_manifest(config, log=None)
 
@@ -105,19 +107,43 @@ def test_repair_also_catches_broken_json_by_content(env, monkeypatch, tmp_path):
     """
     config, _runtime, _low = env
     fake_home = tmp_path / "home"
-    files = (fake_home / "NVIDIA" / "NGX" / "models" / "config" / "versions" / "1" / "files")
+    local = fake_home / "AppData" / "Local"
+    files = local / "NVIDIA" / "NGX" / "models" / "config" / "versions" / "1" / "files"
     files.mkdir(parents=True)
     (files / "nvngx_mapping.json").write_bytes(b"")                  # 0 字节
     (files / "nvngx_deny_list.txt").write_text("[streamline-ota]\napp_X = 1\n", encoding="utf-8")
     good = files / "nvngx_other.json"
     good.write_text(json.dumps({"ok": True}), encoding="utf-8")
-    monkeypatch.setenv("LOCALAPPDATA", str(fake_home))
+    monkeypatch.setenv("USERPROFILE", str(fake_home))
+    monkeypatch.setenv("PROGRAMDATA", str(tmp_path / "ProgramData"))
 
     moved = crashwatch.repair_streamline_manifest(config, log=None)
 
     assert "nvngx_mapping.json" in moved, moved
     assert good.is_file(), "能正常解析的 JSON 不能动"
     assert not list(files.glob("nvngx_other.json.mc-backup-*"))
+
+
+def test_repair_searches_every_known_root(env, monkeypatch, tmp_path):
+    """★ **必须遍历全部已知根**（2026-10-06 第二次踩坑）。
+
+    现场：诊断采集列出了 6 个候选根，而清理一度只查 `%LOCALAPPDATA%\\NVIDIA\\NGX` 一个 ⇒
+    反馈者那台的坏配置在 `%PROGRAMDATA%` 那个根里 ⇒ 日志写着"判据命中、但没找到可清理的
+    缓存文件"，修复实际没做。这一条钉住"跨根也要找得到"。
+    """
+    config, _runtime, _low = env
+    fake_home = tmp_path / "home"
+    (fake_home / "AppData" / "Local").mkdir(parents=True)
+    programdata = tmp_path / "ProgramData"
+    files = programdata / "NVIDIA" / "NGX" / "models" / "config" / "versions" / "2" / "files"
+    files.mkdir(parents=True)
+    (files / "nvngx_server_config.txt").write_bytes(b"")            # 空文件，且在 PROGRAMDATA 根
+    monkeypatch.setenv("USERPROFILE", str(fake_home))
+    monkeypatch.setenv("PROGRAMDATA", str(programdata))
+
+    moved = crashwatch.repair_streamline_manifest(config, log=None)
+
+    assert "nvngx_server_config.txt" in moved, f"跨根没找到 ⇒ 修复又会空手而归：{moved}"
 
 
 def test_repair_is_noop_when_nothing_found(env, monkeypatch, tmp_path):
