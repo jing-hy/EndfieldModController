@@ -1659,6 +1659,30 @@ def ensure_injections(config: AppConfig) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001
         warnings.append(f"应用最小注入模式失败: {exc}")
 
+    # ⓪c **Streamline/NGX 的 server manifest 坏了就备份移走**（2026-10-06）。
+    #     现场（一台 i9-13980HX + Win11 + RTX 40 系）：游戏启动后 **15 毫秒**连打 10 条
+    #     `[streamline][error] ota.cpp:329 [parseServerManifest] Unexpected line in manifest file`，
+    #     随后内存从 627 MB 涨到 **1694 MB**、线程掉到 1、进程自己退出 ——
+    #     **没有 WER、也不像崩溃**，光看崩溃取证什么都抓不到；而包内
+    #     `%LOCALAPPDATA%\NVIDIA\NGX\models\config\versions\2\files\nvngx_server_config.txt`
+    #     **是 0 字节**（名字与报错的 `parseServerManifest` 直接对应）。
+    #     判据读游戏 `Player.log`；命中就把 NGX 的 server manifest 与 Streamline 的 OTA 缓存
+    #     **备份移走**（只搬不删，驱动/游戏下次启动会自己重建）。
+    try:
+        from . import crashwatch
+
+        if crashwatch.streamline_manifest_broken(config):
+            moved = crashwatch.repair_streamline_manifest(
+                config, log=lambda message: actions.append(message))
+            if moved:
+                actions.append(f"Streamline 的 server manifest 读不懂 → 已备份移走 "
+                               f"{len(moved)} 个缓存文件（驱动下次启动会自动重建）")
+            else:
+                warnings.append("Streamline 的 server manifest 读不懂，但没找到可清理的缓存文件"
+                                "（可能不在标准位置，请把诊断包发来）")
+    except Exception as exc:  # noqa: BLE001
+        warnings.append(f"检查 Streamline 缓存失败: {exc}")
+
     # ① **XXMI 的配置文件本身必须先存在** —— 它是 XXMI 首次运行时生成的，空环境里没有，
     #    于是下面所有写入（game_folder / enabled_importers / 签名 / extra_libraries）
     #    全都会落空，表现为「注入失败」（2026-09-29 端到端实测定位）。

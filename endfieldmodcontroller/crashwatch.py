@@ -718,6 +718,87 @@ def nr_toggle_flap(config: AppConfig, *, window: float = 3.0) -> str:
     return ""
 
 
+# ── Streamline / NGX 的 server manifest 损坏（2026-10-06）───────────────────────
+# 现场：游戏启动后 15 毫秒连打 10 条
+#   `[streamline][error] ota.cpp:329 [parseServerManifest] Unexpected line in manifest file: <乱码>`
+# 随后内存从 627 MB 涨到 1694 MB、进程自己退出（无 WER、ReShade 卸载都没走完）。
+# 包内 `%LOCALAPPDATA%\NVIDIA\NGX\models\config\versions\2\files\nvngx_server_config.txt`
+# **是 0 字节** —— 与报错的 `parseServerManifest` 直接对应。
+_STREAMLINE_MANIFEST_MARKERS = (
+    "parseServerManifest",
+    "Unexpected line in manifest file",
+    "[streamline][error]",
+)
+
+
+def streamline_manifest_broken(config: AppConfig) -> str:
+    """游戏 `Player.log` 里有没有"Streamline 读不懂它的 server manifest"。
+
+    为什么要它：这类失败**不是崩溃**（没有 WER、面板 addon 也正常 detach），
+    表现是"游戏启动后很快就自己退出"，光看崩溃取证什么都抓不到。
+    """
+    for name in ("Player.log", "Endfield-Player.log", "player-Player.log"):
+        path = Path(config.runtime_path) / "logs" / "player" / name
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        hits = sum(1 for line in text.splitlines()
+                   if any(mark in line for mark in _STREAMLINE_MANIFEST_MARKERS))
+        if hits:
+            return (f"**Streamline 的 server manifest 读不懂**（`Player.log` 里 {hits} 条 "
+                    f"`parseServerManifest Unexpected line in manifest file`）—— "
+                    f"这类失败表现为**内存暴涨 + 启动后很快自己退出**，没有 WER、也不像崩溃")
+    return ""
+
+
+def streamline_ota_files(config: AppConfig) -> list[Path]:
+    r"""要清理的 NGX / Streamline 缓存文件（server manifest 与 OTA 缓存）。
+
+    只列**确定的目标**：NGX 的 `models\config\versions\*\files\nvngx_server_config.txt`
+    与 Streamline 用户目录下的小文件。**不碰** `nvngx_config.txt` / `sl_sdk_*` 这些
+    内容正常、驱动需要的表。
+    """
+    home = Path(os.environ.get("LOCALAPPDATA") or os.environ.get("USERPROFILE") or "")
+    out: list[Path] = []
+    ngx = home / "NVIDIA" / "NGX"
+    if ngx.is_dir():
+        out.extend(sorted(ngx.glob("models/config/versions/*/files/nvngx_server_config.txt")))
+    streamline = home / "NVIDIA" / "Streamline"
+    if streamline.is_dir():
+        for item in sorted(streamline.rglob("*")):
+            if not item.is_file():
+                continue
+            # **只取与 manifest / OTA 缓存有关的**（更保守：别把整个目录内容都搬走）
+            name = item.name.lower()
+            if any(key in name for key in ("manifest", "server", "ota", "cache")):
+                out.append(item)
+    return out
+
+
+def repair_streamline_manifest(config: AppConfig, *,
+                               log: Callable[[str], None] | None = None) -> list[str]:
+    """把坏的 server manifest / OTA 缓存**备份移走**（只搬不删，驱动下次启动会重建）。
+
+    返回被移走的文件名。**只有在判据命中时才会被调用**（见 `initialize` 的自检项）。
+    """
+    moved: list[str] = []
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    for path in streamline_ota_files(config):
+        try:
+            dest = path.with_name(path.name + f".mc-backup-{stamp}")
+            shutil.move(str(path), str(dest))
+        except OSError:
+            continue
+        moved.append(path.name)
+    if moved and log:
+        log("Streamline/NGX 的 server manifest 缓存已备份移走（驱动下次启动会自动重建）："
+            + "、".join(moved[:6]) + ("…" if len(moved) > 6 else ""))
+    return moved
+
+
 def crash_forensics(config: AppConfig, evidence: dict[str, Any] | None = None) -> list[str]:
     """一次崩溃的**一页结论**（每条都只有一个问题、一个答案，且只陈述证据）。
 
@@ -754,6 +835,9 @@ def crash_forensics(config: AppConfig, evidence: dict[str, Any] | None = None) -
     stuck = stuck_on_crt_dialog()
     if stuck:
         lines.append(f"当前状态：{stuck}")
+    streamline = streamline_manifest_broken(config)
+    if streamline:
+        lines.append(f"Streamline：{streamline}")
     return lines
 
 
