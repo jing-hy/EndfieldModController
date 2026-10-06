@@ -5,6 +5,7 @@
     python scripts/build_release.py --skip-checks    # 跳过静态检查（只在明确知道原因时用）
     python scripts/build_release.py --skip-addon     # 不重编 ReShade 面板（沿用上次产物）
     python scripts/build_release.py --skip-modtest   # 不同步进测试目录
+python scripts/build_release.py --no-push        # 不自动推 main（默认构建完就推）
     python scripts/build_release.py --with-fake-old      # 额外构建伪旧版（测自更新用，约 +19s）
 python scripts/build_release.py --modtest-fake-old # 测试目录改放伪旧版（隐含 --with-fake-old）
 python scripts/build_release.py --modtest-both     # 最新版与伪旧版**都**放进测试目录
@@ -559,8 +560,24 @@ def main() -> int:
         except SystemExit as exc:      # 快照失败不影响产物
             print(f"      !! 快照失败（产物不受影响）：{exc}", flush=True)
 
+    # ★ **构建完成即推 main**（2026-10-06 用户要求：
+    #   「以后构建（哪怕是测试版），流程都要固化推 main」）——
+    #   原因：要**两台电脑合作**，main 必须始终等于"刚构建过的那份源码"，
+    #   否则另一台机器拉下来的是旧的。`push.py` 会**先做状态快照**（快照失败就不推），
+    #   所以这里直接调它是安全的；它**只推 main、不发 Release**。
+    #   想跳过（例如离线构建）用 `--no-push`。
+    if "--no-push" in args:
+        print("\n[9/9] 已按要求跳过推 main（--no-push）", flush=True)
+    else:
+        print("\n[9/9] 推 main（构建完成自动推送，另一台机器据此拿到同一份源码）", flush=True)
+        pushed = subprocess.run([sys.executable, "scripts/push.py"], cwd=str(ROOT))
+        if pushed.returncode != 0:
+            print("!! 推 main 失败 —— 本地已构建但远端可能落后，请检查后手动重跑 "
+                  "`python scripts/push.py`", flush=True)
+            return pushed.returncode
+        print("      已推 main ✓（注意：**没有**发 Release —— 发版仍需明确指示）", flush=True)
+
     print("\n下一步：要发布就跑 `python scripts/prepare_release.py`（备齐附件并打印上传指引）。", flush=True)
-    print("      推送用 `python scripts/push.py` —— 它会**先自动快照**再推 main。", flush=True)
     print("DONE", flush=True)
     return 0
 
