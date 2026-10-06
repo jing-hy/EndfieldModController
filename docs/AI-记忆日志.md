@@ -4,7 +4,7 @@
 > 目的：让「当时为什么这么改、踩过什么坑」跟着源码一起留在仓库里。
 > 想改内容 → 改记忆库（用记忆工具），再跑一次本脚本；不要直接编辑本文件。
 
-- 生成时间：2026-10-06 00:54:32
+- 生成时间：2026-10-06 08:13:03
 - 来源：`.dsh-meow/memory.db`
 - 条目：567 条（已跳过 archived / 其它项目的条目）
 
@@ -595,20 +595,18 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 `关键词：["变体机制落点","best_rtx_sm唯一入口","select_dlssnr_variant","ensure_dlssnr","dll_architectures扫fatbin","dlssnr_variant.json marker","baseline按变体判防抖","dlss5:nr_arch自检","dlss5_gpu_scope_applied迁移","pack_nvngx_assets变体字段"]`
 
 ### 【modecontroller 当前状态唯一真源】（20…
-*2026-10-05 23:09*
+*2026-10-06 00:56*
 
-【modecontroller 当前状态唯一真源】（2026-10-05 23:09 更新）
-**Latest Release = `v1.0.14`**（tag `v1.0.14`，2026-10-05T13:27Z）。
-**本地现在 = `1.0.15-beta`（未发版，比 Release 领先一个）**，本轮四批改动都已构建：
-1. **DLSS5 方案换代**：按显卡架构自动选运行库（`official`+`sf` 随包、`rtx40` 依赖页可选）；换锁（RTX 20 系及以上支持；A 卡 / GTX 10 系 / GTX 16 系 / 核显锁定）；`dlss5_gpu_scope_applied` 迁移；自检 `dlss5:nr_arch`。
-2. **依赖页「导入随包 zip」**（逐条校验分卷，缺卷拒绝）；**去掉「从 Release 下载」按钮**。
-3. **下载线路新规则**：无 token 的直连永不开多连接（抢块不含直连）；直连 <1.5 MB/s 换镜像抢块；抢块不如直连快就回直连单连接下完。
-4. **崩溃取证**：新增 `pedeps.py`（PE 静态导入表预检，诊断包加「注入 DLL 依赖检查」段，缺 DLL 直接点名）+ 「净化后按当前开关重新铺设了 N 项」的显式说明（`game_clean.injection_snapshot()` + `launcher` 前后差集）。
-**当前产物**：`dist\EndfieldModController.exe` **30,099,652 B / sha256 `0257f30ca9e41c54000b…`**（23:08:53；modtest 已同步、哈希一致）；`dist\assets-bundle.zip` 261,962,034 B / sha256 `84606649d19698e6884323f8142f643be70d6670239ab2c76aede595915d0f90`。**未 commit、未推、未发版**，等用户发话。
-**测试**：全量 894 + `tests/test_pedeps.py` 13 条；反向验证 10/10。
-**诊断包（`diagnostics-20261005-223225.zip`）结论**：机主用户名 `HUAWEI`、数据根 `C:\Users\<user>\Downloads\runtime`、游戏 `D:\Endfield Game`、**Intel Arc 无 N 卡**；游戏 5 次以 `0xC0000135 STATUS_DLL_NOT_FOUND` 极早期退出（一帧未渲染、无 WER/dump、CrashSightLog 停在 13:58 没新增）；**XXMI 与被证正常**（注入成功 → 游戏没了 → 自收尾 App Exit，用户说的"启动器闪退"=它跟关）；**实例锁没触发**（`app.single_instance` 机制这次无记录）；包里两条该有却没有：`game/d3dx.ini`、`game/d3dx_user.ini`。**对照包仍缺**（用户 Downloads 里那份 222113 是"没启动过游戏"的现场，不算对照）。
+【modecontroller 当前状态唯一真源】（2026-10-06 00:56 更新）
+**Latest Release = `v1.0.15`**（tag `v1.0.15`，2026-10-05T16:56Z，**已转正为 Latest**；上一版 v1.0.14）。
+**本地 = `1.0.15`（正式号，与 Release 同号、不欠号）**。main = `8208bb5`（已推，远端一致）。
+**本版内容（跨多批改动）**：① DLSS5 按显卡架构自动选运行库（`official`+`sf` 随包、`rtx40` 依赖页可选）+ 支持范围扩到 **RTX 20 系及以上**（锁定 A 卡 / GTX 10/16 系 / 核显）+ `dlss5_gpu_scope_applied` 迁移 + 自检 `dlss5:nr_arch`；② 依赖页「导入随包 zip」（逐条校验分卷、缺卷拒绝），去掉「从 Release 下载」；③ 下载线路新规则（无 token 直连不开并发、慢则换镜像抢块、抢块不如直连就回直连）；④ **崩溃取证链修复**（`on_game_exit` / `arm·poll_runtime_watch` 两个共用入口，主路径从此真的会采样、归因、记崩溃记忆与"连续三次失败"计数）；⑤ **注入现场时间线**（五个时机 + `expect_missing`）+ `pedeps` 注入 DLL 依赖预检；⑥ 诊断包按"排查素材"全收（`collect_diagnosis_files` + `reshade-keylines.txt`）；⑦ 修复随包资产**并发展开**（临时文件唯一命名 + `ensure_all` 串行化）；⑧ **不再覆写第一人称开关**（`CameraFirstPerson` 撤出同步列表）+ 相机 hook 失败明说 + 等待诊断。
+**附件**：`EndfieldModController.exe` 30,126,521 B / sha256 `f4e20ebcdff10d5bf2d1…`；`assets-bundle.zip` 261,962,034 B / sha256 `29d66a6e41d906ab6c01…`（约 250 MB，含 `nvngx_dlssnr.sf.dll.xz.part1/2`，各 55.92 MB ⇒ GitHub 有"超 50 MB 推荐值"警告，非错误）。
+**测试**：全量 **927 passed**；反向验证 **16/16 变红**。
+**快照**：`D:\zmdmod\_snapshot_1.0.15-20261006-005431`。
+**待办**：issue **#16**（唯一 OPEN，"游戏加载过程中闪退"）的回复草稿已写好（`D:\zmdmod\_dlss5_research\issue16-回复草稿.md`），**等用户一句话再发**；下一版号 = **`1.0.16-beta`**。
 
-`关键词：["当前状态唯一真源","Latest-v1.0.14","本地1.0.15-beta","exe-30099652","sha256-0257f30c","DLSS5按架构选运行库","崩溃取证pedeps","净化后铺回说明","0xC0000135诊断包结论","未推未发版"]`
+`关键词：["当前状态唯一真源","Latest-v1.0.15","本地1.0.15正式号","main-8208bb5","exe-30126521","assets-bundle-250MB","927passed","issue16草稿待发","下一版1.0.16-beta"]`
 
 ### 待办
 
