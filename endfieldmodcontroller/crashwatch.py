@@ -860,6 +860,15 @@ def streamline_ota_files(config: AppConfig) -> list[Path]:
                     out.append(item)
             # ② 名字直接对应报错函数的那份（server manifest）——内容看着正常也一并搬走
             out.extend(sorted(root.glob("models/config/versions/*/files/nvngx_server_config.txt")))
+            # ③ ★★ **`nvngx_deny_list.txt` 才是 `ota.cpp` 真正读的那个清单**（2026-10-06 定案）。
+            #    它的内容就是 `[streamline-ota]` 段（正常机器上 33 B：`[streamline-ota]` +
+            #    `app_xxx = 1`），而反馈者那台 **是 0 字节** ⇒
+            #    `[streamline][error] ota.cpp:329[parseServerManifest] Unexpected line in
+            #    manifest file` ⇒ 内存暴涨后进程自己退出。
+            #    ⚠️ **必须与上面那份成组一起清**：v1.0.24 只清了 `server_config`，
+            #    结果驱动重建 OTA 时把 `deny_list` 写坏（那时它还不是 0 字节，按内容判不到）
+            #    ⇒ 症状照旧。成组清掉、让驱动整套重建才有效。
+            out.extend(sorted(root.glob("models/config/versions/*/files/nvngx_deny_list.txt")))
         else:
             for item in sorted(root.rglob("*")):
                 if not item.is_file():

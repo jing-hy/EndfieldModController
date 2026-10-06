@@ -152,8 +152,34 @@ def test_repair_searches_every_known_root(env, monkeypatch, tmp_path):
     assert "nvngx_server_config.txt" in moved, f"跨根没找到 ⇒ 修复又会空手而归：{moved}"
 
 
+def test_repair_clears_the_whole_ota_group(env, monkeypatch, tmp_path):
+    """★ `nvngx_deny_list.txt` 必须与 `nvngx_server_config.txt` **成组**被清掉。
+
+    2026-10-06 定案：`ota.cpp` 的 **OTA** 指 `[streamline-ota]` 段，**它就在
+    `nvngx_deny_list.txt` 里**（正常机器 33 B）。反馈者那台该文件 **0 字节** ⇒
+    `parseServerManifest Unexpected line in manifest file` ⇒ 内存暴涨后进程自己退出。
+    v1.0.24 只清了 `server_config` ⇒ 驱动重建 OTA 时又把 `deny_list` 写坏 ⇒ 症状照旧。
+    这一条钉住"成组清"（另有一条钉住"内容正常的表不许动"）。
+    """
+    config, _runtime, _low = env
+    fake_home = tmp_path / "home"
+    local = fake_home / "AppData" / "Local"
+    files = local / "NVIDIA" / "NGX" / "models" / "config" / "versions" / "1" / "files"
+    files.mkdir(parents=True)
+    (files / "nvngx_deny_list.txt").write_bytes(b"")                 # ★ 真凶：0 字节
+    (files / "nvngx_mapping.json").write_text('{"ok": true}', encoding="utf-8")
+    monkeypatch.setenv("USERPROFILE", str(fake_home))
+    monkeypatch.setenv("PROGRAMDATA", str(tmp_path / "ProgramData"))
+
+    moved = crashwatch.repair_streamline_manifest(config, log=None)
+
+    assert "nvngx_deny_list.txt" in moved, f"真凶没被清 ⇒ 症状会照旧：{moved}"
+    assert "nvngx_mapping.json" not in moved, "内容正常的文件不许动"
+
+
 def test_repair_is_noop_when_nothing_found(env, monkeypatch, tmp_path):
     """找不到任何目标 ⇒ 不动手、返回空列表。"""
     config, _runtime, _low = env
-    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "empty-home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "nohome2"))
+    monkeypatch.setenv("PROGRAMDATA", str(tmp_path / "empty-home"))
     assert crashwatch.repair_streamline_manifest(config, log=None) == []
