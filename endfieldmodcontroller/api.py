@@ -1479,6 +1479,13 @@ class EndfieldModControllerApi:
                 "config": {
                     "dlss5_addon_enabled": bool(getattr(self.config, "dlss5_addon_enabled", True)),
                     "firstperson_addon_enabled": bool(getattr(self.config, "firstperson_addon_enabled", True)),
+                    # ⚠️⚠️ **这一段是前端唯一能读到它们的路径**（`store.state.component_addon_status.config`）。
+                    #   2026-10-06 我连着改错两次，最后是**真调 `get_state()` 打出来看**才发现：
+                    #   这里以前是**硬编码两个键**的，而 `api.component_addon_status()` 是
+                    #   **另一个同名方法**（前端根本不读它）⇒ 字段加在那里等于没加 ⇒
+                    #   40 系那一行仍然是灰的。**判断字段落在哪一层，必须用真实调用验证。**
+                    "mfg_unlock_available": _mfg_available()[0],
+                    "mfg_unlock_reason": _mfg_available()[1],
                 },
             },
             "secondary_motion_status": secondary_motion.status(self.config),

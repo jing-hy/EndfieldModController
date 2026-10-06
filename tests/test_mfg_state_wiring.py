@@ -25,14 +25,24 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 LAUNCH_PAGE = ROOT / "frontend" / "src" / "pages" / "LaunchPage.vue"
 
 
-def test_availability_lives_in_component_addon_status_config() -> None:
-    """★ 后端：可用性字段必须在 `component_addon_status()` 的 `config` 里（前端从那里读）。"""
-    source = inspect.getsource(api.EndfieldModControllerApi.component_addon_status)
-    assert "mfg_unlock_available" in source, "字段不在 component_addon_status 里"
-    assert "mfg_unlock_reason" in source
-    # 反例：它**不该**被塞进 `get_state()["config"]`（那是 AppConfig.to_dict()，会污染配置）
-    state_source = inspect.getsource(api.EndfieldModControllerApi.get_state)
-    assert '"config": self.config.to_dict()' in state_source, "get_state 的 config 来源变了，需复核本测试"
+def test_get_state_really_exposes_the_field() -> None:
+    """★★ **真调 `get_state()`**，确认字段真的在前端唯一能读到的那一层。
+
+    ⚠️ **为什么必须真调、不能看源码**：2026-10-06 我连着改错两次 ——
+    字段加进了 `api.component_addon_status()`（一个**同名但前端不读**的方法），
+    而前端读的是 `get_state()` 里**另一个**名叫 `component_addon_status` 的字典
+    （那里以前是**硬编码两个键**的）⇒ 那一行对 40 系**仍然是灰的**，
+    而"看源码"的测试居然是通过的。**字段落在哪一层，只有真实调用能证明。**
+    """
+    inst = api.EndfieldModControllerApi()
+    state = inst.get_state()
+    config = (state.get("component_addon_status") or {}).get("config")
+    assert isinstance(config, dict), "get_state 里没有 component_addon_status.config"
+    assert "mfg_unlock_available" in config, (
+        "字段不在 get_state() 的 component_addon_status.config 里 ⇒ "
+        "前端读不到 ⇒ 那一行永远灰（40 系也打不开）"
+    )
+    assert "mfg_unlock_reason" in config
 
 
 def test_frontend_reads_from_the_same_place() -> None:
