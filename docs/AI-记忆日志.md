@@ -4,9 +4,9 @@
 > 目的：让「当时为什么这么改、踩过什么坑」跟着源码一起留在仓库里。
 > 想改内容 → 改记忆库（用记忆工具），再跑一次本脚本；不要直接编辑本文件。
 
-- 生成时间：2026-10-06 08:17:37
+- 生成时间：2026-10-06 10:06:27
 - 来源：`.dsh-meow/memory.db`
-- 条目：567 条（已跳过 archived / 其它项目的条目）
+- 条目：571 条（已跳过 archived / 其它项目的条目）
 
 ---
 
@@ -279,7 +279,7 @@
 
 `关键词：["第一轮只看日志包","未收先改收包范围","大文件可以节选","collect_diagnosis_files","两个打包通道共用","reshade-keylines","诊断包一次抓齐","别翻本地文件","反馈者机器碰不到"]`
 
-## 项目记忆（结构 / 决策 / 部署 / 待办）（35 条）
+## 项目记忆（结构 / 决策 / 部署 / 待办）（37 条）
 
 ### 项目概述
 
@@ -459,6 +459,31 @@ runtime\dlss5                      38 字符  ❌ 崩
 
 `关键词：["CameraFirstPerson决定hook","Camera controls installed不出现","启动就开DLSS5可行","NeuralUplift=1与hook共存","修正NR抢trampoline结论","nr_autostart等不到hook","auto_enable_nr_after_camera_hook关闭","不许覆写第一人称开关","同步列表撤掉CameraFirstPerson"]`
 
+### 【修正：`CameraFirstPerson=0` 时相…
+*2026-10-06 08:19*
+
+【修正：`CameraFirstPerson=0` 时相机 hook **照样会装**（2026-10-06 从反馈者包查出，**推翻当日更早的结论**）】
+反馈者（数据根 `P:\TOOL`、游戏 `K:\game\...`、**RTX 5080**）生效 `ReShade.ini` 里 `CameraFirstPerson=0`，而 ReShade 日志里 `[RenoDX: Arknights Endfield Enhancer] Endfield enhancer: Camera controls installed.` **照样出现**（arm 后仅 **26 秒**）⇒ 「`=0` ⇒ enhancer 不装 hook ⇒ `nr_autostart` 永远等不到」**作废**。
+⚠️ **仍未解释**：本机 modtest 那次（同样 `=0`，00:22:11 arm → 00:23:38 退出，87 秒）**没有**这句话 —— 两台条件相近却不同，原因待查。
+**同时查出的真根因（他那台"开不了 DLSS5"）**：他把 NR 快捷键设成小键盘键，addon 日志写成 `hotkeys: NR toggle NUM`，而键表认不出 ⇒ **退回按了 F6** ⇒ NR 从未打开（面板停在「成功NR帧 4」，那几帧正是这次误按留下的；`feature ready` + `frame 1/2/3 delivered` 都在误按之后）。与显卡、与 hook 均无关。
+**修法**：键表补 `NUM`/`NUMLOCK`(0x90)、`NUM0..9`(0x60..69)、`NUM±*/` 与 `ADD/SUBTRACT/MULTIPLY/DIVIDE/DECIMAL`；`_HOTKEY_RE` 的字符类从 `[A-Za-z0-9]` 补成 `[A-Za-z0-9+*/.−]`（否则 `NUM+` 只匹配到 `NUM`，解析成 NumLock）。测试 `test_numpad_hotkey_names_are_recognised`，反向验证 W 项。
+
+`关键词：["CameraFirstPerson=0照样装hook","推翻不装hook的结论","Camera controls installed","NR快捷键NUM","退回按F6","小键盘键名键表","_HOTKEY_RE字符类补符号","成功NR帧4真相"]`
+
+### 【四个反馈者的身份对照（2026-10-06 用户质疑「…
+*2026-10-06 08:20*
+
+【四个反馈者的身份对照（2026-10-06 用户质疑「你确定是同一个人吗」后逐项核出 —— **我曾把两人混为一谈**）】
+**认人判据**：一律看诊断包 `summary.txt` 的 `runtime=` / `game_dir=` / 显卡，**别凭"时间接近"或"症状相似"猜**。
+* **issue #16 `xingluo667`**：`C:\Users\<user>\Downloads\runtime` / `D:\Hypergryph Launcher\games\Arknights Endfield` / **RTX 5070 Ti Laptop**。**NR 键 = `F6`（认得出来）**，而 **`Camera controls installed.` 从未出现** ⇒ `nr_autostart` 一次都没按过 ⇒ NR 从没打开（他会话里"就是没自动开 nr"）。
+* **第四人（`P:\TOOL`，`diagnostics-20261006-080326`）**：`P:\TOOL\runtime` / `K:\game\Hypergryph Launcher\games\Endfield Game` / **RTX 5080**。**NR 键 = `Num`（当时认不出）** ⇒ 退回按了 F6 ⇒ NR 从没打开（面板「成功NR帧 4」= 误按留下的）；他的 **hook 出现了**。⚠️ **issue 列表里没有对应的 issue**（应属私下反馈）。
+* **`HUAWEI`**（`diagnostics-20261005-223225`）：`C:\Users\<user>\Downloads\runtime` / `D:\Endfield Game` / **Intel Arc**。
+* **`lzh18`**（`diagnostics-20261005-232050`）：`C:\Users\<user>\Downloads\runtime` / `D:\Hypergryph Launcher\games\Arknights Endfield` / **RTX 4060 Laptop**。
+**同时确认**：`CameraFirstPerson=0` 时 hook 装不装**两台结果相反**（#16 没装、第四人装了）⇒ **`CameraFirstPerson` 不是决定因素**，"=0 ⇒ 不装 hook"那条定案作废；真正原因**仍未找到**（不许猜）。
+**教训**：写"回某条 issue"的草稿前，**先逐项核对是不是同一个人** —— 这次把 #16 与第四人的症状、显卡、根因写进了同一份草稿（还写了"你的显卡 5080"），靠用户一句质疑才发现。
+
+`关键词：["四个反馈者身份对照","xingluo667是5070Ti","PTTOOL第四人是5080","HUAWEI是Intel-Arc","lzh18是4060","按runtime认人","CameraFirstPerson不是决定因素","写issue草稿前先核对身份"]`
+
 ### 部署与数据
 
 ### 乳摇插件（SecondaryMotion / Shaki…
@@ -595,18 +620,17 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 `关键词：["变体机制落点","best_rtx_sm唯一入口","select_dlssnr_variant","ensure_dlssnr","dll_architectures扫fatbin","dlssnr_variant.json marker","baseline按变体判防抖","dlss5:nr_arch自检","dlss5_gpu_scope_applied迁移","pack_nvngx_assets变体字段"]`
 
 ### 【modecontroller 当前状态唯一真源】（20…
-*2026-10-06 00:56*
+*2026-10-06 08:19*
 
-【modecontroller 当前状态唯一真源】（2026-10-06 00:56 更新）
-**Latest Release = `v1.0.15`**（tag `v1.0.15`，2026-10-05T16:56Z，**已转正为 Latest**；上一版 v1.0.14）。
-**本地 = `1.0.15`（正式号，与 Release 同号、不欠号）**。main = `8208bb5`（已推，远端一致）。
-**本版内容（跨多批改动）**：① DLSS5 按显卡架构自动选运行库（`official`+`sf` 随包、`rtx40` 依赖页可选）+ 支持范围扩到 **RTX 20 系及以上**（锁定 A 卡 / GTX 10/16 系 / 核显）+ `dlss5_gpu_scope_applied` 迁移 + 自检 `dlss5:nr_arch`；② 依赖页「导入随包 zip」（逐条校验分卷、缺卷拒绝），去掉「从 Release 下载」；③ 下载线路新规则（无 token 直连不开并发、慢则换镜像抢块、抢块不如直连就回直连）；④ **崩溃取证链修复**（`on_game_exit` / `arm·poll_runtime_watch` 两个共用入口，主路径从此真的会采样、归因、记崩溃记忆与"连续三次失败"计数）；⑤ **注入现场时间线**（五个时机 + `expect_missing`）+ `pedeps` 注入 DLL 依赖预检；⑥ 诊断包按"排查素材"全收（`collect_diagnosis_files` + `reshade-keylines.txt`）；⑦ 修复随包资产**并发展开**（临时文件唯一命名 + `ensure_all` 串行化）；⑧ **不再覆写第一人称开关**（`CameraFirstPerson` 撤出同步列表）+ 相机 hook 失败明说 + 等待诊断。
-**附件**：`EndfieldModController.exe` 30,126,521 B / sha256 `f4e20ebcdff10d5bf2d1…`；`assets-bundle.zip` 261,962,034 B / sha256 `29d66a6e41d906ab6c01…`（约 250 MB，含 `nvngx_dlssnr.sf.dll.xz.part1/2`，各 55.92 MB ⇒ GitHub 有"超 50 MB 推荐值"警告，非错误）。
-**测试**：全量 **927 passed**；反向验证 **16/16 变红**。
-**快照**：`D:\zmdmod\_snapshot_1.0.15-20261006-005431`。
-**待办**：issue **#16**（唯一 OPEN，"游戏加载过程中闪退"）的回复草稿已写好（`D:\zmdmod\_dlss5_research\issue16-回复草稿.md`），**等用户一句话再发**；下一版号 = **`1.0.16-beta`**。
+【modecontroller 当前状态唯一真源】（2026-10-06 08:19 更新）
+**Latest Release = `v1.0.16`**（tag `v1.0.16`，2026-10-06T00:19Z，**已转正为 Latest**；上一版 v1.0.15）。
+**本地 = `1.0.16`（正式号，与 Release 同号、不欠号）**。main = `c83f374`（已推，远端一致）。
+**本版内容**：① **DLSS5 神经渲染默认「启动即开」**（新开关 `start_dlss5_nr_immediately=True`；自检写 `NeuralUplift=1`；`nr_autostart` 整条停用；保守的"压 0 → 等 hook → 模拟按键"完整保留为可选）；② **修复一次启动拉起多个 XXMI**（`launcher.launch` 拉起前查已有实例 + `api.launch`/`launch_game` 非阻塞入口锁 + 前端 `running` 提到所有 await 之前）；③ 三处"看着在、实际没生效"的判据修复（注入签名长度 / 采样读生效那份 `ReShade.log` / 注入时间线段接进 summary）；④ 诊断包收 **Streamline/NGX 清单** + `ReShade.log` 关键行摘录；⑤ **NR 快捷键认全小键盘键名**（`NUM`/`NUMLOCK`/`NUM0-9`/`NUM±*/`）+ `_HOTKEY_RE` 字符类补符号；⑥ `XXMI-Libs` → **v1.2.2**。
+**附件**：`EndfieldModController.exe` 30,129,292 B / sha256 `dcb4937dd853b832…`；`assets-bundle.zip` 261,962,034 B / sha256 `8458261149391afa…`。
+**测试**：全量 **939 passed**；反向验证 **23/23 变红**。
+**待办**：issue **#16** 的回复草稿（`D:\zmdmod\_dlss5_research\issue16_reply_v1016.txt`，内容是"NR 快捷键 `NUM` 认不出 ⇒ 误按 F6"，**已能确定**）**等用户一句话再发**；下一版号 = **`1.0.17-beta`**。
 
-`关键词：["当前状态唯一真源","Latest-v1.0.15","本地1.0.15正式号","main-8208bb5","exe-30126521","assets-bundle-250MB","927passed","issue16草稿待发","下一版1.0.16-beta"]`
+`关键词：["当前状态唯一真源","Latest-v1.0.16","本地1.0.16正式号","main-c83f374","exe-30129292","DLSS5启动即开","一次启动多XXMI修复","939passed","issue16草稿待发","下一版1.0.17-beta"]`
 
 ### 待办
 
@@ -867,7 +891,7 @@ issue #16（xingluo667，游戏加载过程中闪退）：已追加评论，让�
 
 `关键词：["DLSS5非50系方案","终末地DX11","DLSS5-Feeder","dlss5-feed.addon64","renodx-dlss5","LumeniteFX运动矢量","bridge与feeder分工","DX11无多帧生成","Forcing-GfxDevice-Direct3D-11","DLSS5-Autopilot","按架构选runtime"]`
 
-## 经验教训（被纠正过的、踩过的坑）（384 条）
+## 经验教训（被纠正过的、踩过的坑）（385 条）
 
 ### XXMI/EFMI 启动终末地是 Endfield.ex…
 *2026-09-27 14:58*
@@ -4382,7 +4406,17 @@ Mod 卡片的「⋯ 更多」在服装页与辅助页各有一套，加动作必
 
 `关键词：["ensure_all","追加结果","ok_status","重试逻辑","既有断言","恰好 N 项","消费方","内置组件"]`
 
-## 事实（细碎的原子信息）（85 条）
+### 【教训·2026-10-06 反馈者"皮肤打不进去"定案…
+*2026-10-06 09:22*
+
+【教训·2026-10-06 反馈者"皮肤打不进去"定案】**「能不能锁键」的判据必须查"这次会不会真的注入"，而不是"文件在不在磁盘上"。**
+现场：反馈者（数据根 `G:\`）把「DLSS5 神经渲染」与「第一人称视角」**都关了** ⇒ 注入库只剩 `EFMI\d3d11.dll`、**没有 `d3d12.dll`**（底座只在两者任一开着时才列）⇒ 游戏里没有 ReShade、**面板不存在**；而 `hotkey_takeover`（默认 True + 一次性迁移替他打开）照样把 Mod 的 `[Key*]` 改写成 `VK_F24` ⇒ **键被锁死、面板却没有**（`panel_info.txt: takeover=1` 且 `mc_action_seen = 0` 就是这状态）。Mod 本身与注入都正常（`d3dx_user.ini` 里部件变量俱全）。
+根因：`reshade_integration.takeover_possible()` 只查"配置/文件在不在"，没查"当前配置下底座会不会被注入" —— 文件当然还在磁盘上。**这是 2026-10-01 那次「键锁死了、面板却不存在」事故换路径重演**。
+修法：新增 `reshade_integration.reshade_base_wanted()` 作**判据唯一来源**，`takeover_possible`（锁键前）与 `launcher.dlss5_injection_targets`（列不列底座）共用它；两插件都关时拒绝锁键、Mod 原键继续可用。测试 `tests/test_hotkey_lock_guard.py`（5 条）+ 反向验证变红。
+
+`关键词：["皮肤打不进去","hotkey_takeover","锁 Mod 快捷键","takeover_possible","reshade_base_wanted","d3d12.dll 没注入","面板不存在","mc_action_seen","Mod 原键失效","VK_F24","判据要查会不会生效"]`
+
+## 事实（细碎的原子信息）（86 条）
 
 ### modecontroller：游戏目录 loader_l…
 *2026-09-27 14:58*
@@ -5274,6 +5308,17 @@ DLSS5 feeder 路线 50 系可用：本机 5080/驱动 617.14 实测 renodx-dlss5
 50 系机器上 DLSS5 的行为**故意不变**（同一份 official 运行库、开关默认开、效果一致）—— 方案换代的可见变化只有三处：① 依赖页多一行「依赖的随包资产包（assets-bundle.zip）· 不是 Mod 包」+「导入随包 zip…」；② 自检多一条 `dlss5:nr_arch`；③「RTX 40 优化版」那一行只在 40 系机器出现。用户问"怎么没变化"时，先照这个答，别怀疑没生效（可查 `runtime\dlss5\.dlssnr_variant.json` 与 config 的 `dlss5_gpu_scope_applied` 证明新版跑过）。
 
 `关键词：["50系DLSS5不变","用户问怎么没变化","可见变化只有依赖页","dlssnr_variant marker","dlss5_gpu_scope_applied","官方运行库同字节","40系才有优化行","换代故意不动50系"]`
+
+### 【已定案·2026-10-06】反馈者（数据根 P:\T…
+*2026-10-06 09:00*
+
+【已定案·2026-10-06】反馈者（数据根 P:\TOOL、游戏 K:\game\…、RTX 5080、Win10 22H2 19045）「开了 NR 一帧不出」= NR workset pool **fail closed**，不是配置问题。
+**现象**：feature 18 created → `evaluation succeeded (count=1)` → 连建 4 个 `inline NR resources` → `WARN NR workset pool exhausted; preserving game output for this evaluation` → 之后 70 秒无任何 NR 活动（面板显示「未匹配NR功能(待机/失败)」、成功NR帧卡 4）。三次运行（03:28 / 07:07 / 08:24 中途手动开、08:49 新版启动即开）**全部一样**。
+**引擎机制（从 addon64 字符串表挖出）**：`failed to install native D3D12 queue submission tracker; NR pool will fail closed when all worksets are busy`；`NR workset completion fence could not be signaled; affected worksets will remain quarantined`。引擎**没有任何 pool/workset/fence 相关配置键**（全部键只有 EnableHooks/NeuralUplift/NRAutoMask/NREnableUpscaling/NRGlobalTone/NRIntensity/NRLocalStructure/NRLocalTone/NRPreset/NRSkinStructure/NRStyle/NRToggleKey/NRSUICorrection/NRDepthMode/NRMVecScaleX/Y/NRDiffuseWhiteNits/NRPaperWhiteScale/NRTransferStrength/NRColorStrength）⇒ **无法用配置规避**。
+**已排除（都有对照/反例）**：版本（1.0.14 与新版一样）、NR 打开时机（启动即开 vs 中途）、小键盘键名、请求字段（host state/format=28/guides/flags=74/跨API方向/驱动/运行库 sha256 全部逐字相同）、分辨率、显卡与驱动（本机同为 5080 + 32.0.16.1714）、注入栈（本机复刻他的 sbm loader 14,336/35,328 + sbm.dll 142,336）、NR 参数（本机复刻他 13 个键后仍 count=60）、native 路径（多处成功反例）、帧时序停顿（本机 STALL 更长仍正常）。
+**唯一残余差异**：① **操作系统**（26 个诊断包里唯一一台 Win10，也是唯一 fail-closed）；② 日志层面 `D3D12 NGX hooks installed across **1** module copy(ies)`（他）vs **3** 份（本机，额外 detour 了游戏目录 nvngx_dlss.dll/nvngx_dlssd.dll）。两条都**未证实**。
+
+`关键词：["NR workset pool exhausted","fail closed","DLSS5 神经渲染","一帧不出","成功NR帧 4","未匹配NR功能","Windows 10 19045","NGX hooks module copy","queue fence","诊断包","P:\\TOOL","RTX 5080"]`
 
 ## 用户偏好与环境（**含个人信息，公开前请自行取舍**）（18 条）
 
