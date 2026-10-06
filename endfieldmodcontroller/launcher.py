@@ -1439,9 +1439,31 @@ def active_efmi_loader(config: AppConfig) -> Path | None:
     fallback = config.efmi_dll_path                     # 最后退回我们自己探测到的那份
     if fallback is not None:
         candidates.append(Path(fallback))
+    # ★★ **必须再验一道"它到底是不是 EFMI loader"**（2026-10-06，`C:\Users\lzh18` 现场）：
+    #    原先只判 `is_file()`，于是当 XXMI 配置里的 `importer_folder` 被指向**用户的 Mod 库**
+    #    （实测 `C:/Users/lzh18/Downloads/library`）时，库里某个 Mod 自带的同名 `d3d11.dll`
+    #    就被当成了 loader 列进注入库 ⇒ 注入它之后 Windows 报「dll 损坏」。
+    #    EFMI loader 的可靠标志是**它旁边有 `d3dx.ini`**（3DMigoto 的配置文件；
+    #    普通 Mod 或 Mod 库里不会有）—— 用它当判据，既挡得住误列、也不影响正常布局。
     for candidate in candidates:
-        if candidate.is_file():
+        if not candidate.is_file():
+            continue
+        if (candidate.parent / "d3dx.ini").is_file():
             return candidate
+        # ⚠️ **XXMI 的包目录那份是"loader 模板"，要照旧认**（2026-10-06）：
+        #    EFMI 还没被 XXMI 部署到 `EFMI\` 的那一刻，XXMI 自己用的就是
+        #    `Resources\Packages\XXMI\d3d11.dll`，而它旁边**本来就没有** `d3dx.ini`
+        #    （那是安装包目录，不是运行目录）。只认 `d3dx.ini` 会把这条合法回退也堵掉
+        #    （实测：`test_efmi_loader_deploy` 立刻变红）。
+        _parent_text = str(candidate.parent).replace("\\", "/").lower()
+        if "/packages/xxmi" in _parent_text:
+            return candidate
+        _append_log(
+            config,
+            f"注入自检: 跳过 {candidate} —— 它既不在 EFMI 运行目录（旁边没有 d3dx.ini）、"
+            "也不在 XXMI 的包目录，不像 EFMI loader"
+            "（多半是 XXMI 配置里的 importer 目录被指到了 Mod 库）"
+        )
     return None
 
 

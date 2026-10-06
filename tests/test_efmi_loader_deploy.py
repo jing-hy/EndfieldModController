@@ -27,6 +27,11 @@ from endfieldmodcontroller.config import AppConfig
 def env(tmp_path, monkeypatch):
     xxmi = tmp_path / "runtime" / "builtin" / "XXMI"
     (xxmi / "EFMI").mkdir(parents=True)
+    # ⚠️ **`EFMI\d3dx.ini` 是"这份 d3d11.dll 确实是 EFMI loader"的判据**
+    #    （2026-10-06 `active_efmi_loader` 加了这道校验：不能把 Mod 库里同名的
+    #     `d3d11.dll` 当成 loader）。真实布局里它一定存在 ⇒ fixture 也要造，
+    #    否则测出来的不是真实布局。
+    (xxmi / "EFMI" / "d3dx.ini").write_text("[Loader]\n", encoding="utf-8")
     packaged = xxmi / "Resources" / "Packages" / "XXMI"
     packaged.mkdir(parents=True)
     (packaged / "d3d11.dll").write_bytes(b"efmi-loader-body")

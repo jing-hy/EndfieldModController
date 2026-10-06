@@ -407,8 +407,15 @@ def send_f10(config: AppConfig, *, log: Callable[[str], None] | None = None,
         if handled:
             note(f"热重载: 3DMigoto 已响应（{user_ini.name} 被更新）")
         else:
-            note(f"热重载: ⚠ 3DMigoto **没有**响应 F10（{user_ini.name} 时间戳没变）"
-                 " —— 按键没被它读到，看上面那条「是否在前台」")
+            # ⚠️ **不能写成"3DMigoto 没有响应"**（2026-10-06 修）：3DMigoto 的
+            #    `SavePersistentSettings()` **只在 `user_config_dirty` 为真时才写**
+            #    `d3dx_user.ini`（源码级结论，见模块说明）—— 游戏内没改过变量时，
+            #    F10 明明被处理了、这个文件也不会变。旧文案据此断言"没响应"，
+            #    紧接着又打印"热重载: 完成"，自相矛盾，把用户和排查的人一起带偏。
+            #    实测对照：手动按 F10 的表现与这里完全一样（画面变化/无变化都相同）。
+            note(f"热重载: 无法据此确认是否重载（{user_ini.name} 未变化；"
+                 "3DMigoto 只在游戏内改动过变量时才写它）"
+                 " —— 游戏卡顿一下 = 它在重新编译着色器，那才是正常现象")
     if not focused:
         return {
             "ok": False, "hwnd": hwnd, "window": title, "focused": False, "sent": sent,

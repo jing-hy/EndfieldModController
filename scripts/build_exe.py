@@ -46,6 +46,20 @@ ADD_DATA = [
     # 读它是纯本地操作（微秒级），不像以前那样同步联网查 GitHub（实测 6.1 秒）。
     ("endfieldmodcontroller/component_versions.json", "endfieldmodcontroller"),
     ("assets/addon/endfieldmodcontroller.addon64", "assets/addon"),
+    # ★★ **把"必须最新才能工作"的随包资产也打进 exe**（2026-10-06 定案）。
+    #    为什么：资产清单是从 `<数据根>\assets\<组>\manifest.json` 读的，而数据根那份
+    #    **优先于 exe 内嵌** ⇒ 用户机器上那句旧 `assets\` 会让"换 exe"完全拿不到新资产
+    #    （实测：DLSS4 的 addon 条目不在旧清单里 ⇒ 永远展不出来 ⇒ ReShade 里没有
+    #     `MFG Unlock` 页签；NR 引擎换代也变成"停用了旧的、又按旧清单装回旧的"）。
+    #    这里只挑小的、且**不最新就会坏**的：清单本身 + 四个 addon 压缩包 + ReShade 模板
+    #    （合计约 1.9 MB）；`shaders\`(0.85 MB) 与 `textures\`(10.5 MB) 属可选效果资产，
+    #    仍走 assets-bundle.zip，不必塞进 exe。
+    ("assets/dlss5/manifest.json", "assets/dlss5"),
+    ("assets/dlss5/ReShade.ini.dlss5-template", "assets/dlss5"),
+    ("assets/dlss5/renodx-dlss5.addon64.xz", "assets/dlss5"),
+    ("assets/dlss5/renodx-endfield-enhancer.addon64.xz", "assets/dlss5"),
+    ("assets/dlss5/renodx-mfgunlock.addon64.xz", "assets/dlss5"),
+    ("assets/dlss5/trans-zh.addon64.xz", "assets/dlss5"),
 ]
 
 # 应用图标（多尺寸 ico，含 16/24/32/48/64/128/256）。放进 exe 后，

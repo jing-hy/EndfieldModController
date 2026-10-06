@@ -102,8 +102,15 @@ def _log(log: Callable[[str], None] | None, message: str) -> None:
         log(message)
 
 
-def group_root(config: AppConfig, group: str) -> Path | None:
-    """某组资产目录（第一个含 manifest.json 的候选）。"""
+def asset_roots(config: AppConfig, group: str) -> list[Path]:
+    """某组资产的**全部**候选根（按优先级，只留真正带 manifest.json 的）。
+
+    ⚠️ 为什么要"全部"而不是"第一个"（2026-10-06 定案）：清单原先只取**第一个**命中的根，
+    而**数据根排在 exe 内嵌之前** ⇒ 用户那句旧的 `<数据根>/assets/` 会一直命中，
+    内嵌的新清单**永远轮不到** ⇒ "只换 exe"的升级拿不到任何新增/替换的随包资产。
+    实测：DLSS4 的 addon 条目不在旧清单里 ⇒ 开着一键启动也永远展不出来。
+    ⇒ 现在把全部候选交出去，由 `manifest_entries()` **按条目合并**（数据根优先、缺的从内嵌补）。
+    """
     subdir = Path("assets") / group
     candidates: list[Path] = []
     # 允许用配置项覆盖根目录（个别用户会把 assets 挪到别处）
@@ -119,6 +126,7 @@ def group_root(config: AppConfig, group: str) -> Path | None:
         candidates.append(Path(meipass) / subdir)
     candidates.append(Path(__file__).resolve().parents[1] / subdir)
 
+    found: list[Path] = []
     seen: set[Path] = set()
     for candidate in candidates:
         if candidate in seen:
@@ -126,10 +134,16 @@ def group_root(config: AppConfig, group: str) -> Path | None:
         seen.add(candidate)
         try:
             if (candidate / MANIFEST_NAME).is_file():
-                return candidate
+                found.append(candidate)
         except OSError:
             continue
-    return None
+    return found
+
+
+def group_root(config: AppConfig, group: str) -> Path | None:
+    """某组资产目录（**优先级最高**的那个候选）—— 落盘/解压目标仍用它。"""
+    roots = asset_roots(config, group)
+    return roots[0] if roots else None
 
 
 def load_manifest(root: Path) -> dict[str, Any]:
@@ -140,15 +154,29 @@ def load_manifest(root: Path) -> dict[str, Any]:
 
 
 def iter_assets(config: AppConfig) -> Iterator[tuple[str, Path, str, dict[str, Any]]]:
-    """依次产出 (组名, 资产目录, 文件名, 清单条目)。"""
+    """依次产出 (组名, **该条目所在的**资产目录, 文件名, 清单条目)。
+
+    ★★ **按条目合并多个候选根**（2026-10-06 定案）：见 `asset_roots()` ——
+    只取"第一个命中的根"时，用户机器上那句旧的 `<数据根>\\assets\\` 会一直命中，
+    **exe 内嵌的新清单永远轮不到** ⇒ "只换 exe"的升级拿不到任何新增/替换的随包资产
+    （实测：DLSS4 的 addon 条目不在旧清单里 ⇒ 开着开关也永远展不出来；
+    NR 引擎换代还变成"停用了旧的、又按旧清单把旧的装回来"）。
+    合并口径：**优先级高的根先出**，同名条目取先出现的那个（数据根里用户自放的仍优先）。
+    ⚠️ 每个条目都带上**它自己所在的 root** —— 解压/校验要按那个目录去找 `.xz` 分卷，
+    不能拿"第一个命中的根"去凑。
+    """
     for group in ASSET_GROUPS:
-        root = group_root(config, group)
-        if root is None:
+        roots = asset_roots(config, group)
+        if not roots:
             continue
-        entries = load_manifest(root).get("files") or {}
-        for name, entry in entries.items():
-            if isinstance(entry, dict):
-                yield group, root, str(name), dict(entry)
+        emitted: set[str] = set()
+        for root in roots:
+            for name, entry in (load_manifest(root).get("files") or {}).items():
+                key = str(name)
+                if key in emitted or not isinstance(entry, dict):
+                    continue
+                emitted.add(key)
+                yield group, root, key, dict(entry)
 
 
 def manifest_entries(config: AppConfig) -> list[tuple[str, Path, str, dict[str, Any]]]:
@@ -950,6 +978,10 @@ def _is_dlssnr_item(item: tuple[str, Path, str, dict[str, Any]]) -> bool:
 RETIRED_NR_ADDONS = ("renodx-dlss5-4.7.addon64", "renodx-dlss5-4.7_汉化.addon64")
 # 匹配用的通配（覆盖中文/拼音等历史命名：`_汉化` / `_hanhua` / 无后缀）
 RETIRED_NR_GLOB = "renodx-dlss5-4.7*.addon64"
+# 换代后**新** NR 引擎在随包清单里的条目名 —— `retire_stale_nr_addons()` 用它校验
+# "停用了旧的之后，新的到底在不在清单里"；不在就说明这台机器的 `assets\` 是旧的一份
+# （换 exe 不会更新它），必须明确报警而不是照旧清单把旧的装回去（2026-10-06 定案）。
+NEW_NR_ENTRY = "renodx-dlss5.addon64"
 RETIRED_DIR = "_retired_addons"
 
 
@@ -983,6 +1015,22 @@ def retire_stale_nr_addons(config: AppConfig, *,
         moved.append(name)
         _log(log, "已停用旧版 NR 引擎 " + name + f"（搬到 {RETIRED_DIR}\\，可还原）——"
                   "旧版在驱动 616.64 及以上会崩在 nvngx_dlssnr.dll，已改用随包的 7.0.0-rc8")
+    # ★★ **搬走旧的之后，必须确认"新版那份在清单里到底有没有"**（2026-10-06 定案）。
+    #    否则就是实测里那种自相矛盾：先"已停用旧版…已改用 7.0.0-rc8"，
+    #    紧接着又照**旧清单**把 `4.7汉化` 展开回来 —— 用户看到的是一句"已改用新的"
+    #    加一句"展开 4.7汉化"，而真正该出现的新 addon 永远不会来。
+    #    根因是资产清单取自 `<数据根>\assets\<组>\manifest.json`，**换 exe 不会更新它**。
+    if moved:
+        try:
+            entries = {n for _g, _r, n, _e in iter_assets(config)}
+        except Exception:  # noqa: BLE001
+            entries = set()
+        if NEW_NR_ENTRY not in entries:
+            _log(log,
+                 f"⚠ 已停用旧版 NR 引擎，但清单里**没有**新版（{NEW_NR_ENTRY}）—— "
+                 "这台机器的 `assets\\` 可能是旧的一份（**换 exe 不会更新它**）。"
+                 "去「依赖页 → 导入随包 zip…」重新导入 `assets-bundle.zip`，"
+                 "之后点一次一键启动即可拿到新版")
     return moved
 
 

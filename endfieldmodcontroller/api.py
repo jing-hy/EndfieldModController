@@ -1611,7 +1611,31 @@ class EndfieldModControllerApi:
             fastnet.set_proxy(getattr(self.config, "download_proxy", ""))
         except Exception:  # noqa: BLE001
             pass
-        return {"ok": True, "config": self.config.to_dict()}
+        # ★★ **「皮肤 Mod」总开关被改到 ⇒ 立刻重铺 staging**（2026-10-06）。
+        #    「关掉总开关 = 一个皮肤都不加载」这个语义本来是成立的
+        #    （`config.effective_selected_mods` 返回空 ⇒ `stage_and_prepare` 走 `_stage_empty`
+        #    清空 `Mods\`），但**那只在跑过一次重铺之后才发生**；而拨开关只走本方法、只改配置
+        #    ⇒ 用户看到的是"关了但 Mod 还在"（实测：关掉后 `Mods\` 仍有 22 个目录，
+        #    手动跑一次 `prepare()` 才降到 2 个）。
+        #    这里顺手重铺一次：`prepare()` 用 `effective_selected_mods`（此刻是空）⇒ 直接清空，
+        #    而且是纯本地文件操作、可逆，**不碰运行时资产**（那正是"卡一下"的来源）。
+        efmi_toggled = "efmi_injection" in data
+        staged: dict[str, Any] | None = None
+        if efmi_toggled:
+            try:
+                staged = self.prepare()
+            except Exception as exc:  # noqa: BLE001 - 重铺失败不该让"保存"整体失败
+                launcher._append_log(self.config, f"总开关已保存，但重铺 staging 失败: {exc}")
+        payload: dict[str, Any] = {"ok": True, "config": self.config.to_dict()}
+        if staged is not None:
+            # ⚠️ prepare() **成功时不返回 ok**（成功就是那一堆字段；失败才给
+            #    ok: False + message）⇒ 判据是"没有明确的 False"，不是"有 True"。
+            payload["staged"] = staged.get("ok") is not False
+            payload["stage_message"] = (
+                "皮肤 Mod 已全部关闭（Mods 目录已清空）" if not self.config.efmi_injection
+                else f"皮肤 Mod 已恢复加载（{len(self.config.effective_selected_mods)} 个）"
+            )
+        return payload
 
     def set_hotkey_takeover(self, enabled: bool) -> dict[str, Any]:
         """启动页「游戏内 Mod 面板」开关的后端。
@@ -3291,8 +3315,12 @@ class EndfieldModControllerApi:
         两个按钮，左边一键启动，右边热重载，点了热重载能包括改配置按 f10 等等」。
 
         做两件事：
-          ① **改配置** —— 直接复用 `prepare_launch()`（收编手动 Mod + 同步 XXMI 注入库 + 初始化自检），
+          ① **重铺 Mod** —— 直接复用 `prepare()`（收编手动 Mod + 按当前勾选重建 staging），
              与「一键启动」改的是同一套东西，**不另造一份判据**；
+             ⚠️ **不要调 `prepare_launch()`**（2026-10-06 修）：它还会跑 `ensure_all()`
+             ⇒ 每次展开 `nvngx_dlssnr.dll`（103 MB，实测 4 秒），而游戏正跑着、那些文件
+             本来就被占用（`WinError 5` / `WinError 32`）—— 用户报的"卡一下"就是这么来的，
+             而且对热重载毫无用处（游戏进程已经加载完了，磁盘上换掉也不会重新读）。
           ② **发 F10** —— `hot_reload.send_f10()`：3DMigoto 收到后才会重新加载配置 / 重扫 Mod
              （机制与两条硬约束见该模块的模块级说明：必须 SendInput、必须游戏在前台）。
 
@@ -3318,10 +3346,16 @@ class EndfieldModControllerApi:
         except Exception as exc:  # noqa: BLE001 - 重铺失败不该拦住后面的重载
             log(f"热重载: 重铺 staging 失败（继续尝试重载）: {exc}")
 
+        # ⚠️ **只重铺 Mod，不要跑 `prepare_launch()`**（2026-10-06 修）：后者会走
+        #    `ensure_all()` ⇒ 每次展开 `nvngx_dlssnr.dll`（103 MB，实测 4 秒），
+        #    而游戏正跑着、那些文件本来就被占用（日志里 `WinError 5 拒绝访问` /
+        #    `WinError 32 另一个程序正在使用`）⇒ 用户感受到的"卡一下"就是这么来的，
+        #    而且对热重载**毫无用处**（游戏进程已经加载完了，磁盘上换掉也不会重新读）。
+        #    热重载真正需要的只有两件：**重铺 Mod**（`prepare()`）+ **发 F10**。
         try:
-            prepared: dict[str, Any] = self.prepare_launch()
+            prepared: dict[str, Any] = self.prepare()
         except Exception as exc:  # noqa: BLE001 - 改配置失败也要继续试着发 F10，并如实报告
-            log(f"热重载: 改配置失败（仍会尝试发 F10）: {exc}")
+            log(f"热重载: 重铺 Mod 失败（仍会尝试发 F10）: {exc}")
             prepared = {"ok": False, "message": str(exc)}
         sent = hot_reload.send_f10(self.config, log=log)
         if sent.get("ok"):

@@ -61,6 +61,11 @@ def env(tmp_path, monkeypatch):
         return assets if name == group else None
 
     monkeypatch.setattr(runtime_assets, "group_root", _fake_group_root)
+    # ⚠️ **必须一起打桩 `asset_roots`**（2026-10-06）：`iter_assets()` 走的是它
+    #    （多候选根 + 按条目合并），只打 `group_root` 拦不住"仓库真实的 assets\dlss5\"
+    #    被并进来 —— 那样断言里会多出一堆真实资产的条目。
+    monkeypatch.setattr(runtime_assets, "asset_roots",
+                        lambda config, name: [assets] if name == group else [])
     return SimpleNamespace(
         tmp=tmp_path, config=config, dlss5=dlss5, assets=assets, payload=payload
     )

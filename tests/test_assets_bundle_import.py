@@ -38,6 +38,11 @@ def isolated_project(tmp_path, monkeypatch):
     monkeypatch.setattr(runtime_assets, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(runtime_assets, "group_root",
                         lambda config, group: tmp_path / "assets" / group)
+    # ⚠️ **也要打桩 `asset_roots`**（2026-10-06）：`iter_assets()` 走的是它，
+    #    而它的候选里还有 `Path(__file__).parents[1] / assets`（仓库真实目录）——
+    #    只打 `PROJECT_ROOT` 挡不住那一条，测试会读到真实资产。
+    monkeypatch.setattr(runtime_assets, "asset_roots",
+                        lambda config, group: [tmp_path / "assets" / group])
     return tmp_path
 
 
