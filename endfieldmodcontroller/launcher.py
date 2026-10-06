@@ -2984,6 +2984,25 @@ def launch(
             raise LaunchError("完整性检查失败: " + "; ".join(item["message"] for item in integrity_report["failures"]))
         _append_log(config, "完整性检查通过")
 
+        # ★★ **修复流程之后必须再按配置对齐一次插件位置**（2026-10-06，实测定案）——
+        #    `repair_integrity()` 会调 `ensure_all()` **再展开一轮**，把"按开关搬进
+        #    `_disabled\`"的插件又放回根目录。实测现场（用户那次一键启动的日志）：
+        #      `注入自检: 统一管理器: 清掉多余副本 endfieldmodcontroller.addon64`   ← 对齐做过了
+        #      `integrity missing: dlss5_enhancer_addon -> …\renodx-endfield-enhancer.addon64`
+        #      `repair: 展开内置资产 renodx-endfield-enhancer.addon64`             ← 又被放回
+        #    随后 ReShade 就加载了它 ⇒ 用户报「关掉了还是注入进去了」。
+        #    ⚠️ 治本在 `integrity.check_integrity()` 那一侧（已改成按开关判"要不要检"），
+        #       这里再对齐一次是**兜底**：任何"修复/补齐"路径都可能顺手把文件铺回来。
+        try:
+            apply_minimal_injection(config, log=lambda message: _append_log(config, message))
+            for _component, _flag in (("dlss5", "dlss5_addon_enabled"),
+                                      ("firstperson", "firstperson_addon_enabled"),
+                                      ("mfg", "mfg_unlock_enabled")):
+                set_component_addons(config, _component,
+                                     bool(getattr(config, _flag, False)))
+        except Exception as exc:  # noqa: BLE001 - 对齐失败不该拦住启动
+            _append_log(config, f"插件位置对齐失败（忽略）: {exc}")
+
     command = build_launch_command(config, start_game=start_game)
     env = build_launch_env(config, existing_reshade=existing_reshade is not None)
     result: dict[str, Any] = {

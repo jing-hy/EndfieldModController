@@ -114,7 +114,18 @@ def check_integrity(config: AppConfig) -> dict:
         dlss5_ini = config.dlss5_ini_path
         add("dlss5_ini", dlss5_ini, dlss5_ini.is_file(), "DLSS5 ReShade.ini（含 [endfield-enhancer] 段）")
         enhancer = config.dlss5_enhancer_addon_path
-        add("dlss5_enhancer_addon", enhancer, enhancer.is_file(), "第一人称插件 renodx-endfield-enhancer.addon64")
+        # ★★ **只在「第一人称视角」开着时才算必检项**（2026-10-06 修）。
+        #    原来无条件判 `is_file()` —— 而关掉第一人称时这个 addon 被**搬进 `_disabled\`**，
+        #    根目录自然没有它 ⇒ 被判定"缺失" ⇒ `repair_integrity()` 又把它**展开回根目录**
+        #    ⇒ **每次启动都这么循环一次，开关形同虚设**。
+        #    实测现场（用户 21:10 那次一键启动）：
+        #      `integrity missing: dlss5_enhancer_addon -> …\renodx-endfield-enhancer.addon64`
+        #      → `repair: 展开内置资产 renodx-endfield-enhancer.addon64`
+        #    而 ReShade 日志显示它接着就被加载了 ⇒ 用户报「第一人称还是注入进去了」。
+        #    ⚠️ 同族的还有下面的 DLSS5 神经渲染与 DLSS4 多帧生成 —— 都按开关判。
+        if bool(getattr(config, "firstperson_addon_enabled", True)):
+            add("dlss5_enhancer_addon", enhancer, enhancer.is_file(),
+                "第一人称插件 renodx-endfield-enhancer.addon64")
         efmi_dll = config.efmi_dll_path
         add("efmi_dll", efmi_dll or Path("<unset>"), efmi_dll is not None and efmi_dll.is_file(), "EFMI d3d11.dll（注入用）")
 
