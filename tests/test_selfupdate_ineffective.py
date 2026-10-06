@@ -105,5 +105,5 @@ def test_apply_records_what_was_installed(env, monkeypatch, tmp_path):
 
     assert out["ok"] is True, out
     applied = json.loads((update_dir / "applied.json").read_text(encoding="utf-8"))
-    assert applied["tag"] == "1.0.20"
+    assert applied["tag"] == "9.9.9"          # = 缓存里的 latest
     assert applied["size"] == (update_dir / "EndfieldModController.exe").stat().st_size
