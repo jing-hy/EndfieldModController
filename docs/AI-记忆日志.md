@@ -4,7 +4,7 @@
 > 目的：让「当时为什么这么改、踩过什么坑」跟着源码一起留在仓库里。
 > 想改内容 → 改记忆库（用记忆工具），再跑一次本脚本；不要直接编辑本文件。
 
-- 生成时间：2026-10-06 11:01:36
+- 生成时间：2026-10-06 11:19:36
 - 来源：`.dsh-meow/memory.db`
 - 条目：571 条（已跳过 archived / 其它项目的条目）
 
@@ -620,22 +620,24 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 `关键词：["变体机制落点","best_rtx_sm唯一入口","select_dlssnr_variant","ensure_dlssnr","dll_architectures扫fatbin","dlssnr_variant.json marker","baseline按变体判防抖","dlss5:nr_arch自检","dlss5_gpu_scope_applied迁移","pack_nvngx_assets变体字段"]`
 
 ### 【modecontroller 当前状态唯一真源】（20…
-*2026-10-06 10:13*
+*2026-10-06 11:01*
 
-【modecontroller 当前状态唯一真源】（2026-10-06 10:20 更新）
-**Latest Release = `v1.0.17`**（2026-10-06T02:13:01Z，**已转正为 Latest**；上一版 v1.0.16）。
-**本地 = `1.0.17`（正式号，与 Release 同号、不欠号）**。main = `991ef23`（已推，远端一致）。
-**本版内容**：
-① 启动页新增「**统一管理器**」开关（**默认开**，第一位）：管"ReShade 底座 + 面板"在不在；**关掉它 ⇒「Mod 快捷键锁定」强制关；开锁键 ⇒ 统一管理器强制开**（用户原话「那个开关就要叫统一管理器，不要讲那么多，默认开，如果这个不开，锁快捷键强制关，如果开锁快捷键，这个强制开」）；**不影响其它插件**（DLSS5/第一人称/汉化/喂帧/乳摇/Poser 各按自己的开关）。
-② **修复 Mod 快捷键被锁死**（反馈者"皮肤打不进去"，数据根 `G:\`）：`takeover_possible()` 以前只查"配置文件在不在磁盘上"、不查"这次会不会真的注入" ⇒ 「DLSS5」与「第一人称」都关时注入库没有 `d3d12.dll`、面板不存在，而 Mod 的 `[Key*]` 仍被改写 `VK_F24` ⇒ 原键与面板两条路同时失效（2026-10-01 那次事故换路径重演）。新增 `reshade_integration.reshade_base_wanted()` 作**判据唯一来源**（锁键前与注入库共用），底座不注入时拒绝锁键。
-③ **修复 DLSS5 出帧判据空转**：原判据读 `runtime\dlss5\ReShade.log`（生效那份其实在 `runtime\reshade\`）+ "出现 `evaluation succeeded` 即算正常"（引擎**首帧**就是 `count=1`）⇒ 新增 `dlss5:nr_frames`（命中 `NR workset pool exhausted` 时报"建了特征、未产出帧，**与设置无关**"），"正常出帧"改判"帧号在涨"。
-④ 诊断包：`ReShade.log` 关键行摘录补收 `workset pool exhausted` 等三类行；摘要新增「DLSS5 神经渲染出帧判据」段。
-⑤ **修复启动页开关点击卡顿**（用户：「这个按钮反应也太慢了吧，过了好几秒才会同步统一管理器和 mod 锁定快捷键」）：`set_hotkey_takeover` 同步跑 `prepare()`（秒级重铺 staging）+ 前端 `await refreshState()` 整份状态 ⇒ 重活改由 `api._run_background`（**可注入**，测试里换同步）丢后台，前端不再 await。
-**附件**：`EndfieldModController.exe` 30,141,126 B / sha256 `e0aa75a76a9b64b14b4b…`；`assets-bundle.zip` 261,962,034 B / sha256 `5312220557c730918c959c…`（digest 已按 release id 核对一致）。
-**测试**：新增 `tests/test_minimal_injection.py` / `test_hotkey_lock_guard.py` / `test_nr_frames_judgement.py`；反向验证 **5/5 变红**；全量通过（v1.0.17 构建闸 exit 0）。
-**待办**：① 结构树（normify）四步本会话没有该插件工具、**未做**（`push.py` 只同步 `docs/structure` 镜像）；② 两位反馈者的回复草稿（等他先看）；③ 下一版号 = `1.0.18-beta`（**有未发版改动才用**）。
+【modecontroller 当前状态唯一真源】（2026-10-06 11:05 更新）
+**Latest Release = `v1.0.18`**（2026-10-06T03:01:28Z，**已转正为 Latest**；上一版 v1.0.17）。
+**本地 = `1.0.18`（正式号，与 Release 同号、不欠号）**。main = `c7b9133`（已推，远端一致）。
+**本版内容（自 v1.0.17 起）**：
+① **修复「暂停被当成终止」**（反馈者原话「我按的是暂停，弹窗告诉我终止了，而且清除半成品」）：`keep_partial` 原来由 api 在**进入 `moddl.download()` 那一刻**求值成 bool ⇒ 运行中才点的"暂停"读到的是旧快照 `False` ⇒ 走终止分支（清半成品）。改成**取消那一刻现算**（接受 callable）。
+② **修复暂停延迟 33 秒**（日志实测 `10:43:29 点暂停 → 10:44:02 下载已终止`）：`read(n)` 阻塞到读满或 socket 超时，而超时必须比"读满一块"更长（超时后 `http.client` 对象不能再读）⇒ 单次 read 时长 = 暂停最坏延迟。新增 `fastnet._adaptive_read_size()` + `MIN_READ_CHUNK=16384`，按当下速度取"约 1.5 秒的量"（慢线路读小块 ⇒ 秒级响应）。
+③ **修复香蕉网下载失败**（`访问失败：返回的不是有效数据：Expecting value: line 2 column 1`）：香蕉网 `apiv11/Mod/<id>/ProfilePage` 响应**在 JSON 前多打一条 PHP Warning**（服务端 bug），与 VPN 无关（带/不带代理、带/不带 UA 返回逐字节一样）。新增 `fsutil.loads_tolerant()`（先正常解析，失败从第一个 `{`/`[` 起 `raw_decode` 重试），并统一换掉**所有网络响应**解析点（`github.api_get`（github+gamebanana 都走它）、`moddl`×2、`alerts`、`sbm_data_sync`、`poser`）；本地状态文件保持严格解析。
+④ **新增崩溃取证判据**（`crashwatch`：`wer_exception_detail` / `addon_exit_kind` / `reshade_log_verdict` / `nr_settings_snapshot` / `nr_toggle_flap` / `crash_forensics`，接进诊断包摘要「崩溃取证」段）：异常代码+异常数据⇒**空指针判定**（`c0000005`+`异常数据=8` 写成"读/写 null+0x8"）；`故障模块=StackHash_*`⇒**明确写"没能定位到模块"**；面板 addon 有没有 `DllMain detach`⇒**自退 vs 被强杀**；ReShade 日志戛然而止⇒**崩在 addon 之前/之后**（并同时说明"也可能是日志缓冲没落盘"）；NR `toggled ON` 后数秒内 `toggled OFF`⇒报"被开了又关"。
+⑤ **修复 staging 目录被指到工作区**：`config._external_efmi_mods()` 只把"数据根下的 `runtime\builtin`"当内置 ⇒ 在"数据根≠程序目录"的场合把**程序自带那份 XXMI** 误判成"外部" ⇒ Mod stage 到错误位置、清理落在错误目录（测试实测污染真实工作区）。已把 `PROJECT_ROOT` 下那份一并排除。
+⑥ **诊断包新增 `staging-inventory.txt`**：逐目录列 EFMI `Mods` 的 Mod、ini 与 **`key =` 行**（锁键会改写成 `VK_F24`）。
+**★ 本轮最有价值的定案（反馈者"游戏内勾选 DLSS5 神经渲染就闪退"）**：他跑 **1.0.10**、config 是 `auto_enable_nr_after_camera_hook: true`（**无** `start_dlss5_nr_immediately`）⇒ 旧版会**等 `Camera controls installed.` 后替他按一次 NR 键**，而那颗键**就是 F6** ⇒ 日志现场：`21:16:31 Camera controls installed` → `21:16:32.126 NR toggled ON via F6` → `21:16:32.760 NR toggled OFF via F6` → **日志到此为止**，同会话 `CrashSight` **`uploadCrash=1`**（真崩；对照 22:18 那次 41 个 `reportException` 但 `uploadCrash=0`）⇒ **NR 被开了 0.6 秒又关 ⇒ 崩**。**v1.0.16 起改"启动即开"+自动按键整条停用 ⇒ 升级即消除**。（同日另有 20:57/20:59/21:01 三次"启动崩溃"，addon 连 `DllMain attach` 都没有 ⇒ 是**另一件事**，要转储/对照才能定。）
+**附件**：`EndfieldModController.exe` 30,152,616 B / sha256 `3605996756fdb4699ce1…`；`assets-bundle.zip` 261,962,034 B / sha256 `a2e76b69f0fe526205e3…`（digest 已按 release id 核对一致）。
+**测试**：新增 `tests/test_pause_semantics.py` / `test_lenient_json.py` / `test_crash_forensics.py`；反向验证全红；构建闸全量通过。
+**待办**：① 结构树（normify）四步本会话无该插件工具、**未做**；② 两位反馈者（皮肤"打不进去"、DLSS5"勾选闪退"）的回复草稿**等他先看**；③ 下一版号 = `1.0.19-beta`（有未发版改动才用）。
 
-`关键词：["当前状态唯一真源","Latest v1.0.17","本地1.0.17正式号","main-991ef23","统一管理器开关","锁键强制联动","皮肤打不进去已修","nr_frames判据","开关卡顿已修","exe-30141126","assets-261962034","下一版1.0.18-beta"]`
+`关键词：["当前状态唯一真源","Latest v1.0.18","本地1.0.18正式号","main-c7b9133","暂停被当成终止已修","暂停延迟已修","香蕉网PHP Warning","loads_tolerant","崩溃取证判据","勾选NR闪退定案","staging-inventory","下一版1.0.19-beta"]`
 
 ### 待办
 
