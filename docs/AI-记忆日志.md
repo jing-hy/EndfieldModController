@@ -4,9 +4,9 @@
 > 目的：让「当时为什么这么改、踩过什么坑」跟着源码一起留在仓库里。
 > 想改内容 → 改记忆库（用记忆工具），再跑一次本脚本；不要直接编辑本文件。
 
-- 生成时间：2026-10-06 11:21:19
+- 生成时间：2026-10-06 12:10:42
 - 来源：`.dsh-meow/memory.db`
-- 条目：571 条（已跳过 archived / 其它项目的条目）
+- 条目：573 条（已跳过 archived / 其它项目的条目）
 
 ---
 
@@ -279,7 +279,7 @@
 
 `关键词：["第一轮只看日志包","未收先改收包范围","大文件可以节选","collect_diagnosis_files","两个打包通道共用","reshade-keylines","诊断包一次抓齐","别翻本地文件","反馈者机器碰不到"]`
 
-## 项目记忆（结构 / 决策 / 部署 / 待办）（37 条）
+## 项目记忆（结构 / 决策 / 部署 / 待办）（38 条）
 
 ### 项目概述
 
@@ -484,6 +484,18 @@ runtime\dlss5                      38 字符  ❌ 崩
 
 `关键词：["四个反馈者身份对照","xingluo667是5070Ti","PTTOOL第四人是5080","HUAWEI是Intel-Arc","lzh18是4060","按runtime认人","CameraFirstPerson不是决定因素","写issue草稿前先核对身份"]`
 
+### 【NR 引擎换代定案（2026-10-06 用户实测批准…
+*2026-10-06 11:35*
+
+【NR 引擎换代定案（2026-10-06 用户实测批准）】**随包的 `renodx-dlss5` 从 4.70 汉化版换成官方 `7.0.0-rc8`**。
+**DFC 是什么**：`Deep Fried Chicken`（`deep-fried-chicken.addon64`，作者 Alexander，只从 Discord `discord.gg/g2v2XGqvR` 分发）是 **DLSS5-Feeder 官方推荐的"神经渲染 addon"**。Feeder 只管喂 DLSS 请求，真正做神经渲染的必须是**第二个 addon**，位置**只能有一个占用者**，两个候选 = `renodx-dlss5`(Krish) 与 DFC。Feeder 原文：「**Never install two neural add-ons.** If Deep Fried Chicken finds RenoDX's add-on … loaded beside it, **it does nothing at all for the whole session — silently**. Pick one.」
+**反馈者现场**：`runtime\dlss5\` 里 DFC 与随包 `renodx-dlss5-4.7_汉化.addon64` 并存 ⇒ Feeder 打 WARN + `Deep Fried Chicken: ARMED -- consuming the synthetic contract` ⇒ `feature 18 create intercepted` 之后**再没有 `feature 18 created`** ⇒ `evaluate raised 0xC0000005 (reading address FFFFFFFFFFFFFFFF)`，fault stack `D3D12Core.dll <- nvngx_dlssnr.dll` ⇒ 崩。
+**新旧中文的真相**：我们那份 `_汉化` 与官方 4.70 **同为 1,732,608 B、仅差 1684 字节**（别人在语言表上做的**等长替换**）；而**官方 7.0.0-rc8 自带多语言表**（2173 处中文，键 `UiLanguage`/`ui_language`，用 `EnumSystemLocalesW` **跟随系统区域**）⇒ **不需要再维护汉化版**。
+**来源**：`RankFTW/rhi-repo`（我们取 DLSS5 运行库的同一镜像仓，GitHub 可直接下）tag `renodx-dlss5-7.0.0-rc8`，资产 `renodx-dlss5_7.0.0-rc8.zip`(630,308 B) → `renodx-dlss5.addon64` 1,921,024 B sha256 `ff8b9738738265e09f01a1c470a0cb0a59eb021b2b23797c3df7cea722a724b6`（随包 `.xz` 464,908 B）。
+**代码落点**：`assets\dlss5\manifest.json` 条目换成 `renodx-dlss5.addon64`；`runtime_assets.retire_stale_nr_addons()`（展开前把旧名搬进 `dlss5\_retired_addons\`，**只搬不删**）+ `RETIRED_NR_ADDONS`；`launcher.DLSS5_ADDON_GLOBS` 从 `renodx-dlss5*.addon64` **收窄成精确名**（否则旧文件进 `_disabled` 后一开开关又被"放回"）；`filewatch` 条目、`runtime_assets`/`initialize` 文案同步。
+
+`关键词：["NR引擎换版定案","Deep Fried Chicken是什么","两个neural addon同装","Never install two neural add-ons","官方7.0.0-rc8","自带中文语言表","UiLanguage系统区域","rhi-repo来源","retire_stale_nr_addons","DLSS5_ADDON_GLOBS收窄","汉化版退役","renodx-dlss5.addon64"]`
+
 ### 部署与数据
 
 ### 乳摇插件（SecondaryMotion / Shaki…
@@ -620,24 +632,21 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 `关键词：["变体机制落点","best_rtx_sm唯一入口","select_dlssnr_variant","ensure_dlssnr","dll_architectures扫fatbin","dlssnr_variant.json marker","baseline按变体判防抖","dlss5:nr_arch自检","dlss5_gpu_scope_applied迁移","pack_nvngx_assets变体字段"]`
 
 ### 【modecontroller 当前状态唯一真源】（20…
-*2026-10-06 11:01*
+*2026-10-06 12:09*
 
-【modecontroller 当前状态唯一真源】（2026-10-06 11:05 更新）
-**Latest Release = `v1.0.18`**（2026-10-06T03:01:28Z，**已转正为 Latest**；上一版 v1.0.17）。
-**本地 = `1.0.18`（正式号，与 Release 同号、不欠号）**。main = `c7b9133`（已推，远端一致）。
-**本版内容（自 v1.0.17 起）**：
-① **修复「暂停被当成终止」**（反馈者原话「我按的是暂停，弹窗告诉我终止了，而且清除半成品」）：`keep_partial` 原来由 api 在**进入 `moddl.download()` 那一刻**求值成 bool ⇒ 运行中才点的"暂停"读到的是旧快照 `False` ⇒ 走终止分支（清半成品）。改成**取消那一刻现算**（接受 callable）。
-② **修复暂停延迟 33 秒**（日志实测 `10:43:29 点暂停 → 10:44:02 下载已终止`）：`read(n)` 阻塞到读满或 socket 超时，而超时必须比"读满一块"更长（超时后 `http.client` 对象不能再读）⇒ 单次 read 时长 = 暂停最坏延迟。新增 `fastnet._adaptive_read_size()` + `MIN_READ_CHUNK=16384`，按当下速度取"约 1.5 秒的量"（慢线路读小块 ⇒ 秒级响应）。
-③ **修复香蕉网下载失败**（`访问失败：返回的不是有效数据：Expecting value: line 2 column 1`）：香蕉网 `apiv11/Mod/<id>/ProfilePage` 响应**在 JSON 前多打一条 PHP Warning**（服务端 bug），与 VPN 无关（带/不带代理、带/不带 UA 返回逐字节一样）。新增 `fsutil.loads_tolerant()`（先正常解析，失败从第一个 `{`/`[` 起 `raw_decode` 重试），并统一换掉**所有网络响应**解析点（`github.api_get`（github+gamebanana 都走它）、`moddl`×2、`alerts`、`sbm_data_sync`、`poser`）；本地状态文件保持严格解析。
-④ **新增崩溃取证判据**（`crashwatch`：`wer_exception_detail` / `addon_exit_kind` / `reshade_log_verdict` / `nr_settings_snapshot` / `nr_toggle_flap` / `crash_forensics`，接进诊断包摘要「崩溃取证」段）：异常代码+异常数据⇒**空指针判定**（`c0000005`+`异常数据=8` 写成"读/写 null+0x8"）；`故障模块=StackHash_*`⇒**明确写"没能定位到模块"**；面板 addon 有没有 `DllMain detach`⇒**自退 vs 被强杀**；ReShade 日志戛然而止⇒**崩在 addon 之前/之后**（并同时说明"也可能是日志缓冲没落盘"）；NR `toggled ON` 后数秒内 `toggled OFF`⇒报"被开了又关"。
-⑤ **修复 staging 目录被指到工作区**：`config._external_efmi_mods()` 只把"数据根下的 `runtime\builtin`"当内置 ⇒ 在"数据根≠程序目录"的场合把**程序自带那份 XXMI** 误判成"外部" ⇒ Mod stage 到错误位置、清理落在错误目录（测试实测污染真实工作区）。已把 `PROJECT_ROOT` 下那份一并排除。
-⑥ **诊断包新增 `staging-inventory.txt`**：逐目录列 EFMI `Mods` 的 Mod、ini 与 **`key =` 行**（锁键会改写成 `VK_F24`）。
-**★ 本轮最有价值的定案（反馈者"游戏内勾选 DLSS5 神经渲染就闪退"）**：他跑 **1.0.10**、config 是 `auto_enable_nr_after_camera_hook: true`（**无** `start_dlss5_nr_immediately`）⇒ 旧版会**等 `Camera controls installed.` 后替他按一次 NR 键**，而那颗键**就是 F6** ⇒ 日志现场：`21:16:31 Camera controls installed` → `21:16:32.126 NR toggled ON via F6` → `21:16:32.760 NR toggled OFF via F6` → **日志到此为止**，同会话 `CrashSight` **`uploadCrash=1`**（真崩；对照 22:18 那次 41 个 `reportException` 但 `uploadCrash=0`）⇒ **NR 被开了 0.6 秒又关 ⇒ 崩**。**v1.0.16 起改"启动即开"+自动按键整条停用 ⇒ 升级即消除**。（同日另有 20:57/20:59/21:01 三次"启动崩溃"，addon 连 `DllMain attach` 都没有 ⇒ 是**另一件事**，要转储/对照才能定。）
-**附件**：`EndfieldModController.exe` 30,152,616 B / sha256 `3605996756fdb4699ce1…`；`assets-bundle.zip` 261,962,034 B / sha256 `a2e76b69f0fe526205e3…`（digest 已按 release id 核对一致）。
-**测试**：新增 `tests/test_pause_semantics.py` / `test_lenient_json.py` / `test_crash_forensics.py`；反向验证全红；构建闸全量通过。
-**待办**：① 结构树（normify）四步本会话无该插件工具、**未做**；② 两位反馈者（皮肤"打不进去"、DLSS5"勾选闪退"）的回复草稿**等他先看**；③ 下一版号 = `1.0.19-beta`（有未发版改动才用）。
+【modecontroller 当前状态唯一真源】（2026-10-06 12:10 更新）
+**Latest Release = `v1.0.19`**（2026-10-06T03:21:11Z）。**本地 = `1.0.20-beta`（已构建、已在 modtest 实测通过、尚未发版）**。分支 main = `a0302fd`（**只 commit 了，没推**）。
+**`1.0.20-beta` 这批改动（自 v1.0.19 起）**：
+① **NR 引擎换官方 `7.0.0-rc8`**（原为社区 `renodx-dlss5-4.7_汉化`）：来源 `RankFTW/rhi-repo` tag `renodx-dlss5-7.0.0-rc8`，`renodx-dlss5.addon64` 1,921,024 B sha256 `ff8b9738738265e09f01a1c470a0cb0a59eb021b2b23797c3df7cea722a724b6`（随包 `.xz` 464,908 B）。**官方包自带多语言表**（2173 处中文，键 `UiLanguage`/`ui_language`，靠 `EnumSystemLocalesW` 跟随系统区域）⇒ **不再维护汉化版**（旧 `_汉化` 与官方 4.70 只差 1684 字节 = 别人做的等长替换）。
+落点：`assets\dlss5\manifest.json` 条目改名 + `runtime_assets.retire_stale_nr_addons()`（展开前把旧名搬进 `dlss5\_retired_addons\`，**只搬不删**）+ `RETIRED_NR_GLOB="renodx-dlss5-4.7*.addon64"`；`launcher.DLSS5_ADDON_GLOBS` 收窄为精确名 `renodx-dlss5.addon64`，并新增 `DLSS5_RETIRED_GLOBS`（**停用/放回故意不对称**：放回只认精确名、停用要盖住退役旧名 —— 否则旧文件进 `_disabled` 后一开开关又被放回，两个 neural addon 同装）；`filewatch`、`runtime_assets`/`initialize` 文案同步。
+② **崩溃取证继续扩充**：`crashwatch` 新增 `nr_provider_conflict()`（认 `deep-fried-chicken.addon64` 与 `renodx-dlss5*` 同装 ⇒ 明确报"两者都不工作、二选一"）、`nr_evaluate_crash()`（读 `dlss5-feed.log` 的 `evaluate raised 0xC0000005` + `fault stack … <- nvngx_dlssnr.dll` ⇒ "崩在 NR 运行库"）、`stuck_on_crt_dialog()`（枚举窗口认 CRT `Runtime Error!` 弹窗；这类失败进程**还活着**，事件/WER/退出码全拿不到）、`nr_ran_ok()` + `nr_engine_driver_mismatch()`（**以实测为准**：本次真没出帧才把"版本×驱动"当线索）。
+③ **自更新取证**：诊断包新增 `self-update-forensics.txt`（**当前 exe 的大小/mtime/sha256** = 判"跑的是哪一版"的唯一直接证据 + `.old`/`.new`/`update-failed.txt` + `_update\` 清单 + `pending_payload()` 判定）；`selfupdate.apply_update()` 的 **10 条失败分支全部落日志**（原来只 return message，用户点重启没反应时事后无从查起）。
+**★ 实测结论（2026-10-06 用户原话「我测试都没问题」）**：**NR 换版通过**（旧引擎被搬走、新引擎出帧、面板仍中文）；**自更新机制通过**（伪旧版 → 正常更新）。⇒ ⇒ **F: 那位（`F:\EndfieldModController`，`current=1.0.11`）的"自更新下载完就没了/没提示重启/手动按重启也没用"是他们那台环境的问题**，不是机制坏了；他必须**先升级到带采集的版本**才能一次定位。
+**modtest 现状**：`EndfieldModController.exe`（1.0.20-beta，30,163,257 B sha256 `0df6a06076c3a31b…`）+ `EndfieldModController-0.1.9-from-1.0.20-beta.exe`（伪旧版 30,160,634 B `097cf8fab4dd37a16682…`）；`_update\` 里只有资产包与两个 json；更新缓存已清。
+**候选发布内容** = 上面 ①②③（NR 换版 + 崩溃/自更新取证）⇒ 待用户点头再走 prepare/push/release。
+**待办**：① 结构树（normify）四步本会话无该插件工具、**未做**；② 三位反馈者的回复草稿**等他先看**（皮肤"打不进去"、DLSS5"勾选闪退"=DFC 冲突、自更新"用不了"）；③ 下一版号 = `1.0.21-beta`（若 v1.0.20 发出后又有改动）。
 
-`关键词：["当前状态唯一真源","Latest v1.0.18","本地1.0.18正式号","main-c7b9133","暂停被当成终止已修","暂停延迟已修","香蕉网PHP Warning","loads_tolerant","崩溃取证判据","勾选NR闪退定案","staging-inventory","下一版1.0.19-beta"]`
+`关键词：["当前状态唯一真源","Latest v1.0.19","本地1.0.20-beta待发","NR引擎换7.0.0-rc8","官方自带中文","retire_stale_nr_addons","自更新取证","self-update-forensics","apply_update失败落日志","自更新机制实测通过","F那位需升级才能定位","下一版1.0.21-beta"]`
 
 ### 待办
 
@@ -898,7 +907,7 @@ issue #16（xingluo667，游戏加载过程中闪退）：已追加评论，让�
 
 `关键词：["DLSS5非50系方案","终末地DX11","DLSS5-Feeder","dlss5-feed.addon64","renodx-dlss5","LumeniteFX运动矢量","bridge与feeder分工","DX11无多帧生成","Forcing-GfxDevice-Direct3D-11","DLSS5-Autopilot","按架构选runtime"]`
 
-## 经验教训（被纠正过的、踩过的坑）（385 条）
+## 经验教训（被纠正过的、踩过的坑）（386 条）
 
 ### XXMI/EFMI 启动终末地是 Endfield.ex…
 *2026-09-27 14:58*
@@ -4422,6 +4431,15 @@ Mod 卡片的「⋯ 更多」在服装页与辅助页各有一套，加动作必
 修法：新增 `reshade_integration.reshade_base_wanted()` 作**判据唯一来源**，`takeover_possible`（锁键前）与 `launcher.dlss5_injection_targets`（列不列底座）共用它；两插件都关时拒绝锁键、Mod 原键继续可用。测试 `tests/test_hotkey_lock_guard.py`（5 条）+ 反向验证变红。
 
 `关键词：["皮肤打不进去","hotkey_takeover","锁 Mod 快捷键","takeover_possible","reshade_base_wanted","d3d12.dll 没注入","面板不存在","mc_action_seen","Mod 原键失效","VK_F24","判据要查会不会生效"]`
+
+### 【教训·2026-10-06 我又把"官方矩阵"当成了根…
+*2026-10-06 11:35*
+
+【教训·2026-10-06 我又把"官方矩阵"当成了根因，被本机对照推翻】反馈者「开 DLSS5 就闪退」时，我在 DLSS5-Feeder 的 README 里看到官方兼容性矩阵写着 `renodx-dlss5` **v4.70 × 驱动 617.14 = 0/300**（其 `v4.6/v4.7` 会 evaluate 崩在 `nvngx_dlssnr.dll`，issue #54），而他的驱动正是 617.14、我们随包的正是 4.70 ⇒ 就下了"**我们随包的版本是根因**"的结论并向用户报告。
+**推翻它的证据**：本机 modtest（驱动同为 617.14）那次运行日志里 **`inline feature 18 evaluation succeeded (count=1)` → `(count=60)`** ⇒ **v4.7 在这台机上出帧完全正常**；而那次日志里同时有一条 `Failed to register add-on, because another one with the same name ("DLSS 5 Neural Rendering") was already registered!` ⇒ 真正决定成败的是"**有几个 neural addon 在抢同一个位置**"。反馈者现场也是这个：DFC 的 `ARMED -- consuming the synthetic contract` + `feature 18 create intercepted` 之后再没有 `feature 18 created`。
+**定式**：① **第三方文档里的兼容性矩阵是"别人机器上的统计"，不是本机的因果**；用它当线索可以，**当根因不行** —— 必须先问"我有没有能推翻它的对照"。② 尤其当对方（这里是 Feeder 的作者）**自己就写了更直接的原因**时，优先采信那条更靠近现场的（"Never install two neural add-ons … it does nothing at all"）。③ 判据要**等于被观测事实**：`crashwatch.nr_engine_driver_mismatch()` 里先过 `nr_ran_ok()` —— **这次真的没出帧（count 只有 0/1）**才把"版本 × 驱动"当线索说出来，出帧正常就一个字都不提。④ 这次幸好**顺手做了对照**才发现，否则会带着一个错的根因去改代码、还要让用户按错方向折腾。
+
+`关键词：["官方矩阵不能当根因","本机对照推翻结论","renodx-dlss5 v4.7 × 617.14 实测正常","count=60出帧正常","两个neural addon同装才是根因","判据要等于被观测事实","nr_ran_ok前置条件","自我纠正","先找对照再下结论","第三方文档不是一手判据"]`
 
 ## 事实（细碎的原子信息）（86 条）
 
