@@ -11,19 +11,19 @@ description:
   en: >
       Where DLSS5 gets hooked: enumerate candidate d3d12 targets, configure the injection, stage the ReShade runtime with the right environment and effect search paths, and keep unwanted add-ons out of the way.
       
-revision: 45e4d6d07cf81770c867c10f0f053a5efbf5e978
-updated_at: "2026-10-03T15:48:42.307Z"
-fingerprint: 625d41711e2451a0f8a305d04dd8a75624112aefc037c331b8863d1d6749bd2d
+revision: ec6d352f646115c51b7b413c56b5095ba5e52eeb
+updated_at: "2026-10-06T05:52:00.969Z"
+fingerprint: 1c07eedd6a7fe5dfb43dc3181e89a23a19b29ad13dfa3ef5e03e7c0f19549ca2
 source:
   - path: "endfieldmodcontroller/launcher.py"
     line: 249
-    end_line: 358
+    end_line: 400
   - path: "endfieldmodcontroller/launcher.py"
-    line: 873
-    end_line: 1917
+    line: 1088
+    end_line: 3032
   - path: "endfieldmodcontroller/launcher.py"
-    line: 1497
-    end_line: 2647
+    line: 1945
+    end_line: 3920
 apis:
   - protocol: rpc
     path: "dlss5_injection_targets"

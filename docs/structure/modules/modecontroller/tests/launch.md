@@ -11,16 +11,16 @@ description:
   en: >
       Tests for the launch path: the api surface the UI calls, linting the generated controller ini, the unified hotkey panel protocol, and one offline end-to-end run — the suite that would catch a launch-time regression before a user does.
       
-revision: 45e4d6d07cf81770c867c10f0f053a5efbf5e978
-updated_at: "2026-10-03T15:48:42.330Z"
-fingerprint: 527f0cc959b7f609675d215a7b018979ea9f63674bb2a4a40f50ed7db6d46572
+revision: ec6d352f646115c51b7b413c56b5095ba5e52eeb
+updated_at: "2026-10-06T05:52:01.004Z"
+fingerprint: 82f7160f989ccd0adccceca844e67a93c2e55e7dcb7c23ebd99c0a8728e57c10
 source:
   - path: "tests/test_launcher_api.py"
     line: 1
     end_line: 286
   - path: "tests/test_hotkey_panel.py"
     line: 1
-    end_line: 2745
+    end_line: 2757
   - path: "tests/test_controller_ini_lint.py"
     line: 1
     end_line: 66

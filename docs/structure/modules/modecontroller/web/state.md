@@ -11,13 +11,13 @@ description:
   en: >
       Frontend global state: get_state payload, current tab (hash deep-link + last_tab), theme persistence.
       
-revision: 45e4d6d07cf81770c867c10f0f053a5efbf5e978
-updated_at: "2026-10-03T15:48:42.334Z"
-fingerprint: 4b9e77ec8be8ff7a6b4575d086659d5fb87acb1ff52e136046acb6fa2b5a222f
+revision: ec6d352f646115c51b7b413c56b5095ba5e52eeb
+updated_at: "2026-10-06T05:52:01.010Z"
+fingerprint: db8b0c73d166727d4f87861b5866840db7047c934b0add6e6a1a86046161f3da
 source:
   - path: "frontend/src/store.js"
     line: 1
-    end_line: 299
+    end_line: 385
 apis:
   - protocol: rpc
     path: "web.escapeHtml"

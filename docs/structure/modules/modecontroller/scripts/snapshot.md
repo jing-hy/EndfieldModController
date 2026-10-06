@@ -11,13 +11,13 @@ description:
   en: >
       Build a rollback point: copy the config, the runtime state, the whole mod library inventory and a hash listing of the game folder into a timestamped folder, so a bad change can be traced back to what the machine looked like before.
       
-revision: 45e4d6d07cf81770c867c10f0f053a5efbf5e978
-updated_at: "2026-10-03T15:48:42.323Z"
-fingerprint: e5f2d424efde324834e54e61fb7376a2c54ce446368bd7e8cf27fab7760b92fd
+revision: ec6d352f646115c51b7b413c56b5095ba5e52eeb
+updated_at: "2026-10-06T05:52:00.990Z"
+fingerprint: 82226771826ce053fc33f6459834934bcaae14828c1019cdfdb05a72cd1e2b31
 source:
   - path: "scripts/snapshot.py"
     line: 1
-    end_line: 294
+    end_line: 316
 apis:
   - protocol: rpc
     path: "scripts.snapshot"

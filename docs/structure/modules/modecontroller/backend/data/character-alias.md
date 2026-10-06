@@ -11,19 +11,19 @@ description:
   en: >
       Keep the character alias table fresh: parse the official operator list page, fetch it, merge with what is already known (never dropping user edits), and write both a runtime copy and the copy shipped inside the exe.
       
-revision: 45e4d6d07cf81770c867c10f0f053a5efbf5e978
-updated_at: "2026-10-03T15:48:42.302Z"
-fingerprint: 3f6be7af5522d37ae4d6336df8c8780acf229cfc76065187bb6f80db2a578c1d
+revision: ec6d352f646115c51b7b413c56b5095ba5e52eeb
+updated_at: "2026-10-06T05:52:00.962Z"
+fingerprint: 344d9b4ccfa0b8ac50462fcbc9ed330eeb3cc052cc1b78eb42e1ef44f1c84e28
 source:
   - path: "endfieldmodcontroller/character_sync.py"
     line: 57
     end_line: 118
   - path: "endfieldmodcontroller/character_sync.py"
     line: 118
-    end_line: 262
+    end_line: 260
   - path: "endfieldmodcontroller/character_sync.py"
-    line: 264
-    end_line: 336
+    line: 263
+    end_line: 334
 apis:
   - protocol: rpc
     path: "character_sync.sync"

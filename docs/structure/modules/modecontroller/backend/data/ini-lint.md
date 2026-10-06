@@ -11,16 +11,16 @@ description:
   en: >
       Health-check generated inis against 3DMigoto's own source rules to find lines that get silently skipped: illegal/redeclared Constants, assignments to undeclared variables, keys whose `run` target is missing — **plus** (2026-10-02) uppercased cross-namespace references, which 3DMigoto drops silently because it registers variables in lowercase.
       
-revision: 45e4d6d07cf81770c867c10f0f053a5efbf5e978
-updated_at: "2026-10-03T15:48:42.303Z"
-fingerprint: a730800fe2a312071ed684fc45c5e9db457699320fffb0694be3ed502397692a
+revision: ec6d352f646115c51b7b413c56b5095ba5e52eeb
+updated_at: "2026-10-06T05:52:00.963Z"
+fingerprint: 602f0cae8de7d17ce78618326f399835351802b24b4a6cd51ac2507541cae40c
 source:
   - path: "endfieldmodcontroller/ini_lint.py"
-    line: 97
-    end_line: 461
+    line: 115
+    end_line: 561
   - path: "endfieldmodcontroller/ini_lint.py"
-    line: 306
-    end_line: 480
+    line: 356
+    end_line: 580
 apis:
   - protocol: rpc
     path: "ini_lint.lint_text"
