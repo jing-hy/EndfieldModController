@@ -1564,7 +1564,15 @@ def _check_defer_nr_until_camera_hook(config: AppConfig, report: Report,
     ⚠️ **必须每次启动都压**：用户在游戏里开 NR 之后，插件会把 `NeuralUplift=1`
     **写回** ini，下次启动就又变成「NR 先上」⇒ 第一人称又坏（本机实测复现）。
     """
-    immediate = bool(getattr(config, "start_dlss5_nr_immediately", True))
+    # ★ **按「要不要用第一人称」分流**（2026-10-06）：enhancer 的相机 hook 与 NR 抢位置 ——
+    #   NR 先上 ⇒ hook 装不上（`error 8`）⇒ **第一人称与相机控制都不能用**（实测现场）。
+    #   * 要用第一人称 ⇒ 压 `NeuralUplift=0`，等 hook 装好后由 `nr_autostart` 补按 NR 键；
+    #   * 不用 ⇒ 保持"启动就开"，NR 照样自动出帧（没有 hook 要保护）。
+    from . import reshade_integration
+
+    _want_firstperson = reshade_integration.firstperson_camera_wanted(config)
+    immediate = (bool(getattr(config, "start_dlss5_nr_immediately", True))
+                 and not _want_firstperson)
     if not immediate and not getattr(config, "auto_enable_nr_after_camera_hook", True):
         report.add("dlss5:nr_defer", True,
                    "「神经渲染延迟到相机 hook 之后自动打开」已在设置页关闭（跳过）")

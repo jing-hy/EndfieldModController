@@ -123,6 +123,36 @@ def reshade_base_wanted(config: AppConfig) -> tuple[bool, str]:
                    "游戏里没有面板")
 
 
+def firstperson_camera_wanted(config: Any) -> bool:
+    r"""用户**要不要用第一人称**（`[endfield-enhancer] CameraFirstPerson=1`）。
+
+    为什么要它（2026-10-06 实测）：enhancer 的**相机 hook** 与 NR 抢同一个位置 ——
+    NR 先激活（`NeuralUplift=1`）⇒ hook 装不上（`error 8`）⇒ **第一人称与相机控制都不能用**。
+    所以"要不要把 NR 压到 hook 之后"取决于**这台机器用不用第一人称**：
+    用 ⇒ 压 0、等 hook、再自动补开；不用 ⇒ 直接"启动就开"（没有 hook 要保护）。
+
+    读**生效那份** `ReShade.ini`（ReShade 真正加载的那份），不是 `dlss5\` 里的模板。
+    读不到时返回 False（= 按"不用第一人称"处理，保持启动就开，不让 NR 白等）。
+    """
+    path = Path(getattr(config, "reshade_runtime_path", "") or "") / "ReShade.ini"
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    in_section = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("["):
+            in_section = stripped.lower() == "[endfield-enhancer]"
+            continue
+        if not in_section or "=" not in stripped:
+            continue
+        key, _, value = stripped.partition("=")
+        if key.strip().lower() == "camerafirstperson":
+            return value.strip().strip('"').strip() == "1"
+    return False
+
+
 def takeover_possible(config: AppConfig) -> tuple[bool, str]:
     """现在这套配置下，面板真的能出现在游戏里吗？（"锁键"必须先过这一关）
 
