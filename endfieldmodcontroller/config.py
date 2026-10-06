@@ -365,6 +365,18 @@ class AppConfig:
     # 见 `initialize._check_defer_nr_until_camera_hook` 与 `nr_autostart`。
     auto_enable_nr_after_camera_hook: bool = True
     firstperson_addon_enabled: bool = True    # Endfield Enhancer 第一人称
+    # ★ **「统一管理器」开关**（2026-10-06 用户定名与语义，原话：
+    #   「**那个开关就要叫统一管理器，不要讲那么多，默认开，如果这个不开，锁快捷键强制关，
+    #     如果开锁快捷键，这个强制开**」）。
+    #   它管的是「**ReShade 底座 + 统一管理器面板**要不要在游戏里」：
+    #     * 开（默认）：面板 `endfieldmodcontroller.addon64` 留在 `runtime\dlss5\`；
+    #       ReShade 底座是否注入由 `reshade_integration.reshade_base_wanted()` 判；
+    #     * 关：面板移进 `_disabled`，并**强制关掉「Mod 快捷键锁定」** —— 没有面板就没有
+    #       替代的换装入口，锁着键等于把用户的 Mod 按键直接拿走。
+    #   它**不动其它插件**（DLSS5 / 第一人称 / 汉化 / 喂帧各按自己的开关）。
+    #   实现在 `launcher.apply_minimal_injection()`（字段名沿用 `minimal_injection`，
+    #   老配置零迁移；界面上叫「统一管理器」）。
+    minimal_injection: bool = True
     # 是否把 EFMI 的 d3d11.dll（服装 Mod 引擎）也写进 XXMI 注入库
     # ⚠️ **语义已改（2026-10-02 用户实测后的要求）**：这个开关**不再**控制"要不要注入
     #    EFMI 的 `d3d11.dll`"，而是**"要不要加载皮肤 Mod"**。

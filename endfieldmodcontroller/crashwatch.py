@@ -1493,7 +1493,13 @@ def collect_diagnosis_files(config: AppConfig, dest: Path, *,
         if src.is_file():
             keys = ("Camera controls installed", "camera hook installation failed",
                     "feature 18 created", "evaluation succeeded", "Registered add-on",
-                    "Loading add-on", "installing delayed hooks", "hotkeys:", "| ERROR | ")
+                    "Loading add-on", "installing delayed hooks", "hotkeys:", "| ERROR | ",
+                    # 2026-10-06 加：NR「建了特征却一帧不出」的现场就在这三行里 ——
+                    # 以前它们**不在采集范围内**，于是"池耗尽"这条关键判据只能在
+                    # 我这边翻全量 ReShade.log 才看得到（第一轮排查又得回头要文件）。
+                    "workset pool exhausted",
+                    "NR workset completion fence could not be signaled",
+                    "failed to install native D3D12 queue submission tracker")
             picked: list[str] = []
             with src.open("r", encoding="utf-8", errors="replace") as handle:
                 for line in handle:

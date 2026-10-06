@@ -1993,6 +1993,76 @@ def _nvngx_fingerprint(config: Any) -> list[str]:
     return lines
 
 
+def _nr_frames_summary(config: Any) -> list[str]:
+    """DLSS5 神经渲染**到底出没出帧**（2026-10-06 加）。
+
+    起因：反馈者机器上 `feature 18 created` 之后紧跟
+    `NR workset pool exhausted; preserving game output for this evaluation`，
+    面板「成功NR帧」停在 4 不动；而这条判据**以前既不在自检里、也不在包里**，
+    第一轮排查只能靠翻全量 `ReShade.log`（还得先发现"日志在 `runtime\\reshade`、
+    不在 `runtime\\dlss5`"）。现在结论直接写在摘要里，一眼就能看到。
+    """
+    lines = ["", "-- DLSS5 神经渲染出帧判据（面板「成功NR帧」不动时先看这里）--"]
+    path: Path | None = None
+    try:
+        from . import nr_autostart
+
+        candidate = nr_autostart.reshade_log_path(config)
+        path = candidate if candidate.is_file() else None
+    except Exception:  # noqa: BLE001
+        path = None
+    if path is None:
+        legacy = Path(config.dlss5_path) / "ReShade.log"
+        path = legacy if legacy.is_file() else None
+    if path is None:
+        lines.append("（没有生效那份 ReShade.log —— 还没进过游戏？）")
+        return lines
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        lines.append(f"（读不到 {path}：{exc}）")
+        return lines
+    marker = "Initializing crosire's ReShade"
+    last = text.rfind(marker)
+    recent = text[last:] if last >= 0 else text
+    counts = [int(value) for value in re.findall(r"evaluation succeeded \(count=(\d+)", recent)]
+    best = max(counts) if counts else 0
+    created = "feature 18 created" in recent
+    exhausted = ("workset pool exhausted" in recent
+                 or "NR workset completion fence could not be signaled" in recent)
+    failed = "feature 18 create failed" in recent
+    lines.append(
+        f"源: {path}（{path.stat().st_size:,} B）；本次运行内：建特征="
+        f"{'是' if created else '否'}、评估成功的最大帧号={best or '无'}、"
+        f"池耗尽={'是' if exhausted else '否'}、建特征失败={'是' if failed else '否'}"
+    )
+    if best > 1:
+        lines.append("结论: NR 正常出帧（帧号在增长）。")
+        return lines
+    if exhausted:
+        lines.append(
+            "结论: **NR 建立了特征、但一帧都没产出** —— 引擎 workset 池 fail closed"
+            "（它认为那批 GPU 提交始终没完成，于是每帧把游戏自己的画面原样放行）。"
+            "**与设置无关**：改 NR 风格 / 强度 / 超分档位、重装组件、换版本都改变不了它。"
+        )
+        hits = [line.rstrip() for line in recent.splitlines()
+                if any(key in line for key in (
+                    "feature 18 created", "evaluation succeeded",
+                    "created inline NR resources", "workset pool exhausted",
+                    "NR workset completion fence", "queue submission tracker"))]
+        lines.append("现场原文（末 6 行）:")
+        lines.extend(f"    {line}" for line in hits[-6:])
+        return lines
+    if failed:
+        lines.append("结论: NR 特征创建失败（错误码见上面 ReShade.log 相关摘录）。")
+        return lines
+    if created:
+        lines.append("结论: 建了特征但没有出帧记录（可能是刚开就退出）。")
+        return lines
+    lines.append("结论: 本次运行没有 NR 活动（没开 NR / 没进到场景）。")
+    return lines
+
+
 def _ngx_consumer_summary(game_dir: Path | None) -> list[str]:
     """「NGX 消费者」是谁 —— 决定"面板的 NGX Hook 计数算不算数"（2026-10-01 加）。
 
@@ -2629,6 +2699,7 @@ def create_diagnostic_bundle(
     # XXMI 自己的注入现场（启动参数 / work_dir / 每个 dll 的注入结果 / 它报的错）—— 2026-10-04 加
     summary.extend(_xxmi_injection_summary(config))
     summary.extend(_ngx_consumer_summary(game_path))
+    summary.extend(_nr_frames_summary(config))
     summary.extend(_shader_summary(config))
     # ⚠️ 2026-10-04 补的四段（用户原话：「你能不能一次加完」）。
     #    这四段全是"数据本来就在现场、只是没人解析/没人列"，不是新采集：

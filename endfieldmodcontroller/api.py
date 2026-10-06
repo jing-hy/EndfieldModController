@@ -698,6 +698,41 @@ class EndfieldModControllerApi:
         )
         return result
 
+    def set_minimal_injection(self, enabled: bool = True) -> dict[str, Any]:
+        """启动页「**统一管理器**」开关的后端。
+
+        用户 2026-10-06 定的语义（原话：「**那个开关就要叫统一管理器，不要讲那么多，
+        默认开，如果这个不开，锁快捷键强制关，如果开锁快捷键，这个强制开**」）：
+        它管「ReShade 底座 + 统一管理器面板」在不在游戏里；关掉时
+        `launcher.apply_minimal_injection()` 会**顺带把「Mod 快捷键锁定」强制关掉**
+        （没有面板就没有替代换装入口）。
+        """
+        from . import launcher
+
+        self.config.minimal_injection = bool(enabled)
+        try:
+            self.config.save()
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "message": f"写配置失败: {exc}"}
+        result = launcher.apply_minimal_injection(
+            self.config, log=lambda message: launcher._append_log(self.config, message))
+        # 注入库要跟着重写：统一管理器开着 ⇒ 底座一定列；关掉后按其它插件开关重算
+        try:
+            launcher.configure_dlss5_injection(self.config, enabled=True)
+        except Exception as exc:  # noqa: BLE001
+            result.setdefault("warnings", []).append(f"重写注入库失败: {exc}")
+        launcher._append_log(
+            self.config,
+            f"统一管理器{'开启' if enabled else '关闭'}"
+            f"（移动 {len(result.get('moved') or [])} 个面板文件）",
+        )
+        result["config"] = {
+            "minimal_injection": bool(enabled),
+            # 关掉统一管理器时锁键会被强制关 —— 前端要照后端落盘的结果回显
+            "hotkey_takeover": bool(getattr(self.config, "hotkey_takeover", False)),
+        }
+        return result
+
     def import_assets_bundle(self) -> dict[str, Any]:
         """依赖页「导入随包 zip…」：导入**依赖的随包 zip**（不是 Mod 压缩包）。
 
@@ -1490,9 +1525,18 @@ class EndfieldModControllerApi:
         只做一件事：**把面板部署进 ReShade 会读的目录**；锁键动作已停用。
         """
         self.config.hotkey_takeover = bool(enabled)
+        if enabled:
+            # ★ 用户 2026-10-06：「**如果开锁快捷键，这个强制开**」—— 面板是锁键的前提：
+            #   锁了 Mod 原键、又没有面板可点，等于把用户的换装入口直接拿走
+            #   （2026-10-06 反馈者"皮肤打不进去"就是这条链）。
+            self.config.minimal_injection = True
         self.config.save()
         deploy: dict[str, Any] = {"warnings": [], "deployed": []}
         if enabled:
+            # 面板先放回 ReShade 会读的目录（统一管理器关着时它躺在 `_disabled` 里）
+            launcher.apply_minimal_injection(
+                self.config, log=lambda message: launcher._append_log(self.config, message)
+            )
             deploy = reshade_integration.deploy_panel(
                 self.config,
                 self.config.controller_dir,
@@ -1513,12 +1557,15 @@ class EndfieldModControllerApi:
         # 开到关 / 关到开都重新生成一次控制器：`actions.tsv` 会随勾选的 Mod 变，
         # 而且上一版（锁键还生效时）可能已经把 staging 里的 `key` 行改写成 `VK_F24`，
         # 重铺一次才是"面板拿到的就是现在的库"。
+        #
+        # ⚠️ **必须丢后台**（2026-10-06 用户反馈：「**这个按钮反应也太慢了吧，过了好几秒
+        #    才会同步统一管理器和 mod 锁定快捷键**」）—— `prepare()` 要重铺 staging、
+        #    重新生成控制器与 `actions.tsv`，是**秒级**的重活；同步跑就把整个
+        #    `set_hotkey_takeover` 调用堵住，界面几秒后才动，手感就是"点了没反应"。
+        #    重铺结果不影响这次点击的返回值（下次进游戏用的才是新 staging）。
         if status["possible"] and not running:
-            try:
-                self.prepare()
-                reprepared = True
-            except Exception as exc:  # noqa: BLE001
-                launcher._append_log(self.config, f"切换游戏内 Mod 面板后重新生成控制器失败: {exc}")
+            reprepared = True
+            self._run_background(self._reprepare_in_background)
 
         if not enabled:
             message = "已关闭：下次启动不再铺面板（已经铺好的那份不删，Mod 自带按键一直照常生效）"
@@ -1527,7 +1574,7 @@ class EndfieldModControllerApi:
         elif running:
             message = "已打开：退出游戏后点「一键启动」才会把面板铺进 ReShade（进游戏按 Home 打开）"
         elif reprepared:
-            message = "已打开：面板已就位 —— 进游戏按 Home 打开，点按钮 = 按一次该 Mod 自己的按键"
+            message = "已打开：面板已就位 —— 正在后台重铺 Mod（几秒），进游戏按 Home 打开"
         else:
             message = "已打开：下次「一键启动」时把面板铺进 ReShade"
 
@@ -1543,6 +1590,32 @@ class EndfieldModControllerApi:
             "game_running": running,
             "message": message,
         }
+
+    def _run_background(self, func, *args, **kwargs) -> None:
+        """把重活丢到后台线程执行（**刻意抽成方法，测试里可替换成同步调用**）。
+
+        为什么需要：2026-10-06 反馈「这个按钮反应也太慢了吧，过了好几秒才会同步统一管理器
+        和 mod 锁定快捷键」—— `prepare()` 这类重活同步跑会把接口堵住。但它又必须在
+        `set_hotkey_takeover` 的语义里"确实发生"（既有回归测试
+        `test_switch_deploys_panel_and_locks_mod_keys` 就要求锁键后 staging 的 key
+        被改写），所以做成可注入：生产走线程，测试里换成同步，两边都成立。
+        另：**不要在测试之外直接起裸线程** —— 游离线程会跨用例污染共享目录。
+        """
+        import threading
+
+        threading.Thread(target=lambda: func(*args, **kwargs), daemon=True).start()
+
+    def _reprepare_in_background(self) -> None:
+        """后台重铺 staging 与控制器（见 `set_hotkey_takeover` 里的说明）。
+
+        为什么单独抽出来：那个接口必须**立刻返回**（用户 2026-10-06：「这个按钮反应也太慢了吧，
+        过了好几秒才会同步…」），重活丢到这里跑；失败只写日志，不打断用户操作。
+        """
+        try:
+            self.prepare()
+            launcher._append_log(self.config, "游戏内 Mod 面板：后台重铺完成")
+        except Exception as exc:  # noqa: BLE001
+            launcher._append_log(self.config, f"游戏内 Mod 面板：后台重铺失败 —— {exc}")
 
     # ------------------------------------------------------------------
     # library / activation

@@ -94,6 +94,10 @@ async function hotReload() {
 // 现在后端在这三个接口里统一落 `secondary_motion_injection` / `poser_injection`
 // （`api._persist_injection_switch`），开关状态与"下次启动要不要注入"永远一致。
 const SWITCHES = [
+  // ★ 统一管理器（2026-10-06 用户定名与语义：「那个开关就要叫统一管理器，不要讲那么多，
+  //   默认开，如果这个不开，锁快捷键强制关，如果开锁快捷键，这个强制开」）。
+  { k: "minimal_injection", name: "统一管理器", desc: "注入 ReShade 与统一管理器面板",
+    apply: (v) => call("set_minimal_injection", v) },
   { k: "dlss5_addon_enabled", name: "DLSS5 神经渲染", desc: "把游戏自身的 DLSS 输出替换成 DLSS5 神经渲染",
     apply: (v) => call("set_component_addon", "dlss5", v) },
   { k: "firstperson_addon_enabled", name: "第一人称视角", desc: "进游戏按 F1 切换第一人称",
@@ -158,8 +162,11 @@ async function toggleSwitch(sw) {
     } else {
       await saveSetting(sw.k, next);
     }
-    await refreshState();
-    loadSettings();
+    // ⚠️ **不再 `await refreshState()`**（2026-10-06 用户：「**这个按钮反应也太慢了吧，
+    //    过了好几秒才会同步统一管理器和 mod 锁定快捷键**」）：`get_state` 是整份状态，
+    //    等它回来界面才动，手感就是"点了没反应"。而开关值已经由后端回传的 `config`
+    //    同步进 `store.state.config`（见上面 `syncConfig`）⇒ 刷新丢后台即可。
+    refreshState().then(() => loadSettings()).catch(() => {});
   } catch (e) { /* call() 已经弹过窗 */ }
   finally { pendingSwitches.delete(sw.k); }
 }

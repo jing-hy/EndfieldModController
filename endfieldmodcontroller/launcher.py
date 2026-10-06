@@ -1166,6 +1166,92 @@ def set_component_addons(config: AppConfig, component: str, enabled: bool) -> di
             "moved": moved, "removed": removed}
 
 
+# ── 「统一管理器」开关（2026-10-06 用户定的语义）───────────────────────────────
+# 用户原话：「**那个开关就要叫统一管理器，不要讲那么多，默认开，如果这个不开，
+#            锁快捷键强制关，如果开锁快捷键，这个强制开**」。
+# 它管的是"**ReShade 底座 + 统一管理器面板**要不要在游戏里"：
+#   * 开（默认）= 面板 addon 在 `runtime\dlss5\`；底座是否注入由
+#     `reshade_integration.reshade_base_wanted()` 判（那个判据也读本开关）；
+#   * 关 = 面板 addon 移进 `_disabled`（ReShade 里就没有统一管理器了），并**强制关掉
+#     「Mod 快捷键锁定」** —— 没有面板就没有替代的换装入口，锁着键等于把用户的 Mod
+#     按键直接拿走（2026-10-06 反馈者"皮肤打不进去"正是这个现场）。
+#   * 它**不动其它插件**：DLSS5 / 第一人称 / 汉化 / 喂帧各按自己的开关。
+UNIFIED_PANEL_ADDON = "endfieldmodcontroller.addon64"
+
+
+def minimal_injection_status(config: AppConfig) -> dict[str, Any]:
+    """「统一管理器」现在的状态：开关值 / 面板在根目录还是被停用。"""
+    base = config.dlss5_path
+    disabled = base / ADDON_DISABLED_DIR
+    return {
+        "enabled": bool(getattr(config, "minimal_injection", False)),
+        "panel_active": (base / UNIFIED_PANEL_ADDON).is_file(),
+        "panel_parked": (disabled / UNIFIED_PANEL_ADDON).is_file(),
+        "addon": UNIFIED_PANEL_ADDON,
+    }
+
+
+def apply_minimal_injection(config: AppConfig,
+                            log: Callable[[str], None] | None = None) -> dict[str, Any]:
+    """按 `config.minimal_injection`（启动页「统一管理器」）铺上 / 收走面板。
+
+    两层**都真的动**（用户准则：「那些滑块要真的有用，不要就做表面功夫」）：
+    文件层把面板 addon 在 `runtime\\dlss5\\` 与 `_disabled\\` 之间搬；
+    配置层在关掉时把「Mod 快捷键锁定」一并关掉（否则用户按 Mod 原键没反应、
+    面板又不存在 —— 两边都没了）。
+    """
+    want = bool(getattr(config, "minimal_injection", False))
+    actions: list[str] = []
+    warnings: list[str] = []
+    base = config.dlss5_path
+    disabled = base / ADDON_DISABLED_DIR
+
+    def emit(text: str) -> None:
+        if log is not None:
+            try:
+                log(text)
+            except Exception:  # noqa: BLE001 - 日志失败绝不影响动作
+                pass
+
+    try:
+        disabled.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return {"ok": False, "enabled": want, "actions": [],
+                "warnings": [f"创建 _disabled 失败: {exc}"], "moved": [],
+                "status": minimal_injection_status(config),
+                "message": f"创建 _disabled 失败: {exc}"}
+
+    source_dir, target_dir = (disabled, base) if want else (base, disabled)
+    moved, removed = _sync_addon_location(source_dir, target_dir, (UNIFIED_PANEL_ADDON,))
+    if want:
+        if not (base / UNIFIED_PANEL_ADDON).is_file():
+            warnings.append("面板没能在 ReShade 目录就位（随包资产缺失？）⇒ 游戏里不会出现统一管理器")
+        else:
+            actions.append("统一管理器已就位（ReShade 面板 + 统一管理器面板）")
+    else:
+        actions.append("统一管理器已关闭：面板已从 ReShade 目录移走")
+        # ★ 用户 2026-10-06：「如果这个不开，锁快捷键强制关」
+        if bool(getattr(config, "hotkey_takeover", False)):
+            config.hotkey_takeover = False
+            try:
+                config.save()
+            except Exception as exc:  # noqa: BLE001
+                warnings.append(f"写配置失败（锁键可能没关干净）: {exc}")
+            emit("统一管理器已关闭 → 一并关闭「Mod 快捷键锁定」（Mod 原键恢复可用）")
+            actions.append("「Mod 快捷键锁定」已强制关闭")
+    if removed:
+        emit(f"统一管理器: 清掉多余副本 {', '.join(removed)}")
+    return {
+        "ok": not warnings,
+        "enabled": want,
+        "actions": actions,
+        "warnings": warnings,
+        "moved": sorted(set(moved)),
+        "status": minimal_injection_status(config),
+        "message": "；".join(actions) if actions else "统一管理器状态已确认",
+    }
+
+
 def set_feed_addon_enabled(
     config: AppConfig,
     enabled: bool,
@@ -1330,9 +1416,10 @@ def dlss5_injection_targets(config: AppConfig) -> list[str]:
     dll = config.dlss5_dll_path
     if not dll.is_file():
         raise LaunchError(f"DLSS5 ReShade 底座不存在: {dll}")
-    # 两个插件（DLSS5 / 第一人称）都关掉时就不必注入底座了
-    want_base = bool(getattr(config, "dlss5_addon_enabled", True)
-                    or getattr(config, "firstperson_addon_enabled", True))
+    # 要不要注入底座：**判据唯一来源**是 `reshade_integration.reshade_base_wanted()`
+    # ——「Mod 快捷键锁定」的"能不能锁"也读它。两边必须同一口径，否则就会出现
+    # "文件在磁盘上所以放行、可实际根本没注入"那种事故（2026-10-06 反馈者现场）。
+    want_base, _base_reason = reshade_integration.reshade_base_wanted(config)
     if want_base:
         targets.append(str(dll))
     # ❌ **绝不要把 EFMI 的 `d3d11.dll` 列进 `extra_libraries`**（2026-10-03 实测定位）。
@@ -1366,6 +1453,8 @@ def dlss5_injection_targets(config: AppConfig) -> list[str]:
     # sbm.dll）。这样游戏目录不用替换 d3dcompiler_47.dll / vulkan-1.dll，
     # 避免和 ReShade/EFMI 抢 D3D 调用链（proxy 方式实测 65 秒崩）。
     sbm_setting = str(getattr(config, "secondary_motion_dll", "") or "").strip()
+    # ⚠️ 这里**不再看**「统一管理器」：那个开关只管"面板在不在"，
+    #    乳摇注入与否只听它自己的 `secondary_motion_injection`（2026-10-06 语义）。
     if sbm_setting and getattr(config, "secondary_motion_injection", False):
         sbm = config.resolve_path(sbm_setting)
         if sbm.is_file():
@@ -1547,6 +1636,18 @@ def ensure_injections(config: AppConfig) -> dict[str, Any]:
             warnings.append(str(available.get("message") or "找不到可用的 XXMI Launcher"))
     except Exception as exc:  # noqa: BLE001
         warnings.append(f"准备 XXMI Launcher 失败: {exc}")
+
+    # ⓪b **最小注入模式**（2026-10-06 用户要求）：先把"除统一管理器面板以外的东西"停掉
+    #     （或按记录恢复），再往下走注入库那几步 —— `dlss5_injection_targets()` 是**按开关
+    #     状态**决定注入哪几个 dll 的，顺序反了就会出现"开关关了、注入库里还列着"。
+    try:
+        minimal = apply_minimal_injection(config, log=lambda message: actions.append(message))
+        if minimal.get("enabled"):
+            actions.append("最小注入模式：只加载 ReShade 底座与统一管理器面板")
+        for warning in minimal.get("warnings") or []:
+            warnings.append(str(warning))
+    except Exception as exc:  # noqa: BLE001
+        warnings.append(f"应用最小注入模式失败: {exc}")
 
     # ① **XXMI 的配置文件本身必须先存在** —— 它是 XXMI 首次运行时生成的，空环境里没有，
     #    于是下面所有写入（game_folder / enabled_importers / 签名 / extra_libraries）

@@ -476,7 +476,13 @@ class HotkeySwitchTests(unittest.TestCase):
         `no_modifiers vk_f23`，手按原键失效，操作集中到游戏内面板。面板本身走
         **F13..F24 内部通道**（切档逻辑注入在 Mod 自己的 ini 里），与 `key` 段无关，
         所以锁键不影响面板 —— 这正是它今天能重新启用的原因。
+
+        ⚠️ 2026-10-06：`set_hotkey_takeover` 里的重铺（`prepare()`）改成**后台执行**了
+        （接口不许被秒级重活堵住，见 `api._run_background` 的说明）。这里把它换回
+        **同步**执行，断言才能直接看到"锁键后 staging 的 key 被改写"这件事本身 ——
+        异步只是执行方式，不改变这条语义。
         """
+        self.api._run_background = lambda func, *args, **kwargs: func(*args, **kwargs)
         self.api.prepare()
         self.assertTrue(self._staged_keys())
         self.assertTrue(all("vk_left" in key for key in self._staged_keys()))

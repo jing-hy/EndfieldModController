@@ -110,3 +110,6 @@ _*.md
 # 否则 clone 下来跑 pytest 会直接 ModuleNotFoundError（2026-10-04 加：
 # `tests/_frontend_freevars.py` 就被上面那条 `_*.py` 吃掉过一次）。
 !tests/_*.py
+
+# 排查素材（诊断包解压、对照日志）—— 不进仓库
+_diag/

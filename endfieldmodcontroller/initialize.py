@@ -1199,8 +1199,24 @@ def _check_dlss5_nr_binding(config: AppConfig, report: Report,
     if not getattr(config, "dlss5_addon_enabled", True):
         report.add("dlss5:nr_binding", True, "DLSS5 已在启动页关闭（跳过 NR 绑定检查）")
         return
-    log_path = config.dlss5_path / "ReShade.log"
-    if not log_path.is_file():
+    # ── 读**生效那份** `ReShade.log`（2026-10-06 修）─────────────────────────────
+    # ⚠️ 以前这里读 `runtime\dlss5\ReShade.log` —— 那样本判据**在正常配置下永远空转**：
+    #    ReShade 的基准目录是 `runtime\reshade`（`RESHADE_BASE_PATH_OVERRIDE`），日志只写
+    #    在那里；反馈者诊断包里 `dlss5/ReShade.log` 一直是「按当前配置不存在」⇒ 每次都走
+    #    「还没有 ReShade.log（没进过游戏，跳过）」。**判据读错文件 = 判据不存在**。
+    log_path: Path | None = None
+    try:
+        from . import nr_autostart
+
+        candidate = nr_autostart.reshade_log_path(config)
+        if candidate.is_file():
+            log_path = candidate
+    except Exception:  # noqa: BLE001 - 取不到就退回旧位置，不能让自检本身崩掉
+        log_path = None
+    if log_path is None:
+        legacy = config.dlss5_path / "ReShade.log"
+        log_path = legacy if legacy.is_file() else None
+    if log_path is None:
         report.add("dlss5:nr_binding", True, "还没有 ReShade.log（没进过游戏，跳过）")
         return
     try:
@@ -1212,8 +1228,35 @@ def _check_dlss5_nr_binding(config: AppConfig, report: Report,
     marker = "Initializing crosire's ReShade"
     last = text.rfind(marker)
     recent = text[last:] if last >= 0 else text
-    if "evaluation succeeded" in recent or "feature ready" in recent:
-        report.add("dlss5:nr_binding", True, "上次进游戏时 DLSS5 的 NR 正常出帧（面板「成功NR帧」应当有数）")
+    # ★ **"正常出帧"必须是"帧数真的在涨"**（2026-10-06 修）：以前只要日志里出现
+    #   `evaluation succeeded` 就算正常 —— 而引擎**第一帧**就会打
+    #   `inline feature 18 evaluation succeeded (count=1, ...)`，紧接着
+    #   `NR workset pool exhausted; preserving game output for this evaluation`。
+    #   于是"建了特征却一帧没出"被这条判据判成了"正常出帧"（反馈者机器上的实况：
+    #   面板「成功NR帧 4」永远不动，自检却说一切正常）。
+    counts = [int(value) for value in re.findall(r"evaluation succeeded \(count=(\d+)", recent)]
+    best = max(counts) if counts else 0
+    if best > 1:
+        report.add("dlss5:nr_binding", True,
+                   f"上次进游戏时 DLSS5 的 NR 正常出帧（日志里评估到第 {best} 帧）")
+        return
+    # ★ **建了 feature 18 却一帧没出**：引擎的 workset 池 fail closed —— 4 代 scratch
+    #   workset 用满后，它认为那批 GPU 提交始终没完成（队列围栏没回来），于是**每一帧都
+    #   把游戏自己的画面原样放行**（`preserving game output for this evaluation`）。
+    #   2026-10-06 定案"与设置无关"：本机（同显卡、同驱动、同 NR 参数、同注入栈）
+    #   复刻后照样出帧到 count=60；反馈者那台换版本、换打开时机（启动即开 / 中途手动开）
+    #   结果都一样 ⇒ 改设置、重装组件都不可能修好它，别让用户白折腾。
+    if ("workset pool exhausted" in recent
+            or "NR workset completion fence could not be signaled" in recent):
+        report.add(
+            "dlss5:nr_frames", False,
+            "上次进游戏时 DLSS5 的神经渲染**建立了特征、但一帧都没产出**：日志里 "
+            "`feature 18 created` 之后紧跟 `NR workset pool exhausted` —— 引擎的 workset 池"
+            "「fail closed」了（它认为那批 GPU 提交始终没完成，于是每帧都把游戏自己的画面"
+            "原样放行）。**这不是设置问题**：改 NR 风格 / 强度 / 超分档位、重装组件、换版本"
+            "都改变不了它 —— 请直接导出诊断包反馈，不必再折腾设置。",
+            manual=True,
+        )
         return
     if "feature 18 create failed" in recent or "NR feature create failed" in recent:
         # 这个码（`0xBAD00001` = NGX 回「不支持该特性」）有**两种完全不同的成因**，必须分开说：

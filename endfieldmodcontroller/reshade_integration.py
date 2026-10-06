@@ -102,15 +102,43 @@ def panel_base_dirs(config: AppConfig) -> list[Path]:
     return dirs
 
 
+def reshade_base_wanted(config: AppConfig) -> tuple[bool, str]:
+    """当前配置下，ReShade 底座（`d3d12.dll`）**到底会不会被注入进程**？（2026-10-06 加）
+
+    **判据唯一来源**：`launcher.dlss5_injection_targets()` 是按这个条件决定列不列底座的
+    —— 那边原本自己写了一遍，这里再写一遍就等着两边漂移（历史教训：「下载侧与激活侧
+    必须共用同一判据」）。所以两边都调这里。
+
+    为什么需要它：反馈者（数据根 `G:\\`）把「DLSS5 神经渲染」和「第一人称视角」**都关了**，
+    于是注入库里只剩 EFMI 的 `d3d11.dll`、**没有一个 ReShade 底座** ⇒ 游戏里根本没有面板；
+    而「Mod 快捷键锁定」照样把 Mod 的 `[Key*]` 改写成 `VK_F24` ⇒ **键被锁死、面板却不存在**
+    （用户感受就是「皮肤打不进去」）。这正是 2026-10-01 那次事故的翻版，只是换了一条路径。
+    """
+    if bool(getattr(config, "minimal_injection", False)):
+        return True, ""                      # 最小注入模式**就是**只要底座 + 面板
+    if (bool(getattr(config, "dlss5_addon_enabled", True))
+            or bool(getattr(config, "firstperson_addon_enabled", True))):
+        return True, ""
+    return False, ("「DLSS5 神经渲染」和「第一人称视角」都关着 ⇒ ReShade 底座不会被注入，"
+                   "游戏里没有面板")
+
+
 def takeover_possible(config: AppConfig) -> tuple[bool, str]:
     """现在这套配置下，面板真的能出现在游戏里吗？（"锁键"必须先过这一关）
 
     教训（2026-10-01）：把用户原本能用的东西改成"由我们中转"之前，必须先证明
     中转件真的会被加载。所以只要有一条不满足，调用方就**不许**改写 Mod 热键。
+
+    ⚠️ **2026-10-06 补第四条**：以前只查"配置文件在不在磁盘上"，没查"**这次会不会真的注入**"。
+    反馈者把 DLSS5 与第一人称都关掉后，注入库里连 `d3d12.dll` 都没有（面板住在 ReShade 里）
+    —— 文件在磁盘上当然还在，判据就放行了，于是"键锁死了、面板不存在"。
     """
     injection = str(getattr(config, "reshade_injection", "") or "").lower()
     if injection not in {"external", "xxmi_extra"}:
         return False, "当前设置为「不注入 ReShade」，游戏里没有面板可供操作"
+    wanted, why = reshade_base_wanted(config)
+    if not wanted:
+        return False, why
     dll = config.reshade_dll_path
     if dll is None or not Path(dll).is_file():
         return False, "找不到 ReShade 底座 d3d12.dll"
