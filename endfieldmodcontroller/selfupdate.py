@@ -425,6 +425,18 @@ fso.DeleteFile WScript.ScriptFullName, True
 '''
 
 
+def _apply_fail(log: Callable[[str], None] | None, message: str) -> dict[str, Any]:
+    """`apply_update` 的失败出口。
+
+    ⚠️ **每条失败都必须落日志**（2026-10-06）：原来所有失败分支都只
+    `return {"ok": False, "message": …}`，一个字都不写日志 —— 于是用户点了「重启安装」
+    没反应时，事后连"是哪一步拦下的"都查不出来（反馈者原话：「手动按重启也没用」，
+    而我们手上只有一句"下载完成"）。
+    """
+    _log(log, f"自更新：替换未执行 —— {message}")
+    return {"ok": False, "message": message}
+
+
 def apply_update(
     config: AppConfig,
     *,
@@ -433,14 +445,12 @@ def apply_update(
 ) -> dict[str, Any]:
     """把下载好的更新包替换到当前 exe（通过 VBS 在退出后完成）。"""
     if not is_frozen():
-        return {
-            "ok": False,
-            "message": "源码运行模式不支持自动替换，请到项目目录执行 git pull 后重启。",
-            "repo": REPO_URL,
-        }
+        result = _apply_fail(log, "当前是源码运行模式，不支持自动替换（改用 git pull 后重启）")
+        result["repo"] = REPO_URL
+        return result
     target = executable_path()
     if target is None or not target.is_file():
-        return {"ok": False, "message": "找不到当前 exe 路径"}
+        return _apply_fail(log, "找不到当前 exe 路径")
 
     payload = Path(archive) if archive else None
     if payload is None:
@@ -452,15 +462,16 @@ def apply_update(
         ) if update_dir.is_dir() else []
         payload = candidates[0] if candidates else None
     if payload is None or not payload.is_file():
-        return {"ok": False, "message": "没有找到已下载的更新包，请先点「下载更新」"}
+        return _apply_fail(log, "没有找到已下载的更新包（_update 目录里没有 exe/zip）")
     # 装之前严格核一遍：这个包必须是"当前 latest 那一份"（size + sha256）。
     # 2026-09-30 实测 bug：`_update\` 里躺着更早下载的 0.6.0，却被当成 0.6.1 装上，
     # 结果"装了还是旧版 → 又提示 → 又装"。这里直接拒绝，让用户重新下载。
     if payload.suffix.lower() == ".exe":
         reason = _payload_stale_reason(config, payload, check_hash=True)
         if reason:
-            return {"ok": False, "stale": True,
-                    "message": f"已下载的更新包不是最新版：{reason}。请重新点「下载更新」。"}
+            result = _apply_fail(log, f"已下载的更新包不是最新版：{reason}")
+            result["stale"] = True
+            return result
 
     # zip 里的 exe 先解出来
     if payload.suffix.lower() == ".zip":
@@ -470,19 +481,19 @@ def apply_update(
             with zipfile.ZipFile(payload) as zf:
                 members = [n for n in zf.namelist() if n.lower().endswith(".exe")]
                 if not members:
-                    return {"ok": False, "message": "更新包里没有 exe"}
+                    return _apply_fail(log, "更新包里没有 exe")
                 member = sorted(members, key=lambda n: len(n))[0]
                 extracted = payload.with_name(Path(member).name)
                 extracted.write_bytes(zf.read(member))
                 payload = extracted
         except (zipfile.BadZipFile, OSError) as exc:
-            return {"ok": False, "message": f"解包失败：{exc}"}
+            return _apply_fail(log, f"解包失败：{exc}")
 
     new_exe = payload.with_name("EndfieldModController.exe.new")
     try:
         shutil.copy2(payload, new_exe)
     except OSError as exc:
-        return {"ok": False, "message": f"写入更新文件失败：{exc}"}
+        return _apply_fail(log, f"写入更新文件失败：{exc}")
 
     script = new_exe.with_suffix(".vbs")
     try:
@@ -496,12 +507,11 @@ def apply_update(
         # "完成，但有 1 项失败"）。回归测试见 tests/test_selfupdate_template.py。
         VBS_TEMPLATE.encode("ascii")
     except UnicodeEncodeError as exc:
-        return {"ok": False,
-                "message": f"更新脚本模板含非 ASCII 字符（程序缺陷，请反馈）：{exc}"}
+        return _apply_fail(log, f"更新脚本模板含非 ASCII 字符（程序缺陷，请反馈）：{exc}")
     try:
         script.write_text(VBS_TEMPLATE, encoding="ascii", newline="\r\n")
     except OSError as exc:
-        return {"ok": False, "message": f"生成更新脚本失败：{exc}"}
+        return _apply_fail(log, f"生成更新脚本失败：{exc}")
 
     try:
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -523,7 +533,7 @@ def apply_update(
             env=env,
         )
     except OSError as exc:
-        return {"ok": False, "message": f"启动更新脚本失败：{exc}"}
+        return _apply_fail(log, f"启动更新脚本失败（wscript 没起来）：{exc}")
 
     _log(log, "更新脚本已启动，程序将退出并在 2 秒后自动重启为新版")
     return {

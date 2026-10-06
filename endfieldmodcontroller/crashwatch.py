@@ -2057,6 +2057,55 @@ def collect_diagnosis_files(config: AppConfig, dest: Path, *,
     except Exception as exc:  # noqa: BLE001
         emit(f"排查素材: ReShade 关键行摘录失败（忽略）: {exc}")
 
+    # ⑪ **自更新现场**（2026-10-06 加）。起因：反馈者报「自更新下载完就没了，没提示重启，
+    #     手动按重启也没用」，而当时包里**一条相关证据都没有** —— 看不到已下载的载荷还在不在、
+    #     exe 旁边有没有 `.old` / `.new` / `update-failed.txt`，更看不到**当前这个 exe 自己**
+    #     的大小与 sha256（这是"他现在跑的是哪一版"的**唯一直接判据**）。
+    try:
+        from . import fsutil, selfupdate
+
+        def _fmt_time(value: float) -> str:
+            return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(value))
+
+        lines: list[str] = []
+        exe = selfupdate.executable_path()
+        if exe is not None and exe.is_file():
+            stat = exe.stat()
+            lines.append(f"当前程序（正在跑的就是它）：{exe}")
+            lines.append(f"  大小={stat.st_size:,} B · 修改时间={_fmt_time(stat.st_mtime)}"
+                         f" · sha256={fsutil.sha256_file(exe)}")
+            lines.append("  （与 Release 附件比对 sha256 即可确认它到底是哪一版）")
+            for suffix in (".old", ".new"):
+                sibling = exe.with_name(exe.name + suffix)
+                if sibling.is_file():
+                    lines.append(f"  残留 {sibling.name}：{sibling.stat().st_size:,} B"
+                                 f" · {_fmt_time(sibling.stat().st_mtime)}")
+            notice = exe.with_name("update-failed.txt")
+            if notice.is_file():
+                lines.append("  **存在 update-failed.txt（上次替换失败的通知）**：")
+                lines.extend("    " + row for row in
+                             notice.read_text(encoding="utf-8", errors="replace").splitlines()[:8])
+        update_dir = Path(config.runtime_path) / "_update"
+        if update_dir.is_dir():
+            lines.append(f"更新目录 {update_dir}：")
+            for item in sorted(update_dir.iterdir()):
+                try:
+                    lines.append(f"  {item.name}  {item.stat().st_size:,} B"
+                                 f" · {_fmt_time(item.stat().st_mtime)}")
+                except OSError:
+                    continue
+            pending = selfupdate.pending_payload(config)
+            lines.append(f"待安装判定：{pending}")
+        else:
+            lines.append("更新目录不存在（从没检查过更新？）")
+        if lines:
+            (dest / "self-update-forensics.txt").write_text(
+                "自更新现场（当前 exe 指纹 / 残留 / 载荷清单 / 待安装判定）\n\n"
+                + "\n".join(lines) + "\n", encoding="utf-8")
+            taken.append("self-update-forensics.txt")
+    except Exception as exc:  # noqa: BLE001
+        emit(f"排查素材: 自更新现场失败（忽略）: {exc}")
+
     # ⑩ **staging（EFMI Mods）的清单与 `key =` 行**（2026-10-06 加）。
     #    起因：反馈者报「**皮肤打不进去**」，而当时包里能回答这个问题的东西**一个都没收** ——
     #    `staged inventory` 只是控制器日志里的一行
