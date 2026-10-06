@@ -644,11 +644,14 @@ class EndfieldModControllerApi:
             "status": launcher.component_addon_status(self.config),
             "config": {
                 "dlss5_addon_enabled": bool(getattr(self.config, "dlss5_addon_enabled", True)),
-            # 「DLSS4 多帧生成（40 系）」能不能用 —— 前端据此把那一行**锁住**并显示原因
-            # （判据唯一来源 = `deviceinfo.mfg_unlock_supported()`）。
-            "mfg_unlock_available": _mfg_available()[0],
-            "mfg_unlock_reason": _mfg_available()[1],
                 "firstperson_addon_enabled": bool(getattr(self.config, "firstperson_addon_enabled", True)),
+                # ⚠️ **前端要从这里读**（`store.state.component_addon_status.config.*`）——
+                #    注意它**不是** `get_state()["config"]`（那个是 `AppConfig.to_dict()`，
+                #    只装配置字段）。2026-10-06：我第一版把这两个键加在了这里，却以为前端会
+                #    从 `settings` 读到 ⇒ 那一行**对所有人都灰**（40 系也一样"开不了"）。
+                #    判据唯一来源 = `deviceinfo.mfg_unlock_supported()`。
+                "mfg_unlock_available": _mfg_available()[0],
+                "mfg_unlock_reason": _mfg_available()[1],
             },
         }
 

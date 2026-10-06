@@ -110,8 +110,12 @@ const SWITCHES = [
   { k: "mfg_unlock_enabled", name: "DLSS4 多帧生成", 
     desc: "40 系把多帧生成从 2x 解锁到 3x/4x（与 DLSS5 神经渲染互斥，同时只能开一个）",
     apply: (v) => call("set_component_addon", "mfg", v),
-    locked: () => !settings.mfg_unlock_available,
-    lockReason: () => settings.mfg_unlock_reason || "这台机器用不了这个功能" },
+    // ⚠️ 能不能用**不在 `settings` 里**（`settings` = `store.state.config` = AppConfig 的字段），
+    //    而在 `store.state.component_addon_status.config`。2026-10-06：我第一版用 settings 读，
+    //    恒为 undefined ⇒ 那一行**对所有人都灰**（40 系也一样"开不了"）。
+    locked: () => !(store.state.component_addon_status?.config?.mfg_unlock_available),
+    lockReason: () => store.state.component_addon_status?.config?.mfg_unlock_reason
+      || "这台机器用不了这个功能" },
   { k: "efmi_injection", name: "皮肤 Mod", desc: "EFMI 服装 Mod 注入（关掉后不加载任何皮肤）" },
   { k: "secondary_motion_injection", name: "ShakingBreastManager", desc: "乳摇物理效果",
     // 拨动即装卸（不止写配置）：开启走 `secondary_motion_install`（装 proxy + plugin\sbm.dll
