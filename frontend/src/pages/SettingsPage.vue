@@ -768,6 +768,8 @@ useLogAutoScroll(probeBox, () => probeText);
         hint="放进 ReShade 真正读取的目录（d3d12.dll 所在处）。关掉后不注入面板；此时「整合 Mod 快捷键」会拒绝锁键。" />
       <SettingSwitch k="prefer_internal_dependencies" label="依赖包优先用控制器维护的那份"
         hint="RabbitFX 这类依赖：同一时间只允许一份生效。开启时优先用控制器自己维护的 _deps 那份，屏蔽你手动放进库的。" />
+      <SettingSwitch k="auto_adopt_manual_mods" label="自动清理 XXMI 里的外来 Mod（收编进库后删掉）"
+        hint="默认开。XXMI 的 Mods 目录只该放本程序的产物；里面出现别的目录时（你手动丢进去的、别的整合包留下的）：先反向同步进 Mod 库（库里已有就只标记、不重复拷），再从 Mods 删掉，并自动勾选显示为开启。⚠️ 为什么必须删：它会和本程序随后生成的同角色 Mod 构成「同角色成对」，游戏会直接崩。关掉则原样保留。" />
       <SettingSwitch k="reshade_panel_font" label="面板自动用系统中文字体"
         hint="ReShade 默认字体只有 ASCII，面板里的中文会显示成方块。开启时（仅在 Font 还为空时）自动指向系统中文字体，写前会备份。" />
     </Card>

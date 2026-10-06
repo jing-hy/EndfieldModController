@@ -2845,6 +2845,35 @@ def ensure_all(config: AppConfig, log: Callable[[str], None] | None = None) -> d
                        f"DLSS5 已关闭，但按开关停用相关 addon 失败（ReShade 可能仍会加载它们）: {exc}",
                        manual=True)
 
+    # ★★ **最后再清一次「已退役的旧 NR 引擎」**（2026-10-07 实测抓到，与上面那条同源）。
+    #
+    #    现场（本机）：`runtime\dlss5\` 里同时躺着
+    #      `renodx-dlss5-4.7_汉化.addon64`（旧，已退役）与 `renodx-dlss5.addon64`（新版 7.0.0-rc8）。
+    #    两者注册名**完全相同**（"DLSS 5 Neural Rendering"）⇒ ReShade 日志：
+    #      `ERROR | Failed to register add-on … already registered!`
+    #      `ERROR | Failed to load add-on … with error code 1114!`
+    #      `ERROR | vtable::Hook(Failed to find NVSDK_NGX_D3D12_EvaluateFeature_C)`
+    #    ⇒ **NR 实际没生效**。这正是上游警告的「Never install two neural add-ons … it does
+    #    nothing at all for the whole session」。
+    #
+    #    根因：本函数**第 1 步** `_check_bundled_assets` 会把随包 addon 无条件展开到顶层
+    #    （`retire_stale_nr_addons()` 跑在它**之前** ⇒ 展开又把退役那份铺了回来；旧数据根的
+    #    `assets\dlss5\manifest.json` 里还列着它）。**与上面"按开关归位"是同一个病**：
+    #    展开会撤销前面的动作，所以兜底必须放在最后一步。
+    try:
+        from . import runtime_assets as _assets
+
+        parked = _assets.retire_stale_nr_addons(config, log=log)
+        if parked:
+            report.add("dlss5:retired_nr_parked", True,
+                       "已把退役的旧 NR 引擎移出底座目录（两个同名 neural addon 同装会让"
+                       "**两个都不工作**）：" + "、".join(parked),
+                       fixed=True)
+    except Exception as exc:  # noqa: BLE001
+        report.add("dlss5:retired_nr_parked", False,
+                   f"清理退役 NR 引擎失败（ReShade 可能同时加载新旧两份，NR 会失效）: {exc}",
+                   manual=True)
+
     payload = report.to_dict()
     for action in payload["actions"]:
         _log(log, f"初始化补齐: {action}")

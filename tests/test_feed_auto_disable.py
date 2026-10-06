@@ -204,14 +204,21 @@ def test_ensure_all_parks_dlss5_addons_when_master_switch_off(tmp_path, monkeypa
 
 
 def test_ensure_all_keeps_switched_on_addons_alone(tmp_path, monkeypatch):
-    """反向对照：总开关**开着**时，这一步一个字都不许动（别把用户开着的 DLSS5 弄停）。"""
+    """反向对照：总开关**开着**时，「按开关停用 addon」这一步一个字都不许动。
+
+    ⚠️ 2026-10-07 修正：原来这里用 `renodx-dlss5-4.7_hanhua.addon64`（旧 NR 引擎）当样本，
+    断言它"还在" —— 而**退役的旧 NR 引擎现在总是会被搬走**（它与随包的 7.0.0-rc8 注册名
+    相同，同装会让两个都不工作，实测 ReShade 报 `error 1114`）。所以换成**没退役**的
+    addon 来验"开关开着时不动它"，退役那条另由
+    `tests/test_no_duplicate_neural_addons.py` 覆盖。
+    """
     config, _game, dlss5 = _env(tmp_path, native_dlss=False, feed_present=False)
     config.dlss5_addon_enabled = True
-    (dlss5 / "renodx-dlss5-4.7_hanhua.addon64").write_bytes(b"dlss5")
+    (dlss5 / "renodx-endfield-enhancer.addon64").write_bytes(b"enhancer")
     (dlss5 / "dlss5-feed.addon64").write_bytes(b"feed")
     _stub_ensure_all(monkeypatch)
 
     initialize.ensure_all(config, log=None)
 
-    assert (dlss5 / "renodx-dlss5-4.7_hanhua.addon64").is_file()
+    assert (dlss5 / "renodx-endfield-enhancer.addon64").is_file()
     assert (dlss5 / "dlss5-feed.addon64").is_file()

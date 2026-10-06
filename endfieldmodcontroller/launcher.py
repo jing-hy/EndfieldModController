@@ -2543,16 +2543,26 @@ def launch_official_gui(config: AppConfig) -> dict[str, Any]:
     # 那个开启，库里没有就把它放到库里，然后显示开启」。
     # 时机很关键：必须在下面对 Mods 的整目录清空**之前**执行，否则手动放的 Mod 会被
     # 直接清掉。收编后它们进入 selected_mods，本次 staging 就会正常生成 MC_* 产物。
-    try:
-        synced = activation.import_manual_mods(config, log=lambda m: _append_log(config, m))
-        if synced.get("found"):
-            detail = (f"手动 Mod 同步: 收进库 {len(synced['imported'])} 个、"
-                      f"库中已有 {len(synced['matched'])} 个")
-            if synced.get("selected_added"):
-                detail += f"；已在界面勾选: {', '.join(synced['selected_added'])}"
-            _append_log(config, detail)
-    except Exception as exc:  # noqa: BLE001
-        _append_log(config, f"同步手动 Mod 失败（已跳过，继续启动）: {exc}")
+    #
+    # ★ 2026-10-06 用户要求把它**做成开关**（默认开）：「设置加个按钮，xxmi 自动清理
+    #   非管理器插件，默认开，如果 xxmi 中有其他 mod，就反向同步到库里，然后直接删掉」。
+    #   关掉 ⇒ `Mods\` 里的外来目录**原样保留**（给"我有特殊摆法"的用户留退路）。
+    if not bool(getattr(config, "auto_adopt_manual_mods", True)):
+        _append_log(config, "«自动收编 XXMI 里的外来 Mod» 已关闭：Mods 目录里的外来目录保持原样")
+    else:
+        try:
+            synced = activation.import_manual_mods(config, log=lambda m: _append_log(config, m))
+            if synced.get("found"):
+                detail = (f"手动 Mod 同步: 收进库 {len(synced['imported'])} 个、"
+                          f"库中已有 {len(synced['matched'])} 个")
+                if synced.get("selected_added"):
+                    detail += f"；已在界面勾选: {', '.join(synced['selected_added'])}"
+                _append_log(config, detail)
+        except activation.LibraryGuardError as exc:
+            # 「不要动用户的 Mod 库」（用户 2026-10-01 硬规则）：staging 与库重叠时拒绝执行。
+            _append_log(config, f"同步手动 Mod 已拒绝（保护 Mod 库）: {exc}")
+        except Exception as exc:  # noqa: BLE001
+            _append_log(config, f"同步手动 Mod 失败（已跳过，继续启动）: {exc}")
 
     # Mods 目录由控制器全权管理：最终只放"用户在 Mod 库勾选的那些"。
     # stage_and_prepare 会先清空整个 Mods 里的 `MC_*`（用户手动放的照样保留），再按选择生成。

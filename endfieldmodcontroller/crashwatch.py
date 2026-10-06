@@ -16,6 +16,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -2128,13 +2129,22 @@ def collect_diagnosis_files(config: AppConfig, dest: Path, *,
     taken: list[str] = []
 
     def take(src: Path | None, arcname: str, *, limit: int = 8 * 1024 * 1024) -> None:
-        """收一个文件（超限/读不到就安静跳过 —— 取证不能反噬打包）。"""
+        """收一个文件（超限/读不到就安静跳过 —— 取证不能反噬打包）。
+
+        ⚠️ **arcname 可以是子目录**（例如 `logs/launch.log`）⇒ 必须先建父目录：
+        否则 `shutil.copy2` 抛 `FileNotFoundError`（属 `OSError`）被这里静默吞掉
+        ⇒ **整批文件一个都进不了包**（2026-10-07 实测栽在这：291 份日志全丢，而日志里
+        没有任何提示 —— 因为"安静跳过"是故意的）。静默失败的前提是"目标父目录一定在"，
+        这一点以前不成立。
+        """
         if src is None:
             return
         try:
             if not src.is_file() or src.stat().st_size > limit:
                 return
-            shutil.copy2(src, dest / arcname)
+            target = dest / arcname
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, target)
             taken.append(arcname)
         except OSError:
             return
@@ -2188,8 +2198,77 @@ def collect_diagnosis_files(config: AppConfig, dest: Path, *,
             for sub in ("Endfield", "Arknights Endfield"):
                 take(home / "AppData" / "LocalLow" / "Hypergryph" / sub / "Player.log",
                      "player-Player.log")
+                # ⚠️ 上一份也要（崩溃那次常常只剩 prev 是完整的）
+                take(home / "AppData" / "LocalLow" / "Hypergryph" / sub / "Player-prev.log",
+                     "player-Player-prev.log")
     except Exception:  # noqa: BLE001
         pass
+
+    # ④b ★★★ **游戏自己的崩溃报告**（2026-10-07 补 —— 这是 issue16 一直查不动的根因）
+    #
+    #     游戏崩溃时会把**带完整堆栈**的日志写到这里：
+    #       `%TEMP%\Hypergryph\Endfield\Crashes\Player.log`（几十~一百多 KB，含 `OUTPUTTING STACK TRACE`）
+    #       `%TEMP%\Hypergryph\Endfield\Crashes\crash.dmp`（1.5~2 MB 的 minidump）
+    #     **我们从来没收集过这个目录** ⇒ 每次拿到手的都只是 `LocalLow` 那份**被截断**的日志
+    #     （实测：反馈者的只有 48 行、止于 `MemoryPool::MMapMemoryBlock count:0`，
+    #       而崩溃原因恰恰在堆栈里）。
+    #     ⚠️ 用户定的规矩是「**第一轮排查只允许看收进日志包的**」⇒ 日志必须全收，
+    #        只有真正的大二进制才节选 ⇒ 这里 `Player.log` **全收**，`crash.dmp` **只记存在与大小**
+    #        （2 MB 的 dump 收进去会让包变大，而堆栈已经在 `Player.log` 里了）。
+    try:
+        import glob as _glob
+        crashes = Path(os.environ.get("TEMP") or tempfile.gettempdir()) / "Hypergryph" / "Endfield" / "Crashes"
+        if crashes.is_dir():
+            reports = sorted(
+                (p for p in crashes.rglob("Player.log") if p.is_file()),
+                key=lambda p: p.stat().st_mtime, reverse=True)
+            for index, report in enumerate(reports[:3]):          # 只取最近 3 次
+                take(report, f"game-crash-{index + 1}-Player.log")
+            rows = ["# 游戏崩溃报告目录（%TEMP%\\Hypergryph\\Endfield\\Crashes）",
+                    "# crash.dmp 是 minidump（MB 级二进制，**不随包分发**，此处只记存在与大小）", ""]
+            for item in sorted(crashes.rglob("*")):
+                if item.is_file():
+                    rows.append(f"{item.stat().st_size:>12,} B  {item.stat().st_mtime:.0f}  "
+                                f"{item.relative_to(crashes)}")
+            (dest / "game-crash-reports.txt").write_text("\n".join(rows) + "\n", encoding="utf-8")
+            taken.append("game-crash-reports.txt")
+            emit(f"排查素材: 游戏崩溃报告目录收到 {min(len(reports), 3)} 份 Player.log")
+    except Exception as exc:  # noqa: BLE001
+        emit(f"排查素材: 游戏崩溃报告目录失败（忽略）: {exc}")
+
+    # ④c ★ **我们自己的日志全量收**（`launch.log` 与逐次会话日志 —— 判"走到哪一步"的第一手材料）
+    #
+    #   ⚠️ 以前只零散收 ReShade / addon 那几份，**主日志 `launch.log` 根本没进包** ——
+    #      而"一键启动卡在哪一步、注入库写成什么、清理搬走了什么"全在里面。
+    #      实测排查 issue16 时要靠用户截图才看到它。
+    #   体积：单份几十 KB ~ 几 MB；**日志全收**（用户 2026-10-05：「你自己怎么查的，就把那些文件全收进日志包」）。
+    try:
+        rt = Path(config.runtime_path)
+        # ⚠️ `launch.log` 在 **runtime 根**（不在 `logs\` 里）—— 实测漏过一次
+        roots = [rt, rt / "logs"]
+        budget = 64 * 1024 * 1024          # 日志总量上限，正常情况远用不到
+        used = 0
+        patterns = ("launch.log", "endfieldmodcontroller-*.log", "windows-events-*.log",
+                    "loader_debug*.log", "d3d11_log*.txt", "ReShade-*.log", "*.dmp.txt")
+        collected: list[Path] = []
+        for root in roots:
+            if not root.is_dir():
+                continue
+            for pattern in patterns:
+                collected.extend(p for p in root.glob(pattern) if p.is_file())
+        # 最新的优先（排查看的就是最近那次）
+        collected.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        for item in collected:
+            size = item.stat().st_size
+            if used + size > budget:
+                continue
+            take(item, f"logs/{item.name}")
+            used += size
+        if collected:
+            emit(f"排查素材: 运行时日志收到 {sum(1 for t in taken if t.startswith('logs/'))} 份"
+                 f"（约 {used / 1048576:.1f} MB）")
+    except Exception as exc:  # noqa: BLE001
+        emit(f"排查素材: 运行时日志收集失败（忽略）: {exc}")
 
     # ⑤ XXMI 那一侧（配置 + 它自己的日志）
     try:

@@ -1079,7 +1079,26 @@ def _ensure_all_locked(
     # ⚠️ **先搬走退役的旧 NR 引擎**（2026-10-06）：两个 neural addon 同装时两个都不工作。
     retire_stale_nr_addons(config, log=log)
 
-    found = manifest_entries(config)
+    # ⚠️⚠️ **清单里也要把它们排除掉**（2026-10-07 实测抓到）：
+    #    数据根那份 `assets\dlss5\manifest.json` 可能是**旧的**（上面还列着
+    #    `renodx-dlss5-4.7_汉化.addon64`），而合并口径是"数据根优先" ⇒ 旧条目依然生效
+    #    ⇒ **展开时又把退役引擎铺回根目录** ⇒ 与新版**同名**（都叫 "DLSS 5 Neural Rendering"）
+    #    ⇒ ReShade 报 `Failed to register add-on … already registered! (error 1114)`
+    #    ⇒ **NR 实际没生效**（本机实测：`vtable::Hook(Failed to find …EvaluateFeature_C)`）。
+    #    这是上游明确警告过的「Never install two neural add-ons … it does nothing at all」。
+    #    ⇒ 在**展开之前**就把退役条目从清单里剔掉，从源头上不让它落盘。
+    _found_before_filter = manifest_entries(config)
+    retired_names = {name.lower() for name in RETIRED_NR_ADDONS}
+
+    def _is_retired(entry_name: str) -> bool:
+        lowered = entry_name.lower()
+        return lowered in retired_names or (
+            "renodx-dlss5-4.7" in lowered and lowered.endswith(".addon64"))
+
+    found = [item for item in _found_before_filter if not _is_retired(item[2])]
+    if len(found) != len(_found_before_filter):
+        _log(log, "随包清单里剔除了已退役的旧 NR 引擎（两个同名 neural addon 会导致两个都不工作）："
+                  + "、".join(sorted(n for _g, _r, n, _e in _found_before_filter if _is_retired(n))))
     if not found and allow_fetch:
         # 拉资产包是**网络下载**，失败要重试（用户 2026-10-01 要求「全部下载完之后如果
         # 有失败项，就重试，3 次截止」）。以前一次失败就直接报"找不到随包资产"，
