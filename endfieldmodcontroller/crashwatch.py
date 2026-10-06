@@ -420,6 +420,69 @@ def nr_settings_snapshot(config: AppConfig) -> str:
     return hits[-1].split("DLSS5 active settings:", 1)[1].strip()
 
 
+# Windows 标准对话框的窗口类名（`#32770` = Dialog）
+_DIALOG_CLASS = "#32770"
+_CRT_DIALOG_HINTS = ("microsoft visual c++ runtime library", "runtime error")
+
+
+def _visible_windows() -> list[tuple[int, str, str]]:
+    """枚举**可见的顶层窗口**：`[(pid, 标题, 类名)]`（非 Windows 返回空）。"""
+    import os
+
+    if os.name != "nt":
+        return []
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    out: list[tuple[int, str, str]] = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def _callback(hwnd, _lparam):  # noqa: ANN001
+        try:
+            if not user32.IsWindowVisible(hwnd):
+                return True
+            pid = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            length = int(user32.GetWindowTextLengthW(hwnd) or 0)
+            title = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hwnd, title, length + 1)
+            klass = ctypes.create_unicode_buffer(256)
+            user32.GetClassNameW(hwnd, klass, 256)
+            out.append((int(pid.value), title.value.strip(), klass.value.strip()))
+        except Exception:  # noqa: BLE001 —— 单个窗口出问题不该影响其它
+            pass
+        return True
+
+    try:
+        user32.EnumWindows(_callback, 0)
+    except Exception:  # noqa: BLE001
+        return []
+    return out
+
+
+def stuck_on_crt_dialog() -> str:
+    """进程是不是**卡在 CRT 的 `Runtime Error!` 弹窗**上（没退出、也没有崩溃事件）。
+
+    为什么要它（2026-10-06 反馈给的截图）：那是典型的
+    「Microsoft Visual C++ Runtime Library / `Runtime Error!` / This application has requested
+    the Runtime to terminate it in an unusual way.」—— `abort()`（未捕获 C++ 异常 /
+    `std::terminate`）弹出的**模态对话框**。
+
+    ⚠️ 关键：按我们自己记过的坑，**它会把进程卡在弹窗上 —— 既不写事件、也不退出**。
+    于是事件日志 / WER / 退出码**一条都拿不到**（`diagnostics` 里解析的那两个退出码
+    `0xC0000409` / `0x40000015` 此时根本不会出现），"闪退"这个词也就对不上现场
+    （进程其实还活着）。所以只能**直接枚举窗口**。
+    """
+    for pid, title, klass in _visible_windows():
+        low = title.lower()
+        if klass == _DIALOG_CLASS and any(hint in low for hint in _CRT_DIALOG_HINTS):
+            return (f"**卡在 CRT 弹窗上**：窗口「{title}」（PID {pid}，类 {klass}）"
+                    f"—— 这是 `abort()` / 未捕获 C++ 异常弹的模态框。**进程还活着**，"
+                    f"事件日志与 WER 都不会有记录，所以别按「闪退」去找；先关掉这个弹窗。")
+    return ""
+
+
 def nr_toggle_flap(config: AppConfig, *, window: float = 3.0) -> str:
     """NR 有没有"**刚打开就被关掉**"（`toggled ON` 之后几秒内又 `toggled OFF`）。
 
@@ -494,6 +557,9 @@ def crash_forensics(config: AppConfig, evidence: dict[str, Any] | None = None) -
     flap = nr_toggle_flap(config)
     if flap:
         lines.append(f"NR 开关：{flap}")
+    stuck = stuck_on_crt_dialog()
+    if stuck:
+        lines.append(f"当前状态：{stuck}")
     return lines
 
 

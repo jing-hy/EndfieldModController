@@ -168,3 +168,34 @@ def test_nr_toggle_staying_on_is_not_flagged(env):
         "21:20:00:000 | INFO | NR toggled OFF via F6\n",
         encoding="utf-8")
     assert crashwatch.nr_toggle_flap(config) == ""
+
+
+def test_crt_runtime_error_dialog_is_detected(monkeypatch):
+    """★ 卡在 CRT `Runtime Error!` 弹窗上（反馈截图那种）。
+
+    这类失败**进程还活着**：事件日志、WER、退出码一条都拿不到，所以只能枚举窗口。
+    """
+    monkeypatch.setattr(crashwatch, "_visible_windows",
+                        lambda: [(4321, "Microsoft Visual C++ Runtime Library", "#32770"),
+                                 (9999, "Endfield", "UnityWndClass")])
+    text = crashwatch.stuck_on_crt_dialog()
+    assert "卡在 CRT 弹窗上" in text
+    assert "4321" in text
+    assert "进程还活着" in text
+
+
+def test_unrelated_dialogs_are_ignored(monkeypatch):
+    """别的对话框、或标题像但**不是对话框类**的窗口，都不算。"""
+    monkeypatch.setattr(crashwatch, "_visible_windows",
+                        lambda: [(1, "另存为", "#32770"),
+                                 (2, "Runtime Error", "Notepad"),
+                                 (3, "Endfield", "UnityWndClass")])
+    assert crashwatch.stuck_on_crt_dialog() == ""
+
+
+def test_forensics_includes_stuck_dialog_when_present(env, monkeypatch):
+    config, _tmp, _wer = env
+    monkeypatch.setattr(crashwatch, "_visible_windows",
+                        lambda: [(777, "Microsoft Visual C++ Runtime Library", "#32770")])
+    lines = crashwatch.crash_forensics(config)
+    assert any("卡在 CRT 弹窗上" in line for line in lines)
