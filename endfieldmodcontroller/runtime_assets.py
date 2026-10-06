@@ -42,7 +42,7 @@ from .config import PROJECT_ROOT, AppConfig
 # 资产组：目录名 → 说明（都解压到 dlss5_dir）
 ASSET_GROUPS: dict[str, str] = {
     "nvngx": "NVIDIA DLSS 运行库（随包，压缩分卷）",
-    "dlss5": "DLSS5 组件包（无公开上游，随包内置）",
+    "dlss5": "DLSS5 组件包（随包内置：第一人称插件 + 面板汉化 + NR 引擎 7.0.0-rc8）",
 }
 MANIFEST_NAME = "manifest.json"
 CHUNK = 1 << 22
@@ -931,6 +931,46 @@ def _is_dlssnr_item(item: tuple[str, Path, str, dict[str, Any]]) -> bool:
     return str(entry.get("install_as") or name) == DLSSNR_TARGET
 
 
+# 已退役的随包 NR 引擎（2026-10-06：由 4.70 换成官方 7.0.0-rc8）。
+# 为什么必须**主动搬走**而不是只报出来：ReShade 会加载底座根目录里的**所有** `*.addon64`，
+# 而两个 neural addon 同装时**两个都不工作**（DLSS5-Feeder 原话：
+# "Never install two neural add-ons … it does nothing at all for the whole session"）；
+# 且旧版 4.70 在驱动 616.64 及以上会 evaluate 崩在 NVIDIA 自己的 `nvngx_dlssnr.dll`
+# （Feeder issue #54，官方矩阵 0/300）。用户升级后旧文件会留在原地
+# ⇒ 不搬走就等于"升级了还是坏的"。
+RETIRED_NR_ADDONS = ("renodx-dlss5-4.7.addon64", "renodx-dlss5-4.7_汉化.addon64")
+RETIRED_DIR = "_retired_addons"
+
+
+def retire_stale_nr_addons(config: AppConfig, *,
+                           log: Callable[[str], None] | None = None) -> list[str]:
+    """把**已退役**的旧 NR 引擎从 `dlss5` 根目录搬进 `_retired_addons\\`（只搬不删，可还原）。"""
+    base = Path(config.dlss5_path)
+    if not base.is_dir():
+        return []
+    moved: list[str] = []
+    for name in RETIRED_NR_ADDONS:
+        source = base / name
+        if not source.is_file():
+            continue
+        target_dir = base / RETIRED_DIR
+        try:
+            target_dir.mkdir(parents=True, exist_ok=True)
+            dest = target_dir / name
+            if dest.exists():
+                import time as _time
+
+                dest = target_dir / f"{name}.{_time.strftime('%Y%m%d-%H%M%S')}"
+            shutil.move(str(source), str(dest))
+        except OSError as exc:
+            _log(log, f"旧版 NR 引擎 {name} 搬走失败（忽略）：{exc}")
+            continue
+        moved.append(name)
+        _log(log, "已停用旧版 NR 引擎 " + name + f"（搬到 {RETIRED_DIR}\\，可还原）——"
+                  "旧版在驱动 616.64 及以上会崩在 nvngx_dlssnr.dll，已改用随包的 7.0.0-rc8")
+    return moved
+
+
 def ensure_all(
     config: AppConfig,
     *,
@@ -972,6 +1012,9 @@ def _ensure_all_locked(
     import time as _time
 
     from . import dependencies
+
+    # ⚠️ **先搬走退役的旧 NR 引擎**（2026-10-06）：两个 neural addon 同装时两个都不工作。
+    retire_stale_nr_addons(config, log=log)
 
     found = manifest_entries(config)
     if not found and allow_fetch:

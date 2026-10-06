@@ -483,6 +483,191 @@ def stuck_on_crt_dialog() -> str:
     return ""
 
 
+# 已知的"**替代 NR provider**"addon：与 `renodx-dlss5*.addon64` 抢同一个 provider 位。
+# 来源 = DLSS5-Feeder 自己的警告（2026-10-06 反馈包实测原文）：
+#   "Deep Fried Chicken 1.4.8-alpha and renodx-dlss5.addon64 are BOTH next to this add-on.
+#    Chicken replaces the RenoDX neural provider and stays inert for the whole process while
+#    both are loaded, so neural rendering will come from RenoDX or from nothing."
+_RIVAL_NR_PROVIDERS = {
+    "deep-fried-chicken.addon64":
+        "Deep Fried Chicken（自带 neural provider，与 RenoDX 抢同一个位置）",
+}
+
+
+# NR 引擎 × 驱动的**已知坏组合**（DLSS5-Feeder 官方矩阵 / issue #54，2026-10-06）。
+# 官方矩阵：renodx-dlss5 v4.70 在 616.56 上 300/300，但 616.64 与 617.14 上 **0/300**；
+# v6.1.0 / v7.0.0-rc8 / v8.0.1 在 617.14 上 300/300。
+_NR_ENGINE_BAD_MAX = (4, 70)
+_NR_DRIVER_BAD_MIN = (616, 64)
+
+
+def _driver_branch(version: str) -> tuple[int, int] | None:
+    """把 Windows 的驱动版本 `32.0.16.1714` 换算成 NVIDIA 的 `617.14`。
+
+    规则：取最后两段数字拼起来（`16` + `1714` = `161714`），**后 5 位**再拆成 `617` / `14`。
+    """
+    parts = [part for part in str(version).split(".") if part.isdigit()]
+    if len(parts) < 2:
+        return None
+    digits = "".join(parts[-2:])
+    if len(digits) < 5:
+        return None
+    tail = digits[-5:]
+    return (int(tail[:3]), int(tail[3:]))
+
+
+def current_driver_branch() -> tuple[int, int] | None:
+    """本机 NVIDIA 驱动分支（如 `(617, 14)`）；拿不到返回 None。"""
+    try:
+        from . import deviceinfo
+
+        for adapter in deviceinfo._adapters():
+            # ⚠️ **只认 NVIDIA 那张卡**（2026-10-06）：本机/很多机器是"核显 + 独显"，
+            #    取第一个会读到 AMD/Intel 的驱动号（实测得到 199.49 这种值）。
+            if "nvidia" not in str(adapter.get("name") or "").lower():
+                continue
+            branch = _driver_branch(str(adapter.get("driver") or ""))
+            if branch:
+                return branch
+    except Exception:  # noqa: BLE001 —— 拿不到就不判
+        return None
+    return None
+
+
+def nr_engine_version(config: AppConfig) -> tuple[int, int] | None:
+    """日志里报出的 NR 引擎版本（`RenoDX DLSS5 Generic v4.7 (build …)`）。"""
+    from . import nr_autostart
+
+    for path in (nr_autostart.reshade_log_path(config),
+                 Path(config.dlss5_path) / "ReShade.log"):
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        # ⚠️ **只看本次运行那段**（2026-10-06）：日志是追加写的，直接取最后一条会读到
+        #    上一次运行留下的旧版本行（换版之后尤其容易看错）。
+        marker = "Initializing crosire's ReShade"
+        recent = text[text.rfind(marker):] if text.rfind(marker) >= 0 else text
+        found = re.findall(r"RenoDX DLSS5 Generic v(\d+)\.(\d+)", recent)
+        if found:
+            major, minor = found[-1]
+            return (int(major), int(minor))
+    return None
+
+
+def nr_ran_ok(config: AppConfig) -> bool:
+    """本次运行 NR 有没有**真的出帧**（`evaluation succeeded (count=N)` 且 N > 1）。
+
+    ⚠️ `count=1` 不算成功：首帧建起来之后就没下文，正是"建了但没跑起来"的形态。
+    """
+    from . import nr_autostart
+
+    for path in (nr_autostart.reshade_log_path(config),
+                 Path(config.dlss5_path) / "ReShade.log"):
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        marker = "Initializing crosire's ReShade"
+        recent = text[text.rfind(marker):] if text.rfind(marker) >= 0 else text
+        counts = [int(value) for value in
+                  re.findall(r"inline feature 18 evaluation succeeded \(count=(\d+)", recent)]
+        if counts and max(counts) > 1:
+            return True
+    return False
+
+
+def nr_engine_driver_mismatch(config: AppConfig) -> str:
+    """NR 引擎 × 驱动落在官方矩阵的**坏格子**里、**且这次确实没出帧**时给一句线索。
+
+    ⚠️ **不要只看矩阵**（2026-10-06 自我纠正）：本机同驱动（617.14）实测 v4.7 出帧
+    `count=60` 正常 ⇒ 矩阵那格不能当根因；所以这里先用 `nr_ran_ok()` 卡一道
+    —— **出帧正常就一个字都不说**（判据要等于被观测事实）。
+    """
+    if nr_ran_ok(config):
+        return ""
+    engine = nr_engine_version(config)
+    driver = current_driver_branch()
+    if not engine or not driver:
+        return ""
+    if engine > _NR_ENGINE_BAD_MAX or driver < _NR_DRIVER_BAD_MIN:
+        return ""
+    return (f"**NR 引擎 {engine[0]}.{engine[1]} × 驱动 {driver[0]}.{driver[1]} 是已知会崩的组合**"
+            f"—— DLSS5-Feeder 官方矩阵里该组合为 **0/300**，失败形态是 evaluate 崩在 "
+            f"`nvngx_dlssnr.dll`（issue #54）。请把随包的 NR 引擎换成 **7.0.0-rc8 或更新**"
+            f"（v6.1+ 起在 617.14 上是 300/300）")
+
+
+def nr_provider_conflict(config: AppConfig) -> str:
+    r"""`runtime\dlss5\` 里是不是**同时装了两个互相顶替的 NR provider**。
+
+    为什么要它（2026-10-06 反馈）：那位机器上 `deep-fried-chicken.addon64`（自己装的）
+    与随包的 `renodx-dlss5-4.7_汉化.addon64` 并存 ⇒ 日志里 Feeder 明确 WARN
+    「两者同装时**两个都不工作**，neural rendering will come from RenoDX **or from nothing**」
+    ⇒ 面板停在「未匹配NR功能 成功NR帧 0」，紧接着 NR 的 evaluate 还**崩在运行库里**。
+    这条冲突 Feeder 检测得到、我们一直没检测 ⇒ 补上。
+    """
+    base = Path(getattr(config, "dlss5_path", "") or "")
+    if not base.is_dir():
+        return ""
+    try:
+        names = {path.name.lower(): path.name for path in base.glob("*.addon64")}
+    except OSError:
+        return ""
+    reno = sorted(name for low, name in names.items() if low.startswith("renodx-dlss5"))
+    rivals = sorted(names[low] for low in names if low in _RIVAL_NR_PROVIDERS)
+    if not (reno and rivals):
+        return ""
+    detail = "；".join(_RIVAL_NR_PROVIDERS[name.lower()] for name in rivals)
+    return (f"**两个 NR provider 同时在场**：{'、'.join(rivals)} 与 {'、'.join(reno)}"
+            f"（{detail}）—— 二者互相顶替，**同装时两个都不工作**（Feeder 的原话："
+            f"neural rendering will come from RenoDX or from nothing）⇒ NR 会停在"
+            f"「未匹配NR功能 / 成功NR帧 0」，evaluate 还可能直接崩在 `nvngx_dlssnr.dll` 里。"
+            f"处理：**二选一**（只留一个），然后完全重启游戏。")
+
+
+def nr_evaluate_crash(config: AppConfig) -> str:
+    """DLSS5-Feeder 有没有记下「**NR 的 evaluate 崩了**」——它带**故障模块**，比 WER 准。
+
+    实测现场（2026-10-06 反馈包 `dlss5-feed.log`）：
+
+        11:17:43.717 [feed] evaluate raised 0xC0000005 (reading address FFFFFFFFFFFFFFFF)
+                            (caught; nothing submitted)
+        11:17:43.717 [feed] evaluate fault stack, by module (innermost first):
+                            D3D12Core.dll <- nvngx_dlssnr.dll
+        11:17:43.718 stopped: the DLSS evaluate crashed
+
+    ⇒ 崩在 **`nvngx_dlssnr.dll`**（NR 运行库）里。WER 那边只给出 `StackHash_*`（定位不到模块），
+    所以这条是"崩在 NR 运行库"**唯一**的一手证据。
+    """
+    path = Path(getattr(config, "dlss5_path", "") or "") / "dlss5-feed.log"
+    if not path.is_file():
+        return ""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    marker = "feed: opening D3D12 session"
+    recent = text[text.rfind(marker):] if text.rfind(marker) >= 0 else text
+    address = ""
+    stack = ""
+    for line in recent.splitlines():
+        if "evaluate raised" in line and "0xC0000005" in line and not address:
+            found = re.search(r"reading address ([0-9A-Fa-f]+)", line)
+            address = found.group(1) if found else ""
+        if "evaluate fault stack" in line and not stack:
+            stack = line.split("innermost first)", 1)[-1].lstrip(": ").strip()
+    if not (address or stack):
+        return ""
+    parts = ["**NR 的 evaluate 崩了**（DLSS5-Feeder 在进程内捕获，带故障模块）"]
+    if address:
+        parts.append(f"读地址 `0x{address}`")
+    if stack:
+        parts.append(f"故障栈（内→外）`{stack}`")
+    parts.append("⇒ 这是 NR 运行库里的崩溃，不是游戏自身逻辑")
+    return "；".join(parts)
+
+
 def nr_toggle_flap(config: AppConfig, *, window: float = 3.0) -> str:
     """NR 有没有"**刚打开就被关掉**"（`toggled ON` 之后几秒内又 `toggled OFF`）。
 
@@ -554,6 +739,15 @@ def crash_forensics(config: AppConfig, evidence: dict[str, Any] | None = None) -
     snapshot = nr_settings_snapshot(config)
     if snapshot:
         lines.append(f"当时的 NR 档位（**只记录、不归因**）：{snapshot}")
+    mismatch = nr_engine_driver_mismatch(config)
+    if mismatch:
+        lines.append(f"NR 版本：{mismatch}")
+    conflict = nr_provider_conflict(config)
+    if conflict:
+        lines.append(f"NR 冲突：{conflict}")
+    crashed = nr_evaluate_crash(config)
+    if crashed:
+        lines.append(f"NR 运行库：{crashed}")
     flap = nr_toggle_flap(config)
     if flap:
         lines.append(f"NR 开关：{flap}")

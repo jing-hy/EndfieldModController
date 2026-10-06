@@ -969,7 +969,7 @@ def sign_xxmi_setting(config_path: Path, value: str) -> str:
 # 一个进程只能有一个 ReShade 底座，所以两者无法用两个 dll 分开注入；
 # 正确的"拆开"方式是各自启停 addon 文件——ReShade 只加载底座**根目录**里的
 # *.addon64，把文件移进 _disabled 子目录就等于停用。
-DLSS5_ADDON_GLOBS = ("renodx-dlss5*.addon64", "dlss5-feed.addon64", "trans-zh.addon64", "translations.txt")
+DLSS5_ADDON_GLOBS = ("renodx-dlss5.addon64", "dlss5-feed.addon64", "trans-zh.addon64", "translations.txt")
 FIRSTPERSON_ADDON_GLOBS = ("renodx-endfield-enhancer.addon64",)
 # 「喂帧组件」单独一档（2026-10-01）：它平时跟 DLSS5 组件一起启停，但在**游戏自带 DLSS**
 # 的机器上会与游戏自己的 DLSS 抢同一条 NGX 链路 —— `dlss5-feed` 组件自己在日志里就写着

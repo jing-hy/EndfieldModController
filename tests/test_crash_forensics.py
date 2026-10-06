@@ -199,3 +199,62 @@ def test_forensics_includes_stuck_dialog_when_present(env, monkeypatch):
                         lambda: [(777, "Microsoft Visual C++ Runtime Library", "#32770")])
     lines = crashwatch.crash_forensics(config)
     assert any("卡在 CRT 弹窗上" in line for line in lines)
+
+
+def test_rival_nr_provider_conflict_is_reported(tmp_path, monkeypatch):
+    """★ 两个 NR provider 同装（Chicken + RenoDX）⇒ **两者都不工作**。
+
+    样本即反馈包现场：`deep-fried-chicken.addon64`（自己装的）与随包的
+    `renodx-dlss5-4.7_汉化.addon64` 并存 —— 这是面板「未匹配NR功能 / 成功NR帧 0」的直接原因。
+    """
+    dlss5 = tmp_path / "dlss5"
+    dlss5.mkdir()
+    for name in ("deep-fried-chicken.addon64", "renodx-dlss5-4.7_汉化.addon64"):
+        (dlss5 / name).write_bytes(b"x")
+    monkeypatch.setattr(AppConfig, "dlss5_path", property(lambda self: dlss5))
+    config = AppConfig()
+    text = crashwatch.nr_provider_conflict(config)
+    assert "两个 NR provider 同时在场" in text
+    assert "deep-fried-chicken.addon64" in text
+    assert "二选一" in text
+    (dlss5 / "deep-fried-chicken.addon64").unlink()          # 只留 RenoDX ⇒ 不该再报
+    assert crashwatch.nr_provider_conflict(config) == ""
+
+
+def test_evaluate_crash_from_feed_log_is_reported(tmp_path, monkeypatch):
+    """★ Feeder 记下的 evaluate 崩溃 —— **它带故障模块**，比 WER 的 `StackHash_*` 准得多。"""
+    dlss5 = tmp_path / "dlss5"
+    dlss5.mkdir()
+    (dlss5 / "dlss5-feed.log").write_text(
+        "11:17:39.112  ################ feed: opening D3D12 session ################\n"
+        "11:17:43.717  [feed] evaluate raised 0xC0000005 (reading address FFFFFFFFFFFFFFFF)"
+        " (caught; nothing submitted)\n"
+        "11:17:43.717  [feed] evaluate fault stack, by module (innermost first):"
+        " D3D12Core.dll <- nvngx_dlssnr.dll\n"
+        "11:17:43.718  stopped: the DLSS evaluate crashed\n",
+        encoding="utf-8")
+    monkeypatch.setattr(AppConfig, "dlss5_path", property(lambda self: dlss5))
+    config = AppConfig()
+    text = crashwatch.nr_evaluate_crash(config)
+    assert "evaluate 崩了" in text
+    assert "FFFFFFFFFFFFFFFF" in text
+    assert "nvngx_dlssnr.dll" in text
+    assert "11:17" not in text, "时间戳不该混进故障栈里"
+
+
+def test_forensics_lists_both_nr_findings(tmp_path, monkeypatch):
+    dlss5 = tmp_path / "dlss5"
+    dlss5.mkdir()
+    for name in ("deep-fried-chicken.addon64", "renodx-dlss5-4.7.addon64"):
+        (dlss5 / name).write_bytes(b"x")
+    (dlss5 / "dlss5-feed.log").write_text(
+        "################ feed: opening D3D12 session ################\n"
+        "evaluate raised 0xC0000005 (reading address FFFFFFFFFFFFFFFF)\n"
+        "evaluate fault stack, by module (innermost first): D3D12Core.dll <- nvngx_dlssnr.dll\n",
+        encoding="utf-8")
+    monkeypatch.setattr(AppConfig, "dlss5_path", property(lambda self: dlss5))
+    monkeypatch.setattr(AppConfig, "reshade_runtime_path", property(lambda self: tmp_path / "reshade"))
+    config = AppConfig()
+    lines = crashwatch.crash_forensics(config)
+    assert any(line.startswith("NR 冲突：") for line in lines)
+    assert any(line.startswith("NR 运行库：") for line in lines)

@@ -88,8 +88,8 @@ WATCHED: tuple[WatchedFile, ...] = (
         base_attr="dlss5_path",
     ),
     WatchedFile(
-        "dlss5/renodx-dlss5-4.7.addon64", "dlss5", "renodx-dlss5-4.7_汉化.addon64",
-        "DLSS5 汉化插件 renodx-dlss5-4.7_汉化.addon64",
+        "dlss5/renodx-dlss5.addon64", "dlss5", "renodx-dlss5.addon64",
+        "DLSS5 神经渲染插件 renodx-dlss5.addon64（官方 7.0.0-rc8，含中文）",
         base_attr="dlss5_path",
     ),
     WatchedFile(

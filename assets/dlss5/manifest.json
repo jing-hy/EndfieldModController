@@ -1,18 +1,18 @@
 {
   "version": 1,
   "group": "dlss5",
-  "notes": "DLSS5 底座里没有公开下载源的三个 addon：第一人称/相机插件（Endfield Enhancer）、ReShade 面板汉化、RenoDX-DLSS5 汉化版。上游仓库均未发布 release（已逐一核查），所以只能随包分发，首次启动自动展开到 dlss5_dir。其余组件（ReShade 底座、DLSS5-Feeder、iMMERSE shader、XXMI/EFMI）走在线自动安装，不在本资产内。",
+  "notes": "DLSS5 底座里**已无公开下载源**的两个 addon：第一人称/相机插件（Endfield Enhancer）、ReShade 面板汉化（trans-zh）。上游仓库均未发布 release（已逐一核查），所以只能随包分发，首次启动自动展开到 dlss5_dir。**RenoDX-DLSS5 引擎自 2026-10-06 起改用官方 7.0.0-rc8**（来源 RankFTW/rhi-repo）：旧版 4.70 在驱动 616.64 及以上会 evaluate 崩在 nvngx_dlssnr.dll（DLSS5-Feeder issue #54，官方矩阵 0/300），而 6.1+/7.0.0-rc8 为 300/300；官方包自带多语言表，中文随系统区域生效，因此不再需要维护汉化版。其余组件（ReShade 底座、DLSS5-Feeder、iMMERSE shader、XXMI/EFMI）走在线自动安装，不在本资产内。",
   "compression": "xz (BCJ x86 + LZMA2 preset 9e)",
   "files": {
-    "renodx-dlss5-4.7_汉化.addon64": {
-      "size": 1732608,
-      "sha256": "897f082dbdfbda460ea4ca7ca9b224b3684f391dfae87e2b28b1bdde93c2dbba",
-      "packed_bytes": 457116,
-      "packed_sha256": "4c34056c5c9887406753765c8597d1b160622a6eba97a161d5becb5987f950f5",
+    "renodx-dlss5.addon64": {
+      "size": 1921024,
+      "sha256": "ff8b9738738265e09f01a1c470a0cb0a59eb021b2b23797c3df7cea722a724b6",
+      "packed_bytes": 464908,
+      "packed_sha256": "5b49509cfa0b22bc26442c7536c44b096d47231e0ad089eaa510476700d8c726",
       "parts": [
-        "renodx-dlss5-4.7_汉化.addon64.xz"
+        "renodx-dlss5.addon64.xz"
       ],
-      "origin": "DLSS5 addon bundle (community build; no public upstream found)"
+      "origin": "RenoDX DLSS5 7.0.0-rc8 (community mirror RankFTW/rhi-repo, tag renodx-dlss5-7.0.0-rc8) —— 官方含多语言表，中文跟随系统区域"
     },
     "renodx-endfield-enhancer.addon64": {
       "size": 3760128,

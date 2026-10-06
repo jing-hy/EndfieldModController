@@ -266,7 +266,7 @@ def _check_bundled_assets(config: AppConfig, report: Report, log: Callable[[str]
       NVIDIA 官方 SDK 只给 `nvngx_dlss.dll`，`nvngx_dlssnr.dll` 没有官方直链；
       压缩后 103 MB 又超过 GitHub 单文件 100 MiB 上限，所以只能压缩 + 分卷随包。
     * `assets\\dlss5\\` —— DLSS5 底座里**没有公开上游**的三个 addon
-      （第一人称 Enhancer、ReShade 面板汉化、RenoDX-DLSS5 汉化版）。
+      （第一人称 Enhancer、ReShade 面板汉化、RenoDX-DLSS5 引擎 7.0.0-rc8）。
 
     展开是一次性慢操作（合计约 6 秒），所以只补缺失的，并且必须给进度。
     """
