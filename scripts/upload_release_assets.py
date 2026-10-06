@@ -117,6 +117,19 @@ def _release_data(tag: str, headers: dict[str, str]) -> dict:
     for item in releases:
         if str(item.get("tag_name")) == tag:
             return item
+    # ★ **兜底：draft 阶段 tag 还没建立**（2026-10-06 实测踩到）。
+    #   `gh release create <tag> --draft` 给出的 `tag_name` 是 `untagged-<hash>`，
+    #   而 `push.py` **只推 main、不推 tag** ⇒ 列表里按 tag 名永远匹配不上 ⇒ 上传步骤
+    #   直接中止（v1.0.24 那次就是手工 `gh release upload` 补的附件）。
+    #   发版流程一次只开一个 draft，所以"当前唯一的 draft"就是它。
+    drafts = [item for item in releases if item.get("draft")]
+    if len(drafts) == 1:
+        print(f"   注意：按 tag `{tag}` 没匹配上，改用当前唯一的 draft"
+              f"（tag_name={drafts[0].get('tag_name')}）—— draft 阶段 tag 尚未建立属正常。")
+        return drafts[0]
+    if len(drafts) > 1:
+        raise SystemExit(f"!! 有 {len(drafts)} 个 draft，无法确定上传目标；"
+                         f"请先把多余的 draft 删掉或转正，再重跑。")
     raise SystemExit(f"!! GitHub 上找不到 tag {tag} 的 Release（含 draft）")
 
 
