@@ -4,7 +4,7 @@
 > 目的：让「当时为什么这么改、踩过什么坑」跟着源码一起留在仓库里。
 > 想改内容 → 改记忆库（用记忆工具），再跑一次本脚本；不要直接编辑本文件。
 
-- 生成时间：2026-10-06 12:14:40
+- 生成时间：2026-10-06 12:28:20
 - 来源：`.dsh-meow/memory.db`
 - 条目：573 条（已跳过 archived / 其它项目的条目）
 
@@ -632,21 +632,19 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 `关键词：["变体机制落点","best_rtx_sm唯一入口","select_dlssnr_variant","ensure_dlssnr","dll_architectures扫fatbin","dlssnr_variant.json marker","baseline按变体判防抖","dlss5:nr_arch自检","dlss5_gpu_scope_applied迁移","pack_nvngx_assets变体字段"]`
 
 ### 【modecontroller 当前状态唯一真源】（20…
-*2026-10-06 12:09*
+*2026-10-06 12:14*
 
-【modecontroller 当前状态唯一真源】（2026-10-06 12:10 更新）
-**Latest Release = `v1.0.19`**（2026-10-06T03:21:11Z）。**本地 = `1.0.20-beta`（已构建、已在 modtest 实测通过、尚未发版）**。分支 main = `a0302fd`（**只 commit 了，没推**）。
-**`1.0.20-beta` 这批改动（自 v1.0.19 起）**：
-① **NR 引擎换官方 `7.0.0-rc8`**（原为社区 `renodx-dlss5-4.7_汉化`）：来源 `RankFTW/rhi-repo` tag `renodx-dlss5-7.0.0-rc8`，`renodx-dlss5.addon64` 1,921,024 B sha256 `ff8b9738738265e09f01a1c470a0cb0a59eb021b2b23797c3df7cea722a724b6`（随包 `.xz` 464,908 B）。**官方包自带多语言表**（2173 处中文，键 `UiLanguage`/`ui_language`，靠 `EnumSystemLocalesW` 跟随系统区域）⇒ **不再维护汉化版**（旧 `_汉化` 与官方 4.70 只差 1684 字节 = 别人做的等长替换）。
-落点：`assets\dlss5\manifest.json` 条目改名 + `runtime_assets.retire_stale_nr_addons()`（展开前把旧名搬进 `dlss5\_retired_addons\`，**只搬不删**）+ `RETIRED_NR_GLOB="renodx-dlss5-4.7*.addon64"`；`launcher.DLSS5_ADDON_GLOBS` 收窄为精确名 `renodx-dlss5.addon64`，并新增 `DLSS5_RETIRED_GLOBS`（**停用/放回故意不对称**：放回只认精确名、停用要盖住退役旧名 —— 否则旧文件进 `_disabled` 后一开开关又被放回，两个 neural addon 同装）；`filewatch`、`runtime_assets`/`initialize` 文案同步。
-② **崩溃取证继续扩充**：`crashwatch` 新增 `nr_provider_conflict()`（认 `deep-fried-chicken.addon64` 与 `renodx-dlss5*` 同装 ⇒ 明确报"两者都不工作、二选一"）、`nr_evaluate_crash()`（读 `dlss5-feed.log` 的 `evaluate raised 0xC0000005` + `fault stack … <- nvngx_dlssnr.dll` ⇒ "崩在 NR 运行库"）、`stuck_on_crt_dialog()`（枚举窗口认 CRT `Runtime Error!` 弹窗；这类失败进程**还活着**，事件/WER/退出码全拿不到）、`nr_ran_ok()` + `nr_engine_driver_mismatch()`（**以实测为准**：本次真没出帧才把"版本×驱动"当线索）。
-③ **自更新取证**：诊断包新增 `self-update-forensics.txt`（**当前 exe 的大小/mtime/sha256** = 判"跑的是哪一版"的唯一直接证据 + `.old`/`.new`/`update-failed.txt` + `_update\` 清单 + `pending_payload()` 判定）；`selfupdate.apply_update()` 的 **10 条失败分支全部落日志**（原来只 return message，用户点重启没反应时事后无从查起）。
-**★ 实测结论（2026-10-06 用户原话「我测试都没问题」）**：**NR 换版通过**（旧引擎被搬走、新引擎出帧、面板仍中文）；**自更新机制通过**（伪旧版 → 正常更新）。⇒ ⇒ **F: 那位（`F:\EndfieldModController`，`current=1.0.11`）的"自更新下载完就没了/没提示重启/手动按重启也没用"是他们那台环境的问题**，不是机制坏了；他必须**先升级到带采集的版本**才能一次定位。
-**modtest 现状**：`EndfieldModController.exe`（1.0.20-beta，30,163,257 B sha256 `0df6a06076c3a31b…`）+ `EndfieldModController-0.1.9-from-1.0.20-beta.exe`（伪旧版 30,160,634 B `097cf8fab4dd37a16682…`）；`_update\` 里只有资产包与两个 json；更新缓存已清。
-**候选发布内容** = 上面 ①②③（NR 换版 + 崩溃/自更新取证）⇒ 待用户点头再走 prepare/push/release。
-**待办**：① 结构树（normify）四步本会话无该插件工具、**未做**；② 三位反馈者的回复草稿**等他先看**（皮肤"打不进去"、DLSS5"勾选闪退"=DFC 冲突、自更新"用不了"）；③ 下一版号 = `1.0.21-beta`（若 v1.0.20 发出后又有改动）。
+【modecontroller 当前状态唯一真源】（2026-10-06 12:16 更新）
+**Latest Release = `v1.0.20`**（2026-10-06T04:14:30Z，**已转正为 Latest**；上一版 v1.0.19）。**本地 = `1.0.20`（正式号，与 Release 同号、不欠号）**。main = `6afe875`（已推，远端一致）。
+**v1.0.20 内容**：
+① **NR 引擎换官方 `7.0.0-rc8`**（原为社区 `renodx-dlss5-4.7_汉化`）：来源 `RankFTW/rhi-repo`，`renodx-dlss5.addon64` 1,921,024 B sha256 `ff8b9738738265e09f01a1c470a0cb0a59eb021b2b23797c3df7cea722a724b6`（随包 `.xz` 464,908 B）。**官方包自带多语言表**（`UiLanguage`/`ui_language`，`EnumSystemLocalesW` 跟随系统区域）⇒ **不再维护汉化版**（旧 `_汉化` 与官方 4.70 只差 1684 字节 = 别人做的等长替换）。落点：`assets\dlss5\manifest.json` 条目改名；`runtime_assets.retire_stale_nr_addons()` + `RETIRED_NR_GLOB="renodx-dlss5-4.7*.addon64"`（展开前把旧名搬进 `dlss5\_retired_addons\`，**只搬不删**）；`launcher.DLSS5_ADDON_GLOBS` 收窄为精确名 + 新增 `DLSS5_RETIRED_GLOBS`（**停用/放回故意不对称**：放回只认精确名、停用盖住退役旧名）。
+② **崩溃取证扩充**：`crashwatch.nr_provider_conflict()`（Chicken 与 renodx 同装 ⇒ 报"两者都不工作、二选一"）、`nr_evaluate_crash()`（读 feed 日志的 `evaluate raised 0xC0000005` + `fault stack … <- nvngx_dlssnr.dll`）、`stuck_on_crt_dialog()`（枚举窗口认 CRT `Runtime Error!` 弹窗 —— 这类失败**进程还活着**，事件/WER/退出码全拿不到）、`nr_ran_ok()` + `nr_engine_driver_mismatch()`（**以实测为准**：本次真没出帧才提示版本×驱动组合）。
+③ **自更新取证**：诊断包新增 `self-update-forensics.txt`（**当前 exe 大小/mtime/sha256** + `.old`/`.new`/`update-failed.txt` + `_update\` 清单 + `pending_payload()` 判定）；`selfupdate.apply_update()` 的 **10 条失败分支全部落日志**。
+**附件**：`EndfieldModController.exe` 30,163,257 B / sha256 `0df6a06076c3a31b226c…`；`assets-bundle.zip` 261,970,243 B / sha256 `ab48babe24fa12d2e884…`（digest 已按 release id 404303711 核对一致；资产包里 dlss5 三项 = `renodx-dlss5.addon64.xz` + `renodx-endfield-len…` 即 enhancer + `trans-zh.addon64.xz`，旧名已消失）。
+**★ 实测（用户原话「我测试都没问题」）**：**NR 换版通过**（旧引擎被搬走、新引擎出帧、面板仍中文）；**自更新机制通过**（伪旧版 → 正常更新）⇒ ⇒ **F: 那位（`F:\EndfieldModController`，`current=1.0.11`）的"自更新下载完就没了/没提示重启/手动按重启也没用"是其环境问题，不是机制坏了**；他必须先升级到 v1.0.20（带采集）再复现，才能一次定位。
+**待办**：① 结构树（normify）四步本会话无该插件工具、**未做**；② 三位反馈者的回复草稿**等他先看**（皮肤"打不进去"、DLSS5"勾选闪退"=与 DFC 抢 provider、自更新"用不了"）；③ 下一版号 = `1.0.21-beta`（有未发版改动才用）。
 
-`关键词：["当前状态唯一真源","Latest v1.0.19","本地1.0.20-beta待发","NR引擎换7.0.0-rc8","官方自带中文","retire_stale_nr_addons","自更新取证","self-update-forensics","apply_update失败落日志","自更新机制实测通过","F那位需升级才能定位","下一版1.0.21-beta"]`
+`关键词：["当前状态唯一真源","Latest v1.0.20","本地1.0.20正式号","main-6afe875","NR引擎7.0.0-rc8","官方自带中文","retire_stale_nr_addons","崩溃取证扩充","自更新取证","自更新机制实测通过","F那位需升级定位","下一版1.0.21-beta"]`
 
 ### 待办
 
