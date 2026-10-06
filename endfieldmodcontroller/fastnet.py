@@ -136,6 +136,15 @@ NO_SPLIT_HOSTS = (
     "github.com", "githubusercontent.com", "githubassets.com",
     "bmclapi2.bangbang93.com", "pcl2-server", "meloong.com",
     "optifine.net", "momot.rs",
+    # ★★ **香蕉网（GameBanana）：分块是负收益**（2026-10-06 实测）。
+    #    同一个 6.9 MB 文件的实测（开加速器环境）：单连接 **1.07~1.40 MB/s**；
+    #    CDN **支持 Range**（`HTTP 206`）；但 **4 路分块只有 0.08 MB/s** ——
+    #    比单连接**慢约 15 倍**。⇒ 它对同 IP 的同文件并发 Range 请求有严格限流，
+    #    "慢就试并发"的策略在这里只会把速度拖垮（这就是下载慢的直接原因）。
+    #    ⚠️ **只写根域**：匹配用的是"相等或后缀"（见 `_parallel_gate`），所以
+    #    `filecache54.gamebanana.com` / `filecache1.…` / 以后新增的任何编号
+    #    **全部动态覆盖** —— 不要写死 `filecacheNN` 这种编号。
+    "gamebanana.com",
 )
 
 # ② **被限流/拒绝要算这条线路自己的账**：PCL 的做法是 `403/429` 就禁用该源
