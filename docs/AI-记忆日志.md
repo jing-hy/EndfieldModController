@@ -4,7 +4,7 @@
 > 目的：让「当时为什么这么改、踩过什么坑」跟着源码一起留在仓库里。
 > 想改内容 → 改记忆库（用记忆工具），再跑一次本脚本；不要直接编辑本文件。
 
-- 生成时间：2026-10-06 10:13:23
+- 生成时间：2026-10-06 11:00:11
 - 来源：`.dsh-meow/memory.db`
 - 条目：571 条（已跳过 archived / 其它项目的条目）
 
@@ -620,17 +620,22 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 `关键词：["变体机制落点","best_rtx_sm唯一入口","select_dlssnr_variant","ensure_dlssnr","dll_architectures扫fatbin","dlssnr_variant.json marker","baseline按变体判防抖","dlss5:nr_arch自检","dlss5_gpu_scope_applied迁移","pack_nvngx_assets变体字段"]`
 
 ### 【modecontroller 当前状态唯一真源】（20…
-*2026-10-06 08:19*
+*2026-10-06 10:13*
 
-【modecontroller 当前状态唯一真源】（2026-10-06 08:19 更新）
-**Latest Release = `v1.0.16`**（tag `v1.0.16`，2026-10-06T00:19Z，**已转正为 Latest**；上一版 v1.0.15）。
-**本地 = `1.0.16`（正式号，与 Release 同号、不欠号）**。main = `c83f374`（已推，远端一致）。
-**本版内容**：① **DLSS5 神经渲染默认「启动即开」**（新开关 `start_dlss5_nr_immediately=True`；自检写 `NeuralUplift=1`；`nr_autostart` 整条停用；保守的"压 0 → 等 hook → 模拟按键"完整保留为可选）；② **修复一次启动拉起多个 XXMI**（`launcher.launch` 拉起前查已有实例 + `api.launch`/`launch_game` 非阻塞入口锁 + 前端 `running` 提到所有 await 之前）；③ 三处"看着在、实际没生效"的判据修复（注入签名长度 / 采样读生效那份 `ReShade.log` / 注入时间线段接进 summary）；④ 诊断包收 **Streamline/NGX 清单** + `ReShade.log` 关键行摘录；⑤ **NR 快捷键认全小键盘键名**（`NUM`/`NUMLOCK`/`NUM0-9`/`NUM±*/`）+ `_HOTKEY_RE` 字符类补符号；⑥ `XXMI-Libs` → **v1.2.2**。
-**附件**：`EndfieldModController.exe` 30,129,292 B / sha256 `dcb4937dd853b832…`；`assets-bundle.zip` 261,962,034 B / sha256 `8458261149391afa…`。
-**测试**：全量 **939 passed**；反向验证 **23/23 变红**。
-**待办**：issue **#16** 的回复草稿（`D:\zmdmod\_dlss5_research\issue16_reply_v1016.txt`，内容是"NR 快捷键 `NUM` 认不出 ⇒ 误按 F6"，**已能确定**）**等用户一句话再发**；下一版号 = **`1.0.17-beta`**。
+【modecontroller 当前状态唯一真源】（2026-10-06 10:20 更新）
+**Latest Release = `v1.0.17`**（2026-10-06T02:13:01Z，**已转正为 Latest**；上一版 v1.0.16）。
+**本地 = `1.0.17`（正式号，与 Release 同号、不欠号）**。main = `991ef23`（已推，远端一致）。
+**本版内容**：
+① 启动页新增「**统一管理器**」开关（**默认开**，第一位）：管"ReShade 底座 + 面板"在不在；**关掉它 ⇒「Mod 快捷键锁定」强制关；开锁键 ⇒ 统一管理器强制开**（用户原话「那个开关就要叫统一管理器，不要讲那么多，默认开，如果这个不开，锁快捷键强制关，如果开锁快捷键，这个强制开」）；**不影响其它插件**（DLSS5/第一人称/汉化/喂帧/乳摇/Poser 各按自己的开关）。
+② **修复 Mod 快捷键被锁死**（反馈者"皮肤打不进去"，数据根 `G:\`）：`takeover_possible()` 以前只查"配置文件在不在磁盘上"、不查"这次会不会真的注入" ⇒ 「DLSS5」与「第一人称」都关时注入库没有 `d3d12.dll`、面板不存在，而 Mod 的 `[Key*]` 仍被改写 `VK_F24` ⇒ 原键与面板两条路同时失效（2026-10-01 那次事故换路径重演）。新增 `reshade_integration.reshade_base_wanted()` 作**判据唯一来源**（锁键前与注入库共用），底座不注入时拒绝锁键。
+③ **修复 DLSS5 出帧判据空转**：原判据读 `runtime\dlss5\ReShade.log`（生效那份其实在 `runtime\reshade\`）+ "出现 `evaluation succeeded` 即算正常"（引擎**首帧**就是 `count=1`）⇒ 新增 `dlss5:nr_frames`（命中 `NR workset pool exhausted` 时报"建了特征、未产出帧，**与设置无关**"），"正常出帧"改判"帧号在涨"。
+④ 诊断包：`ReShade.log` 关键行摘录补收 `workset pool exhausted` 等三类行；摘要新增「DLSS5 神经渲染出帧判据」段。
+⑤ **修复启动页开关点击卡顿**（用户：「这个按钮反应也太慢了吧，过了好几秒才会同步统一管理器和 mod 锁定快捷键」）：`set_hotkey_takeover` 同步跑 `prepare()`（秒级重铺 staging）+ 前端 `await refreshState()` 整份状态 ⇒ 重活改由 `api._run_background`（**可注入**，测试里换同步）丢后台，前端不再 await。
+**附件**：`EndfieldModController.exe` 30,141,126 B / sha256 `e0aa75a76a9b64b14b4b…`；`assets-bundle.zip` 261,962,034 B / sha256 `5312220557c730918c959c…`（digest 已按 release id 核对一致）。
+**测试**：新增 `tests/test_minimal_injection.py` / `test_hotkey_lock_guard.py` / `test_nr_frames_judgement.py`；反向验证 **5/5 变红**；全量通过（v1.0.17 构建闸 exit 0）。
+**待办**：① 结构树（normify）四步本会话没有该插件工具、**未做**（`push.py` 只同步 `docs/structure` 镜像）；② 两位反馈者的回复草稿（等他先看）；③ 下一版号 = `1.0.18-beta`（**有未发版改动才用**）。
 
-`关键词：["当前状态唯一真源","Latest-v1.0.16","本地1.0.16正式号","main-c83f374","exe-30129292","DLSS5启动即开","一次启动多XXMI修复","939passed","issue16草稿待发","下一版1.0.17-beta"]`
+`关键词：["当前状态唯一真源","Latest v1.0.17","本地1.0.17正式号","main-991ef23","统一管理器开关","锁键强制联动","皮肤打不进去已修","nr_frames判据","开关卡顿已修","exe-30141126","assets-261962034","下一版1.0.18-beta"]`
 
 ### 待办
 
