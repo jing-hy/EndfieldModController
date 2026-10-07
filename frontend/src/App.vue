@@ -170,7 +170,14 @@ async function pollCrash() {
         "",
       );
       if (mods.length) lines.push(`当时启用的 Mod：`, `· ${mods.join("\n· ")}`, "");
-      lines.push("把这个 zip 发到 Issues 或 QQ 群，就能定位原因。");
+      lines.push(
+        "把这个 zip 发到 Issues 或 QQ 群，就能定位原因。",
+        "",
+        // 「让 AI 帮你修」（2026-10-07 用户要求）：UP 在上学，有时间差；
+        // 仓库里有一份给 AI 看的 `AGENTS.md`，这类工具会自动读到。
+        "UP 在上学期间不一定有时间及时修；也可以让 AI 工具（如 DSH，https://deepseek.com/harness ）",
+        "对着这个开源仓库自己排查修复 —— 详细说明见「说明」页的「也可以让 AI 帮你修」。",
+      );
       const extraButtons = [];
       if (isConflict) extraButtons.push({ text: "去清理冲突", value: "conflict" });
       if (canRedownload) extraButtons.push({ text: "清空依赖并重新下载", value: "redownload" });

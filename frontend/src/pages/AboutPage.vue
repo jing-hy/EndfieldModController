@@ -72,5 +72,27 @@ const releases = computed(() => store.state.releases_url || REPO + "/releases");
         <li>版本发布（下载新版 exe / 便携包）：<a class="text-accent" :href="releases" target="_blank" rel="noopener">{{ releases }}</a></li>
       </ul>
     </Card>
+
+    <!-- 「让 AI 帮你修」（2026-10-07 用户要求）——
+         为什么放在这里：UP 在上学，报错只能等他有空，很多小问题其实**用 AI 对着源码就能修**，
+         而仓库里已经有一份给 AI 看的 `AGENTS.md`（自动会被这类工具读到）。
+         提示词直接给成可复制的整段，用户不用自己组织语言。 -->
+    <Card title="也可以让 AI 帮你修">
+      <div class="text-sm leading-6 space-y-2">
+        <p>
+          <b>UP 在上学期间不一定有时间修 bug</b>，提倡使用 AI 工具自行修复 —— 比如
+          <a class="text-accent" href="https://deepseek.com/harness" target="_blank" rel="noopener">DSH（DeepSeek Harness）</a>，
+          现在下载就送 6 块。
+        </p>
+        <p class="text-xs" style="color: var(--text-muted)">
+          把下面这段发给它（最后一句换成你的实际问题、并附上诊断包）：
+        </p>
+        <pre class="text-xs p-2 rounded whitespace-pre-wrap leading-5"
+             style="background: var(--surface-2); border: 1px solid var(--border)">我现在使用 emc 出现问题，请你帮我检查并修复。emc 为开源项目，仓库在 https://github.com/jing-hy/EndfieldModController ，请你先查阅 https://github.com/jing-hy/EndfieldModController/blob/main/AGENTS.md ，自行查找或向我询问 emc 本地位置和终末地位置。我遇到的具体问题是：（这里写你的问题）</pre>
+        <p class="text-xs" style="color: var(--text-muted)">
+          它照着那份说明定位、改、自测；如果确认是本程序的问题，修好可以提 PR 上来（没有 GitHub 账号就在群里发）。
+        </p>
+      </div>
+    </Card>
   </div>
 </template>

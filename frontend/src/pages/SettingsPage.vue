@@ -387,10 +387,15 @@ async function exportDiagnostics() {
     title: "诊断包已导出",
     message:
       `已生成：\n${path}\n\n` +
-      "**怎么用**：\n" +
+      // ⚠️ 弹窗正文是**纯文本**渲染（`textContent`）⇒ 这里**不能用 markdown**
+      //    （原来写的 `**怎么用**` 会原样带着星号露出来）。
+      "怎么用：\n" +
       "· 去 GitHub 提 issue 时把它拖进附件（仓库 jing-hy/EndfieldModController）\n" +
-      "· 或发到 QQ 群 1045239747（加群验证答案：jing_hy）\n\n" +
-      "包里含运行日志、配置、注入快照与游戏侧日志，**不含你的 Mod 内容**。",
+      "· 或发到 QQ 群 1045239747（加群验证答案：jing_hy）\n" +
+      // 「让 AI 帮你修」（2026-10-07 用户要求）：UP 在上学，有时间差。
+      "· UP 在上学期间不一定有时间及时修；也可以让 AI 工具（如 DSH，https://deepseek.com/harness ）\n" +
+      "  对着这个开源仓库自行排查修复 —— 提示词见「说明」页的「也可以让 AI 帮你修」\n\n" +
+      "包里含运行日志、配置、注入快照与游戏侧日志，不含你的 Mod 内容。",
     okText: "打开所在文件夹", cancelText: "知道了",
     // ⚠️ **C11：把"去提 issue"也做成一个按钮**（0.9.5 的反馈弹窗里有这些入口）。
     extraButtons: [{ text: "去提 issue", value: "issue" }],
