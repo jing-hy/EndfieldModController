@@ -257,7 +257,16 @@ async function openLib() {
       <Btn @click="openLib">打开 Mod 文件夹</Btn>
       <span class="text-xs" style="color: var(--text-muted)">{{ status }}</span>
     </div>
-    <Card v-if="!list.length" title="辅助 Mod">
+    <!-- ★ 同「服装 Mod」页：**"还没读到" ≠ "没有"** —— 首屏状态未到之前给加载态，
+         别让它显示成"这里还没有辅助 Mod"（用户 2026-10-07 要求：要等就显示加载页面）。 -->
+    <Card v-if="!store.ready" title="辅助 Mod">
+      <div class="empty-state">
+        <component :is="Wrench" :size="30" class="empty-icon" />
+        <div class="empty-title">正在读取 Mod 库…</div>
+        <div>状态读完后列表会自动出现（首次启动要扫一遍库）。</div>
+      </div>
+    </Card>
+    <Card v-else-if="!list.length" title="辅助 Mod">
       <div class="empty-state">
         <component :is="Wrench" :size="30" class="empty-icon" />
         <div class="empty-title">这里还没有辅助 Mod</div>

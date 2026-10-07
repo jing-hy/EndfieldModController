@@ -50,6 +50,22 @@ let firstRunChecked = false;
 const tourVisible = ref(false);   // 新手引导浮层（挖孔高亮 + 气泡）
 let dragDepth = 0;
 
+// ── 首屏加载页（用户 2026-10-07：「**我要一进去就能出，要是要等待，就显示加载页面**」）──
+// 为什么需要：窗口一出现就渲染了侧栏与页面骨架，而 Mod 列表要等**第一次 `get_state()`
+// 回来**才有（首次启动要扫库 + 补每个 Mod 的修复状态）。在那之前 Mod 库页显示的是
+// 空态「还没有发现 Mod」—— 用户看到的是"库是空的"，过一会儿又自己冒出来，很像界面坏了。
+// 现在用一层加载页盖住：拿到状态就消失；**超过 12 秒还没拿到也放行**（下面那个按钮），
+// 免得桥/后端出问题时把人永久锁在加载页上。
+const bootStuck = ref(false);
+let bootFallbackTimer = null;
+function enterAnyway() {
+  bootStuck.value = true;
+  store.ready = true;              // 只影响这层遮罩：界面照常工作、列表读到了会自己补上
+}
+onMounted(() => {
+  bootFallbackTimer = setTimeout(() => { bootStuck.value = true; }, 12000);
+});
+
 // ── 终末地异常退出的**弹窗**（用户 2026-10-03：「我需要崩溃的弹窗」）──────────
 // 后端早就有现成的：`crash_bundle_status()` 返回 `{watch, fresh, latest}`，
 // 其中 `fresh` 是 `crashwatch.take_bundle()` 的**"取走"语义** —— 一次调用就消费掉，
@@ -571,6 +587,24 @@ window.addEventListener("pagehide", clearAnnounceTimers);
 
 <template>
   <div class="flex h-full">
+    <!-- ★ 首屏加载页（见 script 里的 `bootStuck`）：状态没到之前盖住界面，
+         免得用户把「还没读到」看成「库是空的」。主色跟着主题走，不闪默认色。 -->
+    <div v-if="!store.ready"
+         class="fixed inset-0 z-50 flex flex-col items-center justify-center gap-3"
+         style="background: var(--bg)">
+      <div class="text-base font-semibold" style="color: var(--text)">终末地 Mod 管理器</div>
+      <div class="text-sm" style="color: var(--text-muted)">
+        {{ bootStuck ? "读取时间比平时长（可能正在扫描较大的 Mod 库）…" : "正在读取 Mod 库与配置…" }}
+      </div>
+      <div class="text-xs" style="color: var(--text-muted)">
+        {{ bootStuck ? "列表读完会自动出现，也可以先进入界面。" : "首次启动会久一点。" }}
+      </div>
+      <button v-if="bootStuck" @click="enterAnyway"
+              class="px-4 py-1.5 rounded text-sm"
+              style="background: var(--accent); color: var(--accent-contrast)">
+        先进界面
+      </button>
+    </div>
     <aside class="w-52 shrink-0 flex flex-col border-r" style="background: var(--surface); border-color: var(--border)">
       <div class="h-12 px-4 flex items-center text-sm font-semibold border-b" style="border-color: var(--border)">
         终末地 Mod 管理器

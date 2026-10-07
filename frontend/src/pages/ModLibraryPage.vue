@@ -545,14 +545,25 @@ watch(() => store.demoCovers, (val) => {
              「已发现 N 个 Mod，按角色分组显示」（`app.js:643`），换代后丢了 ——
              用户不知道自己库里到底有多少个、也没法判断扫描有没有生效。 -->
         <span class="text-xs self-center" style="color: var(--text-muted)">
-          已发现 {{ store.state.mods ? store.state.mods.length : 0 }} 个 Mod，按角色分组显示
+          <!-- 状态没到之前**不要**显示"已发现 0 个"——那会被读成"库是空的" -->
+          <template v-if="store.ready">已发现 {{ store.state.mods ? store.state.mods.length : 0 }} 个 Mod，按角色分组显示</template>
+          <template v-else>正在读取 Mod 库…</template>
         </span>
         <Btn @click="fixAll">一键修复所有 Mod</Btn>
         <span class="ml-auto flex items-center gap-2">
           <input v-model="keyword" class="field" style="width: 200px" placeholder="搜索 Mod / 角色…" />
         </span>
       </div>
-      <div v-if="!groups.length" class="empty-state">
+      <!-- ★ **"还没读到" ≠ "库里没有"**（用户 2026-10-07：「我要一进去就能出，要是要等待，
+           就显示加载页面」）。首屏那一下 `get_state()` 可能还没回来（首次要扫库 +
+           逐个 Mod 补修复状态），以前这里直接显示"还没有发现 Mod" ⇒ 看着像库是空的、
+           过一会儿又自己冒出来。现在先给加载态。 -->
+      <div v-if="!store.ready" class="empty-state">
+        <Library :size="30" class="empty-icon" />
+        <div class="empty-title">正在读取 Mod 库…</div>
+        <div>状态读完后列表会自动出现（首次启动要扫一遍库）。</div>
+      </div>
+      <div v-else-if="!groups.length" class="empty-state">
         <Library :size="30" class="empty-icon" />
         <!-- 两种情况必须说清楚：库里真的没有 vs 搜索没匹配上（文案混用会让人以为 Mod 丢了） -->
         <div class="empty-title">{{ keyword ? "没有匹配的 Mod" : "还没有发现 Mod" }}</div>

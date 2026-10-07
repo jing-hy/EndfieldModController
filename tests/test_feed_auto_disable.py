@@ -199,7 +199,7 @@ def test_ensure_all_parks_dlss5_addons_when_master_switch_off(tmp_path, monkeypa
     for name in ("renodx-dlss5-4.7_hanhua.addon64", "trans-zh.addon64", "translations.txt"):
         assert not (dlss5 / name).exists(), f"{name} 仍留在底座目录，ReShade 还会加载它"
         assert (dlss5 / "_disabled" / name).is_file(), f"{name} 没有停到位"
-    checks = [c for c in payload["checks"] if c["key"] == "dlss5:addons_parked"]
+    checks = [c for c in payload["checks"] if c["key"] == "addons:realigned"]
     assert checks and checks[0]["ok"] is True, payload["checks"]
 
 

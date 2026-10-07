@@ -1217,6 +1217,48 @@ def minimal_injection_status(config: AppConfig) -> dict[str, Any]:
     }
 
 
+def realign_component_addons(config: AppConfig, *,
+                             log: Callable[[str], None] | None = None) -> dict[str, Any]:
+    """**按当前开关把所有 addon 与面板归位**（唯一实现，凡"展开过资产"的入口末尾都要调）。
+
+    **为什么必须收口成一处**（2026-10-07，lzh18 现场 + 用户「dlss4 还是能开」）：
+      * 随包资产展开（`runtime_assets.ensure_all` → `initialize._check_bundled_assets`）**不认开关**：
+        它只看"`runtime\\dlss5\\` 顶层有没有这个文件"，发现缺就**又解压一份回去**；
+      * 而"按开关把 addon 搬进 `_disabled\\`"是另一步 ⇒ **展开会撤销停用**；
+      * 在这之前只有**两处**各自补了一刀：`ensure_injections()` 末尾（三个组件 + 面板，齐的）、
+        `initialize.ensure_all()` 末尾（**只管 DLSS5**）。于是只要走"初始化自检"这条路
+        （不经过一键启动），`renodx-mfgunlock.addon64` 就会被展开放回顶层 ——
+        实测现场（lzh18，v1.1.0）：`mfg_unlock_enabled=False`、`_disabled\\` 不存在，
+        而根目录里 `renodx-mfgunlock.addon64`（1,191,424 B）**在**、且 mtime 正是他点
+        "初始化自检"的那一秒（12:47）⇒ ReShade 照样加载它 ⇒ 游戏里 DLSS4 那个 addon 还在。
+      * ⇒ 判据只留这一份，两个入口都调它；以后任何"展开/补齐"路径的末尾也调它。
+
+    返回 `{"moved": [...], "errors": [...]}`；**任何单项失败都不抛**（归位失败不该拦住启动）。
+    """
+    moved: list[str] = []
+    errors: list[str] = []
+    for component, flag in (("dlss5", "dlss5_addon_enabled"),
+                            ("firstperson", "firstperson_addon_enabled"),
+                            ("mfg", "mfg_unlock_enabled")):
+        try:
+            result = set_component_addons(config, component, bool(getattr(config, flag, False)))
+            if not result.get("ok"):
+                errors.append(f"{component}: {result.get('message') or '归位失败'}")
+                continue
+            moved.extend(result.get("moved") or [])
+            moved.extend(f"{name}（清掉多余副本）" for name in (result.get("removed") or []))
+        except Exception as exc:  # noqa: BLE001 - 单个组件失败不影响其它
+            errors.append(f"{component}: {exc}")
+    try:
+        panel = apply_minimal_injection(config, log=log)
+        moved.extend(panel.get("moved") or [])
+        for warning in panel.get("warnings") or []:
+            errors.append(f"面板: {warning}")
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"面板: {exc}")
+    return {"moved": sorted(set(str(item) for item in moved)), "errors": errors}
+
+
 def apply_minimal_injection(config: AppConfig,
                             log: Callable[[str], None] | None = None) -> dict[str, Any]:
     """按 `config.minimal_injection`（启动页「统一管理器」）铺上 / 收走面板。
@@ -2192,21 +2234,17 @@ def ensure_injections(config: AppConfig) -> dict[str, Any]:
     #    `renodx-mfgunlock.addon64`（1,191,424 B）**还在**、`_disabled\` 是空的
     #    ⇒ ReShade 照样加载它 ⇒ 用户报的就是「**关了为什么还是注入了**」。
     #    ⚠️ 受影响的不止 DLSS4：`dlss5` / `firstperson` 走的是同一条路。
-    for _component, _flag in (("dlss5", "dlss5_addon_enabled"),
-                              ("firstperson", "firstperson_addon_enabled"),
-                              ("mfg", "mfg_unlock_enabled")):
-        try:
-            set_component_addons(config, _component, bool(getattr(config, _flag, False)))
-        except Exception:  # noqa: BLE001 - 对齐失败不该拦住启动
-            pass
-    # ⚠️ **「统一管理器」的面板 addon 走的是另一条路**（`apply_minimal_injection`），
-    #    所以这里要**单独再对齐一次** —— 同一个病换了个函数（2026-10-06 用户现场：
-    #    「我除了 dlss4 全关，但是 **MOD 管理器**和第一人称还是注入了」，根目录里
-    #    `endfieldmodcontroller.addon64` 还在，而 `_disabled\` 里也有它）。
+    #    ⚠️⚠️ **2026-10-07 收口**：这段原来只在本函数里（另一份在 `initialize.ensure_all`
+    #       末尾、而且只管 DLSS5）⇒ 走"初始化自检"那条路时不生效。现在统一走
+    #       `realign_component_addons()`，两个入口共用同一份判据。
     try:
-        apply_minimal_injection(config, log=lambda message: _append_log(config, message))
-    except Exception:  # noqa: BLE001 - 对齐失败不该拦住启动
-        pass
+        realigned = realign_component_addons(config, log=_log)
+        if realigned["moved"]:
+            actions.append("按开关归位插件: " + "、".join(realigned["moved"]))
+        for error in realigned["errors"]:
+            warnings.append(f"按开关归位插件失败（{error}）")
+    except Exception as exc:  # noqa: BLE001 - 对齐失败不该拦住启动
+        warnings.append(f"按开关归位插件失败: {exc}")
 
     for action in actions:
         _append_log(config, f"注入自检: {action}")

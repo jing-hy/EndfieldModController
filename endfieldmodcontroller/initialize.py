@@ -2818,7 +2818,7 @@ def ensure_all(config: AppConfig, log: Callable[[str], None] | None = None) -> d
     # 缺 .bak 时**自动从 System32 补**，补不到就明确告诉用户"先别点还原"。
     _check_proxy_backups(config, report, log)
 
-    # ⚠️⚠️ **总开关关着时，最后再按开关归位一次 addon 位置**（2026-10-05 补，必须放最后）。
+    # ⚠️⚠️ **本函数展开过资产 ⇒ 最后必须按开关把所有 addon 与面板归位一次**（必须放最后）。
     # 为什么非要在最后：本函数**第 1 步** `_check_bundled_assets` 会把随包 addon
     # **无条件展开到 `runtime\dlss5\` 顶层**（它不认识开关），而 `launcher` 按开关做的
     # 停用**发生在本函数之前** ⇒ 展开动作把刚停用的 `renodx-dlss5*.addon64` /
@@ -2826,26 +2826,35 @@ def ensure_all(config: AppConfig, log: Callable[[str], None] | None = None) -> d
     # 现场（2026-10-05 反馈者，Intel Arc、无 N 卡）：配置 `dlss5_addon_enabled=False`，
     # launch.log 里却是「停用 → 展开内置资产」的顺序，ReShade 最终实载 5 个 addon。
     # 放在最后还有一个好处：它同时兜住「别的步骤、以后的改动」又把 addon 放回的情况。
-    if not getattr(config, "dlss5_addon_enabled", True):
-        try:
-            from . import launcher as _launcher
+    #
+    # ⚠️⚠️ **2026-10-07 收口（用户报「dlss4 还是能开」）**：这段原来**只处理 DLSS5**
+    #   （`if not dlss5_addon_enabled: set_component_addons(config,"dlss5",False)`），
+    #   于是只要走"初始化自检"这条不经过一键启动的路，`renodx-mfgunlock.addon64`
+    #   就会被展开放回顶层、没人再管它。实测现场（lzh18，v1.1.0）：
+    #   `mfg_unlock_enabled=False`、`_disabled\` 不存在，而根目录里
+    #   `renodx-mfgunlock.addon64`（1,191,424 B）**在**、mtime 正是他点"初始化自检"
+    #   的那一秒 ⇒ ReShade 照样加载它。现在与 `ensure_injections()` 共用
+    #   `launcher.realign_component_addons()`（三个组件 + 面板），不再两处各写一套。
+    try:
+        from . import launcher as _launcher
 
-            parked = _launcher.set_component_addons(config, "dlss5", False)
-            parked_names = list(parked.get("moved") or []) + [
-                f"{name}（清掉多余副本）" for name in (parked.get("removed") or [])
-            ]
-            if parked_names:
-                report.add("dlss5:addons_parked", True,
-                           "DLSS5 已在启动页关闭 → 已把 DLSS5 相关 addon 移出底座目录（"
-                           + "、".join(parked_names) + "），ReShade 下次不会加载它们",
-                           fixed=True)
-            else:
-                report.add("dlss5:addons_parked", True,
-                           "DLSS5 已在启动页关闭 → DLSS5 相关 addon 均已处于停用位置")
-        except Exception as exc:  # noqa: BLE001
-            report.add("dlss5:addons_parked", False,
-                       f"DLSS5 已关闭，但按开关停用相关 addon 失败（ReShade 可能仍会加载它们）: {exc}",
+        realigned = _launcher.realign_component_addons(config, log=log)
+        moved = realigned.get("moved") or []
+        if moved:
+            report.add("addons:realigned", True,
+                       "已按启动页的开关把插件归位（展开资产会把停用的插件放回底座目录，"
+                       "所以每次展开之后都要再来一次）：" + "、".join(moved),
+                       fixed=True)
+        else:
+            report.add("addons:realigned", True, "插件位置与启动页开关一致")
+        for error in realigned.get("errors") or []:
+            report.add("addons:realigned", False,
+                       f"按开关归位插件失败（{error}）—— ReShade 可能仍会加载已停用的插件",
                        manual=True)
+    except Exception as exc:  # noqa: BLE001
+        report.add("addons:realigned", False,
+                   f"按开关归位插件失败（ReShade 可能仍会加载已停用的插件）: {exc}",
+                   manual=True)
 
     # ★★ **最后再清一次「已退役的旧 NR 引擎」**（2026-10-07 实测抓到，与上面那条同源）。
     #
