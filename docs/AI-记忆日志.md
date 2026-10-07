@@ -4,9 +4,9 @@
 > 目的：让「当时为什么这么改、踩过什么坑」跟着源码一起留在仓库里。
 > 想改内容 → 改记忆库（用记忆工具），再跑一次本脚本；不要直接编辑本文件。
 
-- 生成时间：2026-10-07 15:31:27
+- 生成时间：2026-10-07 17:20:51
 - 来源：`.dsh-meow/memory.db`
-- 条目：593 条（已跳过 archived / 其它项目的条目）
+- 条目：597 条（已跳过 archived / 其它项目的条目）
 
 ---
 
@@ -297,7 +297,7 @@
 
 `关键词：["GPL-3.0","MIT","许可证冲突","copyleft","开源协议","JASM 参考","不能抄代码","思路重写","LICENSE 检查","分发合规"]`
 
-## 项目记忆（结构 / 决策 / 部署 / 待办）（41 条）
+## 项目记忆（结构 / 决策 / 部署 / 待办）（42 条）
 
 ### 项目概述
 
@@ -525,6 +525,17 @@ runtime\dlss5                      38 字符  ❌ 崩
 
 `关键词：["importer_folder","ensure_efmi_importer_folder","xxmi_foreign_loader","active_efmi_loader","两份 loader","injecttrace duplicate_loaders","诊断包 importer_folder","lzh18 现场","0xC0000005","0xC0000135","注入库 extra_libraries","EFMI loader"]`
 
+### 【Mod 库「角色视图」+ 角色表/头像随 exe（20…
+*2026-10-07 16:19*
+
+【Mod 库「角色视图」+ 角色表/头像随 exe（2026-10-07 用户要求，落地中）】
+**用户原话**：「还有服装mod库加个改布局的开关，**默认关就是现在这样**，开了之后变成**像jasm那样**，**第一页展示所有任务（角色，包括头像，可以从官网拉），然后点进去是他自己的mod**」；随后「**角色表和图直接随包**」「**是随exe**」；「**角色视图应该是一个开关而不是按钮**」；「那个开关能不能做成**滑块里是样式展示**——划到左边是一个框然后一个横杠，到右边是几个框」；「**不是说单列一个其他角色吗**」。
+**落地**：① 开关 = `config.library_character_view`（**布尔、默认 False**），**放在「皮肤 Mod」卡的开关区**（用现成的 `switch-row` 样式，与其它开关并排）—— ⚠️ 我先放在 Mod 列表工具栏那排小按钮里，用户直接回「**我没看到你说的开关**」，位置太挤就是没看到；② 控件是**图示滑块**（左：一个框+一横杠=列表；右：四个小框=角色墙，当前那侧主题色高亮）；③ 角色墙（`character_gallery`）→ 点角色 ⇒ **角色墙隐藏、只显示该角色的 Mod + 「← 返回角色列表」**（不是"墙 + 下面列表"）；④ **「其他」与角色平级成一格**（认不出角色归属的 Mod，点进去用后端给的 **id 名单**过滤，不能拿"其他"去比分组名 —— 那些 Mod 的分组名五花八门）。
+**随 exe**：头像 34 张 PNG/3.8 MB 放 `endfieldmodcontroller/characters/`（与 `characters.json` 同级，已加进 `scripts/build_exe.py` 的 `--add-data`）+ **索引 `index.json`**（角色名→文件名）。⚠️ **必须用索引，不能按 key 猜文件名**：佩丽卡官网文件是 `prelica.*.png` 而表里 key 是 `perlica`；管理员在官网被拆成 `endministrator1/2` 两条。查找顺序 = **随包 → 运行时缓存**（官网新角色才联网下），实测 34 位角色全有头像、待下载 0（离线可用）。`modstore.ThumbServer` 的 `translate_path` 同时查随包与缓存两个头像目录。
+**踩过的坑**：① 前端错读 `result.files`（后端给的是**每行自带 `avatar`**）⇒ 一个头像都不显示；② 改开关后 `onMounted` 里仍写着旧变量名 `layout` ⇒ 报错、`loadGallery()` 从不执行 ⇒ 用户看到「正在读取角色表…」卡住（**表其实早就随包了**）；③ 删掉 `toggleLayout` 后**切换开关不再触发加载** ⇒ 必须显式 `setCharacterView()` + `watch(characterView)` 兜底。
+
+`关键词：["角色视图","library_character_view","角色墙","头像随包","随exe","characters/index.json","prelica perlica 拼写","endministrator1 2","其他 单列","点进去看mod","图示滑块","switch-row 位置","thumbnail 没显示"]`
+
 ### 用户原话
 
 ### 【用户 2026-10-07 新增需求原话（Mod 商城…
@@ -683,30 +694,21 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 `关键词：["1.1.2-beta","Mod 商城落地","下载中心","modstore.py","downloads.py","StorePage.vue","DownloadsPage.vue","依赖页瘦身","1229 passed","selfupdate flaky","未构建 exe","已安装标记不亮"]`
 
 ### 【modecontroller 当前状态唯一真源】（20…
-*2026-10-07 15:28*
+*2026-10-07 15:33*
 
-【modecontroller 当前状态唯一真源】（2026-10-07 15:28 更新）
-**Latest Release = `v1.2.0`**（2026-10-07T07:27:46Z = 北京 15:27，release id `405493403`，draft=false / prerelease=false / --latest；**遗留 draft = 0**）。**本地 = `1.2.0`（与 Release 同号，不欠号）**；main = `7c36bab`（已推）。快照 `D:\zmdmod\_snapshot_1.2.0-20261007-152608`。
-**v1.2.0 附件（digest 与本地逐字节一致）**：`EndfieldModController.exe` 32,109,271 B / sha256 `ab467b5b933809e9ad2ca2bd663454b07c518cd4645c73744bebf4dc2ca90c16`；`assets-bundle.zip` 262,289,985 B / sha256 `1d4893b6c1ad75575ad57ab16532d4f31e5010f8de0085dbf95b6f3280b99975`。
-**v1.2.0 内容（自 v1.1.1 起）**：① **Mod 商城**（GameBanana 浏览/搜索/分类+角色筛选/四种排序/页内详情/R18 三档/批量扫描与一键更新）；② **下载中心**独立页签（统一任务列表、暂停继续取消清空、队列可追加）；③ **修国际服日志目录厂商段写死**（`Hypergryph` vs `Gryphline`，`fsutil.endfield_local_low_dirs()` 四处共用）—— 这是 issue #16「说好的自动换 Streamline 从未生效」的根因；④ **补退出时刻取证**（`game-exited`/`crash` 两时机此前从未落盘：含它们的 `crashwatch.postmortem` 在实际生效的监视路径上没被调用，改由 `diagnostics._capture_postmortem` 记录并加 `pid` 参数）；⑤ 商城图片链路重做（本地只读图片服务 + 三档 + 懒加载 + 连接复用，12 张 38.0s→4.6s）；⑥ 角色名中文化；⑦ 索引/分类缓存加 `STORE_SCHEMA` 版本号。
-**发版流程（不变）**：`build_release.py`（**会自动推 main**）→ `prepare_release.py` → `gh release create --draft --notes-file RELEASE_NOTES.md` → `upload_release_assets.py --tag` → `gh release edit --draft=false --latest` → **按 release id 核对 digest**（draft 阶段按 tag 查会 404）→ 查遗留 draft。附件只推 `EndfieldModController.exe` + `assets-bundle.zip`（都不带版本号）。
-⚠️ 版本号 WARN：`scripts/release_version.py` 会提示"1.2.0 不是 v1.1.1+1"—— 那是**用户主动跳号**（1.1.2 → 1.2.0，因为加了商城这个量级的功能），属预期，不阻断构建。
-**issue 状态**：**#16（xingluo667）OPEN** —— 回复草稿已备好（撤回驱动建议 + 说明厂商段 bug 已修 + 请他更新 1.2.0 后照常一键启动试、不用改设置），**等用户检查后再发**。
-**待办**：① 发 #16 回复；② normify 结构树四步（本轮改动大：realign → refresh → validate → build+render）；③ 宣传片脚本仍停在 v0.3.2。
+【modecontroller 当前状态唯一真源】（2026-10-07 15:36 更新）
+**Latest Release = `v1.2.0`**（2026-10-07T07:27:46Z，release id `405493403`，Latest；遗留 draft 0）。**本地 = `1.2.0`（与 Release 同号）**。**main = `1c76a38`**（v1.2.0 的 tag 指向构建时点 `7c36bab`；其后的结构树镜像与文档清理是单独提交，属正常）。快照 `D:\zmdmod\_snapshot_1.2.0-20261007-153126`。
+**v1.2.0 附件（digest 逐字节一致）**：exe 32,109,271 B / sha256 `ab467b5b933809e9ad2ca2bd663454b07c518cd4645c73744bebf4dc2ca90c16`；assets-bundle.zip 262,289,985 B / sha256 `1d4893b6c1ad75575ad57ab16532d4f31e5010f8de0085dbf95b6f3280b99975`。
+**v1.2.0 内容（自 v1.1.1 起）**：① Mod 商城（浏览/搜索/分类+角色筛选/四种排序/页内详情/R18 三档/批量扫描与一键更新）；② 下载中心独立页签（统一任务列表、暂停继续取消清空、队列可追加）；③ **修国际服日志目录厂商段写死**（`Hypergryph` vs `Gryphline`，`fsutil.endfield_local_low_dirs()` 四处共用）—— issue #16「说好的自动换 Streamline 从未生效」的根因；④ **补退出时刻取证**（`game-exited`/`crash` 两时机此前从未落盘，改由 `diagnostics._capture_postmortem` 记录并加 `pid`）；⑤ 商城图片链路重做（本地只读图片服务 + 三档 + 懒加载 + 连接复用，12 张 38.0s→4.6s）；⑥ 角色名中文化；⑦ 缓存加 `STORE_SCHEMA` 版本号。
+**normify 结构树（2026-10-07 15:31 已做完）**：realign（37 模块/191 行号）→ 新增 6 模块（`backend.store` 容器 + `store.catalog` + `store.tasks` + `api.store` + `web.store` + `web.downloads`，uid `5f0a0001`~`5f0a0006`）→ refresh → **validate 0 error** → build（170 模块/392 API/84 依赖）→ render（601 KB）→ 镜像 195 文件进 `docs/structure`。
+⚠️ 两个 L1 坑：`deps[].label.en` **必须 ≤30 字符**；**API 键全项目唯一**（js_api 只能声明在后端 `api.*`，前端页模块 `apis` 留空）。
+**发版流程**：`build_release.py`（会自动推 main）→ `prepare_release.py` → `gh release create --draft --notes-file RELEASE_NOTES.md` → `upload_release_assets.py --tag` → `gh release edit --draft=false --latest` → **按 release id 核对 digest** → 查遗留 draft。附件只推 exe + assets-bundle.zip（不带版本号）。版本号 WARN（"1.2.0 不是 v1.1.1+1"）是用户主动跳号，属预期。
+**issue**：**#16（xingluo667）OPEN** —— 15:29 已回复（comment 6033152760），等他更新 1.2.0 后回报。
+**待办**：等 #16 回报（若仍是同现象，看新包里 `game-exited` 那张照片）。
 
 `关键词：["当前状态唯一真源","Latest Release v1.1.0","release id 405355434","exe sha256 03092366","assets 262289985","伪旧版 from-1.1.0","启动提速 19 秒","launch_stage 分步进度","issue 16 已回","issue 17 已关","版本号 1.1.0 用户指定"]`
 
 ### 待办
-
-### **B站宣传片（EndfieldModControlle…
-*2026-09-30 11:13*
-
-**B站宣传片（EndfieldModController）的包装素材进展（2026-09-29，尚未落盘）。**
-① **BGM** —— 用户要"B站热门一点的"，首选三首：**Elektronomia — Sky High**（明亮电子，配"一键启动"动作剪辑）、**TheFatRat — Xenogenesis**（科技感最正、有清晰 build→drop，适合 30/60/90s 卡点）、**AShamaluevMusic — Technology**（corporate tech，讲界面操作时不抢字幕）。备选：TheFatRat `Monody`、Janji `Heroes Tonight`、DEAF KEV `Invincible`、Zack Hemsey `Mind Heist`、Tobu `Hope`、Two Steps From Hell `Victory`（NCS 系免费可商用）。用法：0–5s 用 Intro/最强一击、5–90s 用稳定律动（人声/字幕要听得清）、90–120s 用 Build→Drop 收尾落版；在 B站音频库里**优先按"使用量"排序挑**。⚠️ 用户澄清「B站会自动识别，但都是可以用的」—— 识别到只会**标注 BGM**，对非商业的开源宣传片不影响，不必因此避开商业曲。
-② **简介** —— 给了 A 版（B站简介正文；**前两行必须是最强卖点**：「一个 exe 装好 DLSS5 + 第一人称 + 服装 Mod，双击就能玩」+ 能力清单 + 下载/源码 + 免责 + `#终末地 #Mod #DLSS5 #开源`）与 B 版（精简，适合置顶评论/字幕）。置顶评论要点：下载在简介、第一次会提示"请再点一次一键启动"（XXMI 在生成配置）、**DLSS5 无需额外设置**、出问题发诊断 zip 到 issue。⚠️ 物理效果用中性表述（"物理效果"）以免限流。
-③ **待办**：以上**还没写进 `docs\宣传视频脚本-2分钟.md`** —— 那份脚本的简介模板仍停在 v0.3.2、也没体现"DLSS5 已全线修好"这个最大卖点，标签与置顶评论同样需要同步。
-
-`关键词：["B站宣传片", "BGM 选曲", "Elektronomia Sky High", "TheFatRat Xenogenesis", "B站音频库按使用量", "视频简介 A版", "置顶评论文案", "DLSS5 无需额外设置", "物理效果中性表述", "宣传视频脚本待更新"]`
 
 ### 【modecontroller 项目待办】（2026-1…
 *2026-10-05 19:46*
@@ -730,7 +732,18 @@ issue #16（xingluo667，游戏加载过程中闪退）：已追加评论，让�
 
 `关键词：["issue 16", "开关组合测试", "全关再逐项加回", "DLSS5 神经渲染", "ShakingBreastManager", "皮肤 Mod", "Endfield Poser", "v1.0.12 开关生效", "等反馈者回报", "游戏加载过程中闪退"]`
 
-## 话题（一件事的前因后果）（24 条）
+### **B站宣传片（EndfieldModControlle…
+*2026-10-07 15:33*
+
+**B站宣传片（EndfieldModController）的包装素材方案（2026-09-29 定，方案本身仍可用）。**
+⚠️ **2026-10-07 用户：「那个 md 之前删掉就行」** ⇒ 脚本文件 `docs/dev/宣传视频脚本-2分钟.md` **已删除并从仓库移除**（提交 `1c76a38`，同时清掉 `docs/README.md` 的索引行），宣传片这件事**不再推进**；以下方案留档备用。
+① **BGM** —— 用户要"B站热门一点的"，首选三首：**Elektronomia — Sky High**（明亮电子，配"一键启动"动作剪辑）、**TheFatRat — Xenogenesis**（科技感最正、有清晰 build→drop，适合 30/60/90s 卡点）、**AShamaluevMusic — Technology**（corporate tech，讲界面操作时不抢字幕）。备选：TheFatRat `Monody`、Janji `Heroes Tonight`、DEAF KEV `Invincible`、Zack Hemsey `Mind Heist`、Tobu `Hope`、Two Steps From Hell `Victory`（NCS 系免费可商用）。用法：0–5s 用 Intro/最强一击、5–90s 用稳定律动（人声/字幕要听得清）、90–120s 用 Build→Drop 收尾落版；在 B站音频库里**优先按"使用量"排序挑**。⚠️ 用户澄清「B站会自动识别，但都是可以用的」—— 识别到只会**标注 BGM**，对非商业的开源宣传片不影响，不必因此避开商业曲。
+② **简介** —— A 版（B站简介正文；**前两行必须是最强卖点**：「一个 exe 装好 DLSS5 + 第一人称 + 服装 Mod，双击就能玩」+ 能力清单 + 下载/源码 + 免责 + `#终末地 #Mod #DLSS5 #开源`）与 B 版（精简，适合置顶评论/字幕）。置顶评论要点：下载在简介、第一次会提示"请再点一次一键启动"（XXMI 在生成配置）、**DLSS5 无需额外设置**、出问题发诊断 zip 到 issue。⚠️ 物理效果用中性表述（"物理效果"）以免限流。
+③ **若以后重启这事**：那份脚本的内容骨架（120 秒逐秒分镜、三批录屏素材编号清单 A/B/C、OBS 设置、标题/封面/标签/置顶评论文案）只在 git 历史里（`git show 1c76a38^:docs/dev/宣传视频脚本-2分钟.md`），正文需重写时以 v1.2.0 的新功能（Mod 商城 / 下载中心）为准。
+
+`关键词：["B站宣传片", "BGM 选曲", "Elektronomia Sky High", "TheFatRat Xenogenesis", "B站音频库按使用量", "视频简介 A版", "置顶评论文案", "DLSS5 无需额外设置", "物理效果中性表述", "宣传视频脚本待更新"]`
+
+## 话题（一件事的前因后果）（25 条）
 
 ### 诊断并稳定终末地换装 Mod 的 DX11/EFMI 路线
 *2026-09-27 18:24*
@@ -738,13 +751,6 @@ issue #16（xingluo667，游戏加载过程中闪退）：已追加评论，让�
 排查终末地 DX11 换装路线的进展：早期确认 DX11 直开正常，旧「加载界面闪退」判断证据不足；标准 3DMigoto v1.4.11 能运行但不识别 EFMI ShapeKey/Pool/UAV 扩展。排除同角色重复 Mod 后，EFMI v1.1.9 实测加载 70+ 自定义资源并识别 ShapeKey，用户确认多个模型（含「诀」）出现，存活约116秒且该次无新崩溃；ReShade 代理先加载时 EFMI Processing=0、模型消失。当前走视频 BV1XMh76UEA5 的单一 DLSS5/ReShade 底座共存路线。乳摇现用游戏目录 d3dcompiler_47/vulkan-1 代理 DLL + plugin\sbm.dll 注入，埃特拉单 Mod 实测能进——「游戏目录不应留第三方 loader 代理」的旧结论过强，已作废。
 
 `关键词：["DX11换装", "EFMI v1.1.9", "3DMigoto v1.4.11", "ShapeKey Pool UAV", "ReShade代理冲突", "Processing=0", "sbm代理DLL现状", "埃特拉单mod能进", "loader代理结论作废"]`
-
-### 让 modecontroller 0.3.2 通过全功能实测后打包发布
-*2026-09-29 18:39*
-
-2026-10-01：审查 modecontroller 本体（只审本体，不管 XXMI 等依赖）→ 8 路并行审查员覆盖后端 24 模块+前端+打包脚本，产出高 11/中 22/低 12 分级报告并澄清 3 条误报。随后按用户边界（只改本应用、依赖插件只提 issue、外部交互只改备份语义）完成第一批修复：下载校验链、自更新、前端 XSS、五处备份语义；用户批准的边界外 9 项也已全改并测试。0.3.0 / 0.3.1 已发布（v0.3.1 = Latest）。当前本地 **0.3.2 未推送**，累积改动含：一键启动首次提示挪到"拉起 XXMI 之后"（再次启动/先不启动）、一键更新进度条分母全程不变（实测 PASS）、初始化写入第一人称中文（`[endfield-enhancer] Language=2` + `[OVERLAY] Language=zh-CN`）、日志框统一纯黑且可复制、首次启动引导弹窗。测试清单 `TESTING.md` 已扩到 40 项，正等用户全功能实测。
-
-`关键词：["审查", "本体", "0.3.2", "未推送", "进度条分母", "首次启动弹窗", "第一人称中文", "TESTING.md", "边界外", "自更新", "前缀校验", "备份语义"]`
 
 ### 复现 BV1XMh76UEA5 的 DLSS5+Mod+第一人称方案
 *2026-09-29 21:00*
@@ -968,7 +974,25 @@ issue #16（xingluo667，游戏加载过程中闪退）：已追加评论，让�
 
 `关键词：["游戏起不来","闪退","0xC0000135","STATUS_DLL_NOT_FOUND","自己退出","parseServerManifest 1 条","只开DLSS5不行","只开第一人称不行","只开乳摇能进","ReShade 底座","驱动假说证伪","dll proxy 假说否定","华硕","xingluo667"]`
 
-## 经验教训（被纠正过的、踩过的坑）（392 条）
+### 让 modecontroller 0.3.2 通过全功能实测后打包发布
+*2026-10-07 15:33*
+
+2026-10-01：审查 modecontroller 本体（只审本体，不管 XXMI 等依赖）→ 8 路并行审查员覆盖后端 24 模块+前端+打包脚本，产出高 11/中 22/低 12 分级报告并澄清 3 条误报。随后按用户边界（只改本应用、依赖插件只提 issue、外部交互只改备份语义）完成第一批修复：下载校验链、自更新、前端 XSS、五处备份语义；用户批准的边界外 9 项也已全改并测试。0.3.0 / 0.3.1 已发布（v0.3.1 = Latest）。当前本地 **0.3.2 未推送**，累积改动含：一键启动首次提示挪到"拉起 XXMI 之后"（再次启动/先不启动）、一键更新进度条分母全程不变（实测 PASS）、初始化写入第一人称中文（`[endfield-enhancer] Language=2` + `[OVERLAY] Language=zh-CN`）、日志框统一纯黑且可复制、首次启动引导弹窗。测试清单 `TESTING.md` 已扩到 40 项，正等用户全功能实测。
+
+`关键词：["审查", "本体", "0.3.2", "未推送", "进度条分母", "首次启动弹窗", "第一人称中文", "TESTING.md", "边界外", "自更新", "前缀校验", "备份语义"]`
+
+### 定位两位反馈者"游戏加载中闪退"的真因
+*2026-10-07 16:46*
+
+【「游戏起不来」两反馈者的诊断现状（2026-10-07 16:45，含一条决定性对照与我的跑偏）】
+**决定性的新证据（本机 vs 两台，逐项 config 对比得出）**：唯一与"能否进游戏"吻合的非路径差异是 **`firstperson_addon_enabled`** —— 本机（**能进**）`False`，华硕与 #16（**都起不来**）都是 `True`（次差异 `require_admin`：本机 False / 两台 True）。这与 **#16 早先自己做过的那组对照完全一致**：全关→能进、**只开第一人称→不行**、只开皮肤 Mod→能进、只开乳摇→能进。⇒ 主线应回到「**第一人称 / DLSS5 这条依赖 ReShade 底座（`runtime\dlss5\d3d12.dll`）的链路**」。
+**⚠️ 我本轮跑偏了一次（教训）**：我从"最小注入模式日志与 4 次失败重合"顺出一条线索，又顺着"旧版 Streamline"深挖，甚至准备发版 —— 而**真正的主线（第一人称那条对照）记忆里早就写着**。**"最小注入"不是变量**：`config.minimal_injection` 默认就是 True，**本机也是 True 却能进**；且 `apply_minimal_injection()` 只搬**统一管理器面板那一个 addon**，不碰别的注入。**Streamline 那条是旁支**：#16 同一台机器、同一份旧版 Streamline、同一条 `parseServerManifest` 报错，**14:38 与 15:15 两次照样跑到 503 行 / 55111 帧正常卸载** ⇒ 旧版 Streamline 不构成"起不来"。
+**Streamline 侧查实的真 bug（该修，但不是本次病因）**：`launcher.py` 里 `deploy_streamline_libs()` 的调用条件是 `if bool(getattr(config, "mfg_unlock_enabled", False))` —— 而 MFG 已按 `deviceinfo.MFG_UNLOCK_DISABLED_FOR_THIS_GAME` **定案禁用** ⇒ 这段**永不执行** ⇒ "判据命中就修 Streamline"形同虚设（实测后果：依赖页下载好了 263 MB，游戏目录里仍是 674,432 B 的旧 `sl.common.dll`，新版是 843,392 B）。已改成 `mfg_unlock_enabled or _streamline_repair_needed(config)`（判据与 `ensure_streamline` 同源）。全量测试 **1237 passed**，**尚未发版（等用户发话）**。
+**待做的干净对照（用户已批准"做"，但当时他正自己开着游戏，故暂停）**：只把本机 `firstperson_addon_enabled` 翻成 `True`，启动一次看能否复现，随后还原（config 已备份 `_tmp\config-before-fp-test.json`）。⚠️ 脚本坑：**`AppConfig()` 直接构造不能 `save()`**（会抛 "called without a path"），必须 `AppConfig.load(path)`。
+
+`关键词：["游戏起不来","第一人称","firstperson_addon_enabled","只开第一人称不行","ReShade 底座","d3d12.dll","最小注入不是变量","Streamline 旁支","deploy_streamline_libs 部署条件","mfg_unlock_enabled","AppConfig.load save","0xC0000135"]`
+
+## 经验教训（被纠正过的、踩过的坑）（394 条）
 
 ### XXMI/EFMI 启动终末地是 Endfield.ex…
 *2026-09-27 14:58*
@@ -4566,6 +4590,34 @@ XXMI 的 importer_folder 指向 Mod 库时，注入库再列另一份 d3d11 load
 ⑤ 别用 `dependencies._http_get` 取图片（它会走 fastnet 的线路预检/分块决策，那是给几十 MB 安装包的）；图片用单次 `urllib.request.urlopen(headers=UA, timeout=…)` + 原子落盘（`.part` → `os.replace`）。
 
 `关键词：["缩略图模糊","图片太慢","本地只读图片服务","ThreadingHTTPServer","data URI 过桥慢","images.gamebanana.com 9KB/s","220 档 100 档两波","并发开了反而超时","懒加载 IntersectionObserver","索引缓存字段版本校验","Cache-Control"]`
+
+### 【商城图片并发数的实测甜点 = 6（2026-10-07…
+*2026-10-07 15:46*
+
+【商城图片并发数的实测甜点 = 6（2026-10-07 三次实测，含一次同刻对照）】
+* `3 路` 10 张 = **8.3s**；`6 路` 10~12 张 = **5.5~5.7s**（全成功）⇒ 6 路明显更快。
+* **`12 路` 12 张 = 5.4s 但 12 张全部失败** —— 而**同一分钟**的 6 路是全成功的 ⇒ 这是
+  **服务端对同 IP 并发连接数的限制**，**不是网络抽风**（两次测到同样结果）。
+* 更早还测到过"6 路全失败"，那一次才是**该域自身在抽风**（同一 URL 前一刻通、后一刻不通是常态）。
+  ⇒ **把这两类混为一谈就会得出"并发有害"的错结论**（我当天就错了一次，还在注释里写死了错理由）。
+* 结论：`modstore.prepare_images` 定在 **6 路 + 超时 20 秒**；失败的只影响那一张、不重试、不留半张。
+* **观感差异比总耗时更重要**（用户原话：「jasm 一下就全出」）：懒加载是**逐条**触发回调的，
+  若每条都单独发请求，后端就只能一张一张排队 ⇒ 总耗时差不多但观感"一张一张往外蹦"。
+  正解 = 前端把 **50ms 内**触发的图片请求**攒成一批**再发（`StorePage.queueImage`）⇒ 一屏同时起飞。
+  对照：JASM 用 .NET `HttpClient`（连接池 + 全并发）+ 内存位图缓存 + `DecodePixelWidth=220`，
+  列表图档位（`_sFile220`）与我们**完全相同**；它快在"全并发 + 一起返回"这一点上，不在 URL 或代理
+  （已核实：本机**没有**系统代理，`ProxyEnable=0`，Steam++ 是 Hosts 模式且 hosts 里无 gamebanana）。
+
+`关键词：["图片并发数","6 路甜点","12 路全部失败","同 IP 并发限制","网络抽风 vs 并发限制","jasm 一下就全出","攒批发送 queueImage","观感比总耗时重要","sFile220 档位相同","没走系统代理"]`
+
+### 【Vue SFC 模板「标签不配对」不要靠猜——写标签栈…
+*2026-10-07 16:30*
+
+【Vue SFC 模板「标签不配对」不要靠猜——写标签栈脚本一次定位】（2026-10-07 自查，我连猜两次没中）
+**现场**：合并卡片时给角色墙多加了一层 `<div>`，忘了配对 ⇒ `vite build` 报 `Element is missing end tag`。我先按印象删了一处 `</div>`（错，那个正是需要的）、又按印象补了一处（还是错）—— 两次都没中；最后写了个**标签栈脚本**（正则扫 `<tag>`/`</tag>`、跳过 void 元素与自闭合、遇不匹配就打印"第 X 行 `</A>` 与第 Y 行 `<B>` 不匹配"），**一次**定位到"第 874 行 `</Card>` 与第 727 行 `<div>` 不匹配"。
+**准则**：① **结构类问题（标签、括号、缩进层级）用工具定位，不要靠读代码猜** —— 人眼在几百行嵌套 HTML 里追配对极不可靠；② 脚本要**带行号**输出，且优先报"**哪一对**不匹配"（只说"缺 end tag"等于没说）；③ 加/删一层包裹元素时，**同时想清楚它的闭合在哪**（本次就是"加了开头、忘了结尾"，而且中间还夹着一个原本就对的可疑 `</div>`，把我带偏两次）；④ 前端构建是**唯一的验证**：`vite build` 通过才算改对，光看代码不算（同族：记忆 `0musj7g19`「前端点了没反应先怀疑组件没 import」—— 那次也是**静默失败**，靠静态测试/实跑才抓到）。
+
+`关键词：["标签不配对","Element is missing end tag","vite build 报错","标签栈脚本","行号定位","别靠猜","加了一层包裹忘了闭合","frontend 结构问题"]`
 
 ## 事实（细碎的原子信息）（94 条）
 
