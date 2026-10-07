@@ -4,9 +4,9 @@
 > 目的：让「当时为什么这么改、踩过什么坑」跟着源码一起留在仓库里。
 > 想改内容 → 改记忆库（用记忆工具），再跑一次本脚本；不要直接编辑本文件。
 
-- 生成时间：2026-10-07 17:20:51
+- 生成时间：2026-10-07 17:47:16
 - 来源：`.dsh-meow/memory.db`
-- 条目：597 条（已跳过 archived / 其它项目的条目）
+- 条目：598 条（已跳过 archived / 其它项目的条目）
 
 ---
 
@@ -297,7 +297,7 @@
 
 `关键词：["GPL-3.0","MIT","许可证冲突","copyleft","开源协议","JASM 参考","不能抄代码","思路重写","LICENSE 检查","分发合规"]`
 
-## 项目记忆（结构 / 决策 / 部署 / 待办）（42 条）
+## 项目记忆（结构 / 决策 / 部署 / 待办）（43 条）
 
 ### 项目概述
 
@@ -694,19 +694,29 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 `关键词：["1.1.2-beta","Mod 商城落地","下载中心","modstore.py","downloads.py","StorePage.vue","DownloadsPage.vue","依赖页瘦身","1229 passed","selfupdate flaky","未构建 exe","已安装标记不亮"]`
 
 ### 【modecontroller 当前状态唯一真源】（20…
-*2026-10-07 15:33*
+*2026-10-07 17:24*
 
-【modecontroller 当前状态唯一真源】（2026-10-07 15:36 更新）
-**Latest Release = `v1.2.0`**（2026-10-07T07:27:46Z，release id `405493403`，Latest；遗留 draft 0）。**本地 = `1.2.0`（与 Release 同号）**。**main = `1c76a38`**（v1.2.0 的 tag 指向构建时点 `7c36bab`；其后的结构树镜像与文档清理是单独提交，属正常）。快照 `D:\zmdmod\_snapshot_1.2.0-20261007-153126`。
-**v1.2.0 附件（digest 逐字节一致）**：exe 32,109,271 B / sha256 `ab467b5b933809e9ad2ca2bd663454b07c518cd4645c73744bebf4dc2ca90c16`；assets-bundle.zip 262,289,985 B / sha256 `1d4893b6c1ad75575ad57ab16532d4f31e5010f8de0085dbf95b6f3280b99975`。
-**v1.2.0 内容（自 v1.1.1 起）**：① Mod 商城（浏览/搜索/分类+角色筛选/四种排序/页内详情/R18 三档/批量扫描与一键更新）；② 下载中心独立页签（统一任务列表、暂停继续取消清空、队列可追加）；③ **修国际服日志目录厂商段写死**（`Hypergryph` vs `Gryphline`，`fsutil.endfield_local_low_dirs()` 四处共用）—— issue #16「说好的自动换 Streamline 从未生效」的根因；④ **补退出时刻取证**（`game-exited`/`crash` 两时机此前从未落盘，改由 `diagnostics._capture_postmortem` 记录并加 `pid`）；⑤ 商城图片链路重做（本地只读图片服务 + 三档 + 懒加载 + 连接复用，12 张 38.0s→4.6s）；⑥ 角色名中文化；⑦ 缓存加 `STORE_SCHEMA` 版本号。
-**normify 结构树（2026-10-07 15:31 已做完）**：realign（37 模块/191 行号）→ 新增 6 模块（`backend.store` 容器 + `store.catalog` + `store.tasks` + `api.store` + `web.store` + `web.downloads`，uid `5f0a0001`~`5f0a0006`）→ refresh → **validate 0 error** → build（170 模块/392 API/84 依赖）→ render（601 KB）→ 镜像 195 文件进 `docs/structure`。
-⚠️ 两个 L1 坑：`deps[].label.en` **必须 ≤30 字符**；**API 键全项目唯一**（js_api 只能声明在后端 `api.*`，前端页模块 `apis` 留空）。
-**发版流程**：`build_release.py`（会自动推 main）→ `prepare_release.py` → `gh release create --draft --notes-file RELEASE_NOTES.md` → `upload_release_assets.py --tag` → `gh release edit --draft=false --latest` → **按 release id 核对 digest** → 查遗留 draft。附件只推 exe + assets-bundle.zip（不带版本号）。版本号 WARN（"1.2.0 不是 v1.1.1+1"）是用户主动跳号，属预期。
-**issue**：**#16（xingluo667）OPEN** —— 15:29 已回复（comment 6033152760），等他更新 1.2.0 后回报。
-**待办**：等 #16 回报（若仍是同现象，看新包里 `game-exited` 那张照片）。
+【modecontroller 当前状态唯一真源】（2026-10-07 17:25 更新）
+**Latest Release = `v1.2.1`**（2026-10-07T09:22:39Z 转正、release id `405589208`、Latest、遗留 draft 0）。**本地 = `1.2.1`**；**main = `737cc1d`**；快照 `D:\zmdmod\_snapshot_1.2.1-20261007-172051`。
+**v1.2.1 附件（远程 digest 与本地逐字节一致）**：exe `35,311,029 B` / sha256 `a9bfa904f01e1d1f16a3206c976f562ae62b0556554371a9f206e5f78b67bc2b`（比 v1.2.0 大 3.2 MB —— 随 exe 的角色头像 3.8 MB）；assets-bundle.zip `262,289,985 B` / sha256 `ad0a88cc8f0dfbf343aa43407377561b26981a83bb564b604cbb163eabf14a76`。
+**v1.2.1 内容（自 v1.2.0 起）**：① **DLSS5 不出帧** —— preset 里 technique 全名缺 effect 目录（应为 `MartysMods_Launchpad@iMMERSE\MartysMods_LAUNCHPAD.fx`），且行合并去重按技术名比 ⇒ 旧短名永远被当"已存在"、**修了等于没修**；② **Streamline 部署从未执行**（调用条件挂在已定案停用的 `mfg_unlock_enabled` 上，issue #16 的确认根因之一）；③ **依赖更新进度字节累加虚高**（回调每 256 KB 一次且给的是当前文件累计值 ⇒ 240 MB 的包显示成 230 GB）；④ **诊断包补采三项**（`dlss5-ReShadePreset.ini` / `dlss5-addon-placement.txt` / `dlss5-shaders-tree.txt`）；⑤ Mod 库「角色视图」开关 + 角色表与头像随 exe 分发。
+**issue #16（xingluo667）**：17:24 已回复（comment `6034982584`）—— 解释"国际服"只是渠道目录名差异（`Arknights Endfield`，不是他装错）、说明查到的两件事、请他更新 1.2.1 再试、并**告知国庆后更新频率显著降低** + 给出 DSH 自查路径（下载页 `https://deepseek.com/harness`，装好自带默认工作区、无需设置）与**可直接复制的提示词**（含仓库网址、他的管理器根目录 `C:\Users\<user>\Downloads`、要他 clone 源码翻日志、修好提 PR）。
+**仍未定案**：他（与华硕那台）`0xC0000135` 的真因 —— 已排除：显卡驱动、VC++ 运行库、注入未进进程（进程里 d3d11/d3d12/sbm/poser 都在）、旧版 Streamline（同机有两次正常跑完的记录，一次 5.5 万帧）。新采集已就位，等他更新后再导包即可用包内文件定案。
 
 `关键词：["当前状态唯一真源","Latest Release v1.1.0","release id 405355434","exe sha256 03092366","assets 262289985","伪旧版 from-1.1.0","启动提速 19 秒","launch_stage 分步进度","issue 16 已回","issue 17 已关","版本号 1.1.0 用户指定"]`
+
+### 【本机有两套**互相独立**的 ReShade/DLSS…
+*2026-10-07 17:38*
+
+【本机有两套**互相独立**的 ReShade/DLSS5 环境（2026-10-07 定案，解释了好几个"两边不一样"的现象）】
+**① 源码版**：数据根 `D:\zmdmod\modecontroller`；config 的 `reshade_dll` 指向**工作区外**的 `D:\zmdmod\DLSS5\d3d12.dll`（历史遗留/手工配置），而 `RESHADE_BASE_PATH_OVERRIDE` 由代码固定成工作区内的 `runtime\reshade` ⇒ **两者不是同一目录**：底座装在 `DLSS5\`、日志与 ini 却落在 `runtime\reshade\`（**真日志在 `runtime\reshade\ReShade.log`**，`DLSS5\ReShade.log` 是旧的）。`DLSS5\` 里攒着一整份 **ReShade 官方 shader 库（36 个包）**。
+**② exe/modtest 版**：数据根 `D:\zmdmod\modtest`；`reshade_dll = runtime/dlss5/d3d12.dll`（与 base path 一致 ⇒ 不会错位）；shader 是**按随包清单展开的**（只有 `MartysMods_LAUNCHPAD.fx` 等少数几个）。
+**⇒ 由此解释的现象**：
+* **"源码启动 ReShade 报错、exe 没问题"** = `DLSS5\` 那份 shader 库里的 `iMMERSE\MartysMods_FFTBLOOM.fx` 与 `INSIGHT.fx` 在 ReShade 6.8 上 `Failed to compile`（`error X3004`），而 **modtest 里根本没有这两个文件**（随包清单没列它们）。已把这两个 `.fx` 移进 `DLSS5\reshade-shaders\Shaders\_disabled\`（可还原；`LAUNCHPAD.fx` 保留，DLSS5 运动矢量来源不受影响）。另有 3 个 `X3020`（`DH\dh_uber_rt.fx`、`AstrayFX\RadiantGI.fx`、`RSRetroArch\mdapt.fx`，"纹理同时当输入输出"，同样是老 shader 与新 ReShade 不兼容）**暂时留着**。
+* **`CameraFirstPerson` 两套不同**：源码 `DLSS5\ReShade.ini` 从 **09-27 21:12（`bak-before-preventunloading`）之后一直是 0**；modtest 那套**一直是 1**（我 09-27 18:36 手改过一次）。**用户实测 `=0` 时按 F1 也能用** ⇒ `0` 是合理默认（"不常开、快捷键切"），**程序不该强制写 1**（用户原话：「不要默认第一视角，这样会覆盖之前的设置」）。
+**③ 第一人称"不支持相机控制"的机制（从 `renodx-endfield-enhancer.addon64` 的字符串挖出）**：enhancer 靠**进程内存里的 `XLua.Runtime.dll`** 去找游戏的 Lua 环境（终末地用 XLua + **IL2CPP** 编译 —— 游戏目录里既没有 `Managed\` 也没有任何 `XLua*` 文件），字符串原文：`Waiting for LuaManager's game environment.` / `Waiting for the Lua bridge to start.` / `XLua.Runtime.dll image missing or ambiguous`。⇒ 游戏**极早退出**（还没加载到那个模块）时它就一直等 ⇒ 面板显示"不支持相机控制" ⇒ **这是"起不来"的下游症状，不是独立问题**。
+
+`关键词：["两套 ReShade 环境","reshade_dll 工作区外","RESHADE_BASE_PATH_OVERRIDE","runtime\\reshade\\ReShade.log","DLSS5 目录 shader 库","MartysMods_FFTBLOOM","MartysMods_INSIGHT","X3004 编译失败","CameraFirstPerson 0 与 1","按 F1 能用","XLua.Runtime.dll","IL2CPP","不支持相机控制","modtest 与源码差异"]`
 
 ### 待办
 
