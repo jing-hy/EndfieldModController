@@ -1,66 +1,25 @@
-# v1.2.1
+# v1.2.2
 
-本次更新修复三个实际影响功能的问题：DLSS5 神经渲染在部分机器上不出帧、Streamline 运行库从未自动部署（#16）、以及依赖更新的进度显示成天文数字；同时扩充了诊断包的采集范围。
+本次更新修复依赖页的一处状态误报，并补充了面向 AI 助手的排查与贡献说明。
 
-## 一、修复：DLSS5 神经渲染不出帧
+## 一、修复：依赖页把「已被停用」的插件误报成「待展开」
 
 ### 现象
 
-游戏可以正常进入，但神经渲染不生效，`dlss5-feed.log` 中出现：
-
-```
-[feed] motion-vector provider MartysMods_Launchpad is installed but DISABLED:
-       enable it above DLSS 5 Feed.
-NR-VERDICT v3 state=UNAVAILABLE
-```
+依赖页上的 `renodx-mfgunlock.addon64` 每次启动游戏之后又变回「待展开」，看上去像没装好。
 
 ### 根因
 
-ReShade 的 technique 全名是 `<Technique>@<effect 相对路径>`。运动矢量来源 `MartysMods_LAUNCHPAD.fx` 位于 `reshade-shaders\Shaders\iMMERSE\` 子目录，而写进 preset 的名字缺少这一层目录：
+一键启动会按随包清单把该插件展开到 DLSS5 目录，紧接着又按当前开关（多帧生成对当前游戏已确认无效、默认停用）把它移入 `_disabled\`；而依赖页判断「是否已展开」时**只看根目录**，看不到停用区里的那份副本。
 
-```
-写入：MartysMods_Launchpad@MartysMods_LAUNCHPAD.fx
-识别：MartysMods_Launchpad@iMMERSE\MartysMods_LAUNCHPAD.fx
-```
-
-ReShade 因此识别不到该 technique，将其视为未启用。缺少运动矢量时，神经渲染只对静止画面有效，动态画面等同于没有效果（`DLSS5_Feed.fx` 在 shaders 根目录，因此它不带目录前缀是正确的，这也是该问题不易察觉的原因）。
-
-同时，自检虽然一直报告 `fixed=True`，文件内容却从未改变：合并 preset 行时按 `@` 之前的技术名去重，两种写法的技术名相同，于是旧的短名字被判为「已存在」而跳过替换。
+结果是一个来回循环：每一轮启动都报「待展开」、又白展开一次，日志也跟着变吵。同一个事实在自检里（`dlss5:mfg_unlock`）本来就同时检查两个位置，两处判据不一致。
 
 ### 修复
 
-- technique 全名按 effect 在磁盘上的**实际相对位置**计算，不写死目录名，shader 包更换子目录时自动跟随。
-- 同名 technique 但路径不一致时，以正确路径替换旧条目。
-- 判据与扫描正则同步收紧：只认带正确相对路径的全名；此前正则的字符类不含路径分隔符，带目录的合法写法反而会被误判为「未启用」。
+- 依赖页新增「已停用」状态：文件位于 `_disabled\` 且尺寸相符时如实显示为「已停用」，并且不再要求展开。
+- 该判据改为与自检一致（两处都同时检查生效目录与停用区）。
 
-## 二、修复：Streamline 运行库从未自动部署（#16）
+## 二、其他
 
-### 根因
-
-`deploy_streamline_libs()` 的调用条件是 `mfg_unlock_enabled`（多帧生成开关）。多帧生成在先前版本中已判定对该游戏无效并默认停用，因此该条件恒为假，「命中判据就修复运行库」这条路径从未执行。
-
-实际后果：依赖页已下载约 263 MB 的 Streamline 运行库，游戏目录中仍是游戏自带的旧版（`sl.common.dll` 674,432 字节，新版为 843,392 字节）。
-
-### 修复
-
-部署条件改为「多帧生成开启 **或** 运行库需要修复」；部署与下载共用同一套判据，避免两侧判据漂移。
-
-## 三、修复：依赖更新的进度显示成超大数字
-
-字节回调每 256 KB 触发一次，回调给出的是「当前这一个文件的累计已下载值与总大小」。原实现无条件累加，一个 240 MB 的安装包在下完时会累加成约 230 GB，界面显示形如 `88968.2 MB / 246303.5 MB`（百分比仍然正确，只有数值失真）。
-
-改为按组件 key 记账：同一组件重复回调时覆盖该组件的值，切换到下一个组件时才并入总量。
-
-## 四、诊断包扩充
-
-新增三项采集，用于在无法直接访问出问题机器的前提下定位上述类型的问题：
-
-- `dlss5-ReShadePreset.ini`：technique 的全名与启用状态所在文件（`ReShade.ini` 只提供路径，`ReShade.log` 只体现识别结果）。
-- `dlss5-addon-placement.txt`：addon 在根目录与 `_disabled\` 中的分布，用于区分「插件被停用」与「插件未铺」。
-- `dlss5-shaders-tree.txt`：shader 的相对路径清单，判定 technique 全名是否正确的唯一依据。
-
-## 五、其他
-
-- 商城的图片链路改为进程内本地只读服务，列表使用 220 档缩略图并按视口懒加载。
-- Mod 库新增「角色视图」开关（默认关闭）：开启后先按角色排列，点进去查看该角色的 Mod。
-- 角色表与角色头像随 exe 分发，离线可用。
+- 仓库新增 `AGENTS.md`：给 AI 助手的排查与贡献说明（怎么用诊断包定位、查明是本程序的问题就自己改好并自测、有 GitHub 账号提 PR / 没有则通过 QQ 群反馈）。`CONTRIBUTING.md` 增加了相应指引。
+- 诊断包补充采集 `dlss5-ReShadePreset.ini`、`dlss5-addon-placement.txt`（含 `_disabled\`）、`dlss5-shaders-tree.txt` 三项，便于在无法直接访问出问题机器的前提下定位 DLSS5 相关问题。
