@@ -722,8 +722,17 @@ def game_dir_from_xxmi_log(launcher: Path, config_path: Path | None = None) -> P
 
 def detect_render_api(game_dir: Path) -> str:
     """Heuristically detect the main graphics API from the latest ReShade.log entries."""
-    player_log = Path(os.environ.get("USERPROFILE", "")) / "AppData" / "LocalLow" / "Hypergryph" / "Endfield" / "Player.log"
-    if player_log.is_file():
+    # ⚠️ 厂商段**不能写死**（2026-10-07 修）：国服 `Hypergryph`、国际服与其它渠道
+    # `Gryphline`；写死一家会让国际服用户这边**永远读不到 Player.log** ⇒ 检测不出渲染 API。
+    from . import fsutil
+
+    player_log = None
+    for folder in fsutil.endfield_local_low_dirs():
+        candidate = folder / "Player.log"
+        if candidate.is_file():
+            player_log = candidate
+            break
+    if player_log is not None:
         try:
             player_text = player_log.read_text(encoding="utf-8", errors="replace")
         except OSError:

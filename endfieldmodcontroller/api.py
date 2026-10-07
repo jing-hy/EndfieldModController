@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import activation, core, dependencies, diagnostics, dlss5_fetcher, fsutil, hot_reload, integrity, launcher, moddl, reshade, reshade_integration, runtime_assets, runtime_deps, selfupdate
+from . import activation, core, dependencies, diagnostics, dlss5_fetcher, downloads, fsutil, hot_reload, integrity, launcher, moddl, modstore, reshade, reshade_integration, runtime_assets, runtime_deps, selfupdate
 from .config import AppConfig, auto_detect_migoto_loader, auto_detect_official_launcher, auto_detect_xxmi, cached_detect
 
 
@@ -176,6 +176,19 @@ class EndfieldModControllerApi:
         # Mod 下载（粘贴网址 → 并行下载 → 自动解压入库）：任务表 + 一把入库锁
         # （下载并行、解压入库串行 —— 用户 2026-10-02 要求"并行多线程下载"）
         self._mod_dl: dict[str, Any] = {"done": True, "items": [], "cancel": False, "pause": False}
+        # **待办队列 + "worker 在不在跑"标记**（2026-10-07 加）。
+        # 用户原话：「把下载从依赖里面抽出来……**下载可以后台进行，可以追加任务**，
+        # 看商城不用下一个就跳转一次，但是要有动态」。
+        # 以前 `start_mod_download` 一见 `done=False` 就拒绝（"上一批还在下载中"）——
+        # 逛商城那种"看到一个加一个"的用法会被反复挡住。现在改成：新项塞进这里，
+        # 由**同一个** worker 循环取件。**任何时刻只有一个 worker**，`_mod_dl` 不会被
+        # 两方并发改写（那条是 2026-10-04 的教训，见 `resume_mod_downloads` 的注释）。
+        self._mod_dl_pending: list[dict[str, Any]] = []
+        self._mod_dl_running = False
+        # Mod 商城的后台任务（补全索引 / 批量扫描更新）。**GUI 线程上不发这些请求** ——
+        # 一次索引是 15 个请求，挂在界面上就是"点一下卡住"。统一放这里，前端轮询进度。
+        self._store_task: dict[str, Any] | None = None
+        self._store_lock = threading.Lock()
         # 「下载中关窗口要弹窗提示」用（用户 2026-10-02）：用户在确认框里点了
         # 「仍然退出」后置 True，closing 事件就放行。
         self.exit_confirmed = False
@@ -3683,70 +3696,130 @@ class EndfieldModControllerApi:
     # **能解压的解压进库**，**不能解压的提示用户需要手动解压**，**并行多线程下载**」；
     # 下载源 = 「**给个输入框输入网址**」⇒ 这里收的就是用户粘贴的 http(s) 直链。
     def start_mod_download(self, urls: Any) -> dict[str, Any]:
-        """起一批下载任务：**多任务并行**，每个任务内部再走 fastnet 的并发分块。
+        """把下载任务加进队列：**多任务并行**，每个任务内部再走 fastnet 的并发分块。
 
         解压/入库复用 `_import_archive_file()`（拖入 zip 那条已验证的链路：zip-slip 校验、
         自动提层、重名加后缀、收编与角色识别），所以"下载进来"和"拖进来"结果一致。
+
+        ⚠️ **允许反复调用（追加任务）**（2026-10-07 用户要求「下载可以后台进行，
+        **可以追加任务**，看商城不用下一个就跳转一次」）：正在下载时再调它**不再被拒**，
+        而是把新项接到同一个队列，由正在跑的那个 worker 接着取；同一队列里
+        **同来源 URL 只留一个**（商城连点同一个 Mod 不该下两份），重复数按 `skipped` 如实回报。
         """
         links = moddl.parse_urls(urls if isinstance(urls, str) else list(urls or []))
         if not links:
             return {"ok": False,
                     "message": "没看到有效的网址 —— 要 http:// 或 https:// 开头的直链，一行一个"}
         with self._mod_dl_lock:
-            if not self._mod_dl.get("done", True):
-                return {"ok": False, "message": "上一批还在下载中，等它跑完再开新的"}
-            self._mod_dl = {
-                "cancel": False, "pause": False,
-                "started_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "done": False,
-                "dir": str(moddl.downloads_dir(self.config)),
-                "items": [
-                    {"url": link, "origin_url": link,      # origin_url = 用户粘的那个（香蕉网常是页面地址）
-                     "name": moddl.file_name_from(link), "status": "等待中",
-                     "percent": 0, "received": 0, "size": 0, "message": "", "path": ""}
-                    for link in links
-                ],
-            }
-            items = self._mod_dl["items"]
-        launcher._append_log(self.config,
-                             f"Mod 下载: 开始 {len(links)} 个任务（并行）→ {moddl.downloads_dir(self.config)}")
-        threading.Thread(target=self._mod_download_worker, args=(items,), daemon=True).start()
-        return {"ok": True, "total": len(links), "items": items}
+            current = list(self._mod_dl.get("items", []))
+            known = {str(item.get("origin_url") or item.get("url") or "") for item in current}
+            fresh_links = [link for link in links if link not in known]
+            skipped = len(links) - len(fresh_links)
+            if not fresh_links:
+                return {"ok": True, "added": 0, "skipped": skipped, "queued": len(current),
+                        "message": "这些已经在下载队列里了", "items": current}
+            if not current or self._mod_dl.get("done", True):
+                # 上一批已结束（或压根没有）⇒ 开一份新记录；否则就是纯追加，不动计时与目录。
+                self._mod_dl = {
+                    "cancel": False, "pause": False,
+                    "started_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "done": False,
+                    "dir": str(moddl.downloads_dir(self.config)),
+                    "items": [],
+                }
+            new_items = [
+                {"url": link, "origin_url": link,      # origin_url = 用户粘的那个（香蕉网常是页面地址）
+                 "name": moddl.file_name_from(link), "status": "等待中",
+                 "percent": 0, "received": 0, "size": 0, "message": "", "path": ""}
+                for link in fresh_links
+            ]
+            # ⚠️ **必须拿到真队列的引用再 extend**（2026-10-07 实测踩到）：上面读 `current`
+            # 时为了不把锁里的对象暴露给外面而做了 `list(...)` 浅拷贝 —— 顺手拿它 `extend`
+            # 的话，新任务只进了一个局部拷贝，**真队列一项都没多**。表现极隐蔽：
+            # 返回值说"已加入 2 个"，队列里却只有 1 个，而 worker 那边什么都没多出来。
+            queue = self._mod_dl.setdefault("items", [])
+            queue.extend(new_items)
+            self._mod_dl["done"] = False
+            # 追加即"我要下"⇒ 顺手清掉暂停/终止标志，与"重新开一批"的旧语义一致。
+            # （不清的话，上一批点过暂停会把刚加的这些一起停住，界面上看着像"没加上"。）
+            self._mod_dl["pause"] = False
+            self._mod_dl["cancel"] = False
+            self._mod_dl_pending.extend(new_items)
+            start_worker = not self._mod_dl_running
+            if start_worker:
+                self._mod_dl_running = True
+            items = list(queue)
+        extra = f"（另有 {skipped} 个已在队列里，跳过）" if skipped else ""
+        launcher._append_log(
+            self.config,
+            f"Mod 下载: 加入 {len(new_items)} 个任务{extra}，当前队列 {len(items)} 个 "
+            f"→ {moddl.downloads_dir(self.config)}")
+        if start_worker:
+            threading.Thread(target=self._mod_download_worker, daemon=True).start()
+        return {"ok": True, "added": len(new_items), "total": len(new_items),
+                "skipped": skipped, "queued": len(items), "items": items}
 
-    def _mod_download_worker(self, items: list[dict[str, Any]]) -> None:
-        """并行下载；**解压入库串行**（同一把锁）—— 文件系统操作串行更稳，
-        也避免两个包同时往库里写时"重名加后缀"的判断互相打架。"""
+    def _mod_download_worker(self) -> None:
+        """下载工作线程：**循环从待办里取件**，所以新任务可以随时追加进来。
+
+        并行下载、**解压入库串行**（同一把锁）—— 文件系统操作串行更稳，也避免两个包
+        同时往库里写时"重名加后缀"的判断互相打架。
+
+        ⚠️⚠️ **为什么不是"一次一批、跑完退出"**（2026-10-07 改）：用户要求
+        「下载可以后台进行，**可以追加任务**」。改成循环取件之后仍然**任何时刻只有一个
+        worker**（`_mod_dl_running` 守着）—— 这条不能破：2026-10-04 有过教训，
+        两个 worker 并发改同一份 `_mod_dl` 会让进度乱跳、完成标志互相覆盖、
+        "解压入库串行"的假设也一起失效。
+        """
         from concurrent.futures import ThreadPoolExecutor
 
         dest_dir = moddl.downloads_dir(self.config)
+        paused = stopped = False
+        counts: dict[str, int] = {}
         try:
-            with ThreadPoolExecutor(max_workers=min(4, max(1, len(items)))) as pool:
-                futures = [pool.submit(self._mod_download_one, item, dest_dir) for item in items]
-                for future in futures:
-                    future.result()          # 异常已在 _mod_download_one 内部吞掉
+            while True:
+                with self._mod_dl_lock:
+                    batch = list(self._mod_dl_pending)
+                    self._mod_dl_pending.clear()
+                    if not batch:
+                        # ⚠️ **"判定没活了"与"复位 worker 标记"必须在同一把锁里做完**：
+                        # 否则有竞态 —— worker 刚判完"没活了"、还没把 `_mod_dl_running`
+                        # 置 False 的那个瞬间，商城正好追加一批新任务（它会看到
+                        # `running=True` 而**不起新线程**），那批任务就永远没人下。
+                        self._mod_dl["done"] = True
+                        self._mod_dl_running = False
+                        paused = bool(self._mod_dl.get("pause"))
+                        stopped = bool(self._mod_dl.get("cancel"))
+                        counts = moddl.summarize(self._mod_dl.get("items", []))
+                        break
+                with ThreadPoolExecutor(max_workers=min(4, max(1, len(batch)))) as pool:
+                    futures = [pool.submit(self._mod_download_one, item, dest_dir) for item in batch]
+                    for future in futures:
+                        future.result()          # 异常已在 _mod_download_one 内部吞掉
                 # **封面图一律不留**（用户 2026-10-02：「入库或者中断图片也要删」）——
                 # 放在这里统一做，是因为任务有成功/失败/待手动解压三条出路径，逐条加容易漏。
-                self._cleanup_download_covers(items)
-        finally:
+                self._cleanup_download_covers(batch)
+        except Exception as exc:  # noqa: BLE001 —— worker 崩了也必须复位，否则后续追加全卡死
+            launcher._append_log(self.config, f"Mod 下载: 工作线程异常（{exc}）")
             with self._mod_dl_lock:
+                self._mod_dl_pending.clear()
                 self._mod_dl["done"] = True
-                paused = bool(self._mod_dl.get("pause"))
-                stopped = bool(self._mod_dl.get("cancel"))
-                counts = moddl.summarize(items)
-            if paused or stopped:
-                # 用户主动停的（2026-10-04 修）：别写成"全部结束" —— 他会以为没停下。
-                # 也别把"已经下完并入库的那几个"说成还在跑：如实写"本次入库 N 个，
-                # 其余保留断点/已终止"（他实测报过「暂停显示已下载并入库 1 个」的困惑）。
-                launcher._append_log(
-                    self.config,
-                    f"Mod 下载: 已{'暂停' if paused else '终止'}"
-                    f"（本次已完成入库 {counts['imported']} 个，"
-                    f"{'其余保留断点，点「继续」接着下' if paused else '半成品已清理'}）")
-            else:
-                launcher._append_log(
-                    self.config,
-                    f"Mod 下载: 全部结束（入库 {counts['imported']}，需手动解压 {counts['manual']}，"
-                    f"失败 {counts['failed']}）")
+                self._mod_dl_running = False
+            return
+        if paused or stopped:
+            # 用户主动停的（2026-10-04 修）：别写成"全部结束" —— 他会以为没停下。
+            # 也别把"已经下完并入库的那几个"说成还在跑：如实写"本次入库 N 个，
+            # 其余保留断点/已终止"（他实测报过「暂停显示已下载并入库 1 个」的困惑）。
+            launcher._append_log(
+                self.config,
+                f"Mod 下载: 已{'暂停' if paused else '终止'}"
+                f"（本次已完成入库 {counts['imported']} 个，"
+                f"{'其余保留断点，点「继续」接着下' if paused else '半成品已清理'}）")
+        else:
+            launcher._append_log(
+                self.config,
+                f"Mod 下载: 全部结束（入库 {counts['imported']}，需手动解压 {counts['manual']}，"
+                f"失败 {counts['failed']}）")
 
     @staticmethod
     def _cover_data_uri(path: Any) -> str:
@@ -4261,8 +4334,7 @@ class EndfieldModControllerApi:
     def active_download_count(self) -> int:
         """还有几个下载任务在跑（关窗口的原生确认框要显示这个数字）。"""
         with self._mod_dl_lock:
-            return sum(1 for item in self._mod_dl.get("items", [])
-                       if item.get("status") in ("等待中", "读取香蕉网信息", "下载中", "解压中"))
+            return len(downloads.active_items(self._mod_dl.get("items", [])))
 
     def has_active_downloads(self) -> bool:
         """有没有正在跑的下载任务 —— 关窗口前要问一句（用户 2026-10-02 要求）。"""
@@ -4319,7 +4391,13 @@ class EndfieldModControllerApi:
         return {"ok": True}
 
     def resume_mod_downloads(self) -> dict[str, Any]:
-        """**继续**：清掉暂停标志，并按当前剩余任务重新起一批（断点续传会跳过已下的部分）。"""
+        """**继续**：清掉暂停标志，把停下的任务放回待办队列（断点续传会跳过已下的部分）。
+
+        ⚠️ 2026-10-07 起不再"自己另起一个 worker 线程"：与 `start_mod_download` 共用
+        **同一套追加机制**（放回 `_mod_dl_pending` + 按 `_mod_dl_running` 决定要不要起线程）。
+        以前两条路各写一份"重新起线程"的判断，正是 2026-10-04 那次"两个 worker 并发改
+        `_mod_dl`"的温床 —— 现在只有一处判定（`_mod_dl_running`），漏判不可能发生。
+        """
         with self._mod_dl_lock:
             self._mod_dl["pause"] = False
             self._mod_dl["cancel"] = False
@@ -4330,16 +4408,16 @@ class EndfieldModControllerApi:
             for item in pending:
                 item["status"] = "等待中"
                 item["message"] = ""
-            dir_path = str(self._mod_dl.get("dir") or moddl.downloads_dir(self.config))
-            # ⚠️ **必须把 `done` 翻回 False**（2026-10-04 修）：上一批 worker 结束时把它设成了
-            # True，而 `start_mod_download` 正是用 `if not self._mod_dl.get("done", True)` 来
-            # "上一批还在跑就拒绝开新批次"。继续下载时若不翻回来，用户在这批还没跑完时点
-            # 「开始下载」会被放行 → **两个 worker 并发改同一份 `_mod_dl` 状态**（进度乱跳、
-            # 完成标志互相覆盖、解压入库的串行假设也被破坏）。
+            # `done` 必须翻回 False：`mod_download_progress` 靠它告诉界面"还在跑"，
+            # 而 worker 结束时刚把它设成 True（不清的话界面立刻显示"已完成"）。
             self._mod_dl["done"] = False
+            self._mod_dl_pending.extend(pending)
+            start_worker = not self._mod_dl_running
+            if start_worker:
+                self._mod_dl_running = True
         launcher._append_log(self.config, f"Mod 下载: 继续 {len(pending)} 个任务（断点续传）")
-        threading.Thread(target=self._mod_download_worker, args=(pending, Path(dir_path)),
-                         daemon=True).start()
+        if start_worker:
+            threading.Thread(target=self._mod_download_worker, daemon=True).start()
         return {"ok": True, "resumed": len(pending)}
 
     def clear_mod_downloads(self) -> dict[str, Any]:
@@ -4349,13 +4427,501 @@ class EndfieldModControllerApi:
         自己扫掉。**有任务正在跑时拒绝**：清记录不能把正在下的东西也抹掉。
         """
         with self._mod_dl_lock:
-            active = [item for item in self._mod_dl.get("items", [])
-                      if item.get("status") in ("等待中", "读取香蕉网信息", "下载中", "解压中")]
+            active = downloads.active_items(self._mod_dl.get("items", []))
             if active:
                 return {"ok": False, "message": f"还有 {len(active)} 个任务在跑，等它们结束再清"}
             self._mod_dl = {"items": [], "done": True, "started_at": "", "dir": ""}
+            # ⚠️ **待办也要一起清**（2026-10-07 加）：worker 循环取件之后，"清记录"和
+            # "待办队列"是两份状态；只清前者的话，队列里剩下的旧项会把刚清空的记录
+            # 重新拉起来（用户看到的是"清了又自己冒出来"）。
+            self._mod_dl_pending.clear()
         launcher._append_log(self.config, "Mod 下载: 已清除任务记录")
         return {"ok": True}
+
+    # ── 下载中心（用户 2026-10-07：「把下载从依赖里面抽出来，之前是所有下载跳转依赖的
+    #    现在都跳转下载，依赖也跳转下载，下载可以后台进行，可以追加任务」）──────────
+    def downloads_snapshot(self) -> dict[str, Any]:
+        """下载页要的全部状态：Mod 队列 + 依赖/组件任务，归一化成同一形状。
+
+        侧栏「下载」徽标读这里的 `active`，页面读 `tasks` —— **只有这一份真源**，
+        依赖页不再自己维护一份进度（那是用户明确要求瘦身掉的东西）。
+        """
+        with self._mod_dl_lock:
+            items_ref = list(self._mod_dl.get("items", []))
+            mod_dl = {key: value for key, value in self._mod_dl.items() if key != "items"}
+        # 封面转 data URI 要在**锁外**做（读文件 + base64），且写回**原对象**——
+        # 与 `mod_download_progress` 同一套：转换一次就缓存在任务上，下次轮询不再读盘。
+        for item in items_ref:
+            if item.get("cover") and "cover_data" not in item:
+                item["cover_data"] = self._cover_data_uri(item["cover"])
+        mod_dl["items"] = items_ref
+        counts = moddl.summarize(items_ref)
+        return downloads.snapshot(
+            mod_dl=mod_dl,
+            dep_task=self._dep_task,
+            downloads_dir=str(moddl.downloads_dir(self.config)),
+            mod_counts=counts,
+        )
+
+    def downloads_active_count(self) -> dict[str, Any]:
+        """侧栏徽标用：只要数字与速度。
+
+        刻意**不构造整份清单**（徽标每秒轮询，而清单里带着几十个任务项与封面 data URI）。
+        """
+        with self._mod_dl_lock:
+            items = list(self._mod_dl.get("items", []))
+        active = len(downloads.active_items(items))
+        speed = sum(float(item.get("speed_bps") or 0.0) for item in items)
+        dep = self._dep_task or {}
+        if dep.get("running"):
+            active += 1
+            speed += float(dep.get("speed_bps") or 0.0)
+        return {"ok": True, "active": active, "speed_bps": speed}
+
+    def downloads_pause(self, task_id: str = "") -> dict[str, Any]:
+        """下载页的「暂停」。
+
+        目前只有 Mod 队列支持暂停/继续（依赖/组件下载是 `ensure_all` 顺下来的一条流程，
+        没有"停在中间"的语义）—— 所以这里对别的任务类型**如实拒绝**，而不是给个点了没反应的按钮。
+        """
+        if task_id and task_id != downloads.KIND_MODS:
+            return {"ok": False, "message": "这一类下载暂时不支持暂停"}
+        return self.pause_mod_downloads()
+
+    def downloads_resume(self, task_id: str = "") -> dict[str, Any]:
+        if task_id and task_id != downloads.KIND_MODS:
+            return {"ok": False, "message": "这一类下载暂时不支持继续"}
+        return self.resume_mod_downloads()
+
+    def downloads_cancel(self, task_id: str = "") -> dict[str, Any]:
+        if task_id and task_id != downloads.KIND_MODS:
+            return {"ok": False, "message": "这一类下载暂时不支持终止"}
+        return self.cancel_mod_downloads()
+
+    def downloads_clear(self, task_id: str = "") -> dict[str, Any]:
+        if task_id and task_id != downloads.KIND_MODS:
+            return {"ok": False, "message": "只能清除 Mod 下载队列的记录"}
+        return self.clear_mod_downloads()
+
+    # ── Mod 商城（GameBanana / 香蕉网）────────────────────────────────────────
+    # 用户 2026-10-07：「我希望加入 mod 商城功能，可以看看 jasm 是怎么做的，
+    # 然后匹配现在 emc 的 ui 和接入下载功能」+「mod 批量扫描、一键更新」。
+    #
+    # 三条硬约束全部来自实测（细节见 `modstore` 模块头）：
+    # ① 三个列表端点里**只有 Subfeed 能排序、且每页固定 15**；`Mod/Index` 能翻大页但
+    #    **完全不能排序**（`_sSort` 一律 400）⇒ "按点赞/浏览排行"只能**本地排**，因此需要全量索引；
+    # ② 索引有 707 条（15 页 × 50）—— **绝不能在 GUI 线程上拉**，统一交给后台任务；
+    # ③ 这里只拿元数据与链接，文件永远实时从 `dl/<fileId>` 拉（下载走既有链路）。
+    def _store_index(self, *, allow_build: bool = False, force: bool = False,
+                     cancel: Any = None, progress: Any = None) -> dict[str, Any]:
+        """取全量索引：**GUI 线程上只读缓存，绝不发网络请求**。
+
+        `allow_build=True` 才真去拉（只该由后台线程用）。理由与 `get_state()` 里那几处
+        "读缓存不扫盘"完全一致：这个方法会被界面按需调用，而拉一次索引是 15 个请求。
+        """
+        cached = modstore.load_index(self.config)
+        if cached.get("items") and not force:
+            return cached
+        if not allow_build:
+            return {"items": [], "total": 0, "stale": True}
+        return modstore.ensure_index(
+            self.config, force=force, cancel=cancel, progress=progress,
+            log=lambda line: launcher._append_log(self.config, line))
+
+    def _store_task_snapshot(self) -> dict[str, Any]:
+        with self._store_lock:
+            return dict(self._store_task or {})
+
+    def _store_start_task(self, kind: str, worker: Any) -> dict[str, Any]:
+        """起一个商城后台任务（补全索引 / 批量扫描）——**同一时刻只允许一个**。
+
+        两个任务并发跑会重复拉同一份索引（十几页请求 ×2），既慢又给站点添压力。
+        """
+        with self._store_lock:
+            if self._store_task and self._store_task.get("running"):
+                return {"ok": False,
+                        "message": f"上一个商城任务还在跑（{self._store_task.get('message') or ''}）"}
+            self._store_task = {
+                "kind": kind, "running": True, "message": "准备中…",
+                "result": {}, "started_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            }
+        threading.Thread(target=worker, daemon=True).start()
+        return {"ok": True, "started": True}
+
+    def mod_store_task_status(self) -> dict[str, Any]:
+        """前端轮询：商城后台任务的进度 + 上次扫描结果（两件事共用一个入口）。"""
+        task = self._store_task_snapshot()
+        return {
+            "ok": True,
+            "running": bool(task.get("running")),
+            "kind": str(task.get("kind") or ""),
+            "message": str(task.get("message") or ""),
+            "result": task.get("result") or {},
+            "scan": fsutil.read_json(modstore.scan_path(self.config)),
+        }
+
+    def mod_store_prefetch(self) -> dict[str, Any]:
+        """后台补全全量索引（进商城页时调一次；缓存新鲜就立刻返回，什么都不做）。"""
+        cached = modstore.load_index(self.config)
+        age = modstore.index_age(self.config)
+        if cached.get("items") and age < modstore.INDEX_TTL_SECONDS:
+            return {"ok": True, "cached": True, "total": len(cached["items"]), "age": int(age)}
+
+        def worker() -> None:
+            try:
+                def progress(message: str) -> None:
+                    with self._store_lock:
+                        if self._store_task:
+                            self._store_task["message"] = message
+
+                fresh = self._store_index(allow_build=True, progress=progress)
+                rows = fresh.get("items") or []
+                with self._store_lock:
+                    if self._store_task:
+                        self._store_task["running"] = False
+                        self._store_task["message"] = f"索引就绪（{len(rows)} 个 Mod）"
+                        self._store_task["result"] = {
+                            "total": len(rows), "failed_pages": fresh.get("failed_pages") or [],
+                        }
+            except Exception as exc:  # noqa: BLE001
+                launcher._append_log(self.config, f"商城: 索引构建失败（{exc}）")
+                with self._store_lock:
+                    if self._store_task:
+                        self._store_task["running"] = False
+                        self._store_task["message"] = f"索引失败：{exc}"
+        return self._store_start_task("index", worker)
+
+    def mod_store_installed_list(self) -> list[dict[str, Any]]:
+        """库里**从香蕉网下载来的** Mod 清单（含"本地这份是什么时候下的"）。
+
+        判据只认 `mod.meta.json` 里的 `source == "gamebanana"` + 数字 `source_id`
+        （下载入库时写进去的，见 `_write_source_sidecar`）。**手工放进库的、或没有来源记录的
+        一律不参与** —— 宁可漏标"已安装"，也不要把用户自己整理的 Mod 说成"网上那个"。
+        """
+        rows: list[dict[str, Any]] = []
+        for mod in self._mods():
+            source = str(getattr(mod, "source", "") or "").strip().lower()
+            folder = Path(str(getattr(mod, "path", "") or ""))
+            info = fsutil.read_json(folder / moddl.DOWNLOAD_INFO_NAME)
+            sid = str(getattr(mod, "source_id", "") or "").strip()
+            if not sid.isdigit():
+                # ⚠️ **老版本下载进来的 Mod 没有 `source_id`**（那个字段 2026-10-04 才写进
+                # `mod.meta.json`）—— 但给人看的 `download-info.json` 里一直留着"页面"地址。
+                # 从那儿解析出来（**纯读，绝不改用户文件**）。
+                # 不这么做的话，商城卡片上的「已安装」对老库永远不会亮（2026-10-07 实测：
+                # 工作区那份库 36 个 Mod，光看 meta 一个都匹配不上）。
+                sid = str(moddl.gamebanana_id(str(info.get("页面") or "")) or "")
+            if not sid.isdigit():
+                continue          # 真没有来源信息的（手工放进库的）**不猜**
+            if source and source != "gamebanana":
+                continue          # 明确标了别的来源，就别改口说它是香蕉网下的
+            installed_at = modstore.parse_download_time(info.get("下载时间"))
+            if not installed_at:
+                # 没有那份记录（老版下载的 / 用户删过）⇒ 退回目录时间，而不是当成 1970 年
+                #（那会把库里每个 Mod 都判成"有更新"）。
+                try:
+                    installed_at = folder.stat().st_mtime
+                except OSError:
+                    installed_at = 0.0
+            rows.append({
+                "source_id": sid,
+                "id": mod.id,
+                "name": mod.name,
+                "folder": str(folder),
+                "installed_at": installed_at,
+                "installed_version": str(info.get("版本") or ""),
+                "source_page": str(getattr(mod, "source_page", "") or ""),
+            })
+        return rows
+
+    def mod_store_installed_map(self) -> dict[str, Any]:
+        """给商城卡片标注用：`{香蕉网 mod id(字符串): {...}}`。"""
+        return {row["source_id"]: row for row in self.mod_store_installed_list()}
+
+    @staticmethod
+    def _store_filter(items: list[dict[str, Any]], *, category: int = 0, character: str = "",
+                      sort: str = "updated", nsfw: str = "blur",
+                      query: str = "") -> list[dict[str, Any]]:
+        """本地筛选 + 排序 —— 服务端**不给**排序能力，点赞/浏览排行只能在这儿做。
+
+        `category` 是香蕉网的根分类 id（`moddl.GAMEBANANA_ROOT_CATEGORIES` 里有全部三个）；
+        `character` 来自分类树里的角色名（如 `Chen Qianyu`）。
+
+        *nsfw* **三档**（用户 2026-10-07：「r18 应该是**显示、模糊、隐藏**三档」，照 JASM 的策略）：
+        `show` 原样、`blur` 原样返回但由前端打码、`hide` 直接滤掉。
+        """
+        rows = list(items)
+        if category:
+            root = moddl.GAMEBANANA_ROOT_CATEGORIES.get(int(category), "")
+            if root:
+                rows = [row for row in rows
+                        if str(row.get("root_category") or "").strip().lower() == root.lower()]
+        if character:
+            want = character.strip().lower()
+            rows = [row for row in rows
+                    if str(row.get("character") or "").strip().lower() == want]
+        if str(nsfw) == "hide":
+            rows = [row for row in rows if not row.get("nsfw")]
+        if query:
+            needle = query.lower()
+            rows = [row for row in rows
+                    if needle in str(row.get("name") or "").lower()
+                    or needle in str(row.get("author") or "").lower()]
+        return modstore.sort_items(rows, sort)
+
+    def _store_payload(self, rows: list[dict[str, Any]], *, total: int, page: int,
+                       per_page: int, source: str, installed: dict[str, Any],
+                       indexed: bool, has_more: bool | None = None) -> dict[str, Any]:
+        """统一出口：给每条打上「已安装 / 有更新」标记，再附来源与分页信息。"""
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            local = installed.get(str(row.get("id") or ""))
+            item = dict(row)
+            item["installed"] = bool(local)
+            item["installed_version"] = str((local or {}).get("installed_version") or "")
+            item["installed_folder"] = str((local or {}).get("folder") or "")
+            # "有更新"与批量扫描同一判据（远端更新时间晚于本地下载时间），
+            # 只是这里逐条比、不发额外请求、也不写盘。
+            item["update_available"] = bool(
+                local and float(row.get("updated") or 0) > float((local or {}).get("installed_at") or 0))
+            out.append(item)
+        count = int(total or 0)
+        return {
+            "ok": True, "items": out, "total": count, "page": page, "per_page": per_page,
+            "has_more": (page * per_page < count) if has_more is None else bool(has_more),
+            "source": source, "indexed": bool(indexed), "installed_count": len(installed),
+        }
+
+    def mod_store_list(self, options: Any = None) -> dict[str, Any]:
+        """商城列表。
+
+        `options`（对象）：`page` / `per_page` / `category`(根分类 id) / `character`(角色名) /
+        `sort`(updated|added|likes|views) / `query` / `nsfw`(show|blur|hide)。
+
+        **有全量索引时全部本地做**（筛选、排序、分页都是秒出，且不碰网络）；
+        索引还没补好时才退回服务端分页 —— 界面因此**永远不会空等**。
+        """
+        opts = options if isinstance(options, dict) else {}
+        page = max(1, int(opts.get("page") or 1))
+        per_page = max(1, min(int(opts.get("per_page") or 24), 60))
+        category = int(opts.get("category") or 0)
+        character = str(opts.get("character") or "").strip()
+        sort = str(opts.get("sort") or "updated")
+        query = str(opts.get("query") or "").strip()
+        nsfw = str(opts.get("nsfw") or "blur").lower()
+        if nsfw not in ("show", "blur", "hide"):
+            nsfw = "blur"
+        installed = self.mod_store_installed_map()
+
+        index = self._store_index(allow_build=False)
+        if index.get("items") and not query:
+            batch = self._store_filter(index["items"], category=category, character=character,
+                                       sort=sort, nsfw=nsfw)
+            start = (page - 1) * per_page
+            return self._store_payload(batch[start:start + per_page], total=len(batch), page=page,
+                                       per_page=per_page, source="index", installed=installed,
+                                       indexed=True)
+
+        try:
+            if query:
+                raw = modstore.search(query, page=page)
+            elif category:
+                raw = modstore.list_mods(page, modstore.PAGE_MAX, category)
+            else:
+                raw = modstore.list_recent(page, "new" if sort == "added" else "updated")
+        except modstore.StoreBadRequest as exc:
+            return {"ok": False, "message": f"香蕉网拒绝了这次请求（参数问题）：{exc}"}
+        except modstore.StoreUnreachable as exc:
+            return {"ok": False, "unreachable": True,
+                    "message": "访问不上香蕉网（超时 / DNS / 证书 / 地区限制）—— "
+                               "建议检查 VPN 或加速器后重试。"
+                               + (f"（{exc}）" if str(exc) else "")}
+        rows = self._store_filter(raw["items"], sort=sort, nsfw=nsfw, query=query)
+        page_size = raw.get("per_page") or modstore.SUBFEED_PER_PAGE
+        return self._store_payload(rows, total=raw["total"], page=page, per_page=page_size,
+                                   source=raw["source"], installed=installed, indexed=False)
+
+    def mod_store_categories(self, force: bool = False) -> dict[str, Any]:
+        """分类树（根分类 + 角色名单）—— 商城的两个筛选下拉。"""
+        try:
+            data = modstore.load_categories(
+                self.config, force=bool(force),
+                log=lambda line: launcher._append_log(self.config, line))
+        except modstore.StoreBadRequest as exc:
+            return {"ok": False, "message": f"香蕉网拒绝了这次请求：{exc}"}
+        except modstore.StoreUnreachable:
+            return {"ok": False, "unreachable": True,
+                    "message": "访问不上香蕉网（超时 / DNS / 证书 / 地区限制）—— "
+                               "建议检查 VPN 或加速器后重试。"}
+        return {"ok": True, **data}
+
+    def mod_store_detail(self, mod_id: Any = 0) -> dict[str, Any]:
+        """商城详情（版本 / 更新说明 / 文件大小 / 许可 / 作者）—— 点开卡片才调，属网络请求。"""
+        try:
+            data = modstore.detail(int(mod_id))
+        except modstore.StoreBadRequest as exc:
+            return {"ok": False, "message": f"香蕉网拒绝了这次请求：{exc}"}
+        except (modstore.StoreUnreachable, ValueError):
+            return {"ok": False, "unreachable": True,
+                    "message": "访问不上香蕉网（超时 / DNS / 证书 / 地区限制）—— "
+                               "建议检查 VPN 或加速器后重试。"}
+        local = self.mod_store_installed_map().get(str(int(mod_id)))
+        data["installed"] = bool(local)
+        data["installed_version"] = str((local or {}).get("installed_version") or "")
+        data["installed_folder"] = str((local or {}).get("folder") or "")
+        data["update_available"] = bool(
+            local and float(data.get("updated") or 0) > float((local or {}).get("installed_at") or 0))
+        # 更新记录（用户 2026-10-07：「详情内容也参考 jasm」—— JASM 详情里有 Updates 页签）。
+        # 直接复用现成实现：下载链路早就在用它决定"这一版需要下哪些文件"。
+        try:
+            data["updates"] = moddl.gamebanana_updates(int(mod_id))[:8]
+        except Exception:  # noqa: BLE001 —— 拿不到更新记录不该让详情失败
+            data["updates"] = []
+        return {"ok": True, "item": data}
+
+    def mod_store_prepare_images(self, urls: Any = None) -> dict[str, Any]:
+        """批量把图片准备好，返回**可直接给 `<img src>` 的本地 URL**（正常路径）。  # noqa: D401
+
+        用户 2026-10-07：「缩略图还是模糊而且**速度太慢**」。根因是每张图都得 base64 成
+        data URI、经 pywebview 的桥**一张张**传（一页 24 张 ≈ 3 MB 字符串注入 + 24 次跨语言
+        往返），为了压体积还只能把图缩小 ⇒ 又慢又糊。现在改成：后端把站点原图**原样**存进
+        缓存目录，再由本地只读服务（`127.0.0.1` + 随机端口）直接发给 WebView2 ——
+        并发、磁盘缓存、解码都归浏览器，后端零重编码。
+
+        返回 `{ok, base, files: {源URL: 文件名}, failed: [源URL]}`；`base` 为空表示本地服务
+        起不来，前端应回退到 `mod_store_thumbnail`（data URI 那条老路）。
+        """
+        wanted = urls if isinstance(urls, list) else ([urls] if urls else [])
+        result = modstore.prepare_images(
+            self.config, [str(item) for item in wanted if str(item or "").strip()],
+            log=lambda line: launcher._append_log(self.config, line))
+        return {"ok": bool(result["base"]), **result}
+
+    def mod_store_thumbnail(self, url: str = "", width: Any = 0) -> dict[str, Any]:
+        """**降级路径**：把一张图转成 data URI（本地图片服务起不来时才用）。
+
+        正常路径是 `mod_store_prepare_images`（浏览器直连本地服务，又快又清晰）。这条留着
+        是因为"图片全挂"比"慢一点"严重得多 —— 服务起不来时至少还能看图。
+
+        ⚠️ **图片请求必须带超时**：实测请求一个不存在的尺寸会长时间挂起（不是秒回 404）。
+        失败一律返回 `ok=False`：卡片退化成占位块，不该因此弹窗（用户没做错任何事）。
+        """
+        link = str(url or "").strip()
+        if not link:
+            return {"ok": False, "message": "没有图片地址"}
+        try:
+            target_width = int(width) or modstore.PREVIEW_WIDTH
+        except (TypeError, ValueError):
+            target_width = modstore.PREVIEW_WIDTH
+        target_width = max(64, min(target_width, 1920))
+        target = modstore.thumb_path(self.config, link)
+        if not target.is_file():
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                dependencies._http_get(link, target, timeout=10)
+            except Exception as exc:  # noqa: BLE001
+                try:
+                    target.unlink(missing_ok=True)      # 别留半张图当缓存
+                except OSError:
+                    pass
+                return {"ok": False, "message": f"图片下载失败：{exc}"}
+        try:
+            from PIL import Image  # type: ignore
+
+            with Image.open(target) as image:
+                image = image.convert("RGB")
+                image.thumbnail((target_width, target_width))
+                buffer = io.BytesIO()
+                image.save(buffer, format="JPEG", quality=82, optimize=True)
+                raw = buffer.getvalue()
+        except Exception:  # noqa: BLE001 —— 没有 PIL / 图坏了：原样回给前端，至少能显示
+            try:
+                raw = target.read_bytes()
+            except OSError as exc:
+                return {"ok": False, "message": str(exc)}
+        if len(raw) > 1_500_000:
+            return {"ok": False, "message": "图片过大"}
+        return {"ok": True,
+                "data_uri": "data:image/jpeg;base64," + base64.b64encode(raw).decode("ascii")}
+
+    def mod_store_check_updates(self) -> dict[str, Any]:
+        """**批量扫描**：库里从香蕉网来的 Mod，哪些有新版（后台跑 + 进度）。
+
+        用户 2026-10-07：「mod 批量扫描、一键更新」。
+
+        ⚠️ 刻意**不逐个查详情**：`Mod/Index` 的记录自带 `_tsDateUpdated`，707 条一次索引就够；
+        逐个查详情 = 707 个请求（按 0.2s 节流约 2.5 分钟），那既慢又最容易招来限流。
+        """
+        def worker() -> None:
+            try:
+                def progress(message: str) -> None:
+                    with self._store_lock:
+                        if self._store_task:
+                            self._store_task["message"] = message
+
+                index = modstore.ensure_index(
+                    self.config, progress=progress,
+                    log=lambda line: launcher._append_log(self.config, line))
+                installed = self.mod_store_installed_list()
+                verdict = modstore.compare_updates(installed, index.get("items") or [])
+                payload = {**verdict,
+                           "checked_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                           "index_size": len(index.get("items") or [])}
+                try:
+                    fsutil.write_json(modstore.scan_path(self.config), payload)
+                except OSError as exc:
+                    launcher._append_log(self.config, f"商城: 扫描结果写入失败（{exc}）")
+                launcher._append_log(
+                    self.config,
+                    f"商城: 批量扫描完成 —— 检查 {verdict['scanned']} 个，"
+                    f"有更新 {len(verdict['updates'])} 个，远端已找不到 {len(verdict['missing'])} 个")
+                with self._store_lock:
+                    if self._store_task:
+                        self._store_task["running"] = False
+                        self._store_task["result"] = payload
+                        self._store_task["message"] = (
+                            f"扫描完成：{len(verdict['updates'])} 个有更新，"
+                            f"{len(verdict['missing'])} 个远端已找不到")
+            except Exception as exc:  # noqa: BLE001
+                launcher._append_log(self.config, f"商城: 批量扫描失败（{exc}）")
+                with self._store_lock:
+                    if self._store_task:
+                        self._store_task["running"] = False
+                        self._store_task["message"] = f"扫描失败：{exc}"
+        return self._store_start_task("scan", worker)
+
+    def mod_store_update_all(self, ids: Any = None) -> dict[str, Any]:
+        """**一键更新**：把有更新的（或指定的一批）排进下载队列。
+
+        故意不自己写下载：只是构造香蕉网页面地址交给 `start_mod_download` ——
+        于是"按最新更新记录决定下哪些文件""同源旧版移出""解压入库""角色识别"
+        全部复用既有链路（那条链路的每一步都有测试钉着）。
+        """
+        wanted: list[int] = []
+        for value in (ids or []):
+            try:
+                wanted.append(int(value))
+            except (TypeError, ValueError):
+                continue
+        if not wanted:
+            saved = fsutil.read_json(modstore.scan_path(self.config))
+            wanted = []
+            for row in (saved.get("updates") or []):
+                try:
+                    wanted.append(int(row.get("source_id") or 0))
+                except (TypeError, ValueError):
+                    continue
+            if not wanted:
+                return {"ok": False, "message": "还没有可用的扫描结果 —— 先点「扫描更新」"}
+        wanted = [mod_id for mod_id in wanted if mod_id > 0]
+        if not wanted:
+            return {"ok": False, "message": "没有要更新的东西"}
+        urls = [f"https://gamebanana.com/mods/{mod_id}" for mod_id in wanted]
+        result = self.start_mod_download(urls)
+        if not result.get("ok"):
+            return result
+        launcher._append_log(self.config, f"商城: 一键更新排入 {result.get('added', 0)} 个任务")
+        return {**result, "requested": len(urls)}
 
     def open_download_dir(self) -> dict[str, Any]:
         """打开下载临时目录（"需手动解压"那条提示旁边的按钮用）。"""

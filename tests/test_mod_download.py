@@ -270,13 +270,59 @@ class DownloadFlowTests(unittest.TestCase):
         statuses = sorted(item["status"] for item in state["items"])
         self.assertEqual(statuses, ["失败", "已入库", "需手动解压"])
 
-    def test_second_batch_refused_while_running(self) -> None:
-        """上一批没跑完时不许再开一批（否则两批一起写库、进度也说不清）。"""
+    def test_second_batch_is_appended_while_running(self) -> None:
+        """★ 2026-10-07 行为变更：**允许追加任务**，不再拒绝第二批。
+
+        用户原话：「把下载从依赖里面抽出来……下载可以后台进行，**可以追加任务**，
+        看商城不用下一个就跳转一次，但是要有动态」。
+
+        旧行为是"上一批还在下载中就拒绝"（`done` 标志直接挡回）—— 逛商城"看到一个加一个"
+        会被反复挡回，所以改成：新项接到同一个队列，由**同一个** worker 循环取件。
+        这里同时钉住那个不能破的不变量：**两批不会并发改写 `_mod_dl`**（只有一个 worker）。
+        """
+        gate = threading.Event()
+        real_one = self.api._mod_download_one
+
+        def slow_one(item, dest_dir):
+            gate.wait(15)          # 卡住第一件，制造出"正在下载"的真实窗口
+            return real_one(item, dest_dir)
+
+        with mock.patch.object(self.api, "_mod_download_one", side_effect=slow_one):
+            first = self.api.start_mod_download(self.url("demo-mod.zip"))
+            self.assertTrue(first["ok"])
+            second = self.api.start_mod_download(self.url("raw.pak"))
+            self.assertTrue(second["ok"])
+            self.assertEqual(second["added"], 1)
+            self.assertEqual(second["queued"], 2)      # 队列里两件都在
+            # 钉住那个隐蔽坑（2026-10-07 实测）：**返回值说加进去了，真队列也必须真的多一件**。
+            # 当时 `start_mod_download` 对着浅拷贝 extend，返回值 2、实际队列 1，worker 什么都没多。
+            self.assertEqual(len(self.api._mod_dl["items"]), 2)
+            gate.set()
+            state = self._wait(timeout=60)
+        self.assertEqual(len(state["items"]), 2)       # 两件都被处理过
+        self.assertTrue(all(item["status"] not in ("等待中", "下载中", "解压中")
+                            for item in state["items"]))
+        self.assertTrue(state["done"])
+
+    def test_same_url_is_not_queued_twice(self) -> None:
+        """同一来源 URL 重复提交**只留一件** —— 商城里连点两下不该下两份。"""
         self.api.start_mod_download(self.url("demo-mod.zip"))
-        second = self.api.start_mod_download(self.url("raw.pak"))
-        self.assertFalse(second["ok"])
-        self.assertIn("还在下载", second["message"])
+        again = self.api.start_mod_download(self.url("demo-mod.zip"))
+        self.assertTrue(again["ok"])
+        self.assertEqual(again["added"], 0)
+        self.assertEqual(again["skipped"], 1)
+        self.assertIn("已经在下载队列里", again["message"])
         self._wait()
+
+    def test_clear_also_empties_the_pending_queue(self) -> None:
+        """「清除记录」要**连待办一起清**：worker 改成循环取件之后，待办是另一份状态，
+        只清记录的话队列里的旧项会把刚清空的记录重新拉起来（"清了又自己冒出来"）。"""
+        self.api.start_mod_download(self.url("demo-mod.zip"))
+        self._wait(timeout=60)
+        self.assertTrue(self.api.clear_mod_downloads()["ok"])
+        with self.api._mod_dl_lock:                     # 内部状态：两份都要空
+            self.assertEqual(self.api._mod_dl.get("items"), [])
+            self.assertEqual(self.api._mod_dl_pending, [])
 
     def test_open_download_dir_creates_and_opens(self) -> None:
         with mock.patch.object(self.api, "open_path", return_value={"ok": True}) as opened:

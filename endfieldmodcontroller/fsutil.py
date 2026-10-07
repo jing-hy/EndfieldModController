@@ -19,6 +19,28 @@ from pathlib import Path
 from typing import Any, Callable
 
 
+#: 终末地日志目录下的**厂商段**：国服是 `Hypergryph`，国际服与其它渠道是 `Gryphline`。
+ENDFIELD_VENDORS = ("Hypergryph", "Gryphline")
+
+
+def endfield_local_low_dirs() -> list[Path]:
+    """游戏自己的 LocalLow 目录候选（`...\\LocalLow\\<厂商>\\Endfield`），**存在的排前面**。
+
+    ⚠️⚠️ **两家厂商都要认**（2026-10-07 从两个反馈者的诊断包做对照时查出）：
+    国服是 `Hypergryph`、国际服与其它渠道是 `Gryphline`（他们的游戏目录叫
+    `Arknights Endfield`）。项目里曾**有四处把厂商写死成 `Hypergryph`**，于是国际服用户
+    那边这些判据**全部静默失效** —— 实测后果：`crashwatch.streamline_manifest_broken()`
+    读不到 `Player.log` ⇒ "检测到 Streamline 的 server manifest 报错就自动换新版运行库"
+    这条**一次都没触发过**（issue #16 换上 v1.1.1 之后，包里仍然是 10 条
+    `parseServerManifest` 报错，本该被自动换掉的新版一直没装）。
+
+    **两个都返回**（存在的排前面）：调用方要能区分"读不到"和"没去看"。
+    """
+    base = Path(os.environ.get("USERPROFILE", "")) / "AppData" / "LocalLow"
+    dirs = [base / vendor / "Endfield" for vendor in ENDFIELD_VENDORS]
+    return sorted(dirs, key=lambda path: (not path.is_dir(), str(path)))
+
+
 def sha256_file(path: Path, progress: Callable[[int, int], None] | None = None) -> str:
     """分块计算文件 sha256；`progress(done, total)` 可选（用于界面进度）。"""
     path = Path(path)

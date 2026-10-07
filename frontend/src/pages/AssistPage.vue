@@ -6,7 +6,6 @@ import { store, refreshState } from "../store.js";
 import { settings, loadSettings } from "../lib/settings.js";
 import Card from "../components/ui/Card.vue";
 import Switch from "../components/ui/Switch.vue";
-import ModDownloadCard from "../components/ModDownloadCard.vue";
 import CharacterAssignDialog from "../components/CharacterAssignDialog.vue";
 import { showToast, showAlert, showModalDialog } from "../lib/dialog.js";
 import { placeMenu } from "../lib/floatingMenu.js";
@@ -351,7 +350,8 @@ async function openLib() {
         </div>
       </div>
     </Card>
-    <ModDownloadCard />
+    <!-- 2026-10-07：「mod 下载」卡片搬到「下载」页了（用户要求"服装mod、辅助mod 下面的
+         mod 下载卡片挪到下载页"）—— 与「服装 Mod」页一致。 -->
 
     <!-- ⋯ 就地小菜单（浮层，点空白处关闭） -->
     <div v-if="menu" class="fixed inset-0 z-40" @click="closeMenu" @mouseenter="scheduleMenuClose()"></div>

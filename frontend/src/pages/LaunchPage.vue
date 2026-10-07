@@ -441,11 +441,11 @@ async function preflightGate() {
  */
 function goToDepsDownload(keys) {
   const list = Array.isArray(keys) ? keys.filter(Boolean) : [];
-  appendLog(`有 ${list.length} 项需要联网下载：${list.join("、")} —— 已跳到「依赖」页开始下载`);
+  appendLog(`有 ${list.length} 项需要联网下载：${list.join("、")} —— 已跳到「下载」页开始下载`);
   store.autoStartDepsNote = `完整性检查发现 ${list.length} 项缺失，开始联网下载补齐…`;
   store.autoStartDeps = true;
-  store.tab = "dependencies";
-  showToast("已跳到「依赖」页，正在开始下载…", "info");
+  store.tab = "downloads";     // 2026-10-07：组件下载也统一去「下载」页看进度
+  showToast("已跳到「下载」页，正在开始下载…", "info");
 }
 
 // ⚠️ **B1：完整性检查要显示结果、并能一键修复**（2026-10-03 补回归）。
@@ -492,11 +492,11 @@ async function checkIntegrity() {
   const go = await showModalDialog({
     title: `完整性检查：${bad.length} 项缺失`,
     message: lines.join("\n") + head
-      + "\n\n要不要现在自动修复？（**只做本地能做的**：补文件、写配置、重建 staging；需要下载的部分会引导你去「依赖」页）",
-    okText: needDl.length ? "去依赖页下载" : "自动修复",
+      + "\n\n要不要现在自动修复？（**只做本地能做的**：补文件、写配置、重建 staging；需要下载的部分会引导你去「下载」页）",
+    okText: needDl.length ? "去下载页下载" : "自动修复",
     cancelText: needDl.length ? "先本地修复" : "先不修",
   });
-  // 主按钮 = 去依赖页开始「一键下载依赖」（那条链路有进度、线路切换、可暂停）
+  // 主按钮 = 去「下载」页开始「一键下载依赖」（那条链路有进度、线路切换、可暂停）
   if (go && needDl.length) {
     goToDepsDownload(needDl);
     return r;
@@ -514,12 +514,12 @@ async function checkIntegrity() {
     const stillBad = after.filter((c) => c.ok === false);
     const stillDl = (fixed && fixed.integrity && fixed.integrity.needs_download) || [];
     if (stillDl.length) {
-      // 还有"要下载"的项 ⇒ 直接把用户送去依赖页（这就是他说的"跳转到依赖进行下载"）
+      // 还有"要下载"的项 ⇒ 直接把用户送去「下载」页（这就是他说的"跳转到下载进行下载"）
       const again = await showModalDialog({
         title: `还有 ${stillDl.length} 项要联网下载`,
         message: "本地能做的都做完了；下面这些需要从网上取：\n    " + stillDl.join("、")
-          + "\n\n要现在跳到「依赖」页下载吗？（那边会显示线路与进度，可暂停）",
-        okText: "去依赖页下载", cancelText: "稍后自己弄",
+          + "\n\n要现在跳到「下载」页下载吗？（那边会显示线路与进度，可暂停）",
+        okText: "去下载页下载", cancelText: "稍后自己弄",
       });
       if (again) goToDepsDownload(stillDl);
     } else {
@@ -597,13 +597,13 @@ async function oneClick() {
         title: `${outdated.length} 个组件有新版本`,
         message:
           `这些组件有新版本可用：\n${lines}\n\n` +
-          "去「依赖」页点「一键更新全部组件」就能装上（那里有进度和速度）。\n\n" +
+          "去「下载」页点「一键更新全部组件」就能装上（那里有进度和速度）。\n\n" +
           "想先不管、直接启动也可以。",
-        okText: "去依赖页更新", cancelText: "仍然启动",
+        okText: "去下载页更新", cancelText: "仍然启动",
       });
       if (go) {
         store.autoStartDeps = true;
-        store.tab = "dependencies";
+        store.tab = "downloads";   // 2026-10-07：组件更新也统一去「下载」页看进度
         return;
       }
     }

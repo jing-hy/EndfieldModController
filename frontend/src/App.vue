@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from "vue";
 import {
-  Library, Wrench, PackageCheck, Rocket, Settings, Info, Palette,
+  Library, Wrench, PackageCheck, Rocket, Settings, Info, Palette, Download, ShoppingBag,
 } from "lucide-vue-next";
 import { store, refreshState, setTheme, THEMES, PAGE_IDS, onStateRefreshed } from "./store.js";
 import { waitForBridge, reportFrontendError } from "./lib/bridge.js";
@@ -21,16 +21,23 @@ import AssistPage from "./pages/AssistPage.vue";
 import DepsPage from "./pages/DepsPage.vue";
 import LaunchPage from "./pages/LaunchPage.vue";
 import ModLibraryPage from "./pages/ModLibraryPage.vue";
+import StorePage from "./pages/StorePage.vue";
+import DownloadsPage from "./pages/DownloadsPage.vue";
 import UiPreviewPage from "./pages/UiPreviewPage.vue";
 
 const pages = {
   preview: UiPreviewPage,
-  library: ModLibraryPage, assist: AssistPage, dependencies: DepsPage, launch: LaunchPage, settings: SettingsPage,
+  library: ModLibraryPage, assist: AssistPage, store: StorePage, downloads: DownloadsPage,
+  dependencies: DepsPage, launch: LaunchPage, settings: SettingsPage,
   about: AboutPage,
 };
+// 侧栏顺序：**服装 Mod | 辅助 Mod | Mod 商城 | 下载 | 依赖 | 启动 | 设置 | 说明**
+// 「下载」紧跟在「Mod 商城」后面 —— 商城点下载不再跳走，进度都汇到那一页看。
 const tabs = [
   { id: "library", name: "服装 Mod", icon: Library },
   { id: "assist", name: "辅助 Mod", icon: Wrench },
+  { id: "store", name: "Mod 商城", icon: ShoppingBag },
+  { id: "downloads", name: "下载", icon: Download },
   { id: "dependencies", name: "依赖", icon: PackageCheck },
   { id: "launch", name: "启动", icon: Rocket },
   { id: "settings", name: "设置", icon: Settings },
@@ -62,8 +69,24 @@ function enterAnyway() {
   bootStuck.value = true;
   store.ready = true;              // 只影响这层遮罩：界面照常工作、列表读到了会自己补上
 }
+// ── 下载徽标轮询（2026-10-07）────────────────────────────────────────────────
+// 用户原话：「看商城不用下一个就跳转一次，**但是要有动态**」。那个"动态"由这里供给：
+// 每 2 秒问一次**专用轻量接口** `downloads_active_count`（它只回数字与速度，
+// 不像 `downloads_snapshot` 那样构造整份清单 + 封面 data URI）。
+// 失败**静默**保持上一次的数字 —— 徽标不该因为一次网络抖动弹窗打断用户。
+let downloadTimer = null;
+async function pollDownloads() {
+  if (!(window.pywebview && window.pywebview.api)) return;   // 预览页 / 浏览器直开时没有桥
+  try {
+    const result = await call("downloads_active_count");
+    store.activeDownloads = Number((result && result.active) || 0);
+  } catch (e) { /* 忽略：下次轮询再说 */ }
+}
+
 onMounted(() => {
   bootFallbackTimer = setTimeout(() => { bootStuck.value = true; }, 12000);
+  pollDownloads();
+  downloadTimer = setInterval(pollDownloads, 2000);
 });
 
 // ── 终末地异常退出的**弹窗**（用户 2026-10-03：「我需要崩溃的弹窗」）──────────
@@ -191,7 +214,7 @@ async function redownloadDependencies() {
       "会依次做三件事：",
       "① 从备份区还原终末地本体（没做过净化就跳过）；",
       "② 清掉 runtime 与 assets，然后重新下载并展开；",
-      "③ 跳到「依赖」页开始一键下载。",
+      "③ 跳到「下载」页开始一键下载。",
       "",
       "你的 Mod 库、Mod 备份与路径设置都不受影响。",
       "清完到装好之间，组件列表会先变空，属于正常现象。",
@@ -209,9 +232,9 @@ async function redownloadDependencies() {
     showToast((result && result.message) || "清空失败，详情见运行日志", "danger");
     return;
   }
-  showToast("已清空 runtime 与 assets，正在跳到依赖页重新下载…", "success");
+  showToast("已清空 runtime 与 assets，正在跳到下载页重新下载…", "success");
   store.autoStartDeps = true;
-  store.tab = "dependencies";
+  store.tab = "downloads";   // 2026-10-07：下载统一去「下载」页
 }
 
 // 「连续启动失败」的说明窗（用户 2026-10-05 要求）。
@@ -252,7 +275,7 @@ async function forceRepair() {
       "会依次做两件事：",
       "① 还原终末地：把游戏目录里的第三方注入全部搬走（不管是谁装的），" +
         "并把系统原版文件补回去；",
-      "② 清空 runtime 与 assets，然后重新下载并展开（接着会自动跳到「依赖」页开跑）。",
+      "② 清空 runtime 与 assets，然后重新下载并展开（接着会自动跳到「下载」页开跑）。",
       "",
       "被搬走的第三方文件会留备份，设置页「撤销清除」可以原样放回。",
       "游戏正在运行时请先完全退出游戏 —— 否则这一步会被拒绝。",
@@ -270,9 +293,9 @@ async function forceRepair() {
     showToast((result && result.message) || "强力修复失败，详情见运行日志", "danger");
     return;
   }
-  showToast(result.message || "强力修复完成，正在跳到依赖页重新下载…", "success");
+  showToast(result.message || "强力修复完成，正在跳到下载页重新下载…", "success");
   store.autoStartDeps = true;
-  store.tab = "dependencies";
+  store.tab = "downloads";   // 2026-10-07：下载统一去「下载」页
 }
 
 // 公告消费（**幂等**）：后端公告由后台线程拉取，且要等首屏就绪（最多 15 秒）才请求，
@@ -509,17 +532,19 @@ const TOUR_STEPS = [
   {
     tab: "dependencies", target: "dep-update-all-btn",
     title: "第一步：先把组件装齐",
-    body: "这里是「依赖」页。点这个「安装缺失依赖」按钮，程序会自动下载并安装\n"
+    body: "这里是「依赖」页。点这个「下载并补齐组件」按钮，程序会自动下载并安装\n"
       + "XXMI Launcher、XXMI 库、EFMI、DLSS5 组件等全部依赖（需要联网）。\n\n"
-      + "建议先点它，等装完再去启动。右边那个黑框会显示下载线路与进度。",
+      + "点下去会跳到「下载」页 —— 进度、速度与日志都在那儿看。装完再回启动页。",
   },
   {
-    tab: "library", target: "mod-download-box",
+    // ⚠️ 2026-10-07：这张卡片从「服装 Mod / 辅助 Mod」页**搬到了「下载」页**，引导的落点
+    // 跟着改 —— 不改的话第 2 步会去高亮一个本页不存在的元素（0.9.5 就踩过这个坑）。
+    tab: "downloads", target: "mod-download-box",
     title: "第二步：把 Mod 弄进来",
     body: "有两种方式：\n"
       + "① 把 Mod 的 .zip / .7z / .rar 拖到窗口任意位置 —— 松手后自动解压进库并识别角色；\n"
-      + "② 直接下载：在「下载 Mod」里粘贴网址（一行一个），也支持香蕉网页面地址，\n"
-      + "   会自动取真实文件直链、并带出封面。\n\n"
+      + "② 直接下载：在这个「下载 Mod」框里粘贴网址（一行一个），也支持香蕉网页面地址，\n"
+      + "   会自动取真实文件直链、并带出封面；想逛现成的就去「Mod 商城」。\n\n"
       + "同一个角色默认只保留一个 Mod（自动互斥），避免游戏崩。",
   },
   {
@@ -616,7 +641,15 @@ window.addEventListener("pagehide", clearAnnounceTimers);
             ? { background: 'var(--accent-soft)', color: 'var(--accent)', fontWeight: 500 }
             : { color: 'var(--text-muted)' }">
           <component :is="t.icon" :size="16" />
-          <span class="text-sm">{{ t.name }}</span>
+          <span class="text-sm flex-1">{{ t.name }}</span>
+          <!-- 下载徽标 —— 就是用户要的那个「动态」（2026-10-07：「看商城不用下一个就跳转一次，
+               **但是要有动态**」）。只在真有活跃下载时出现；数字来自 store.activeDownloads，
+               由下方每 2 秒一次的 `pollDownloads()` 统一刷新（商城/下载页读同一份）。 -->
+          <span v-if="t.id === 'downloads' && store.activeDownloads > 0"
+                class="text-xs px-1.5 rounded-full"
+                style="background: var(--accent); color: var(--accent-contrast)">
+            {{ store.activeDownloads }}
+          </span>
         </button>
       </nav>
       <!-- 自更新入口（用户要求：左侧导航下面、主题色上面） -->

@@ -407,3 +407,34 @@ def test_game_dir_inventory_flags_files_not_written_this_run(tmp_path: Path, mon
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(pytest.main([__file__, "-q"]))
+
+# ---------------------------------------------------------------------------
+# ⑥ 注入现场时间线：**退出那一刻的两张照片必须落下来**（2026-10-07 回归）
+# ---------------------------------------------------------------------------
+
+
+def test_postmortem_records_game_exited_and_crash_phases(tmp_path: Path, monkeypatch):
+    """★ 回归（2026-10-07）：游戏退出时必须落 `game-exited` 与 `crash` 两张注入现场照片。
+
+    **两个反馈者（华硕 / issue #16 xingluo667）的诊断包里这两张一张都没有** ——
+    `injection-trace.jsonl` 里只有 `launch-begin` 与 `game-started`，于是"游戏退出那一刻
+    谁在进程里、注入库有没有被动过"永远无从查证，`0xC0000135`（运行期某个 LoadLibrary
+    失败）就只能一直猜。根因：含这两个时机的 `crashwatch.postmortem()` 在实际生效的
+    monitor 路径上**从未被调用**，那条路走的是 `diagnostics._capture_postmortem`。
+    """
+    from endfieldmodcontroller import injecttrace
+
+    config, game, _runtime = _make_config(tmp_path)
+    _quiet_collectors(monkeypatch)
+    recorded: list[tuple[object, object]] = []
+    monkeypatch.setattr(injecttrace, "record",
+                        lambda cfg, **kw: recorded.append((kw.get("phase"), kw.get("pid"))))
+
+    # 用「正常退出」的原因 ⇒ 不打包，只验时机落没落下来
+    diagnostics._capture_postmortem(config, game, "exit_code=0", pid=4242)
+
+    phases = [item[0] for item in recorded]
+    assert "game-exited" in phases, f"退出时没记「终末地关闭」：{phases}"
+    assert "crash" in phases, f"退出时没记「崩溃后」：{phases}"
+    # pid 要一路传下去：进程虽已退出，只要句柄还在就仍能读到模块清单
+    assert all(item[1] == 4242 for item in recorded), recorded

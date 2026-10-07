@@ -230,8 +230,55 @@ def test_monitor_reports_exit_code_when_process_vanishes(env, monkeypatch):
     monkeypatch.setattr(diagnostics, "_close_handle", lambda handle: None)
     monkeypatch.setattr(diagnostics.time, "sleep", lambda seconds: None)
     monkeypatch.setattr(diagnostics, "_capture_postmortem",
-                        lambda config, game_dir, reason: captured.setdefault("reason", reason))
+                        lambda config, game_dir, reason, **kw:
+                            captured.update({"reason": reason, "pid": kw.get("pid")}))
 
     diagnostics._monitor_process(env.config, env.tmp, "Endfield.exe", timeout=30.0)
 
     assert captured.get("reason") == "exit_code=0", captured
+    # pid 也必须一路传下去（2026-10-07）：进程虽然已经退出，只要句柄还在，
+    # 就仍能读到模块清单 —— 那是"退出那一刻谁在进程里"的唯一来源。
+    assert captured.get("pid") == 4242, captured
+
+
+# ---------------------------------------------------------------------------
+# ⑦ 游戏日志目录的**厂商段**：国服 Hypergryph / 国际服 Gryphline 都要认（2026-10-07）
+# ---------------------------------------------------------------------------
+
+
+def test_endfield_local_low_accepts_both_vendors(tmp_path, monkeypatch):
+    """★ 回归（2026-10-07 对照两个反馈者的包查出）：**两家厂商都要认**。
+
+    项目里曾有四处把厂商写死成 `Hypergryph`，而国际服/其它渠道的游戏日志在
+    `Gryphline\\Endfield` 下 ⇒ 那些判据在国际服机器上**全部静默失效**。实测后果：
+    `crashwatch.streamline_manifest_broken()` 读不到 `Player.log` ⇒ "检测到 Streamline
+    的 server manifest 报错就自动换新版运行库"这条**一次都没触发过**
+    （issue #16 换上 v1.1.1 之后，包里仍然是 10 条 `parseServerManifest` 报错）。
+    """
+    from endfieldmodcontroller import crashwatch, fsutil
+
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    only_global = tmp_path / "AppData" / "LocalLow" / "Gryphline" / "Endfield"
+    only_global.mkdir(parents=True)
+
+    dirs = fsutil.endfield_local_low_dirs()
+    assert len(dirs) == 2, dirs                       # 两个都返回，调用方能区分"没读到"与"没去看"
+    assert dirs[0] == only_global, dirs               # 存在的排前面
+    assert crashwatch._endfield_local_low() == only_global
+
+
+def test_streamline_judgement_works_on_gryphline_layout(tmp_path, monkeypatch):
+    """同族：判据在国际服目录布局下**真的能命中**（不是只认路径、判据仍失效）。"""
+    from endfieldmodcontroller import crashwatch
+    from endfieldmodcontroller.config import AppConfig
+
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    folder = tmp_path / "AppData" / "LocalLow" / "Gryphline" / "Endfield"
+    folder.mkdir(parents=True)
+    (folder / "Player.log").write_text(
+        "[Error][streamline][error]ota.cpp:329[parseServerManifest] Unexpected line in manifest file: x\n",
+        encoding="utf-8")
+
+    config = AppConfig(runtime_dir=str(tmp_path / "runtime"))
+    detail = crashwatch.streamline_manifest_broken(config)
+    assert detail, "国际服布局下应当命中 Streamline 判据"

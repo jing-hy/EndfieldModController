@@ -2,7 +2,9 @@
 import { reactive } from "vue";
 import { call } from "./lib/bridge.js";
 
-export const PAGE_IDS = ["library", "assist", "dependencies", "launch", "settings", "about"];
+// 页签白名单 —— **必须与 App.vue 的 pages/tabs 一一对应**（深链 `index.html#store` 也读它）。
+// 2026-10-07 新增 `store`（Mod 商城）与 `downloads`（下载中心）。
+export const PAGE_IDS = ["library", "assist", "store", "downloads", "dependencies", "launch", "settings", "about"];
 
 export const store = reactive({
   // ⚠️ 依赖页的日志框内容放**全局**（2026-10-03 用户实测：「下载的时候切到其他页面，
@@ -45,6 +47,11 @@ export const store = reactive({
   autoStartDepsNote: "",
   // Mod 下载开始后跳到依赖页（那儿的日志框显示下载过程）
   autoStartModDownload: false,
+  // **侧栏「下载」徽标 + 商城页"已加入下载"的同一份真源**（2026-10-07）：
+  // 用户要求「看商城不用下一个就跳转一次，**但是要有动态**」—— 那个"动态"就是它：
+  // App.vue 每 2 秒问一次 `downloads_active_count`，商城/下载页都读这一个数字，
+  // 不再各自维护计数器。
+  activeDownloads: 0,
 });
 
 // 「每次状态刷新之后要做的事」注册表。

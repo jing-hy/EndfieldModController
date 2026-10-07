@@ -1467,7 +1467,19 @@ def _try_capture(config: Any, what: str, func: Any, *args: Any, **kwargs: Any) -
         return None
 
 
-def _capture_postmortem(config: Any, game_dir: Path | None, reason: str) -> None:
+def _record_trace_phase(config: Any, phase: str, pid: int | None, note: str) -> None:
+    """记一张"注入现场照片"（时机见 `injecttrace.PHASES`）；失败绝不影响主流程。"""
+    try:
+        from . import injecttrace
+
+        injecttrace.record(config, phase=phase, pid=pid, note=note)
+    except Exception as exc:  # noqa: BLE001
+        log_event(config, f"注入时间线: 记录 {phase} 失败（忽略）",
+                  category="monitor", error=str(exc))
+
+
+def _capture_postmortem(config: Any, game_dir: Path | None, reason: str,
+                        *, pid: int | None = None) -> None:
     """游戏退出后收集现场。
 
     ⚠️ **正常退出不打完整诊断包**（2026-10-04 修）：原来无论什么原因都会走到
@@ -1487,6 +1499,17 @@ def _capture_postmortem(config: Any, game_dir: Path | None, reason: str) -> None
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     target_dir = logs_dir(config)
     manifest = _new_capture_manifest()
+
+    # ⓪ 注入现场时间线·**时机 4/5：终末地关闭**（2026-10-07 补记）。
+    #    ⚠️ **为什么要补在这里**：2026-10-07 两个反馈者（华硕 / issue #16 xingluo667）
+    #    的诊断包里 `injection-trace.jsonl` 只有 `launch-begin` 与 `game-started` 两种时机，
+    #    **`game-exited` / `crash` 一条都没有** —— 而这两张正是"游戏退出那一刻谁在进程里、
+    #    注入库与游戏目录有没有被动过"的唯一现场。缺了它，`0xC0000135`（运行期某个
+    #    `LoadLibrary` 失败）这类问题就只能一直猜，连"是不是中途被改坏了"都分不出来。
+    #    根因是**取证走了两条路**：`crashwatch.postmortem()` 里那两个时机（步骤 ①/③）
+    #    在实际生效的这条 monitor 路径上**从来没被调用过**，走的是这个函数。
+    #    判据只该有一处 ⇒ 补在这里，与另一边共用同一个 `injecttrace.record`。
+    _record_trace_phase(config, "game-exited", pid, f"退出：{reason}")
 
     # ① ReShade 日志（多候选，文件名带来源标签，谁也不覆盖谁）
     for label, source in _try_capture(config, "ReShade 候选路径", reshade_log_candidates, config, game_dir) or []:
@@ -1530,6 +1553,10 @@ def _capture_postmortem(config: Any, game_dir: Path | None, reason: str) -> None
 
     # ⑤ EFMI 状态（路径以 config 为准；内部三路各自独立兜底）
     _try_capture(config, "EFMI 状态", log_efmi_state, config)
+
+    # ⑥ 注入现场时间线·**时机 5/5：崩溃后**（事后状态：注入库/游戏目录有没有被动过）。
+    #    放在"分叉（正常退出 / 打诊断包）之前"⇒ 两条路都会记上这一张。
+    _record_trace_phase(config, "crash", pid, f"事后状态（{reason}）")
 
     if _is_normal_exit_reason(reason):
         # 正常退出不打包，但**采集清单仍然落盘**（下次排查能看出"当时抓了什么"）
@@ -1753,7 +1780,7 @@ def _monitor_process(config: Any, game_dir: Path | None, image_name: str, timeou
                     log_event(config, "游戏进程已退出", category="crash", image=image_name, pid=pid,
                               exit_code=code, exit_text=describe_exit_code(code))
                     _close_handle(handle)
-                    _capture_postmortem(config, game_dir, f"exit_code={code}")
+                    _capture_postmortem(config, game_dir, f"exit_code={code}", pid=pid)
                     return
             elif found_pid is not None:
                 # ⚠️⚠️ **进程消失时也必须读退出码**（2026-10-05 修，反馈者 HUAWEI 那台暴露）。
@@ -1772,11 +1799,11 @@ def _monitor_process(config: Any, game_dir: Path | None, image_name: str, timeou
                 log_event(config, "游戏进程已结束", category="crash", image=image_name,
                           pid=found_pid, **extra)
                 _close_handle(handle)
-                _capture_postmortem(config, game_dir, reason)
+                _capture_postmortem(config, game_dir, reason, pid=found_pid)
                 return
             time.sleep(0.5 if time.monotonic() - started < 60 else 1.0)
         log_event(config, "进程监视超时", category="monitor", image=image_name, timeout=timeout)
-        _capture_postmortem(config, game_dir, "monitor_timeout")
+        _capture_postmortem(config, game_dir, "monitor_timeout", pid=pid)
     except Exception as exc:  # noqa: BLE001
         log_exception(config, "进程监视异常", exc, category="monitor")
 

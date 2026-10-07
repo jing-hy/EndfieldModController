@@ -13,7 +13,6 @@ import Card from "../components/ui/Card.vue";
 // ⚠️ 与 CharacterAssignDialog 同一类漏网：模板 `<template #badge><Badge …>` 用到了它，
 // 但这里从来没 import（依赖页 / 设置页都有）⇒ 「皮肤 Mod 总开关」那个角标一直渲染不出来。
 import Badge from "../components/ui/Badge.vue";
-import ModDownloadCard from "../components/ModDownloadCard.vue";
 import { Library } from "lucide-vue-next";
 import Btn from "../components/ui/Btn.vue";
 import Switch from "../components/ui/Switch.vue";
@@ -656,7 +655,8 @@ watch(() => store.demoCovers, (val) => {
     </Card>
 
     <CharacterAssignDialog ref="assignRef" />
-    <ModDownloadCard />
+    <!-- 2026-10-07：「mod 下载」卡片搬到「下载」页了（用户原话：「服装mod、辅助mod下面的
+         **mod下载卡片挪到下载页**」）—— 发起下载与看进度现在都在同一页。 -->
 
     <ConflictDialog v-if="conflicts" :groups="conflicts"
                     @resolve="resolveConflicts" @cancel="conflicts = null" />

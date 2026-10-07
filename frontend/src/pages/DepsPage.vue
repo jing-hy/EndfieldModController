@@ -3,7 +3,6 @@
 // ⚠️ 日志框是**纯黑**的（.log-box 在 tokens.css 里，且 user-select: text 保证可复制）。
 import { ref, computed, onMounted, onUnmounted } from "vue";
 import { call } from "../lib/bridge.js";
-import { useLogAutoScroll } from "../lib/autoscroll.js";
 import { store, refreshState } from "../store.js";
 import { loadSettings } from "../lib/settings.js";
 // ⚠️ `sleep` 原先**根本没定义**（2026-10-04 修）：第 96 行 `await sleep(300)` 会抛
@@ -111,43 +110,16 @@ const mdThreads = ref(0);
 const mdAccelerating = ref(false);
 const mdPolicy = ref("");
 
-// ⚠️ **Mod 下载的控制**（2026-10-03 补回归）。
-// 0.9.5 有「暂停 / 终止 / 继续 / 清除记录」四个按钮（旧 app.js 的 renderModDownload +
-// bindDownloadListClicks），换代到 Vue 后全丢了 —— 后端 `pause_mod_downloads` /
-// `cancel_mod_downloads` / `resume_mod_downloads` / `clear_mod_downloads` 四个方法一直健在，
-// 而现前端 grep 这四个名字**全 0 命中** ⇒ 下载太慢或下错了**没法停**。
-async function modDlControl(act) {
-  const map = {
-    pause:  ["pause_mod_downloads",  "已暂停（断点保留，点「继续」可接着下）"],
-    resume: ["resume_mod_downloads", "已继续下载"],
-    cancel: ["cancel_mod_downloads", "已终止（半成品会清掉）"],
-    clear:  ["clear_mod_downloads",  "已清除下载记录"],
-  };
-  const entry = map[act];
-  if (!entry) return;
-  if (act === "cancel") {
-    const ok = await showModalDialog({
-      title: "终止下载",
-      message: "会停下所有 Mod 下载任务，**已下完的部分会被清掉**。\n\n确定终止吗？\n（只是想暂存进度就选「暂停」，那会保留断点。）",
-      okText: "终止并清掉半成品", cancelText: "继续下载", focusCancel: true,
-    });
-    if (!ok) return;
-  }
-  try {
-    const r = await call(entry[0]);
-    if (r && r.ok === false) { showToast(String(r.message || "操作失败"), "danger"); return; }
-    showToast(entry[1], act === "cancel" ? "warning" : "success");
-  } catch (e) {
-    showToast(String((e && e.message) || "操作失败"), "danger");
-    return;
-  }
-  await sleep(300);          // 给后端一点时间落状态
-  await pollProgress();      // 立刻刷新一次，按钮与进度条跟着变
-}
+// ⚠️ **Mod 下载的控制按钮已搬到「下载」页**（2026-10-07）：暂停 / 继续 / 终止 / 清除记录
+// 现在都在那儿（走新的 `downloads_*` 接口）。
+// 这里原来那个 `modDlControl()` 随之删除 —— 本页已经没有这些按钮，
+// 留着一套没人调的控制逻辑就是死代码（项目对"只写不读"的东西一贯要清掉）。
 
 // ⚠️ **B4：组件就地更新**（点这一行的按钮只更新它，不用跑整包）。
 // 后端没有"只更新某一个"的接口，但 `start_full_update` 会**跳过已是最新的**，
 // 所以这里就是"确认 → 跑一遍（只会有这一个真的动）→ 结果如实报"。
+// 2026-10-07：**本页不再自己跑**，改为把任务交给「下载」页（用户要求依赖页只留
+// "状态 + 开关 + 更新入口"，下载进度/日志统一在下载页看）。
 async function updateComponent(d) {
   const ok = await showModalDialog({
     title: `更新 ${d.display || d.key}`,
@@ -156,21 +128,15 @@ async function updateComponent(d) {
       d.latest ? `最新：${d.latest}` : "",
       "",
       "会下载并替换它。**已经是最新的其它组件会自动跳过**，不会白下。",
+      "",
+      "点「开始更新」会跳到「下载」页，那里能看到进度与日志。",
     ].filter((x) => x !== "").join("\n"),
     okText: "开始更新", cancelText: "先不更新",
   });
   if (!ok) return;
-  showProgressToast("comp-update", `正在更新 ${d.display || d.key}…`);
-  try {
-    const r = await call("start_full_update");
-    if (r && r.ok === false) showToast(String(r.message || "更新失败"), "danger");
-    else showToast("已开始更新，进度见右侧日志", "success");
-  } catch (e) {
-    showToast(String((e && e.message) || "更新失败"), "danger");
-  } finally {
-    hideProgressToast("comp-update");
-    await refreshState();
-  }
+  store.autoStartDepsNote = `正在更新 ${d.display || d.key}…`;
+  store.autoStartDeps = true;
+  store.tab = "downloads";
 }
 
 // ⚠️ **B3：dry-run「检查状态」**（2026-10-03 补回归）。
@@ -271,6 +237,12 @@ let wasRunning = false;
 // Mod 下载的"上一轮是否活跃"——用来捕捉"刚下完"那一刻只弹一次窗
 let wasModDlActive = false;      // 上一轮是否在跑（用来捕捉"刚跑完"这个瞬间）
 
+// ⚠️ 2026-10-07：本函数里与 **Mod 下载显示** 有关的分支（`logLines` 追加、`speedBps`、
+// `modDlActive` 阶段文字）现在**在本页已经没有界面消费者**了 —— 下载的界面整体搬到了
+// 「下载」页（那边读后端 `downloads_snapshot`，日志用后端 `_dep_task["log"]`，不再前端攒）。
+// 为什么这一轮**没有**拆掉这个函数：真正必须留下的那半段（依赖任务本次跑完 →
+// 刷新组件清单 + 弹完成提示）与 Mod 那段在同一函数里交织，拆它要动几百行轮询逻辑，
+// 风险远大于收益 —— 宁可留着这段"不再画到界面上"的计算，也不要弄坏组件状态刷新。
 async function pollProgress() {
   try {
     const p = await call("get_dependency_progress");
@@ -598,46 +570,32 @@ async function pollProgress() {
   } catch (e) { /* 忽略轮询错误 */ }
 }
 
-async function start() {
-  running.value = true;
-  wasRunning = true;
-  try { await call("start_full_update"); } catch (e) { running.value = false; wasRunning = false; return; }
-  status.value = "已开始自动安装/更新…";
-  await refresh();
+// 2026-10-07：**本页不再自己开跑**，也看不到进度 —— 直接交给「下载」页：
+// 那边 `onMounted` 读到 `autoStartDeps` 标志后调 `start_full_update`，并显示进度与日志。
+// （用户原话：「把下载从依赖里面抽出来……依赖也跳转下载」。）
+function start() {
+  store.autoStartDepsNote = "开始安装/更新组件…";
+  store.autoStartDeps = true;
+  store.tab = "downloads";
+}
+
+function goDownloads() {
+  store.tab = "downloads";
 }
 
 onMounted(() => {
   refresh();
   timer = setInterval(pollProgress, 1200);
-  // 「依赖清空并重新下载」在设置页清完会置这个标志并跳过来 —— 这里自动开跑，
-  // 用户不用再找按钮点一次（用户 2026-10-03 要求：「清空完…然后跳转到依赖页走正常
-  // 下载流程，包括那些日志什么的」）。日志靠下面的 pollProgress 轮询同一个后端进度。
-  if (store.autoStartDeps) {
-    store.autoStartDeps = false;
-    // 第一行日志按"是谁把我送过来的"写（缺省是「依赖清空并重新下载」那条路径；
-    // 从启动页「完整性检查」跳过来时它会写明"缺了几项、开始下载补齐"）
-    logLines.value = [store.autoStartDepsNote || "已清空 runtime 与 assets，开始重新下载依赖…"];
-    store.autoStartDepsNote = "";
-    start();
-  }
-  // ⚠️⚠️ **`autoStartModDownload` 的消费端**（2026-10-03 补，用户报「点了下载还是没跳转」）。
-  // `ModDownloadCard.startDownload()` 会置这个标志并跳到本页，但**以前全项目没有任何地方读它**
-  // —— 标志只写不读 ⇒ 跳过来之后**什么都不发生**，用户看到的就是"点了没反应"。
-  // 这里补上：Mod 下载任务已经在后端跑着（`start_mod_download` 那一步就起来了），
-  // 所以只要**把轮询和日志接上**，用户就能立刻看到进度。
-  if (store.autoStartModDownload) {
-    store.autoStartModDownload = false;
-    modDlActive.value = true;          // 立刻让下载相关控件出现，不等下一轮轮询
-    logLines.value = [...(logLines.value || []),
-      "已跳到依赖页 —— 下载进度、速度和连接数都在上方卡片，日志会持续追加。"];
-    pollProgress();                    // 不等 1.2 秒，马上拉一次，避免"跳过来是空的"
-  }
+  // ⚠️ 2026-10-07：两个"自动开跑 / 接上进度"的消费端**都搬到「下载」页了**
+  //（`autoStartDeps` 由下载页发起下载并显示进度；`autoStartModDownload` 也在那边接线）。
+  // 本页只保留轮询 —— 它负责"依赖任务跑完 → 刷新组件清单 + 弹完成提示"，
+  // 那段逻辑仍在 `pollProgress` 里；完成提示是全局 toast，用户在哪个页都能看到。
 });
 onUnmounted(() => { if (timer) clearInterval(timer); });
 
-// 日志框自动滚到底（不抢鼠标、没新内容不动）
-const logBox = ref(null);
-useLogAutoScroll(logBox, () => logLines.value);
+// ⚠️ 2026-10-07：日志框连同它的自动滚动（`useLogAutoScroll` + `logBox`）一起搬到
+// 「下载」页了 —— 那儿的日志是后端 `_dep_task["log"]` 的原样呈现（权威、可重放），
+// 不在前端另攒一份（前端攒的那份在组件销毁时会丢，2026-10-03 用户实测报过）。
 </script>
 
 <template>
@@ -648,27 +606,18 @@ useLogAutoScroll(logBox, () => logLines.value);
            连 `await` 都没有 ⇒ 结果丢弃、页面也不刷新、失败也看不到。 -->
       <Btn @click="checkAndComplete">检查并补齐</Btn>
       <Btn @click="dryRunCheck">检查状态（不下载）</Btn>
-      <Btn id="dep-update-all-btn" variant="primary" @click="start">安装缺失依赖</Btn>
-
-      <!-- ⚠️ **Mod 下载的控制按钮**（2026-10-03 补回归）。
-           0.9.5 有 暂停 / 终止 / 继续 / 清除记录 四个按钮，换代到 Vue 后**全没了**
-           （后端四个方法一直健在，现前端 grep 全 0 命中）——
-           下载链接下错、或者线路太慢想停下时，用户**没有任何办法停**。
-           展示沿用现有 Btn（size="sm"），只在有任务/有记录时出现。 -->
-      <template v-if="modDlActive">
-        <Btn size="sm" @click="modDlControl('pause')">暂停</Btn>
-        <Btn size="sm" variant="danger" @click="modDlControl('cancel')">终止</Btn>
-      </template>
-      <Btn v-else-if="modDlHasRecord" size="sm" @click="modDlControl('resume')">继续</Btn>
-      <Btn v-if="modDlHasRecord" size="sm" @click="modDlControl('clear')">清除记录</Btn>
+      <!-- 下载统一交给「下载」页去跑、去看（2026-10-07 用户：「依赖页只留状态+开关+
+           更新入口……把下载从依赖里面抽出来，依赖也跳转下载」）。 -->
+      <Btn id="dep-update-all-btn" variant="primary" @click="start">下载并补齐组件</Btn>
+      <Btn size="sm" @click="goDownloads">去「下载」页</Btn>
     </div>
 
-    <!-- 两列（GPT-6 Astra 评审：摘要/进度/日志全占首屏，真正要看的组件列表起点太低）：
-         左 = 摘要 + 进度 + 组件列表（要看的）；右 = 安装日志（要盯的，滚动时吸顶）。 -->
-    <div class="two-col grid gap-4">
-      <div class="space-y-4 min-w-0">
+    <!-- 2026-10-07：原来是"左栏 + 右栏安装日志"两列布局，日志已搬到「下载」页 ⇒ 单列。 -->
+    <div class="space-y-4 min-w-0">
 
-    <!-- 状态摘要：把"现在到底什么情况"用三个数字说清楚（评审：原来只有 0/0 和一行日志） -->
+    <!-- 状态摘要：把"现在到底什么情况"用两个数字说清楚。
+         ⚠️ 2026-10-07 起**这里不再有进度条与下载速度** —— 用户要求依赖页只留
+         「状态 + 开关 + 更新入口」，进度/速度/日志整体搬到「下载」页。第三张卡改成入口。 -->
     <div class="grid gap-3" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr))">
       <div class="card"><div class="card-body">
         <div class="text-xl font-semibold">{{ okCount }}</div>
@@ -678,37 +627,19 @@ useLogAutoScroll(logBox, () => logLines.value);
         <div class="text-xl font-semibold">{{ missingCount }}</div>
         <div class="text-xs mt-0.5" style="color: var(--text-muted)">缺失组件</div>
       </div></div>
-      <div class="card"><div class="card-body">
-        <div class="text-xl font-semibold">{{ progressLabel }}</div>
-        <div class="text-xs mt-0.5" style="color: var(--text-muted)">当前状态</div>
-      </div></div>
-      <!-- 第 4 个：下载实时速度（用户 2026-10-03：「不是上面三个卡片还有一个空位吗，
-           可以把下载实时速度开个卡片放那里」）。不在下载时显示 —，不留一个假数字。 -->
-      <div class="card"><div class="card-body">
-        <div class="text-xl font-semibold">{{ speedText }}</div>
-        <!-- ⚠️ **「香蕉网高速下载」的状态**（2026-10-03 用户：「香蕉网高速下载逻辑也加进去」）。
-             只显示 MB/s 不够 —— 用户还要知道"现在到底有没有在并发加速"，
-             否则"下载慢"这件事他没法判断是线路问题、还是加速没开。 -->
+      <!-- 下载入口卡：数字来自 store.activeDownloads（App.vue 每 2 秒统一轮询），
+           点一下就去「下载」页看进度 —— 本页不重复显示进度。 -->
+      <div class="card cursor-pointer" @click="goDownloads"><div class="card-body">
+        <div class="text-xl font-semibold">{{ store.activeDownloads > 0 ? store.activeDownloads : "—" }}</div>
         <div class="text-xs mt-0.5" style="color: var(--text-muted)">
-          下载速度<template v-if="mdAccelerating">　⚡ 高速下载（{{ mdThreads }} 连接）</template>
-          <template v-else-if="mdPolicy === 'never'">　加速已关闭（设置 → 下载加速）</template>
+          {{ store.activeDownloads > 0 ? "下载进行中 · 点此查看" : "当前没有下载" }}
         </div>
       </div></div>
     </div>
 
-    <div>
-      <!-- ⚠️ **进度条本身也要显示百分比**（2026-10-03 用户：「进度条下面文字还是未开始，
-           要显示百分比」）—— 只在下面那行写文字不够，条上带数字才一眼看到进度。
-           用现有 CSS 变量与尺寸，不新造样式。 -->
-      <div class="flex items-center justify-between text-xs mb-1.5" style="color: var(--text-muted)">
-        <span>{{ progressText || "尚未开始" }}</span>
-        <!-- 再兜一道 Math.round：百分数在界面上永远是整数 -->
-        <span style="color: var(--accent); font-weight: 600">{{ Math.round(percent) }}%</span>
-      </div>
-      <div class="h-1.5 rounded-full overflow-hidden" style="background: var(--surface-2); border: 1px solid var(--border)">
-        <div class="h-full transition-all" :style="{ width: percent + '%', background: 'var(--accent)' }"></div>
-      </div>
-    </div>
+    <!-- ⚠️ 2026-10-07：**原来这里有一条进度条 + 百分比文字**，已搬到「下载」页。
+         用户要求「把下载从依赖里面抽出来……依赖页只留状态+开关+更新入口」——
+         进度条留在这里会变成第二个真相（两页各显示一份进度，用户不知道该信哪个）。 -->
 
     <Card v-if="deps.length" title="组件状态">
       <div class="divide-y" style="border-color: var(--border)">
@@ -749,23 +680,6 @@ useLogAutoScroll(logBox, () => logLines.value);
         <Badge v-for="r in required" :key="r" tone="muted">{{ r }}</Badge>
       </div>
     </Card>
-      </div>
-
-      <!-- 右栏：安装日志（滚动时吸顶） -->
-      <div class="min-w-0" style="align-self: start; position: sticky; top: 12px">
-        <div class="log-card">
-          <div class="log-card-head">
-            <span>安装日志</span>
-            <span class="text-xs" style="color: var(--text-muted); font-weight: 400">
-              {{ logLines.length > 1 ? logLines.length + " 行" : "尚无日志" }}
-            </span>
-          </div>
-          <div v-if="logLines.length" ref="logBox" class="log-box" style="max-height: 420px; border-radius: 0">{{ logLines.join("\n") }}</div>
-          <div v-else class="log-empty" style="min-height: 52px; text-align: center">
-            尚未开始。点「安装缺失依赖」后，这里会显示下载线路与安装过程。
-          </div>
-        </div>
-      </div>
     </div>
   </div>
 </template>

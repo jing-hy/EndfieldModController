@@ -64,17 +64,32 @@ def _process_ids(name: str = GAME_PROCESS) -> list[int]:
 
 
 def _endfield_local_low() -> Path:
-    return Path(os.environ.get("USERPROFILE", "")) / "AppData" / "LocalLow" / "Hypergryph" / "Endfield"
+    """游戏自己的 LocalLow 目录（`...\\LocalLow\\<厂商>\\Endfield`）。
 
+    ⚠️⚠️ **两家厂商都要认**（2026-10-07 从两个反馈者的包对照查出）：国服是 `Hypergryph`，
+    **国际服/其它渠道是 `Gryphline`**（他们的游戏目录叫 `Arknights Endfield`）。这里原先
+    **写死 `Hypergryph`** ⇒ 国际服那台**永远读不到 `Player.log`** ⇒ 建立在它上面的判据
+    （`streamline_manifest_broken()` 等）**一次都不会命中** —— 表现就是"说好的自动处理
+    从来没触发过"：issue #16 换上 v1.1.1 之后，包里**仍然是 10 条 `parseServerManifest`
+    报错**（本该被自动换掉的新版 Streamline 一直没装）。
+
+    两个目录都不在时，仍返回国服那个路径（让调用方能拼出路径，只是文件不存在）。
+    """
+    from . import fsutil
+
+    return fsutil.endfield_local_low_dirs()[0]
 
 def _crash_root() -> Path:
+    """游戏的崩溃报告目录（`%TEMP%\\<厂商>\\Endfield\\Crashes`）—— 同样**两家都要认**。"""
     for base in (os.environ.get("LOCALAPPDATA", ""), os.environ.get("TEMP", "")):
         if not base:
             continue
-        root = Path(base) / "Temp" / "Hypergryph" / "Endfield" / "Crashes"
-        if root.is_dir():
-            return root
-    return Path(os.environ.get("LOCALAPPDATA", "")) / "Temp" / "Hypergryph" / "Endfield" / "Crashes"
+        for vendor in ("Hypergryph", "Gryphline"):
+            root = Path(base) / "Temp" / vendor / "Endfield" / "Crashes"
+            if root.is_dir():
+                return root
+    return (Path(os.environ.get("LOCALAPPDATA", "")) / "Temp"
+            / "Hypergryph" / "Endfield" / "Crashes")
 
 
 # ---------------------------------------------------------------------------
@@ -2192,15 +2207,17 @@ def collect_diagnosis_files(config: AppConfig, dest: Path, *,
         emit(f"排查素材: addon 清单失败（忽略）: {exc}")
 
     # ④ 游戏自己的日志（判"走到哪一步"必看）
+    #    ⚠️ **厂商目录不能写死**（2026-10-07 修）：国服 `Hypergryph`、国际服/其它渠道
+    #    `Gryphline` —— 原来只试 `Hypergryph`，国际服那台一条都收不到。
     try:
         home = Path(os.environ.get("USERPROFILE") or "")
         if home.is_dir():
-            for sub in ("Endfield", "Arknights Endfield"):
-                take(home / "AppData" / "LocalLow" / "Hypergryph" / sub / "Player.log",
-                     "player-Player.log")
-                # ⚠️ 上一份也要（崩溃那次常常只剩 prev 是完整的）
-                take(home / "AppData" / "LocalLow" / "Hypergryph" / sub / "Player-prev.log",
-                     "player-Player-prev.log")
+            for vendor in ("Hypergryph", "Gryphline"):
+                for sub in ("Endfield", "Arknights Endfield"):
+                    base = home / "AppData" / "LocalLow" / vendor / sub
+                    take(base / "Player.log", "player-Player.log")
+                    # ⚠️ 上一份也要（崩溃那次常常只剩 prev 是完整的）
+                    take(base / "Player-prev.log", "player-Player-prev.log")
     except Exception:  # noqa: BLE001
         pass
 
@@ -2217,11 +2234,22 @@ def collect_diagnosis_files(config: AppConfig, dest: Path, *,
     #        （2 MB 的 dump 收进去会让包变大，而堆栈已经在 `Player.log` 里了）。
     try:
         import glob as _glob
-        crashes = Path(os.environ.get("TEMP") or tempfile.gettempdir()) / "Hypergryph" / "Endfield" / "Crashes"
-        if crashes.is_dir():
-            reports = sorted(
-                (p for p in crashes.rglob("Player.log") if p.is_file()),
-                key=lambda p: p.stat().st_mtime, reverse=True)
+
+        from . import fsutil
+
+        # ⚠️ 厂商段同样**不能写死**（2026-10-07）：国际服的崩溃报告在 `Gryphline` 下，
+        #    只扫 `Hypergryph` 会让那台永远收不到游戏自己的崩溃堆栈。
+        _temp = Path(os.environ.get("TEMP") or tempfile.gettempdir())
+        crashes = _temp / fsutil.ENDFIELD_VENDORS[0] / "Endfield" / "Crashes"
+        _found: list[Path] = []
+        for _vendor in fsutil.ENDFIELD_VENDORS:
+            _dir = _temp / _vendor / "Endfield" / "Crashes"
+            if _dir.is_dir():
+                if not _found:
+                    crashes = _dir
+                _found.extend(p for p in _dir.rglob("Player.log") if p.is_file())
+        if _found:
+            reports = sorted(_found, key=lambda p: p.stat().st_mtime, reverse=True)
             for index, report in enumerate(reports[:3]):          # 只取最近 3 次
                 take(report, f"game-crash-{index + 1}-Player.log")
             rows = ["# 游戏崩溃报告目录（%TEMP%\\Hypergryph\\Endfield\\Crashes）",

@@ -236,7 +236,7 @@ async function startFullUpdate() {
   });
   if (!ok) return;
   store.autoStartDeps = true;
-  store.tab = "dependencies";
+  store.tab = "downloads";   // 2026-10-07：下载统一去「下载」页
 }
 
 // 「更新 ReShade 底座」—— 长耗时，且**成功时原本完全静默**，用户会以为没反应而重复点。
@@ -414,7 +414,7 @@ async function resetDependencies() {
       "会依次做三件事：",
       "① 从备份区还原终末地本体（没做过净化就跳过）；",
       "② 清掉 runtime 与 assets，然后重新下载并展开；",
-      "③ 跳到「依赖」页开始一键下载。",
+      "③ 跳到「下载」页开始一键下载。",
       "",
       "你的 Mod 库和程序本体不受影响。",
       "清完到装好之间，组件列表会先变空，属于正常现象。",
@@ -433,10 +433,10 @@ async function resetDependencies() {
   }
 
   // 清空完的"动态"提示（用户原话：「清空完弹个动态」）
-  showToast("已清空 runtime 与 assets，正在跳到依赖页重新下载…", "success");
-  // 跳依赖页并让那边自动开跑（依赖页 onMounted 会读这个标志）
+  showToast("已清空 runtime 与 assets，正在跳到下载页重新下载…", "success");
+  // 跳**下载页**并让那边自动开跑（下载页 onMounted 读这个标志；2026-10-07 从依赖页搬过去）
   store.autoStartDeps = true;
-  store.tab = "dependencies";
+  store.tab = "downloads";
 }
 // ⚠️ **B10：Mod 备份目录必须走带校验的接口**（见模板里的说明）。
 // `set_mod_backup_dir` 会拒绝"落在 Mod 库 / 中转目录里"的位置并保持原值 ——
