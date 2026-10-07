@@ -11,8 +11,8 @@ description:
   en: >
       Offline verification of the injection link: a "fake EFMI" (**polling `GetAsyncKeyState` through its import table**, the way the real one reads keys) plus a host exe asserting 21 points: module found, import table patched, injection observed, held across frames, "just pressed" only once, modifier+key combo, automatic release, only the target module affected, untouched keys passed through, table restored on unload.
       
-revision: ec6d352f646115c51b7b413c56b5095ba5e52eeb
-updated_at: "2026-10-06T05:52:00.951Z"
+revision: 4c6f9c516371a0e037c4a033a394270fa154178d
+updated_at: "2026-10-07T05:13:35.504Z"
 fingerprint: 2f31190229b81a272bb444aa4b47bbb00880b9d4c41a2948ed0d6387754ecbd2
 source:
   - path: "reshade_addon/tests/hook_host.cpp"

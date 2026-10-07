@@ -11,16 +11,16 @@ description:
   en: >
       What the UI asks for on boot and after every action: the aggregated state payload (config, mods, dependency report, first-run flag, update hint, device text), app info, and the one-shot initialisation entry.
       
-revision: ec6d352f646115c51b7b413c56b5095ba5e52eeb
-updated_at: "2026-10-06T05:52:00.957Z"
-fingerprint: b92c723d5b8c04cdbf576ad6b64d2db507624b74a75c5b27bac8c252c36325c4
+revision: 4c6f9c516371a0e037c4a033a394270fa154178d
+updated_at: "2026-10-07T05:13:35.510Z"
+fingerprint: c6fe1419a2bd7026a531f9460dc3f8ba7740d92aa023662e6e06a71b86454100
 source:
   - path: "endfieldmodcontroller/api.py"
-    line: 323
-    end_line: 635
+    line: 329
+    end_line: 647
   - path: "endfieldmodcontroller/api.py"
-    line: 1540
-    end_line: 2770
+    line: 1676
+    end_line: 3042
 apis:
   - protocol: rpc
     path: "ui_ready"

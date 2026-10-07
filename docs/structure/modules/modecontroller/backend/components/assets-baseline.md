@@ -11,16 +11,16 @@ description:
   en: >
       The baseline of files that must be exactly right: the asset manifest, a baseline mismatch detector (which deployed files drifted from the shipped copy), a summary, a repair action, and a runtime inventory with hashes for diagnostic bundles.
       
-revision: ec6d352f646115c51b7b413c56b5095ba5e52eeb
-updated_at: "2026-10-06T05:52:00.958Z"
-fingerprint: 510ae14d00973c5c594fb03add2034a28cd47b4de8f98fc6d06f619be515bd73
+revision: 4c6f9c516371a0e037c4a033a394270fa154178d
+updated_at: "2026-10-07T05:13:35.511Z"
+fingerprint: 3fa052e819c484c3d70643f885c7ec32db8ee15a5b2f36533e8aadcdcc8aa591
 source:
   - path: "endfieldmodcontroller/runtime_assets.py"
     line: 85
-    end_line: 200
+    end_line: 274
   - path: "endfieldmodcontroller/runtime_assets.py"
-    line: 166
-    end_line: 1624
+    line: 194
+    end_line: 1820
 apis:
   - protocol: rpc
     path: "baseline_mismatches"

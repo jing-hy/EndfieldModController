@@ -11,8 +11,8 @@ description:
   en: >
       Dependencies page (Vue): component list from dependency_report.manifest with progress polling and one-click update.
       
-revision: ec6d352f646115c51b7b413c56b5095ba5e52eeb
-updated_at: "2026-10-06T05:52:01.008Z"
+revision: 4c6f9c516371a0e037c4a033a394270fa154178d
+updated_at: "2026-10-07T05:13:35.547Z"
 fingerprint: 067d3cbdb87e1e47c1e1bd69983bc829cecd0c67e9c5090fc6f2c0e850489105
 source:
   - path: "frontend/src/pages/DepsPage.vue"

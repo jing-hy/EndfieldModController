@@ -11,16 +11,16 @@ description:
   en: >
       Keeping XXMI's injection library correct: ensure the launcher exists, register our ReShade d3d12.dll and the EFMI d3d11.dll as extra libraries, point the importer at the real game folder, and keep the launcher config valid — the piece that decides whether mods load at all.
       
-revision: ec6d352f646115c51b7b413c56b5095ba5e52eeb
-updated_at: "2026-10-06T05:52:00.970Z"
-fingerprint: 1c07eedd6a7fe5dfb43dc3181e89a23a19b29ad13dfa3ef5e03e7c0f19549ca2
+revision: 4c6f9c516371a0e037c4a033a394270fa154178d
+updated_at: "2026-10-07T05:13:35.523Z"
+fingerprint: e6caf67402aa640892ab0f595aed44045002c053eb58f71cc2467be001d1956a
 source:
   - path: "endfieldmodcontroller/launcher.py"
-    line: 2116
-    end_line: 4272
+    line: 2575
+    end_line: 5322
   - path: "endfieldmodcontroller/launcher.py"
-    line: 2326
-    end_line: 4703
+    line: 2785
+    end_line: 5753
 apis:
   - protocol: rpc
     path: "ensure_injections"

@@ -11,16 +11,16 @@ description:
   en: >
       Look at what is injected into the game folder and classify it: our loader proxy, OptiScaler, the game's own DLSS libraries, or a system module that has been replaced — then disable/restore selectively instead of nuking everything.
       
-revision: ec6d352f646115c51b7b413c56b5095ba5e52eeb
-updated_at: "2026-10-06T05:52:00.965Z"
-fingerprint: 62c8b1f40d10822f7f1fdfacd3459ee548fb57679153d757e7ab52abc27262d2
+revision: 4c6f9c516371a0e037c4a033a394270fa154178d
+updated_at: "2026-10-07T05:13:35.518Z"
+fingerprint: 09ca401ab6e7fda97dc608eb873f5ff95c8fa44602ea3193d25a8f2373ed5b46
 source:
   - path: "endfieldmodcontroller/reshade_integration.py"
-    line: 2000
-    end_line: 3163
+    line: 2009
+    end_line: 3181
   - path: "endfieldmodcontroller/reshade_integration.py"
-    line: 2160
-    end_line: 3412
+    line: 2169
+    end_line: 3430
 apis:
   - protocol: rpc
     path: "reshade_integration.audit_game_dir_injections"

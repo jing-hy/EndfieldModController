@@ -11,13 +11,13 @@ description:
   en: >
       Frontend root (Vue): App.vue holds the sidebar layout, tab switching, notices, first-run dialog, drag-drop host and the global dialog/toast hosts.
       
-revision: ec6d352f646115c51b7b413c56b5095ba5e52eeb
-updated_at: "2026-10-06T05:52:01.009Z"
-fingerprint: 147d369b229579e4bad482ff153c9e7b9ce9f53ee2b18391728d882a26d02594
+revision: 4c6f9c516371a0e037c4a033a394270fa154178d
+updated_at: "2026-10-07T05:13:35.548Z"
+fingerprint: 7ec6b00bbb55cc05271f45988f609d68ba3d4eac9f95308e6b3e8573cb09e590
 source:
   - path: "frontend/src/App.vue"
     line: 1
-    end_line: 1472
+    end_line: 1540
 deps:
   - kind: call
     to: modecontroller.backend

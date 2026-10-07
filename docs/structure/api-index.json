@@ -91,6 +91,7 @@
   "rpc:enable_d3d12_proxy_mode": "modecontroller.backend.api.inject-guard",
   "rpc:ensure_all": "modecontroller.backend.components.assets-ensure",
   "rpc:ensure_efmi_early_includes": "modecontroller.backend.launch.efmi-globals",
+  "rpc:ensure_efmi_importer_folder": "modecontroller.backend.launch.dlss5-targets",
   "rpc:ensure_efmi_library_globals": "modecontroller.backend.launch.efmi-globals",
   "rpc:ensure_file": "modecontroller.backend.components.assets-ensure",
   "rpc:ensure_injections": "modecontroller.backend.launch.injection-lib",
@@ -216,12 +217,15 @@
   "rpc:prepare_runtime": "modecontroller.backend.library.prepare",
   "rpc:press_action": "modecontroller.addon.panel",
   "rpc:probe": "modecontroller.backend.components.fastnet",
+  "rpc:read_all": "modecontroller.backend.observe.inject-trace",
   "rpc:read_launch_log": "modecontroller.backend.api.logs",
   "rpc:read_text": "modecontroller.backend.library.util",
   "rpc:read_user_var": "modecontroller.backend.library.user-vars",
+  "rpc:record": "modecontroller.backend.observe.inject-trace",
   "rpc:record_mod_conflicts": "modecontroller.backend.observe.conflict-state",
   "rpc:releases_latest": "modecontroller.backend.components.github",
   "rpc:releases_list": "modecontroller.backend.components.github",
+  "rpc:render": "modecontroller.backend.observe.inject-trace",
   "rpc:repair_integrity": "modecontroller.backend.api.maintenance",
   "rpc:repair_mismatched": "modecontroller.backend.components.assets-baseline",
   "rpc:reshade_ini": "modecontroller.backend.selfcheck.runtime",
@@ -367,5 +371,7 @@
   "rpc:web.TOUR_STEPS": "modecontroller.web.tour",
   "rpc:web.tourShow": "modecontroller.web.tour",
   "rpc:write_action_queue": "modecontroller.backend.library.actions",
-  "rpc:write_report": "modecontroller.backend.observe.report"
+  "rpc:write_report": "modecontroller.backend.observe.report",
+  "rpc:xxmi_foreign_loader": "modecontroller.backend.launch.dlss5-targets",
+  "rpc:xxmi_importer_folder": "modecontroller.backend.launch.dlss5-targets"
 }

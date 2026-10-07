@@ -11,8 +11,8 @@ description:
   en: >
       Health-check generated inis against 3DMigoto's own source rules to find lines that get silently skipped: illegal/redeclared Constants, assignments to undeclared variables, keys whose `run` target is missing — **plus** (2026-10-02) uppercased cross-namespace references, which 3DMigoto drops silently because it registers variables in lowercase.
       
-revision: ec6d352f646115c51b7b413c56b5095ba5e52eeb
-updated_at: "2026-10-06T05:52:00.963Z"
+revision: 4c6f9c516371a0e037c4a033a394270fa154178d
+updated_at: "2026-10-07T05:13:35.517Z"
 fingerprint: 602f0cae8de7d17ce78618326f399835351802b24b4a6cd51ac2507541cae40c
 source:
   - path: "endfieldmodcontroller/ini_lint.py"
