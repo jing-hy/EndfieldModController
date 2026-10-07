@@ -2754,7 +2754,7 @@ class EndfieldModControllerApi:
         try:
             return launcher.configure_dlss5_injection(self.config, enabled=bool(enabled))
         except Exception as exc:  # noqa: BLE001
-            launcher._append_log(self.config, f"DLSS5 注入开关失败: {exc}")
+            launcher._append_log(self.config, f"注入库开关失败: {exc}")
             raise
 
     # ------------------------------------------------------------------

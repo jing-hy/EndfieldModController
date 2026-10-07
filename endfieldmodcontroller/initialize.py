@@ -2794,7 +2794,9 @@ def ensure_all(config: AppConfig, log: Callable[[str], None] | None = None) -> d
     _check_dlss5_nr_binding(config, report, log)
     # 游戏自带 DLSS → 自动停用「喂帧组件」（设置页有开关，默认开启）
     _check_dlss5_feed_redundant(config, report, log)
-    # NRStyle=2 是 RenoDX DLSS5 作者标记"启动就崩"的档位（2026-10-02 用户实测撞上）→ 自动改回 0
+    # ⚠️ `NRStyle` **只报告、不改动**（2026-10-07 更正：这条注释原来写着"→ 自动改回 0"，
+    #    而那个自动改动的动作早就按用户要求删掉了 ⇒ 注释与实际行为相反，会误导排查）。
+    #    现在只把当前值如实写进自检；`NRStyle=2` 与崩溃的因果归因已定案不成立。
     _check_dlss5_nrstyle(config, report, log)
     _check_game_libs(config, report, log)
     _check_bundled_versions(config, report, log)

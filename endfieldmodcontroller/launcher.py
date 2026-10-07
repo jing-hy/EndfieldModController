@@ -1582,10 +1582,15 @@ def ensure_efmi_loader_deployed(config: AppConfig, *,
 
 
 def configure_dlss5_injection(config: AppConfig, enabled: bool = True) -> dict[str, Any]:
-    """开/关 DLSS5 注入：改写 XXMI 的 EFMI extra_libraries（可回滚）。
+    """开/关**注入库**：改写 XXMI 的 EFMI `extra_libraries`（可回滚）。
 
-    开 = 注入 d3d12.dll（DLSS5 + 第一人称 + 服装 Mod 三件套齐活）
-    关 = 清空注入库（只跑服装 Mod，ReShade/DLSS5 不加载）
+    ⚠️ 函数名带 `dlss5` 是历史命名，**它管的不是"DLSS5 神经渲染"那个开关**，而是
+    **所有功能共用的注入底座**（2026-10-07 用户就被这个名字误导过：
+    「为什么我没开 dlss5 日志也说按 dlss5」）：
+
+    开 = 写入注入库（`d3d12.dll` 底座 + `EFMI\\d3d11.dll`）—— DLSS4 多帧生成、DLSS5 神经渲染、
+         第一人称、游戏内面板**全靠这两条**；
+    关 = 清空注入库（只跑服装 Mod，ReShade 与上面那些插件都不加载）
     """
     launcher = config.xxmi_launcher_path
     if launcher is None or not launcher.is_file():
@@ -1907,7 +1912,7 @@ def ensure_injections(config: AppConfig) -> dict[str, Any]:
         # 关闭时必须主动清空，否则会保留上一次写进去的 DLL（滑块看着关了、实际还在注入）
         try:
             configure_dlss5_injection(config, enabled=False)
-            actions.append("XXMI 注入库已清空（DLSS5 注入关闭）")
+            actions.append("XXMI 注入库已清空（注入底座关闭）")
         except Exception as exc:  # noqa: BLE001
             warnings.append(f"清空 XXMI 注入库失败: {exc}")
 
