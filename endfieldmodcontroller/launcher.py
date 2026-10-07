@@ -2840,6 +2840,38 @@ def check_game_multi_instance(config: AppConfig) -> dict[str, Any]:
     }
 
 
+_LAUNCH_STAGE: dict[str, Any] = {}
+# 阶段文案只在"启动进行中"有意义；超过这个时长还没被下一次启动覆盖，就当它过期
+# （避免界面永远停在"正在重建 Mod 目录…"）。
+_LAUNCH_STAGE_TTL = 300.0
+
+
+def set_launch_stage(text: str) -> None:
+    """记录"一键启动**当前走到哪一步**"，供界面显示进度（2026-10-07 用户要求）。
+
+    用户原话：「**启动到扫除mod还是很慢，要是要时间就显示加载页面**」——
+    启动链上有几处天然要花时间（随包资产校验、`stage_and_prepare` 重建 3.5 GB 的 Mods 目录、
+    游戏目录净化…），而界面上只显示按钮文字「正在启动…」⇒ 用户不知道是在干活还是卡死了。
+
+    ⚠️ 这是**纯展示**用的状态：只写内存、不做任何判断、失败也不抛
+    （界面读不到就退回原来的按钮文字）。前端已经在按 1~2 秒轮询 `get_state()`，
+    所以不需要新增任何通道。
+    """
+    global _LAUNCH_STAGE
+    _LAUNCH_STAGE = {"text": str(text or ""), "at": time.time()}
+
+
+def current_launch_stage() -> dict[str, Any]:
+    """给 `api.get_state()` 用：当前阶段文案 + 开始时刻（空 = 没在启动 / 已过期）。"""
+    stage = _LAUNCH_STAGE
+    try:
+        if stage and (time.time() - float(stage.get("at") or 0)) > _LAUNCH_STAGE_TTL:
+            return {}
+    except (TypeError, ValueError):
+        return {}
+    return dict(stage)
+
+
 def launch(
     config: AppConfig,
     *,
@@ -2868,11 +2900,13 @@ def launch(
             raise LaunchError(state["message"])
         if state["running"]:
             _append_log(config, f"⚠ {state['message']}")
+    set_launch_stage("正在检查游戏目录与注入库…")
     game_dir = reshade_integration.detect_game_dir(config)
     if not dry_run:
         diagnostics.begin_launch(config, "xxmi", game_dir=game_dir)
     if config.use_builtin_runtime and not dry_run:
         try:
+            set_launch_stage("正在检查随包组件与运行库…")
             runtime_deps.ensure_all(
                 config,
                 progress=lambda current, total, key, status: _append_log(config, f"builtin {key}: {status}"),
@@ -2890,6 +2924,7 @@ def launch(
             _append_log(config, f"missing dependency install failed: {exc}")
 
     if not dry_run:
+        set_launch_stage("正在重建 Mod 目录（按当前勾选，可能要复制较大的 Mod）…")
         activation.stage_and_prepare(
             config.library_path,
             config.staging_mods_path,
@@ -2917,6 +2952,7 @@ def launch(
         manifest = dependencies.load_manifest(Path(config.dependency_manifest))
         dependency_updates += [r.__dict__ for r in dependencies.update_all(manifest, config.library_path, dry_run=False)]
 
+    set_launch_stage("正在准备 ReShade 底座与游戏内面板…")
     reshade = prepare_reshade_runtime(config, controller_dir)
     existing_reshade = reshade_integration.detect_existing_reshade(config)
     if not dry_run and game_dir is not None:
@@ -3057,6 +3093,7 @@ def launch(
         except Exception as exc:  # noqa: BLE001 - 对齐失败不该拦住启动
             _append_log(config, f"插件位置对齐失败（忽略）: {exc}")
 
+    set_launch_stage("正在拉起 XXMI 启动器…")
     command = build_launch_command(config, start_game=start_game)
     env = build_launch_env(config, existing_reshade=existing_reshade is not None)
     result: dict[str, Any] = {

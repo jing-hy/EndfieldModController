@@ -49,7 +49,15 @@ const running = ref(false);
 // —— 改配置复用 `prepare_launch()`，再发 F10 让 3DMigoto 重新加载配置 / 重扫 Mod。
 const gameLive = ref(false);
 const hotReloading = ref(false);
-let liveTimer = null;
+
+// ★ **启动进度文案**（2026-10-07 用户要求："启动到扫除mod还是很慢，要是要时间就显示加载页面"）。
+//   后端在启动链的关键节点写 `launch_stage`（检查注入库 → 随包组件 → 重建 Mod 目录 →
+//   ReShade/面板 → 拉起 XXMI），前端本来就按 1~2 秒轮询 `get_state()`，直接读它显示即可。
+//   读不到就是空串 —— 模板里 `v-if` 会把它整个藏起来，不会留空占位。
+const launchStageText = computed(() => {
+  const stage = store.state.launch_stage;
+  return (stage && stage.text) || "";
+});let liveTimer = null;
 
 async function refreshGameLive() {
   try {
@@ -768,6 +776,15 @@ useLogAutoScroll(logBox, () => consoleLog.value);
         {{ hotReloading ? "热重载中…" : "热重载" }}
       </button>
     </div>
+    <!-- ★ **启动进度**（2026-10-07 用户要求："启动到扫除mod还是很慢，要是要时间就显示加载页面"）。
+         后端在启动链的关键节点写 `launch_stage`（检查注入库 → 随包组件 → **重建 Mod 目录** →
+         ReShade/面板 → 拉起 XXMI），前端本来就按 1~2 秒轮询 `get_state()`，直接显示即可。
+         只在 `running` 时出现；读不到就什么也不显示（退回按钮文字，不占位）。 -->
+    <p v-if="running && launchStageText"
+       class="text-center text-xs mt-2"
+       style="color: var(--text-muted)">
+      {{ launchStageText }}
+    </p>
 
     <Card title="注入开关">
       <div class="divide-y" style="border-color: var(--border)">

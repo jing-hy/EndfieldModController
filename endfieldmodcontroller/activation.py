@@ -648,6 +648,70 @@ def _stage_empty(library_root: Path, staging_root: Path, runtime_dir: Path,
     }
 
 
+def _dir_fingerprint(root: Path) -> str:
+    """目录的**廉价指纹**：`文件数-总字节`（读不到返回空串）。
+
+    只用来判断"这次启动要不要重新复制这个 Mod"（2026-10-07，为"扫除 mod 慢"而加）。
+    ⚠️ **绝不能把 mtime 算进来**（第一版就是这么写的，实测**永远命中不了**）：
+    产物目录每次重拷都会刷新 mtime ⇒ "产物指纹"必然与上次记录不同 ⇒ 判据恒假 ⇒
+    快路径形同虚设（实测三次仍是 4.76 / 5.40 / 4.59 秒）。只用"文件数 + 总字节"，
+    重拷前后**不变** ⇒ 判据才可能为真。
+    ⚠️ 它**不参与任何校验语义** —— 拿不准（读不到 / 抛异常）就返回空串，
+    调用方据此走原路（老老实实删+拷），绝不因为"算不出指纹"而误跳过。
+    """
+    try:
+        count = 0
+        size = 0
+        for item in root.rglob("*"):
+            if item.is_file():
+                count += 1
+                size += item.stat().st_size
+        return f"{count}-{size}"
+    except OSError:
+        return ""
+
+
+def _stage_fingerprint_path(staging_root: Path) -> Path:
+    r"""指纹表的位置 —— **必须放在 staging 之外**。
+
+    ⚠️ 第一版放在 `staging_root / ".mc_stage_fingerprints.json"`，结果**永远命中不了**：
+    `stage_and_prepare` 开头会清理 staging（`MC_*` 与历史产物），这张表也在其中
+    ⇒ 下次启动读不到 ⇒ 判据恒假 ⇒ 快路径形同虚设（实测三次 4.86 / 4.23 / 3.96 秒）。
+    ⇒ 改放 `staging_root.parent.parent / "_state"`（= `<runtime>\_state`，与其它状态文件同处）。
+      拿不到父级时退回原处（宁可慢，也不能写坏别处）。
+    """
+    staging_root = Path(staging_root)
+    for candidate in (staging_root.parent.parent / "_state", staging_root.parent / "_state"):
+        try:
+            if candidate.parent.is_dir():
+                return candidate / "stage_fingerprints.json"
+        except OSError:
+            continue
+    return staging_root / ".mc_stage_fingerprints.json"
+
+
+def _read_stage_fingerprints(staging_root: Path) -> dict[str, str]:
+    """上次 stage 时记下的 `{产物目录名: "源指纹|产物指纹"}`；读不到当空表。"""
+    try:
+        data = json.loads(_stage_fingerprint_path(staging_root).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {str(k): str(v) for k, v in data.items()}
+
+
+def _write_stage_fingerprints(staging_root: Path, table: dict[str, str]) -> None:
+    try:
+        path = _stage_fingerprint_path(staging_root)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(table, ensure_ascii=False, indent=1), encoding="utf-8", newline="\n")
+    except OSError:
+        pass          # 写不进去只是"下次重拷一遍"，不影响正确性
+
+
+
 def stage_and_prepare(
     library_root: Path,
     staging_root: Path,
@@ -791,8 +855,31 @@ def stage_and_prepare(
     # 复制不过去的 Mod（失败**不打断启动**，只是如实记下来：
     # 用户 2026-10-03「启动弹出失败弹窗，但 xxmi 成功拉起」—— 那是误报）
     stage_failed: list[dict[str, str]] = []
+    # ★★ **"没变就跳过"快路径**（2026-10-07 加）。
+    #    起因（用户原话）：「启动到扫除 mod 还是很慢」。实测：staging 3.5 GB / 2204 个文件，
+    #    其中一个大包（加载页与壁纸）就 1.9 GB ⇒ 原来的"**无条件 `rmtree` + `copytree`**"
+    #    每次启动都要**实打实删+拷 3.5 GB**（本机连跑两次 5.91s / 5.11s；
+    #    而"只遍历不复制"只要 0.02 秒 ⇒ 那 5 秒全是文件 IO，不是扫描）。
+    #    ⇒ 用"**源指纹 + 产物指纹**"双校验：**两边都与上次一致**才跳过。
+    #      只比源会漏掉"产物被外部改过"；只比产物会漏掉"源被改过"。两个都记，两个都对才跳。
+    #    ⚠️ 指纹只用来**决定跳过**，不参与任何校验语义 —— 拿不准（读不到、没有记录）就不跳，走原路。
+    fingerprints = _read_stage_fingerprints(staging_root)
+    new_fingerprints: dict[str, str] = {}
+    skipped_unchanged: list[str] = []
     for mod in active_plan:
         dest = staging_root / f"MC_{mc_core.safe_name(mod.group)}_{mc_core.safe_name(mod.name)}"
+        source_fp = _dir_fingerprint(mod.path)
+        recorded = fingerprints.get(dest.name)
+        if dest.is_dir() and source_fp and recorded:
+            recorded_source, _, recorded_dest = recorded.partition("|")
+            if recorded_source == source_fp and recorded_dest == _dir_fingerprint(dest):
+                new_fingerprints[dest.name] = f"{source_fp}|{recorded_dest}"
+                skipped_unchanged.append(dest.name)
+                # ⚠️ 与下面"复制成功"那条**用同一种形式**（`str(dest)`）：`active_pairs` 的
+                #    第二项会被后续当作**路径**用（生成控制器、写 actions），
+                #    一个给目录名一个给完整路径会让两者行为不一致。
+                active_pairs.append((mod, str(dest)))
+                continue
         if dest.exists():
             # ⚠️ 不能用 `ignore_errors=True`：删不掉（文件被占用 / 只读）时它会静默放过，
             # 紧接着 copytree 就撞上残留报 `[WinError 183] 当文件已存在时，无法创建该文件`
@@ -830,6 +917,14 @@ def stage_and_prepare(
             pass
         active_targets.append(str(dest))
         active_pairs.append((mod, str(dest)))
+        # 记下这次复制后的指纹（源 + 产物），供下次启动判断"要不要重拷"
+        new_fingerprints[dest.name] = f"{source_fp}|{_dir_fingerprint(dest)}"
+    # 指纹表落盘（**没变就跳过**快路径的依据）。写不进去只是"下次重拷一遍"，不影响正确性。
+    _write_stage_fingerprints(staging_root, new_fingerprints)
+    if skipped_unchanged:
+        _log(log, f"staging 跳过 {len(skipped_unchanged)} 个没变化的 Mod（省去重复复制）："
+                  + "、".join(sorted(skipped_unchanged)[:6])
+                  + ("…" if len(skipped_unchanged) > 6 else ""))
     fsutil.write_text_atomic(
         managed_root / "active_targets.json",
         json.dumps(active_targets, ensure_ascii=False, indent=2),

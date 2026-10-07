@@ -1504,6 +1504,11 @@ class EndfieldModControllerApi:
             # 未初始化（组件没装齐/控制器没生成）时，前端启动后弹窗说明"再点一次一键启动"
             "first_run": self.first_run_state(),
             "warming": not self._warm_done,
+            # ★ **一键启动当前走到哪一步**（2026-10-07 用户要求："启动到扫除mod还是很慢，
+            #   要是要时间就显示加载页面"）。纯展示：没在启动时是空 dict。
+            #   启动链上有几处天然要花时间（随包资产校验、重建几 GB 的 Mods 目录、净化游戏目录），
+            #   以前界面只显示按钮文字「正在启动…」，用户分不清"在干活"还是"卡死了"。
+            "launch_stage": launcher.current_launch_stage(),
             "detected_xxmi": cached_detect("xxmi"),
             "detected_migoto_loader": cached_detect("migoto"),
             "detected_official_launcher": cached_detect("launcher"),
