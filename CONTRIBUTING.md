@@ -6,6 +6,12 @@
 > 面向**使用者**的说明在 [README.md](README.md)（简略）与 [docs/README.detailed.md](docs/README.detailed.md)（详细）。
 > 面向**手测**的清单在 [TESTING.md](TESTING.md)（编号条目，用户按编号回话）。
 
+### 用 AI 排查故障？
+
+先读 **[AGENTS.md](AGENTS.md)** —— 那份专门写给 AI 助手：怎么用诊断包里的东西定位问题、
+查明是**本程序**的问题就**修好并提 PR**、拿不准或不方便提 PR 就用 **QQ 群**
+（群号 **1045239747**，加群验证答案 `jing_hy`）反馈。
+
 ---
 
 ## 一、改动边界（别越线）
