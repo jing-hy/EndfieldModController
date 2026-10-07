@@ -1169,8 +1169,20 @@ def _ensure_all_locked(
         results.append(AssetResult(DLSSNR_TARGET, "skipped", choice.reason, group="nvngx"))
     else:
         try:
+            # ⚠️⚠️ **不能写 `force=force or bool(fixed_items)`**（2026-10-07 实测抓到的真凶）。
+            #    `fixed_items` = 清单里那两条 `nvngx_dlssnr*` 条目（official + sf）⇒ **恒非空**
+            #    ⇒ 那个表达式**恒为 True** ⇒ **每一轮 `ensure_all` 都强制重解压 165 MB**。
+            #    代价：本机实测单轮 4.6~4.8 秒，而同一次启动里 `ensure_all` 最多被调 **4 轮**
+            #    （`ensure_injections` → `integrity.repair` → `initialize` → `launch`）⇒
+            #    **累计约 19 秒**，那段时间主线程被占住，用户看到的是
+            #    「刚启动时注入开关全是关的」「过很久才能打开」「DLSS5↔DLSS4 互斥超级慢」。
+            #    而"按架构选对那一份 / 换卡或被整合包替换后自愈"这件事，
+            #    `ensure_dlssnr` 内部的 `_installed_matches()` **本来就做了**
+            #    （marker 快路径 0 秒；marker 丢了才扫一次 fatbin，实测 0.1 秒）
+            #    ⇒ 强制重解压纯属多余。
+            #    `force` 仍然透传：依赖页「一键更新全部组件」传的就是 `force=True`，那时**要**真重解。
             results.append(ensure_dlssnr(
-                config, log=log, progress=progress, force=force or bool(fixed_items),
+                config, log=log, progress=progress, force=force,
             ))
         except Exception as exc:  # noqa: BLE001
             results.append(AssetResult(
