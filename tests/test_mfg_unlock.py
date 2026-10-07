@@ -6,6 +6,12 @@
 "unlocks 3x/4x/6x frame generation on RTX 40-series cards and corrects the temporal
 midpoint. **In-memory only**."（只改运行时内存，不写游戏目录、不碰磁盘上的 NGX 库）。
 
+⚠️ **2026-10-07 起本作禁用这个功能**（终末地只有 DX11 启动模式、游戏内没有帧生成接口 ⇒
+游戏从不提交帧生成请求 ⇒ addon 没有请求可接）。本文件里那些**按显卡的判据测试**
+因此统一加上前置条件：`monkeypatch` 把 `MFG_UNLOCK_DISABLED_FOR_THIS_GAME` 打桩成 `False`
+—— **判据代码一字未删**，这些测试验的是『以后游戏支持了，改回常量即可恢复』的那条路径。
+『本作当前禁用 + 界面写明原因』这条行为由 `tests/test_mfg_unlock_scope.py` 覆盖。
+
 要守住四条：
 * **默认关**（可选增强，不是"能不能玩"的必需品）；
 * **只放 40 系**（`sm_89`）—— 50 系官方本来就有、30/20 系连 Ada 插值内核都没有；
@@ -46,6 +52,8 @@ def env(tmp_path, monkeypatch):
     ("NVIDIA GeForce RTX 2060", False),                 # 20 系 ⇒ 锁
 ])
 def test_supported_only_for_ada(monkeypatch, card, expected):
+    # ★ 复活路径：本作已禁用该功能，这里验的是"常量改回 False 后"的按显卡判据
+    monkeypatch.setattr(deviceinfo, "MFG_UNLOCK_DISABLED_FOR_THIS_GAME", False)
     monkeypatch.setattr(deviceinfo, "collect", lambda refresh=False: _fake_adapters(card))
     ok, reason = deviceinfo.mfg_unlock_supported()
     assert ok is expected, reason
@@ -55,6 +63,8 @@ def test_supported_only_for_ada(monkeypatch, card, expected):
 
 
 def test_locked_when_no_nvidia(monkeypatch):
+    # ★ 复活路径：本作已禁用该功能，这里验的是"常量改回 False 后"的按显卡判据
+    monkeypatch.setattr(deviceinfo, "MFG_UNLOCK_DISABLED_FOR_THIS_GAME", False)
     monkeypatch.setattr(deviceinfo, "collect",
                         lambda refresh=False: _fake_adapters("AMD Radeon(TM) Graphics"))
     ok, reason = deviceinfo.mfg_unlock_supported()
@@ -68,6 +78,8 @@ def test_multi_gpu_takes_the_best(monkeypatch):
     50 系放行之后，这条测的不再是"锁不锁"，而是"**有没有按最强那张算**"——
     理由里必须体现它认的是 5080（而不是因为机器里恰好有张 4060 才放行）。
     """
+    # ★ 复活路径：本作已禁用该功能，这里验的是"常量改回 False 后"的按显卡判据
+    monkeypatch.setattr(deviceinfo, "MFG_UNLOCK_DISABLED_FOR_THIS_GAME", False)
     monkeypatch.setattr(deviceinfo, "collect", lambda refresh=False: _fake_adapters(
         "NVIDIA GeForce RTX 4060", "NVIDIA GeForce RTX 5080"))
     ok, reason = deviceinfo.mfg_unlock_supported()
@@ -112,6 +124,8 @@ class _Report:
 
 
 def test_check_says_not_applicable_on_blackwell(env, monkeypatch):
+    # ★ 复活路径：本作已禁用该功能，这里验的是"常量改回 False 后"的按显卡判据
+    monkeypatch.setattr(deviceinfo, "MFG_UNLOCK_DISABLED_FOR_THIS_GAME", False)
     config, _dlss5 = env
     monkeypatch.setattr(deviceinfo, "collect",
                         lambda refresh=False: _fake_adapters("NVIDIA GeForce RTX 5080"))
@@ -126,6 +140,8 @@ def test_check_says_not_applicable_on_blackwell(env, monkeypatch):
 
 
 def test_check_warns_when_enabled_but_addon_missing(env, monkeypatch):
+    # ★ 复活路径：本作已禁用该功能，这里验的是"常量改回 False 后"的按显卡判据
+    monkeypatch.setattr(deviceinfo, "MFG_UNLOCK_DISABLED_FOR_THIS_GAME", False)
     config, _dlss5 = env
     config.mfg_unlock_enabled = True
     monkeypatch.setattr(deviceinfo, "mfg_unlock_supported",
