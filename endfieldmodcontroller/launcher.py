@@ -1612,7 +1612,16 @@ def configure_dlss5_injection(config: AppConfig, enabled: bool = True) -> dict[s
     config.dlss5_injection = enabled
     config.reshade_injection = "xxmi_extra" if enabled else "none"
     config.save()
-    _append_log(config, f"DLSS5 注入 {'开启' if enabled else '关闭'}: {targets or '(注入库已清空)'}")
+    # ⚠️ 日志**不要**写成"DLSS5 注入"（2026-10-07 用户被它误导：「为什么我没开dlss5
+    #    日志也说按dlss5」）。这里的 `targets` 是 **XXMI 的注入库**（`extra_libraries`）
+    #    —— 即 **ReShade 底座 + EFMI**，**所有功能共用的地基**：
+    #    DLSS4 多帧生成、DLSS5 神经渲染、第一人称、游戏内面板全靠这两条。
+    #    它与「DLSS5 神经渲染」那个**开关**没有任何关系（关掉那个开关本条照样打印）。
+    _append_log(
+        config,
+        f"注入库已写入（ReShade 底座 + EFMI，DLSS4/DLSS5/第一人称共用）: "
+        f"{targets or '(注入库已清空)'}",
+    )
     return {
         "ok": True,
         "enabled": enabled,

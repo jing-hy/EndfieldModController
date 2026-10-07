@@ -147,7 +147,14 @@ def arm(config: AppConfig, *, log: Callable[[str], None] | None = None) -> dict[
     _STATE["armed"] = True
     _STATE["armed_at"] = time.time()
     if log is not None:
-        log(f"NR 自动开启: 已就位（等相机 hook 装好后按一次 NR 键；日志 {path}）")
+        # ⚠️ 文案要写清"**只是挂上监视**"（2026-10-07 用户被它误导：「为什么我没开 dlss5
+        #    日志也说按 dlss5」）。真正按 NR 键发生在 `poll()` 里，那里**有开关判据**
+        #    （`auto_enable_nr_after_camera_hook`）。只打"已就位"会让人以为它已经在按了。
+        #    另外这里也**不预判** DLSS5 开关：本模块只负责"等到相机 hook 就补按一次 NR"，
+        #    是否真按由 `poll()` 按当前配置决定。
+        enabled = bool(getattr(config, "auto_enable_nr_after_camera_hook", True))
+        log(f"NR 自动开启: 已挂上监视（{'等相机 hook 后补按一次 NR 键' if enabled else '当前配置已关闭，不会按键'}；"
+            f"日志 {path}）")
     return dict(_STATE)
 
 
