@@ -4,9 +4,9 @@
 > 目的：让「当时为什么这么改、踩过什么坑」跟着源码一起留在仓库里。
 > 想改内容 → 改记忆库（用记忆工具），再跑一次本脚本；不要直接编辑本文件。
 
-- 生成时间：2026-10-07 13:51:10
+- 生成时间：2026-10-07 15:26:08
 - 来源：`.dsh-meow/memory.db`
-- 条目：587 条（已跳过 archived / 其它项目的条目）
+- 条目：593 条（已跳过 archived / 其它项目的条目）
 
 ---
 
@@ -297,7 +297,7 @@
 
 `关键词：["GPL-3.0","MIT","许可证冲突","copyleft","开源协议","JASM 参考","不能抄代码","思路重写","LICENSE 检查","分发合规"]`
 
-## 项目记忆（结构 / 决策 / 部署 / 待办）（39 条）
+## 项目记忆（结构 / 决策 / 部署 / 待办）（41 条）
 
 ### 项目概述
 
@@ -525,6 +525,16 @@ runtime\dlss5                      38 字符  ❌ 崩
 
 `关键词：["importer_folder","ensure_efmi_importer_folder","xxmi_foreign_loader","active_efmi_loader","两份 loader","injecttrace duplicate_loaders","诊断包 importer_folder","lzh18 现场","0xC0000005","0xC0000135","注入库 extra_libraries","EFMI loader"]`
 
+### 用户原话
+
+### 【用户 2026-10-07 新增需求原话（Mod 商城…
+*2026-10-07 14:15*
+
+【用户 2026-10-07 新增需求原话（Mod 商城 + 下载中心）】① 「根据现在 emc 项目情况，我希望**加入 mod 商城功能**，可以看看 jasm 是怎么做的，然后**匹配现在 emc 的 ui** 和**接入下载功能**」；② 「mod **批量扫描、一键更新**，看看 api **能不能账号登录**」；③ 「**把下载从依赖里面抽出来**，之前是所有下载跳转依赖的现在都跳转下载，**依赖也跳转下载**，下载可以**后台进行**，可以**追加任务**，看商城**不用下一个就跳转一次，但是要有动态**」；④ 「**单独 fork，不要和现在的改动放一起**」（随后改为「算了，**不需要 fork，直接改**」）；⑤ 「测试期间**在我确认裸版本没问题之后再进行构建**」（= 先不打包 exe）。
+**结论性决定**：**账号登录本期不做** —— 实测香蕉网只有 `POST /apiv11/Member/Authenticate`（用户名+密码换 session cookie，GET 返回 404），**没有 OAuth**；浏览/下载本来不需要登录，登录后才能做的（收藏/订阅/上传）在 apiv11 无文档。要做建议下一期只做"登录态 + 收藏同步"，且不保存明文密码。
+
+`关键词：["mod 商城","下载中心","批量扫描","一键更新","账号登录","OAuth","新增任务到下载队列","不要 fork 直接改","裸版本确认后再构建","依赖页瘦身","要有动态","GameBanana"]`
+
 ### 部署与数据
 
 ### 乳摇插件（SecondaryMotion / Shaki…
@@ -661,17 +671,29 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 `关键词：["变体机制落点", "best_rtx_sm唯一入口", "select_dlssnr_variant", "ensure_dlssnr", "dll_architectures扫fatbin", "dlssnr_variant.json marker", "baseline按变体判防抖", "dlss5:nr_arch自检", "dlss5_gpu_scope_applied迁移", "pack_nvngx_assets变体字段"]`
 
 ### 【modecontroller 当前状态唯一真源】（20…
-*2026-10-07 13:00*
+*2026-10-07 13:52*
 
-【modecontroller 当前状态唯一真源】（2026-10-07 13:00 更新）
-**Latest Release = `v1.1.0`**（2026-10-07T03:47:53Z，release id `405355434`，`--latest`）。**本地 = `1.1.1-beta`（未发布）**；main 本地已到 `ad16939`（**未推**，等用户明确说推）。
-**v1.1.1-beta 内容（自 v1.1.0 起）**：① 两份 README 重写为面向使用者 + `docs/dev/` 归档 + `docs/README.md` 索引重排；② 注释与文案审计（4 处改写）；③ **修「EFMI 加载失败：无法检测到游戏进程窗口」** —— XXMI 的 `importer_folder` 被指到 Mod 库 ⇒ 两份 d3d11 loader ⇒ `0xC0000005`（详见 decisions 条 `0muxn2v0`）；落点 `launcher.ensure_efmi_importer_folder()` 等，测试 `tests/test_efmi_importer_folder.py` 16 条，全量 1174 passed。
-**发布流程（不变）**：`build_release.py`（`--with-fake-old` 才产伪旧版）→ `prepare_release.py` → `gh release create --draft` → `upload_release_assets.py --tag` → `gh release edit --draft=false --latest` → **按 release id 核对 digest**。附件只推 `EndfieldModController.exe` + `assets-bundle.zip`（都不带版本号）。**未经用户明确说"推"/"发"绝不推送、绝不发 Release**（他说「Releases 没更新啊」只是陈述事实）。
-**结构树**：本会话已按四步更新（realign 72 模块/382 行号 → refresh(all,activate) → validate 0 error → build+render），**新增模块 `modecontroller.backend.observe.inject-trace`**（此前 `injecttrace.py` 未被结构树覆盖），并把 `dlss5-targets` 更名为「XXMI 注入库」；产 164 模块 / 375 API，HTML 58 万字节。
+【modecontroller 当前状态唯一真源】（2026-10-07 13:53 更新）
+**Latest Release = `v1.1.1`**（2026-10-07T05:52:40Z = 北京时间 13:52，release id `405424097`，`draft=false`/`prerelease=false`/`--latest`）。**本地 = `1.1.1`（正式号，与 Release 同号，不欠号）**；main = `688afc3`（已推，含记忆日志与结构树镜像提交）。快照 `D:\zmdmod\_snapshot_1.1.1-20261007-135110`。
+**v1.1.1 附件（digest 与本地逐字节一致）**：`EndfieldModController.exe` 32,040,403 B / sha256 `392d264c00f357c1ae55ee1abe5088b954a7a34a70b24552880f1f54360a3f62`；`assets-bundle.zip` 262,289,985 B / sha256 `182e5508f5d7c73818dcc3af981bb3527cd715c0e3715a9545304c084a4a91bc`。**伪旧版本版未构建**（要 `--with-fake-old`）。
+**v1.1.1 内容（自 v1.1.0 起）**：① **修「EFMI 加载失败：无法检测到游戏进程窗口」** —— XXMI 的 `importer_folder` 被指到 Mod 库 ⇒ 两份 d3d11 loader ⇒ `0xC0000005`（落点 `launcher.ensure_efmi_importer_folder()` / `xxmi_foreign_loader()`；详见 decisions 条 `0muxn2v0`）；② **修「DLSS4 关掉还留在生效目录」** —— 资产展开把 `renodx-mfgunlock.addon64` 放回顶层，而归位兜底只覆盖 DLSS5 ⇒ 收口成 `launcher.realign_component_addons()`（三组件 + 面板），`ensure_injections` 与 `initialize.ensure_all` 都调；③ **首屏 Mod 列表提前就绪** —— `_warm_up` 先扫库再等 `ui_ready`（与窗口创建并行）、`_mods()` 加锁 + 代次号、改库操作与扫描互斥（RLock）、预热段零写盘；前端加首屏加载页（12 秒兜底）；④ README/docs 重写整理 + 注释文案审计。
+**流程（不变）**：`build_release.py --no-push`（本地验证）/ 不带参数会**自动推 main** → `prepare_release.py`（备附件并打印 sha256）→ `gh release create --draft --notes-file RELEASE_NOTES.md` → `upload_release_assets.py --tag`（DoH 直连，262 MB 约 47 秒）→ `gh release edit --draft=false --latest` → **按 release id 核对 digest**（draft 阶段按 tag 查会 404）→ 发完**必查有无遗留 draft**。附件只推 `EndfieldModController.exe` + `assets-bundle.zip`（都不带版本号）。
 **issue 状态**：**#16（xingluo667）OPEN**（2026-10-07 已回 comment 6030530865：说清 10 条 `parseServerManifest` 是游戏自带 Streamline 2.10.3 的产物、不是闪退原因；建议更新驱动；请他用「一键启动」启动以拿退出码）。**#17 CLOSED**。
-**待办**：① 等 #16 回报退出码；② 下一版发布前把 `RELEASE_NOTES.md`（现已是 v1.1.1 正文）随构建确认；③ DLSS4 多帧生成线已作废。
+**待办**：① 等 #16 回报退出码；② 下一步版本号规则：本地 = 正式号，下次动实质改动再写 `1.1.2-beta`；③ DLSS4 多帧生成线已作废（游戏不提供帧生成）。
 
 `关键词：["当前状态唯一真源","Latest Release v1.1.0","release id 405355434","exe sha256 03092366","assets 262289985","伪旧版 from-1.1.0","启动提速 19 秒","launch_stage 分步进度","issue 16 已回","issue 17 已关","版本号 1.1.0 用户指定"]`
+
+### 【modecontroller 当前状态（2026-10…
+*2026-10-07 14:15*
+
+【modecontroller 当前状态（2026-10-07 14:15，本期 = Mod 商城 + 下载中心）】
+**版本 = `1.1.2-beta`**（version.py 与两份 README 三处一致，`scripts/release_version.py` 校验通过 = v1.1.1 + 1）；**未提交、未推送、未构建 exe**（用户要求"我确认裸版本没问题之后再进行构建"）。
+**本轮改动**（14 改 + 6 新）：后端新增 `modstore.py`(705 行，GameBanana 数据层) 与 `downloads.py`(180 行，任务归一化)；`api.py` +652 行（商城接口 `mod_store_list/categories/detail/thumbnail/prefetch/check_updates/update_all/installed_list/installed_map/task_status` + 下载中心 `downloads_snapshot/active_count/pause/resume/cancel/clear` + `start_mod_download` 改追加语义 + `_mod_download_worker` 改循环取件 + 旧接口全部兼容转发）；前端新增 `pages/StorePage.vue`(434 行) 与 `pages/DownloadsPage.vue`(297 行)，`App.vue`/`store.js` 加两个页签与下载徽标轮询（每 2 秒 `downloads_active_count`，就是用户要的"动态"），`DepsPage.vue` 瘦身 -190 行（删进度条/速度/日志框/Mod 控制按钮，两列改单列），所有"下载跳转"从 `dependencies` 改指 `downloads`；测试新增 `tests/test_modstore.py`(23 条) 与 `tests/test_download_center.py`(15 条)，`test_mod_download.py` 里"第二批被拒"那条按新契约改成"追加"（+3 条）。
+**验证**：全量 `pytest tests -q -n 4` → **1229 passed / 1 failed**，失败的是 `test_selfupdate_forensics`（既有并行 flaky：单独跑 15/15 通过、与相邻测试并行 3/3 通过，我未触碰 selfupdate/crashwatch）；另有真机冒烟（工作区真 config 调新接口，列表/分类/详情/缩略图/任务快照全部 OK）。
+**已知事实**：工作区 `library` 里 36 个 Mod **全是手工/整合包放进来的**（0 份 `download-info.json`）⇒ 商城卡片上的「已安装」在当前这份库上**不会亮**（程序不猜，属正确行为）；从程序下载过的 Mod 才会标。
+**下一步**：① 等用户确认裸版本；② 之后才 `scripts/build_release.py` 构建；③ normify 结构树四步（realign → refresh → validate → build+render）**尚未做**；④ 未经明确说"推/发"不动 GitHub。
+
+`关键词：["1.1.2-beta","Mod 商城落地","下载中心","modstore.py","downloads.py","StorePage.vue","DownloadsPage.vue","依赖页瘦身","1229 passed","selfupdate flaky","未构建 exe","已安装标记不亮"]`
 
 ### 待办
 
@@ -707,7 +729,7 @@ issue #16（xingluo667，游戏加载过程中闪退）：已追加评论，让�
 
 `关键词：["issue 16", "开关组合测试", "全关再逐项加回", "DLSS5 神经渲染", "ShakingBreastManager", "皮肤 Mod", "Endfield Poser", "v1.0.12 开关生效", "等反馈者回报", "游戏加载过程中闪退"]`
 
-## 话题（一件事的前因后果）（23 条）
+## 话题（一件事的前因后果）（24 条）
 
 ### 诊断并稳定终末地换装 Mod 的 DX11/EFMI 路线
 *2026-09-27 18:24*
@@ -932,7 +954,20 @@ issue #16（xingluo667，游戏加载过程中闪退）：已追加评论，让�
 
 `关键词：["DLSS5非50系方案", "终末地DX11", "DLSS5-Feeder", "dlss5-feed.addon64", "renodx-dlss5", "LumeniteFX运动矢量", "bridge与feeder分工", "DX11无多帧生成", "Forcing-GfxDevice-Direct3D-11", "DLSS5-Autopilot", "按架构选runtime"]`
 
-## 经验教训（被纠正过的、踩过的坑）（390 条）
+### 定位"游戏加载中闪退（0xC0000135）"的真因
+*2026-10-07 15:04*
+
+【"游戏起不来 / 闪退"两个反馈者的对照（2026-10-07 定案级信息）】
+**共同症状（两台逐条一致）**：退出码 **`0xC0000135 STATUS_DLL_NOT_FOUND`**（8/8、稳定复现）；退出方式=**"自己退出"**（面板 addon 收到 `DllMain detach`，走了正常卸载）；**无 WER**；`Player.log` 里都只有 **1 条** `parseServerManifest Unexpected line in manifest file`（内容是乱码 `�ߟ'`，不是"版本旧"那种 10 条噪音）；静态导入表**都能解析**（⇒ 缺的是**运行期 LoadLibrary** 的目标）。
+**关键对照（issue #16 xingluo667 早就做过，勿再让他重做）**：**全关 → 能进；只开 DLSS5 → 不行；只开第一人称 → 不行；只开皮肤 Mod → 能进；只开 ShakingBreastManager → 能进**（Poser 他没装）。
+⇒ **由此否掉两条假说**：① **乳摇/Poser 铺的 `d3dcompiler_47.dll`+`vulkan-1.dll` proxy 不是原因**（只开乳摇时它们照样在，却能进）；② **显卡驱动不是原因** —— owner 曾据"596.49 闪退 / 616.92 能进"让他更新驱动，他更到 **617.42 后照样闪退**（该线索应撤回）。
+⇒ **收窄到**：出问题的两个开关**都依赖 ReShade 底座**（`runtime\dlss5\d3d12.dll`），而能进的两个都不依赖它。
+**两台机器差异**：华硕（RTX 5060 616.64，数据根 `D:\终末地模组和dlss5`，游戏盘 E:，装了 Poser）vs #16（RTX 5070 Ti 617.42，`C:\Users\<user>\Downloads\runtime`，游戏盘 D:，没装 Poser）；失败机 vs 本机（能进）差在哪**尚未定案**。
+⚠️ 关联但**不许合并**：本机 09-27 那批崩溃包是 **10 条** parseServerManifest（跑到 837 行才崩），与这两台的 **1 条 + 早退**不是同一现象。
+
+`关键词：["游戏起不来","闪退","0xC0000135","STATUS_DLL_NOT_FOUND","自己退出","parseServerManifest 1 条","只开DLSS5不行","只开第一人称不行","只开乳摇能进","ReShade 底座","驱动假说证伪","dll proxy 假说否定","华硕","xingluo667"]`
+
+## 经验教训（被纠正过的、踩过的坑）（392 条）
 
 ### XXMI/EFMI 启动终末地是 Endfield.ex…
 *2026-09-27 14:58*
@@ -4506,7 +4541,32 @@ XXMI 的 importer_folder 指向 Mod 库时，注入库再列另一份 d3d11 load
 
 `关键词：["importer_folder","两份 d3d11 loader","EFMI 加载失败","无法检测到游戏进程窗口","0xC0000005","ACE-Base64","GfxDevice creating device client","GfxDevice","extra_libraries","注入库","XXMI 配置","双 loader 冲突"]`
 
-## 事实（细碎的原子信息）（93 条）
+### 【模式：把"单批下载"改成"可追加队列"的正确做法（20…
+*2026-10-07 14:15*
+
+【模式：把"单批下载"改成"可追加队列"的正确做法（2026-10-07 落地，含一个隐蔽坑）】
+用户要求「下载可以后台进行，**可以追加任务**」。做法 = **单 worker + 待办队列**，不是"每批起一个线程"：
+* `api._mod_dl_pending`（待办 list）+ `api._mod_dl_running`（worker 标志）；`start_mod_download` 只负责把新项 append 进 `_mod_dl["items"]` 与待办，按 `_mod_dl_running` 决定要不要起 worker；
+* worker 改成**循环取件**：每轮在**同一把锁内**"取空待办 → 若为空则置 `done=True`/`running=False` 并 break"。⚠️ **"判定没活了"与"复位 running"必须在同一把锁里做完**，否则竞态：worker 刚判完空、还没把 running 置 False 时来了新任务（它看到 running=True 就不起线程）⇒ 那批永远没人下；
+* **硬不变量：任何时刻只有一个 worker**（2026-10-04 的教训：两个 worker 并发改 `_mod_dl` 会让进度乱跳、完成标志互相覆盖、"解压入库串行"的假设失效）；
+* `resume_mod_downloads` 也改走同一套（放回待办 + 按 running 起线程），不再自己另写一条"重开线程"的路径；`clear` 要**连待办一起清**（否则清完又被旧待办拉起来）。
+⚠️ **当天踩到的隐蔽坑**：`start_mod_download` 里为了不把锁里的对象暴露出去，用了 `current = list(self._mod_dl["items"])` 做浅拷贝，随后对着**这个拷贝** `extend(new_items)` ⇒ 返回值说"已加入 2 个"、真队列却只有 1 个，worker 那边什么都没多出来（测试里表现为 `queued==2` 但最终 `items` 只有 1 项）。**判据：写完队列后立刻断言"真队列的长度"**，别只信返回值。
+
+`关键词：["追加任务","单 worker","待办队列","pending","running 标志","同一把锁内复位","浅拷贝 extend 的坑","resume 复用同一机制","clear 要清待办","并发改 _mod_dl"]`
+
+### 【图片链路的三个坑（2026-10-07 全部实测定案）…
+*2026-10-07 14:41*
+
+【图片链路的三个坑（2026-10-07 全部实测定案）—— 商城缩略图"又糊又慢"的真因】
+① **通道**：pywebview/WebView2 里 `file://` 读不到本地图，原先只能把每张图 base64 成 data URI **经桥一张张传**（一页 24 张 ≈ 3 MB 字符串注入 + 24 次跨语言往返），为压体积还只能缩图 ⇒ 又慢又糊。**正解 = 进程内本地只读图片服务**：`ThreadingHTTPServer(("127.0.0.1", 0), …)` + `SimpleHTTPRequestHandler(directory=thumbs)`，`translate_path` 只认 `[0-9a-f]{16}\.jpg`（挡 `../`）、`end_headers` 补 `Cache-Control: public, max-age=86400`，daemon 线程、起不来返回 0 让调用方回退 data URI。前端 `prepare_images(urls)` 批量拿短 URL → `<img>` 直连 ⇒ 并发/磁盘缓存/解码全归浏览器。
+② **档位**：这台机器到 `images.gamebanana.com` 只有约 **9 KB/s**（实测：530 档 56 KB = 5.9s、220 档 13.5 KB = 1.8s、100 档 3.9 KB = 1.6s、原图超时；主站代理同路径 404 走不通）。⇒ **列表用 220 档、并配 100 档做"秒出占位"**（两波：先 tiny 后 mid，用户看到"图快出现再变清晰"）；**详情/灯箱才用 530/800**（用户主动等）。
+③ **并发陷阱**（反直觉但实测确凿）：总带宽固定时**开多路会一起饿死** —— 并发 8 路时带宽被切成 8 份，每张 13.5 KB 都要 12s+，直接撞 10s 超时 ⇒ **15 张图全部失败**。正确是 **3 路 + 超时 20 秒**。配合 **IntersectionObserver 懒加载**（只下视口内的图、`rootMargin: 240px`）。
+④ 附带：**索引缓存必须带字段版本校验**（`load_index` 里查一个"新版必有"的字段）—— 归一化口径一改，旧缓存会让前端拿到旧字段，表现为"代码改了、界面没变"，极难往缓存上想。
+⑤ 别用 `dependencies._http_get` 取图片（它会走 fastnet 的线路预检/分块决策，那是给几十 MB 安装包的）；图片用单次 `urllib.request.urlopen(headers=UA, timeout=…)` + 原子落盘（`.part` → `os.replace`）。
+
+`关键词：["缩略图模糊","图片太慢","本地只读图片服务","ThreadingHTTPServer","data URI 过桥慢","images.gamebanana.com 9KB/s","220 档 100 档两波","并发开了反而超时","懒加载 IntersectionObserver","索引缓存字段版本校验","Cache-Control"]`
+
+## 事实（细碎的原子信息）（94 条）
 
 ### modecontroller：游戏目录 loader_l…
 *2026-09-27 14:58*
@@ -5474,6 +5534,23 @@ DLSS5 feeder 路线 50 系可用：本机 5080/驱动 617.14 实测 renodx-dlss5
 本机终末地真实安装目录 = **`D:\Hypergryph Launcher\games\Endfield Game`**（2026-10-07 实测该目录下确有 `Endfield.exe`；XXMI2 的配置里 EFMI `game_folder` 写的也是它）。曾经的 `D:\TapTap\PC Games\232326\games\Enfield Game` 路径**已不存在**（旧视频/旧记录里的路径，别再据此找游戏）。
 
 `关键词：["游戏目录","Endfield.exe","Hypergryph Launcher","Endfield Game","本机安装路径","TapTap 路径已失效","game_folder","XXMI 配置"]`
+
+### 【GameBanana apiv11 硬约束速查（202…
+*2026-10-07 14:15*
+
+【GameBanana apiv11 硬约束速查（2026-10-07 逐条实测，写商城前必读）】
+* 基址 `https://gamebanana.com/apiv11/`，**匿名可用、无 API key/OAuth**；终末地 `game_id=21842`。
+* **浏览·翻大页** = `Mod/Index?_nPage=&_nPerpage=≤50&_aFilters[Generic_Game]=21842[&_aFilters[Generic_Category]=<根分类id>]`（707 条纯 Mod）。**它完全不支持排序**：`_sSort` 试 22 个值**一律 400**，`_sOrder` 被静默忽略；也不能搜索。`_nPerpage` **上限 50**（51/100/200 → 400，报错原文 `_nPerpage cannot exceed 50`）。
+* **浏览·排序** = `Game/21842/Subfeed?_nPage=&_csvModelInclusions=Mod&_sSort=new|updated|default` —— 唯一认 `_sSort` 的端点，但**每页固定 15**（官方 Admin 在 bug 4905 明说 intentional）；不加 `_csvModelInclusions=Mod` 会混进 Question/Tool（1165 → 707）。
+* **搜索** = `Util/Search/Results?_sSearchString=<必填>&_sModelName=Mod&_sOrder=best_match|popularity|date|udate&_idGameRow=21842`（限定游戏**只能用 `_idGameRow`**，`_aFilters[Generic_Game]` 在这儿无效）；每页固定 15；`_csvFields` 影响匹配范围（照抄 pybanana 默认值否则漏结果）。
+* **分类树** = `Mod/Categories?_idGameRow=21842` → `?_idCategoryRow=<id>&_bShowEmpty=true`；**必须带 `_sSort=a_to_z` 与 `_nPerpage`**，否则回 `INPUT_ERRORS`（踩过）；**返回裸数组**（不是 `{_aMetadata,_aRecords}` 壳）；根 = Skins(35464,654)/UI(42706,25)/Other-Misc(42780,28)，Skins→Operators(42770,620)→**32 个角色**。
+* **详情瘦查询** = `Mod/<id>?_csvProperties=_sName,...,_aFiles`（0.7~4.9 KB vs ProfilePage 14.5 KB）；⚠️ **字段名非法 → 整个请求 400**（必须本地白名单 + 回退 ProfilePage）。
+* **下载直链** = `https://gamebanana.com/dl/<fileId>` → 302 → `files.gamebanana.com`，无需 Referer/Cookie，**支持 Range(206)**。
+* **缩略图** = `{_sBaseUrl}/{_sFile530|_sFile220|_sFile100|_sFile}`（**尺寸要逐级降级**，不是每张都有）；可热链但**无 Cache-Control**（须自缓存）；请求不存在的尺寸会**长时间挂起**（须设超时）。
+* **列表一律没有下载量**（只有详情端点有 `_nDownloadCount`）；NSFW 判据 = `_sInitialVisibility=="hide"` 或 `_bHasContentRatings`；失败矩阵：**400 不重试**（参数非法）、403/429 读 `Retry-After` 退避、5xx/超时重试 3 次。
+* 合规：ToS 无禁止自动化、robots 无 Disallow，但保留"无理由限制访问"的权利 ⇒ **只存链接与元数据、不镜像不重分发**，卡片显著标注作者与来源。
+
+`关键词：["GameBanana","apiv11","Mod/Index","Subfeed","csvProperties","nPerpage 上限 50","分类端点 INPUT_ERRORS","dl 直链","缩略图降级链","NSFW 判据","下载量只在详情","400 不重试"]`
 
 ## 用户偏好与环境（**含个人信息，公开前请自行取舍**）（18 条）
 
