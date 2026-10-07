@@ -19,14 +19,15 @@
 //     为压体积还只能缩图 ⇒ 又慢又糊。现在改成 `mod_store_prepare_images` 一次性准备好，
 //     图片由 WebView2 **直接向本地只读服务取**（并发 / 磁盘缓存 / 解码都归浏览器），
 //     而且用的就是站点原图（530 档），不重编码。
-import { ref, computed, nextTick, onMounted, onUnmounted } from "vue";
-import { call } from "../lib/bridge.js";
+import { ref, computed, nextTick, watch, onMounted, onUnmounted } from "vue";import { call } from "../lib/bridge.js";
 import { store } from "../store.js";
 import { showAlert, showToast } from "../lib/dialog.js";
 import Card from "../components/ui/Card.vue";
 import Btn from "../components/ui/Btn.vue";
 import Badge from "../components/ui/Badge.vue";
 import TextField from "../components/ui/TextField.vue";
+// 统计行的图标（照 JASM 的卡片：底部一行"图标 + 数字"）
+import { Heart, Eye } from "lucide-vue-next";
 
 const PER_PAGE = 24;
 const IMG_LIST = 360;      // 仅降级（data URI）路径用
@@ -79,11 +80,38 @@ const thumbFiles = ref({});
 const fallback = ref({});        // 源 URL → data URI（仅在无本地服务时使用）
 let preparing = null;
 
-async function prepareImages(urls, tinyUrls = []) {
-  // **两波**：先小图（100 档 3.9 KB，约 1~2 秒到）把格子填上，再换 220 档。
-  // 在这台机器 9 KB/s 的网速下，"先出糊的、再变清晰"比"白等十几秒后一次出现"好得多。
-  if (tinyUrls && tinyUrls.length) await prepareBatch(tinyUrls);
+async function prepareImages(urls) {
+  // ⚠️ **一张图只请求一次**（2026-10-07 对照 JASM 后改）：原先做了"先 100 档秒出、再换 220 档"
+  // 两波，在慢网下等于**请求数翻倍**、总耗时也翻倍 —— 而 JASM 的列表缩略图同样用 220 档，
+  // 全程只请求一次，观感反而更快。慢网下"少请求"比"早出糊图"更值。
   await prepareBatch(urls);
+}
+
+// ── 后台下图的**轮询**：让图片"下好一张显一张" ─────────────────────────────────
+// 用户 2026-10-07：「拉到下面也慢」—— 根因是同步等**整批**下完才一起返回。现在后端只返回
+// 已经在本地的那几张、其余丢后台，这里就按 600ms 问一次"还没到位的那几张"。
+// 上限 60 轮（约 36 秒）—— 该域的图有时会彻底不通，不能让轮询一直转下去。
+const pendingImages2 = new Set();   // 注意：与上面的 pendingImages（攒批用）不是一回事
+let pendingTimer = null;
+
+function watchPending(urls) {
+  for (const url of urls) if (url) pendingImages2.add(url);
+  if (pendingTimer || !pendingImages2.size) return;
+  let rounds = 0;
+  pendingTimer = setInterval(async () => {
+    rounds += 1;
+    const still = [...pendingImages2].filter((url) => !thumbFiles.value[url]);
+    for (const url of [...pendingImages2]) {
+      if (thumbFiles.value[url]) pendingImages2.delete(url);   // 到位了就摘掉
+    }
+    if (!still.length || rounds > 60) {
+      clearInterval(pendingTimer);
+      pendingTimer = null;
+      pendingImages2.clear();
+      return;
+    }
+    await prepareBatch(still);
+  }, 600);
 }
 
 async function prepareBatch(urls) {
@@ -91,13 +119,12 @@ async function prepareBatch(urls) {
   for (const url of urls || []) {
     const value = String(url || "").trim();
     if (!value) continue;
-    if (thumbFiles.value[value] !== undefined) continue;
+    // 只有**真的拿到文件名**才算"有了"（后端走的是后台下载，没到位的要能重复来问）
+    if (thumbFiles.value[value]) continue;
     if (need.includes(value)) continue;
     need.push(value);
   }
   if (!need.length) return;
-  // 占位：标成"已排队"，避免同一批在两次渲染里被重复请求
-  for (const url of need) thumbFiles.value = { ...thumbFiles.value, [url]: "" };
   try {
     const result = await call("mod_store_prepare_images", need);
     if (result && result.ok && result.base) {
@@ -105,6 +132,9 @@ async function prepareBatch(urls) {
       const merged = { ...thumbFiles.value, ...(result.files || {}) };
       for (const url of result.failed || []) delete merged[url];   // 失败的允许之后再试
       thumbFiles.value = merged;
+      // 后端在**后台**下这批图（它只返回"已经在本地"的那些）⇒ 没到位的过一会儿再问一次，
+      // 于是图片是**下好一张显一张**，而不是等整批下完才一起出现。
+      watchPending(result.pending || []);
       return;
     }
   } catch (e) { /* 落到下面的降级路径 */ }
@@ -126,6 +156,27 @@ function imageSrc(url) {
   return fallback.value[url] || "";
 }
 
+// ── 让一屏图片**同时并发取**（用户 2026-10-07：「jasm 一下就全出」）──────────────
+// 懒加载是**一条一条**触发回调的。若每条都单独发一次请求，后端就只能一张一张排队下载 ——
+// 总耗时差不多，但观感是"一张一张往外蹦"，而 JASM 是全部一起请求、一起到。
+// 做法：把 **50ms 内**触发的请求攒成一批再发 ⇒ 一屏图片同时起飞。
+const pendingImages = new Set();
+let flushTimer = null;
+
+function queueImage(url) {
+  const key = String(url || "").trim();
+  if (!key) return;
+  if (thumbFiles.value[key] !== undefined || pendingImages.has(key)) return;
+  pendingImages.add(key);
+  if (flushTimer) return;
+  flushTimer = setTimeout(() => {
+    flushTimer = null;
+    const batch = Array.from(pendingImages);
+    pendingImages.clear();
+    prepareImages(batch);
+  }, 50);
+}
+
 function listSrc(item) {
   // 220 档到位就用它；没到就先用 100 档顶着（别让格子空着）
   return imageSrc(item.thumb) || imageSrc(item.thumb_tiny);
@@ -144,8 +195,7 @@ function ensureObserver() {
     for (const entry of entries) {
       if (!entry.isIntersecting) continue;
       const url = entry.target.getAttribute("data-thumb");
-      const tiny = entry.target.getAttribute("data-thumb-tiny");
-      prepareImages(url ? [url] : [], tiny ? [tiny] : []);
+      if (url) queueImage(url);      // 攒批后再发 ⇒ 一屏同时并发
       observer.unobserve(entry.target);       // 每张只触发一次
     }
   }, { rootMargin: "240px 0px" });            // 提前约一屏开始下，滚动时不至于一片空白
@@ -157,6 +207,39 @@ async function observeThumbs() {
   const watcher = ensureObserver();
   document.querySelectorAll("[data-thumb]").forEach((node) => watcher.observe(node));
 }
+
+// ── 无限滚动：滚到底部自动加载下一页 ─────────────────────────────────────────
+// 用户 2026-10-07：「在线商城应该划到最下面**自动往下加载**，而不是靠我手点」。
+// **两条腿走路**，缺一条都会卡住：
+//   ① `IntersectionObserver` 负责"用户滚到哨兵附近"；
+//   ② 每次列表变长后再**主动量一次**哨兵位置 —— 列表短或屏幕大时，哨兵会一直待在视口里，
+//      而 observer 只在"进出视口"时回调 ⇒ 只看它会停在第二页不动（纯 observer 写法的经典坑）。
+const sentinel = ref(null);
+let sentinelObserver = null;
+
+async function fillIfNeeded() {
+  if (detail.value || !hasMore.value || loading.value || loadingMore.value) return;
+  await nextTick();
+  const node = sentinel.value;
+  if (!node) return;
+  if (node.getBoundingClientRect().top <= window.innerHeight + 400) {
+    await loadMore();
+    await fillIfNeeded();     // 一页填不满屏幕就继续填（items 变多后自然停下）
+  }
+}
+
+function watchSentinel() {
+  if (!sentinelObserver) {
+    sentinelObserver = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) fillIfNeeded();
+    }, { rootMargin: "400px 0px" });
+  }
+  sentinelObserver.disconnect();
+  if (sentinel.value) sentinelObserver.observe(sentinel.value);
+}
+
+// 列表一变长就重新盯住哨兵（详情页切回来时哨兵是新渲染出来的，也得重新盯）+ 主动补填
+watch(() => items.value.length, () => { watchSentinel(); fillIfNeeded(); });
 
 // ── 列表 ─────────────────────────────────────────────────────────────────────
 function options(nextPage) {
@@ -249,7 +332,7 @@ async function openDetail(item) {
   detail.value = { ...item, loading: true };
   detailLoading.value = true;
   // 先用列表已有的小图顶着，大图另外拉（详情要清晰，值得多等）
-  prepareImages([item.thumb_big || item.thumb].filter(Boolean), [item.thumb_tiny].filter(Boolean));
+  prepareImages([item.thumb_big || item.thumb].filter(Boolean));
   try {
     const result = await call("mod_store_detail", item.id);
     if (result && result.ok) {
@@ -269,6 +352,8 @@ async function openDetail(item) {
 function closeDetail() {
   detail.value = null;
   lightbox.value = "";
+  // 列表重新渲染出来 ⇒ 哨兵是新的 DOM，得重新盯上（否则从详情返回后就不再自动加载）
+  nextTick(() => { watchSentinel(); fillIfNeeded(); });
 }
 
 function openLightbox(url) {
@@ -367,6 +452,7 @@ onMounted(() => {
 onUnmounted(() => {
   if (timer) clearInterval(timer);
   if (observer) { observer.disconnect(); observer = null; }
+  if (sentinelObserver) { sentinelObserver.disconnect(); sentinelObserver = null; }
 });
 </script>
 
@@ -561,8 +647,11 @@ onUnmounted(() => {
                       style="background: var(--danger); color: #fff; font-weight: 600; line-height: 18px">R18</span>
               </div>
               <div class="p-3 flex-1 flex flex-col gap-2">
-                <div class="text-sm font-medium cursor-pointer" style="line-height: 1.35; min-height: 2.7em"
-                     :title="item.name" @click="openDetail(item)">
+                <!-- 标题限 **2 行**（照 JASM 的 "Title max 2 lines"）：用 -webkit-line-clamp 真截断，
+                     而不是只留出两行的高度（那样长标题会溢出到下面的行上） -->
+                <div class="text-sm font-medium cursor-pointer" :title="item.name"
+                     style="line-height: 1.35; height: 2.7em; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden"
+                     @click="openDetail(item)">
                   {{ item.name || `#${item.id}` }}
                 </div>
                 <div class="flex flex-wrap items-center gap-1.5 text-xs" style="color: var(--text-muted)">
@@ -574,15 +663,20 @@ onUnmounted(() => {
                   <Badge v-if="item.installed && item.update_available" tone="warn">有更新</Badge>
                   <Badge v-else-if="item.installed" tone="success">已安装</Badge>
                   <Badge v-if="item.version" tone="muted">v{{ item.version }}</Badge>
-                  <span class="text-xs" style="color: var(--text-muted)">♥ {{ item.likes }} · 浏览 {{ item.views }}</span>
                 </div>
+                <!-- 统计行：图标 + 数字（列表接口里没有下载量，只有点赞与浏览，所以不编一个出来） -->
+                <div class="flex items-center gap-3 text-xs" style="color: var(--text-muted)">
+                  <span class="flex items-center gap-1" :title="`点赞 ${item.likes}`"><Heart :size="12" />{{ item.likes }}</span>
+                  <span class="flex items-center gap-1" :title="`浏览 ${item.views}`"><Eye :size="12" />{{ item.views }}</span>
+                </div>
+                <!-- 卡片上只留「下载」+「详情」（照 JASM：点卡片就是进详情）；
+                     **网页链接挪到详情页** —— 那才是决定"要不要去站点看看"的地方，卡片上摆着只会挤 -->
                 <div class="flex items-center gap-2 mt-auto">
                   <Btn size="sm" :variant="queued[item.id] ? 'secondary' : 'primary'"
                        :disabled="!!queued[item.id] || !item.has_files" @click="download(item)">
                     {{ queued[item.id] ? "已加入下载" : "下载" }}
                   </Btn>
                   <a class="text-xs cursor-pointer" style="color: var(--accent)" @click="openDetail(item)">详情</a>
-                  <a class="text-xs cursor-pointer" style="color: var(--accent)" @click="openPage(item.url)">网页</a>
                 </div>
               </div>
             </div>
@@ -594,11 +688,12 @@ onUnmounted(() => {
             </p>
           </Card>
 
-          <div v-if="items.length" class="flex items-center justify-center gap-3">
-            <Btn v-if="hasMore" size="sm" :disabled="loadingMore" @click="loadMore">
-              {{ loadingMore ? "加载中…" : "加载更多" }}
-            </Btn>
-            <span v-else class="text-xs" style="color: var(--text-muted)">已经到底了（共 {{ items.length }} 个）</span>
+          <!-- 哨兵：滚到这儿自动加载下一页（用户 2026-10-07：「划到最下面自动往下加载，而不是靠我手点」） -->
+          <div v-if="items.length" ref="sentinel"
+               class="flex items-center justify-center gap-3" style="min-height: 44px">
+            <span v-if="loadingMore" class="text-xs" style="color: var(--text-muted)">正在加载更多…</span>
+            <span v-else-if="!hasMore" class="text-xs" style="color: var(--text-muted)">已经到底了（共 {{ items.length }} 个）</span>
+            <span v-else class="text-xs" style="color: var(--text-muted)">往下滑自动加载</span>
           </div>
         </div>
       </div>

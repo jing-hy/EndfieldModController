@@ -571,10 +571,25 @@ def _merge_preset_line(body: str, key: str, required: list[str], *, front: bool 
         if line.split("=", 1)[0].strip() != key:
             continue
         items = [item.strip() for item in line.split("=", 1)[1].split(",") if item.strip()]
-        have = {item.split("@", 1)[0] if "@" in item else item for item in items}
 
         def _bare(name: str) -> str:
             return name.split("@", 1)[0] if "@" in name else name
+
+        # ⚠️⚠️ **同名 technique 但 effect 路径不同 ⇒ 换成调用方给的那个**（2026-10-07 修）。
+        #    根因：下面按 `_bare()`（`@` 前面那段）去重，而
+        #      `MartysMods_Launchpad@MartysMods_LAUNCHPAD.fx`        ← 旧写法，少了目录
+        #      `MartysMods_Launchpad@iMMERSE\MartysMods_LAUNCHPAD.fx` ← ReShade 真正认的全名
+        #    两者的 `_bare` 相同 ⇒ 旧的短名字永远被当作"已经存在"⇒ **修了等于没修**。
+        #    这就是"自检报 fixed=True、文件却纹丝不动"的原因；而 ReShade 认不出短名字，
+        #    插件日志里就是 `provider MartysMods_Launchpad is installed but DISABLED`。
+        for wanted in required:
+            wanted_bare = _bare(wanted)
+            for position, item in enumerate(items):
+                if _bare(item) == wanted_bare and item != wanted:
+                    items[position] = wanted
+                    break
+
+        have = {_bare(item) for item in items}
 
         if front:
             # ⚠️⚠️ **`front` 必须一次性插到最前面**（2026-10-04 修）。
@@ -602,6 +617,32 @@ def _merge_preset_line(body: str, key: str, required: list[str], *, front: bool 
         lines.pop()
     lines.append(f"{key}=" + ",".join(required))
     return "\n".join(lines)
+
+
+def _effect_relative_path(shaders_root: Path, file_name: str) -> str:
+    """在 shaders 目录里找到这个 effect，返回**相对路径**（如 `iMMERSE\\MartysMods_LAUNCHPAD.fx`）。
+
+    为什么必须带路径（2026-10-07 用户实测「注入进去了，但是 reshade 还是报错 / DLSS5 和
+    第一人称没加载」）：ReShade 的 technique 全名就是 `<Technique>@<effect 相对路径>`。
+    `DLSS5_Feed.fx` 落在 shaders **根目录**，写文件名就对；而
+    `MartysMods_LAUNCHPAD.fx` 在 **`iMMERSE\\` 子目录**里 —— 只写文件名时 ReShade
+    **认不出这个 technique**，于是插件日志里出现
+
+        [feed] motion-vector provider MartysMods_Launchpad is installed but DISABLED:
+               enable it above DLSS 5 Feed.
+        NR-VERDICT v3 state=UNAVAILABLE
+
+    （没有运动矢量 ⇒ 神经渲染建不起来 ⇒ 面板上"成功NR帧 0"）。
+    ⚠️ 而我们的自检**一直报 OK**：它只查 preset 文本里那两行在不在，而两份都写着 `=1` ——
+    从不检查 ReShade 认不认这个名字。所以这里**按磁盘实际位置算路径**，不写死目录名
+    （shader 包升级换了子目录时也能自己跟对）。
+    """
+    if not shaders_root.is_dir():
+        return file_name
+    for candidate in sorted(shaders_root.rglob(file_name)):
+        if candidate.is_file():
+            return candidate.relative_to(shaders_root).as_posix().replace("/", "\\")
+    return file_name
 
 
 def _check_dlss5_preset(config: AppConfig, report: Report, log: Callable[[str], None] | None) -> None:
@@ -657,7 +698,14 @@ def _check_dlss5_preset(config: AppConfig, report: Report, log: Callable[[str], 
     # `LaunchPad technique found (DISABLED)`；而旧判据只看"有没有 DLSS5_Feed@DLSS5_Feed.fx"
     # 就直接放行（第 281 行），所以这种"写了但没启用 / 顺序不对"的状态**永远不会被修**，
     # 用户只能看到面板 NGX Hook 创建0 / 成功NR帧 0。
-    launchpad_name, feed_name = DLSS5_PRESET_TECHNIQUES
+    # ⚠️ **technique 全名要按 effect 的**实际相对路径**算**（2026-10-07 修，见
+    #    `_effect_relative_path` 的说明）：`MartysMods_LAUNCHPAD.fx` 在 `iMMERSE\` 子目录里，
+    #    写 `MartysMods_Launchpad@MartysMods_LAUNCHPAD.fx` 时 ReShade 认不出 ⇒ 视为禁用 ⇒
+    #    `provider MartysMods_Launchpad is installed but DISABLED` ⇒ 神经渲染 UNAVAILABLE。
+    #    而旧判据只看"文本里有没有这两行"（两份都写着 `=1`）⇒ 永远报 OK、永不修复。
+    shaders_root = dlss5 / "reshade-shaders" / "Shaders"
+    launchpad_name = f"MartysMods_Launchpad@{_effect_relative_path(shaders_root, DLSS5_PROVIDER_EFFECT)}"
+    feed_name = f"DLSS5_Feed@{_effect_relative_path(shaders_root, DLSS5_FEED_EFFECT)}"
     # ReShade 的 preset 里 technique 有两种写法：`Name@Effect.fx`（**列出即启用**，ReShade
     # 自己写出来的就是这种）与 `Name@Effect.fx=1`/`=0`（显式启用/禁用）。两种都要认 ——
     # 只认 `=1` 会把 ReShade 写的合法格式误判成"没启用"，于是每次启动都去"修"一遍
@@ -676,8 +724,12 @@ def _check_dlss5_preset(config: AppConfig, report: Report, log: Callable[[str], 
             techniques_line = line.split("=", 1)[1]
             break
     scan_text = techniques_line if techniques_line else body   # 老格式/空 preset 退回旧行为
-    for name, value in re.findall(r"([\w.\-]+@[\w.\-]+\.fx)\s*(?:=\s*([01]))?", scan_text):
-        enabled_map[name] = value or "1"
+    # ⚠️ 正则要让**路径里的分隔符**通过（2026-10-07 修）：`MartysMods_Launchpad@iMMERSE\
+    # MartysMods_LAUNCHPAD.fx` 这种带子目录的全名，原字符类 `[\w.\-]` **匹配不到** ⇒
+    # 带路径的（= ReShade 真正认的）写法会被当成"没启用"，于是自检误报"需要修复"、
+    # 每轮一键启动都去改一遍。反斜杠在字符类里要转义。
+    for name, value in re.findall(r"([\w.\-\\/]+@[\w.\-\\/]+\.fx)\s*(?:=\s*([01]))?", scan_text):
+        enabled_map[name.replace("/", "\\")] = value or "1"
     sorting_line = ""
     for line in body.splitlines():
         if line.strip().startswith("TechniqueSorting="):

@@ -41,7 +41,7 @@ USER_AGENT = "EndfieldModController/0.1 (+https://github.com/jing-hy/EndfieldMod
 _NAME_RE = re.compile(r'OperatorItem_nameText[^"]*"[^>]*>([^<]+)<')
 _CODE_RE = re.compile(r'OperatorItem_codename[^"]*">\s*//\s*([^<]+)<')
 _INDEX_RE = re.compile(r'OperatorItem_index[^"]*">\s*(\d+)[^0-9]{0,24}?(\d+)')
-_IMG_RE = re.compile(r"https://[^\"'\s]*/([a-z0-9_]+)\.[0-9a-f]{6,}\.png", re.I)
+_IMG_RE = re.compile(r"(https://[^\"'\s]*/([a-z0-9_]+)\.[0-9a-f]{6,}\.(?:png|jpg|jpeg|webp))", re.I)
 # 一个角色块内部 name → codename 的距离上限（防止"某个角色缺代号"时错配到下一个）
 _MAX_GAP = 2000
 
@@ -70,11 +70,17 @@ def parse_official(html: str) -> dict[str, Any]:
 
     做法：先收集四类锚点（名字 / 代号 / index / 图标 URL）**带位置**，再以每个名字为
     锚点，取它后面最近的代号与 index、前面最近的图标（页面里就是这个顺序）。
+
+    **图标这一项同时留两样**（2026-10-07 为"角色墙"布局加的）：
+      * `key` = 文件名主体（如 `chen`）—— 一直以来的用法，不动它；
+      * `avatar` = **完整直链**（如 `https://web.hycdn.cn/endfield/official-v4/.../chen.b0afd1ba.png`）
+        —— 下载头像要用它。⚠️ 直链里带构建 hash、**会随官网改版变**，所以只能现抓、不能写死。
+      头像**不随包分发**（官方美术），下载后只放本机 `runtime\\cache\\characters\\` 供界面显示。
     """
     names = [(m.start(), m.group(1).strip()) for m in _NAME_RE.finditer(html)]
     codes = [(m.start(), m.group(1).strip()) for m in _CODE_RE.finditer(html)]
     indexes = [(m.start(), int(m.group(1)), int(m.group(2))) for m in _INDEX_RE.finditer(html)]
-    images = [(m.start(), m.group(1).lower()) for m in _IMG_RE.finditer(html)]
+    images = [(m.start(), m.group(2).lower(), m.group(1)) for m in _IMG_RE.finditer(html)]
 
     characters: list[dict[str, Any]] = []
     total = 0
@@ -90,14 +96,17 @@ def parse_official(html: str) -> dict[str, Any]:
                 index, page_total = idx_value, idx_total
                 break
         key = ""
-        for img_pos, img_value in reversed(images):
+        avatar = ""
+        for img_pos, img_name, img_url in reversed(images):
             if img_pos < pos:
-                key = img_value
+                key, avatar = img_name, img_url
                 break
         total = max(total, page_total)
         aliases = [alias for alias in (name, codename, key) if alias]
         characters.append({
-            "index": index, "name": name, "codename": codename, "key": key, "aliases": aliases,
+            "index": index, "name": name, "codename": codename, "key": key,
+            "avatar": avatar,
+            "aliases": aliases,
         })
     return {"total": total or len(characters), "characters": characters,
             "source": SOURCE_URL, "fetched_at": time.strftime("%Y-%m-%d")}
@@ -154,6 +163,11 @@ def merge_payload(local: dict[str, Any], official: dict[str, Any]) -> dict[str, 
                          if str(i.get("codename") or "").strip()), "")
         key = next((str(i.get("key") or "").strip() for i in items
                     if str(i.get("key") or "").strip()), "")
+        # ⚠️ **头像直链要一起带下来**（2026-10-07 加"角色墙"时踩到）：这个函数是**重建**条目、
+        #    只列它认识的字段 ⇒ 新加的字段不在这里露面就会被**静默丢掉**，
+        #    表现为"解析明明拿到了直链、写进表里却是空的"。加字段时必须同时改这里。
+        avatar = next((str(i.get("avatar") or "").strip() for i in items
+                       if str(i.get("avatar") or "").strip()), "")
         official_aliases = [str(a).strip() for i in items
                             for a in (i.get("aliases") or []) if str(a).strip()]
         prior = local_items.get(name)
@@ -163,6 +177,7 @@ def merge_payload(local: dict[str, Any], official: dict[str, Any]) -> dict[str, 
             added.append(name)
             merged.append({
                 "name": name, "codename": codename, "key": key,
+                "avatar": avatar,
                 "aliases": list(dict.fromkeys([name] + official_aliases)),
             })
             continue
@@ -175,7 +190,10 @@ def merge_payload(local: dict[str, Any], official: dict[str, Any]) -> dict[str, 
         if new_code != str(prior.get("codename") or "") or new_key != str(prior.get("key") or ""):
             updated += 1
         merged.append({"name": prior.get("name") or name, "codename": new_code,
-                       "key": new_key, "aliases": aliases})
+                       "key": new_key,
+                       # 官网这次没给就用上次那份（别把已有的直链擦掉）
+                       "avatar": avatar or str(prior.get("avatar") or ""),
+                       "aliases": aliases})
 
     # 官网没列、但本地有的（下架 / 改名）→ **保留**，别让用户已有的 Mod 突然识别不出来
     seen = {item["name"] for item in merged}
@@ -246,6 +264,11 @@ def combine_tables(primary: dict[str, Any], secondary: dict[str, Any]) -> dict[s
             other = by_code.get(code) if code else None
         if other is not None:
             entry["aliases"] = list(dict.fromkeys(_aliases_of(entry) + _aliases_of(other)))
+            # ⚠️ **头像只在官网那份里**（随包表根本没这个字段）⇒ 必须从 secondary 带过来。
+            #    2026-10-07 实测踩到：漏了这一步，"角色墙"里 34 个角色**全是无直链**，
+            #    而表本身看着完全正常 —— 属于"字段只在一侧存在、合并时静默丢掉"那一类坑。
+            if not entry.get("avatar") and other.get("avatar"):
+                entry["avatar"] = other["avatar"]
         merged.append(entry)
 
     for item in secondary["characters"]:
@@ -281,6 +304,24 @@ def _load_local(config: Any) -> dict[str, Any]:
 def load_local(config: Any) -> dict[str, Any]:
     """读当前生效的本地表（公开包装，供 `scripts\\fetch_characters.py` 用）。"""
     return _load_local(config)
+
+
+def avatar_map(config: Any) -> dict[str, str]:
+    """`{中文名: 官网头像直链}`。
+
+    从**合并后**的表里取（不是只读运行时那份）：`combine_tables` 会把官网侧的 `avatar`
+    并进以随包表为准的那一份，两条来源任何一条缺失都不影响这里。
+    没有同步过就是空表 —— 界面据此退化成占位块，不是错误。
+    """
+    out: dict[str, str] = {}
+    for item in (_load_local(config).get("characters") or []):
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        url = str(item.get("avatar") or "").strip()
+        if name and url:
+            out[name] = url
+    return out
 
 
 def write_latest(config: Any, payload: dict[str, Any]) -> Path:

@@ -2190,6 +2190,55 @@ def collect_diagnosis_files(config: AppConfig, dest: Path, *,
     take(dlss5 / ".dlssnr_variant.json", "dlss5-variant.json")
     take(dlss5 / "panel_info.txt", "dlss5-panel_info.txt")
 
+    # ★★★ 2026-10-07 补采（用户定的规矩：「**你查过啥，啥就要加进诊断包，没加的你不允许看**」）：
+    #     排查「DLSS5 不出帧」时我实际看的就是下面这三样，而它们**当时都不在包里** ——
+    #     我只能去读本机文件，那等于绕开诊断包、对反馈者的机器完全无效。
+    # ① preset 本体：technique 的**全名与启用状态**都写在它里面。
+    #    `dlss5-ReShade.ini` 只给 `PresetPath`（一个路径），`dlss5-ReShade.log` 只给
+    #    "认没认出来"的后果 —— **判据本身在这份文件里**，缺了它就没法定案。
+    take(dlss5 / "ReShadePreset.ini", "dlss5-ReShadePreset.ini")
+    # ② addon 的**位置**（根目录 vs `_disabled\`）：上面 `dlss5-addons.txt` 只列根目录，
+    #    于是"那个插件是被停用了、还是根本没铺进来"分不清 —— 两边各有一份时结论正好相反。
+    try:
+        rows = ["dlss5 里的 addon 位置（根目录 = 启用中；_disabled = 已停用）"]
+        for item in sorted(dlss5.glob("*.addon64")):
+            try:
+                rows.append(f"根目录\t{item.name}\t{item.stat().st_size} B")
+            except OSError:
+                rows.append(f"根目录\t{item.name}\t(读不到)")
+        disabled_dir = dlss5 / "_disabled"     # 与 `launcher.ADDON_DISABLED_DIR` 同一个名字
+        if disabled_dir.is_dir():
+            for item in sorted(disabled_dir.glob("*")):
+                try:
+                    rows.append(f"_disabled\t{item.name}\t{item.stat().st_size} B")
+                except OSError:
+                    rows.append(f"_disabled\t{item.name}\t(读不到)")
+        else:
+            rows.append("_disabled\t（目录不存在）")
+        (dest / "dlss5-addon-placement.txt").write_text("\n".join(rows) + "\n", encoding="utf-8")
+        taken.append("dlss5-addon-placement.txt")
+    except Exception as exc:  # noqa: BLE001 —— 采集失败绝不影响诊断包生成
+        emit(f"排查素材: addon 位置清单失败（忽略）: {exc}")
+    # ③ shader 的**相对路径清单**：ReShade 的 technique 全名是
+    #    `<Technique>@<effect 相对路径>` ⇒ "`MartysMods_LAUNCHPAD.fx` 在根目录还是 `iMMERSE\` 下"
+    #    直接决定全名对不对。这正是 2026-10-07 那台 `provider is installed but DISABLED`
+    #    的根因，而它**推不出来** —— 已收的任何一份文件里都没有这个信息。
+    try:
+        shaders_root = dlss5 / "reshade-shaders" / "Shaders"
+        rows = [f"shaders 根目录: {shaders_root}"]
+        if shaders_root.is_dir():
+            for item in sorted(shaders_root.rglob("*.fx")):
+                try:
+                    rows.append(item.relative_to(shaders_root).as_posix())
+                except ValueError:
+                    rows.append(item.name)
+        else:
+            rows.append("（目录不存在）")
+        (dest / "dlss5-shaders-tree.txt").write_text("\n".join(rows) + "\n", encoding="utf-8")
+        taken.append("dlss5-shaders-tree.txt")
+    except Exception as exc:  # noqa: BLE001
+        emit(f"排查素材: shader 清单失败（忽略）: {exc}")
+
     # ③ 各 addon 的**身份**（只收清单：名 + 字节 + sha256 前 16 —— 判"对方用的是不是我们随包那份"
     #    靠它；4 MB 的本体不收，包会太大）
     try:

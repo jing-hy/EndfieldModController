@@ -697,7 +697,13 @@ class ThumbServer:
         return self._port
 
     def ensure(self, root: Path) -> int:
-        """起服务（幂等）；返回端口；失败返回 0。"""
+        """起服务（幂等）；返回端口；失败返回 0。
+
+        ⚠️ **同一个服务也负责角色头像**（2026-10-07 加"角色墙"布局时）：头像在
+        `<root 的兄弟目录>/characters/` 下。因为 `_SERVER` 是**进程内单例、只起一次**，
+        不能靠"调用方各传各的目录"—— 那样先调用的那个会把目录固化下来，后调用的就 404。
+        所以这里**从 root 自己推算**出头像目录，签名保持不变。
+        """
         with self._lock:
             if self._httpd is not None:
                 return self._port
@@ -705,6 +711,16 @@ class ThumbServer:
                 import http.server
 
                 root.mkdir(parents=True, exist_ok=True)
+                # 头像目录 = `<cache>/characters`，**必须与 `character_avatars.avatar_dir()` 完全一致**。
+                # ⚠️ 这两处曾经一个在 `cache/characters`、一个在 `cache/modstore/characters`
+                #    （2026-10-07 实测踩到）：文件明明下好了、服务却一律 404，
+                #    排查时最费时间的就是这种"两边都对、就是不在同一个地方"。
+                avatars = root.parent.parent / "characters"
+                avatars.mkdir(parents=True, exist_ok=True)
+                # **随包**头像（与 `characters.json` 同级、一起打进 exe）：用户 2026-10-07
+                # 「角色表和图直接随包」「是随 exe」⇒ 这里两个目录都查，随包的优先、
+                # 运行时缓存（官网新角色）兜底。
+                packed_avatars = Path(__file__).with_name("characters")
 
                 class _Handler(http.server.SimpleHTTPRequestHandler):
                     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -720,11 +736,19 @@ class ThumbServer:
                         super().end_headers()
 
                     def translate_path(self, path: str) -> str:
-                        # 只认 `<16 位 hex>.jpg` —— `../` 之类一律落到一个不存在的名字上。
                         name = posixpath.basename(urllib.parse.urlsplit(path).path)
-                        if not re.fullmatch(r"[0-9a-f]{16}\.jpg", name):
-                            return str(root / "__forbidden__")
-                        return str(root / name)
+                        # ① 商城缩略图：`<16 位 hex>.jpg`
+                        if re.fullmatch(r"[0-9a-f]{16}\.jpg", name):
+                            return str(root / name)
+                        # ② 角色头像：`<名字>[.<构建 hash>].png|jpg`（白名单与
+                        #    `character_avatars._NAME_RE` 保持一致，两边都挡 `../`）
+                        if re.fullmatch(r"[a-z0-9_]+(?:\.[0-9a-f]{6,})?\.(?:png|jpg|jpeg|webp)",
+                                        name, re.I):
+                            for folder in (packed_avatars, avatars):
+                                if (folder / name).is_file():
+                                    return str(folder / name)
+                            return str(avatars / name)      # 真没有 ⇒ 404，符合预期
+                        return str(root / "__forbidden__")
 
                 self._httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
                 self._port = int(self._httpd.server_address[1])
@@ -792,28 +816,86 @@ def _image_get(url: str, *, timeout: int = 20, attempts: int = 2) -> bytes:
     raise OSError(f"取图失败：{last}")
 
 
+#: 后台正在下载的图片（同一个 URL 不重复起任务）。
+_INFLIGHT: set[str] = set()
+_INFLIGHT_LOCK = threading.Lock()
+
+
+def _fetch_image(config: Any, url: str, timeout: int,
+                 log: Callable[[str], None] | None) -> bool:
+    """取一张图并落到本地缓存；返回是否成功。
+
+    ⚠️ 两点都是实测定下来的：
+    ① **不要走 `fastnet`**（`dependencies._http_get`）—— 那是给几十 MB 安装包准备的
+       线路预检/分块决策，套在小图上代价极高；
+    ② **必须复用连接** —— 新建连接光 TLS 握手就要 1.4 秒，而同一条连接上的后续图
+       只要 0.3~0.5 秒（见 `_image_get`）。
+
+    失败**不留半张图**（`.part` 与目标一起清掉），也不重试 —— 一张失败不该拖住整页。
+    """
+    path = thumb_path(config, url)
+    tmp = path.with_name(path.name + ".part")
+    try:
+        blob = _image_get(url, timeout=timeout)
+        tmp.write_bytes(blob)
+        os.replace(tmp, path)          # 原子落位
+        return True
+    except Exception as exc:  # noqa: BLE001 —— 一张图失败不影响整页
+        for leftover in (tmp, path):
+            try:
+                leftover.unlink(missing_ok=True)
+            except OSError:
+                pass
+        _log(log, f"商城：图片下载失败（{exc}）")
+        return False
+
+
+def _drain_images(config: Any, urls: list[str], timeout: int, workers: int,
+                  log: Callable[[str], None] | None) -> None:
+    """后台把一批图下完（**不阻塞调用方**），跑完把自己从在飞集合里摘掉。"""
+    from concurrent.futures import ThreadPoolExecutor
+
+    try:
+        with ThreadPoolExecutor(max_workers=max(1, min(workers, len(urls)))) as pool:
+            list(pool.map(lambda item: _fetch_image(config, item, timeout, log), urls))
+    finally:
+        with _INFLIGHT_LOCK:
+            _INFLIGHT.difference_update(urls)
+
+
 def prepare_images(config: Any, urls: Iterable[str], *, timeout: int = 20,
-                   workers: int = 3, log: Callable[[str], None] | None = None) -> dict:
+                   workers: int = 6, background: bool = False,
+                   log: Callable[[str], None] | None = None) -> dict:
     """确保这批图都在本地，并返回**可以直接交给 `<img src>` 的本地 URL**。
 
     * 已缓存的图不再下载（缓存按 URL 哈希，命中就是本地读）；
-    * 缺的图**并发下载**，但并发数**刻意开小**（3 路）。
+    * 缺的图**并发下载**，默认 **6 路**。
 
-    ⚠️ 并发为什么是 3 而不是 8（2026-10-07 实测踩到）：这台机器到图片 CDN 的**总吞吐**
-    只有约 **9 KB/s**。开 8 路时带宽被切成 8 份 ⇒ 每张 13.5 KB 的小图都要 12 秒以上，
-    直接撞上超时 ⇒ **整页图片全部失败**（实测 15 张全灭）。改成 3 路后每张约 4~5 秒能收完；
-    超时也从 10 秒放宽到 20 秒 —— 在小带宽下"多开几路"只会让每路一起饿死。
+    ⚠️ **`background=True` 是给界面用的那条路**（2026-10-07 用户：「拉到下面也慢」）：
+    同步模式要等**这一批全部下完**才返回 ⇒ 一页 24 张的话，最后一张到位前**一张都不显示**，
+    等待全落在观感上。而 JASM 是"**下好一张显一张**"。所以界面走这条路：
+    **只返回已经在本地的那些**，缺的丢给后台线程，调用方过一会儿再问一次
+    （返回里的 `pending` 就是"还在下"的清单），于是图片会**逐张出现**。
+
+    ⚠️ 并发数的三次实测（**别再用猜的**）：
+      * 3 路 10 张 = 8.3s；**6 路 10~12 张 = 5.5~5.7s**（全成功）⇒ 6 路更快；
+      * **12 路 12 张 = 5.4s 但 12 张全部失败** —— 而**同一分钟**的 6 路是全成功的
+        ⇒ 这是**服务端对同 IP 并发连接数的限制**，不是网络抽风（两次测到同样结果）；
+      * 早期还测到过"6 路全失败"，那一次才是**该域自身在抽风**（同一 URL 前一刻通、
+        后一刻不通是常态）—— 把这两类混为一谈就会得出"并发有害"的错结论（我当天错过一次）。
+      ⇒ 定在 **6 路**、超时 20 秒；失败的只影响那一张，不重试、不留半张。
     * 单张失败**不中断其它**（项目既定规则：批量不 fail-fast），失败项如实回报。
 
-    返回 `{"base": "http://127.0.0.1:<port>", "files": {源URL: 文件名}, "failed": [源URL]}`；
-    本地服务起不来时 `base` 为空字符串，调用方据此回退到 data URI。
+    返回 `{"base": "http://127.0.0.1:<port>", "files": {源URL: 文件名},
+    "failed": [源URL], "pending": [源URL]}`；本地服务起不来时 `base` 为空字符串，
+    调用方据此回退到 data URI。
     """
     from concurrent.futures import ThreadPoolExecutor
 
     wanted = [str(url).strip() for url in urls if str(url or "").strip()]
     port = _SERVER.ensure(thumb_root(config))
     if not port:
-        return {"base": "", "files": {}, "failed": wanted}
+        return {"base": "", "files": {}, "failed": wanted, "pending": []}
 
     files: dict[str, str] = {}
     pending: list[str] = []
@@ -824,38 +906,32 @@ def prepare_images(config: Any, urls: Iterable[str], *, timeout: int = 20,
         else:
             pending.append(url)
 
+    if not pending:
+        return {"base": f"http://127.0.0.1:{port}", "files": files, "failed": [],
+                "pending": []}
+
+    if background:
+        with _INFLIGHT_LOCK:
+            fresh = [item for item in pending if item not in _INFLIGHT]
+            _INFLIGHT.update(fresh)
+        if fresh:
+            threading.Thread(target=_drain_images,
+                             args=(config, fresh, timeout, workers, log),
+                             daemon=True, name="mc-store-images").start()
+        return {"base": f"http://127.0.0.1:{port}", "files": files, "failed": [],
+                "pending": pending}
+
     failed: list[str] = []
-
-    def _fetch(url: str) -> None:
-        """取一张图（走 `_image_get`：**同一条线程复用一条连接**）。
-
-        ⚠️ 两点都是实测定下来的：
-        ① **不要走 `fastnet`**（`dependencies._http_get`）—— 那是给几十 MB 安装包准备的
-           线路预检/分块决策，套在小图上代价极高；
-        ② **必须复用连接** —— 新建连接的 TLS 握手就要 1.4 秒，而同一连接上的后续图
-           只要 0.3~0.5 秒（见 `_image_get`）。
-        """
-        path = thumb_path(config, url)
-        tmp = path.with_name(path.name + ".part")
-        try:
-            blob = _image_get(url, timeout=timeout)
-            tmp.write_bytes(blob)
-            os.replace(tmp, path)          # 原子落位：不留半张图当缓存
-            files[url] = path.name
-        except Exception as exc:  # noqa: BLE001 —— 一张图失败不影响整页
-            for leftover in (tmp, path):
-                try:
-                    leftover.unlink(missing_ok=True)
-                except OSError:
-                    pass
+    with ThreadPoolExecutor(max_workers=max(1, min(workers, len(pending)))) as pool:
+        results = list(pool.map(lambda item: _fetch_image(config, item, timeout, log), pending))
+    for url, ok in zip(pending, results):
+        if ok:
+            files[url] = thumb_path(config, url).name
+        else:
             failed.append(url)
-            _log(log, f"商城：图片下载失败（{exc}）")
 
-    if pending:
-        with ThreadPoolExecutor(max_workers=max(1, min(workers, len(pending)))) as pool:
-            list(pool.map(_fetch, pending))
-
-    return {"base": f"http://127.0.0.1:{port}", "files": files, "failed": failed}
+    return {"base": f"http://127.0.0.1:{port}", "files": files, "failed": failed,
+            "pending": []}
 
 
 def scan_path(config: Any) -> Path:

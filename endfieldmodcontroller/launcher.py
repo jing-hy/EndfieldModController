@@ -2211,8 +2211,15 @@ def ensure_injections(config: AppConfig) -> dict[str, Any]:
     #    而终末地自带的是 310.5.2 / 2.10.3 ⇒ 面板只会显示「Dynamic MFG requires …」。
     #    ⚠️ **写游戏目录前先备份原版**，且备份走管理器统一的备份区（`game_backup\<时间戳>\`）
     #       ⇒ 依赖页/还原入口能列出它、**一键还原能直接还原**（用户明确要求）。
-    #    幂等：内容一致就不动；没下载 / 没开多帧生成时整段跳过。
-    if bool(getattr(config, "mfg_unlock_enabled", False)):
+    #    幂等：内容一致就不动；没下载时整段跳过。
+    #    ⚠️⚠️ **2026-10-07 修：部署不能再挂在"开了多帧生成"这一个条件上** ——
+    #       MFG 已被定案禁用（`deviceinfo.MFG_UNLOCK_DISABLED_FOR_THIS_GAME`），
+    #       于是这段**永远不会执行**；而"游戏自带的 Streamline 太旧 ⇒ 启动几十秒就退
+    #       （`0xC0000135`）"恰恰要靠它来修。实测后果（两位反馈者的诊断包对照）：
+    #       依赖页**下载好了 263 MB**、游戏目录里却还是 660 KB 的旧 `sl.common.dll`
+    #       ⇒ 判据每次都命中、每次都没救到。（判断依据：旧版 674,432 B / 新版 843,392 B）
+    #    ⇒ **判据命中也算部署理由**：那是在**修故障**，与用不用多帧生成无关。
+    if bool(getattr(config, "mfg_unlock_enabled", False)) or _streamline_repair_needed(config):
         try:
             deployed = runtime_deps.deploy_streamline_libs(
                 config, log=lambda message: _append_log(config, message))
@@ -2962,6 +2969,23 @@ def install_missing_dependencies(config: AppConfig) -> list[dict[str, Any]]:
     if not missing:
         return []
     return [result.__dict__ for result in dependencies.update_all(missing, config.library_path, dry_run=False, enabled_only=False)]
+
+
+def _streamline_repair_needed(config: AppConfig) -> bool:
+    """游戏自带的 Streamline 是不是"太旧到会拖垮启动"。
+
+    判据与 `runtime_deps.ensure_streamline` 里用的**是同一个**
+    （`crashwatch.streamline_manifest_broken`）—— 那边用它决定"**要不要下载**"，
+    这里用它决定"**要不要部署**"。**两处必须同源**，否则就会出现"下载了却不装"：
+    2026-10-07 两位反馈者的现场正是如此（依赖页下好了 263 MB，游戏目录里
+    还是 674,432 B 的旧 `sl.common.dll`，新版是 843,392 B）。
+    """
+    try:
+        from . import crashwatch
+
+        return bool(crashwatch.streamline_manifest_broken(config))
+    except Exception:  # noqa: BLE001 —— 判据异常不该拦住启动
+        return False
 
 
 def _append_log(config: AppConfig, message: str) -> None:

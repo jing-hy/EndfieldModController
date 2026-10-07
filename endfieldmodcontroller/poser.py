@@ -65,7 +65,10 @@ OWNED_NAMES = (f"{PLUGIN_DIR_NAME}\\{PLUGIN_DLL}", PROXY_NAMES[0], PROXY_NAMES[1
 GAME_EXE = "Endfield.exe"
 WEB_PORT = 18923
 WEB_UI_URL = f"http://127.0.0.1:{WEB_PORT}"
-WEB_TIMEOUT = 1.5
+# ⚠️ **本地回环不需要 1.5 秒**（2026-10-07 实测）：Poser 没在跑时这个连接**不是立刻被拒**，
+# 而是要等满超时 —— 1.5 秒的取值让 `get_state()` 每次都白等 1.515 秒（见 api.get_state 的注释）。
+# 0.4 秒对本地 HTTP 已经非常宽裕（正常响应 <50ms），被拒时也能立刻返回。
+WEB_TIMEOUT = 0.4
 WIZARD_TIMEOUT = 600
 
 Log = Callable[[str], None] | None

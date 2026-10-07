@@ -1600,7 +1600,13 @@ class EndfieldModControllerApi:
             },
             "secondary_motion_status": secondary_motion.status(self.config),
             # Endfield Poser（摆姿 / MMD 播放插件）：状态 + 它自带摆姿页的只读状态
-            "poser_status": poser.status(self.config),
+            # ⚠️⚠️ **绝不能带 `include_web=True`**（2026-10-07 实测定位）：get_state 跑在
+            #   GUI 线程上，而 Poser 的本地 HTTP 探测（`127.0.0.1:18923`）在 Poser 没运行时
+            #   **不是立刻被拒、而是等满 `poser.WEB_TIMEOUT`(1.5s) 超时** ⇒ cProfile 显示
+            #   get_state 每次 1.6 秒里 **1.515 秒全在 socket.connect 上**。前端启动阶段是
+            #   密集调 get_state 的（见过 1 秒内 5 次），于是整个界面都发滞。
+            #   Poser 的 Web UI 现状改由专门接口 `poser_status()` 按需取。
+            "poser_status": poser.status(self.config, include_web=False),
             # Mod 修复工具是否就位（库页用它提示"找不到工具"的原因）
             "modfix_status": self.modfix_status(),
             # 未读的公告（info/warning）：前端首屏就绪后弹一次，**不锁启动**。
@@ -2065,9 +2071,23 @@ class EndfieldModControllerApi:
             # 用户 2026-10-03：「进度条不要一卡一卡的，应该跟着实际大小走」。
             # 原因：项数口径下 138 MB 的资产包**只算 1 项**，进度条涨到 1/N 就停住，
             # 直到那一项整个下完才跳一下，看起来就是"一卡一卡"。
-            task["computed_bytes"] = int(task.get("computed_bytes", 0)) + int(received)
+            # ⚠️⚠️ **必须按组件 key 记账，绝不能直接累加**（2026-10-07 用户报「88968.2 MB /
+            # 246303.5 MB 这下载又是啥 bug」——在「依赖更新」里看到的）：
+            # 这个回调是**每 256 KB 调一次**（见 `dependencies._download` 的读取循环），
+            # 而 `received` / `expected` 给的是"**当前这一个文件**的累计已下值 / 总大小"。
+            # 直接累加 ⇒ 一个 240 MB 的包下完时会滚成 240 MB × ≈960 次 ≈ **230 GB**
+            # （实测显示 246303.5 MB，真实是 240.5 MB，正好虚高约 1024 倍；分子 88968.2 MB
+            # 对应的真实值是 86.9 MB，两者百分比仍一致，所以肉眼看着"进度对、数字疯了"）。
+            # 正确口径：**同一个 key 反复回调就覆盖那一条**，只有换了组件（新 key）
+            # 才把上一项的最终值并进总量 —— 这样"一键更新"跨组件仍然累加得对。
+            ledger = task.setdefault("_byte_ledger", {})
+            prev_received, prev_expected = ledger.get(key) or (0, 0)
+            ledger[key] = (int(received), int(expected))
+            task["computed_bytes"] = max(
+                0, int(task.get("computed_bytes", 0)) - int(prev_received) + int(received))
             if expected:
-                task["expected_bytes"] = int(task.get("expected_bytes", 0)) + int(expected)
+                task["expected_bytes"] = max(
+                    0, int(task.get("expected_bytes", 0)) - int(prev_expected) + int(expected))
             # 项数口径保留（某些下载拿不到 Content-Length 时它仍可用）
             task["percent"] = min(99.0, (done + min(max(inner, 0.0), 1.0)) / total_items * 100.0)
             exp_all = int(task.get("expected_bytes", 0))
@@ -4794,8 +4814,121 @@ class EndfieldModControllerApi:
         wanted = urls if isinstance(urls, list) else ([urls] if urls else [])
         result = modstore.prepare_images(
             self.config, [str(item) for item in wanted if str(item or "").strip()],
+            # ⚠️ **界面走"后台下 + 逐张出现"这条路**（2026-10-07 用户：「拉到下面也慢」）：
+            #   同步等整批下完的话，一页 24 张要等**最后一张**到位才一起显示，等待全落在观感上。
+            #   这里只返回已经在本地的那几张，缺的丢后台线程；前端按 600ms 轮询 `pending` 里
+            #   还没到位的那些 ⇒ 图片变成"下好一张显一张"。
+            background=True,
             log=lambda line: launcher._append_log(self.config, line))
         return {"ok": bool(result["base"]), **result}
+
+    def character_gallery(self) -> dict[str, Any]:
+        """「角色墙」布局的数据（用户 2026-10-07：「第一页展示所有角色（包括头像），点进去是他自己的 mod」）。
+
+        返回**全部角色**（不只是有 Mod 的那些 —— 他要的就是"所有角色"），每个角色带中文名、
+        代号、头像、Mod 数与该角色的 Mod 简要清单；认不出角色的 Mod 单独归到 `other`。
+
+        ⚠️ **认不出就不硬塞**（照 JASM 的做法：它认不出时进 `Others`，而不是猜测）——
+        以前我们只要"匹配上就算"，很容易把别人的皮肤算到某个角色头上、
+        于是同角色互斥逻辑跟着误判。归 `other` 是诚实的做法，界面上也能看见。
+
+        头像：官网直链（由 `character_sync` 抓，**不随包分发**）。这里只负责
+        "把缺的丢后台下 + 返回本地文件名"，前端按 `pending` 轮询 ⇒ 头像逐张出现。
+        """
+        from . import character_avatars, character_sync
+
+        table = character_sync.load_local(self.config)
+        avatars = character_sync.avatar_map(self.config)
+
+        by_character: dict[str, list[dict[str, Any]]] = {}
+        other: list[dict[str, Any]] = []
+        for mod in self._mods():
+            payload = mod.to_dict(include_actions=False)
+            # ⚠️ **只统计"会出现在 Mod 列表里"的那些**（2026-10-07 用户实测：
+            #    「其他显示有 6 个，但是我点进去一个都没有」）—— 因为 Mod 列表会跳过
+            #    依赖 / 工具 / 辅助与 `_deps` 分组，而"其他"里当时恰好全是这些
+            #    （RabbitFX、HideUID、湿润效果修复…）⇒ 数字与内容对不上。
+            #    **两边必须用同一套可见性规则**（这里与 `ModLibraryPage.groups` 的跳过条件一致）。
+            kind = str(payload.get("kind") or "")
+            group = str(payload.get("conflict_group") or payload.get("group") or "")
+            if group == "_deps" or kind in ("dependency", "tool", "assist"):
+                continue
+            item = {"id": mod.id, "name": mod.name}
+            # ⚠️ 角色字段叫 **`char_guess`**（不是 `character`）—— 实测打出来才确认的；
+            #    另外它带 `char_confidence`：置信度低的**不该硬算给某个角色**（照 JASM 的
+            #    "认不出就进 Others"），否则同角色互斥会被误判成冲突。
+            owner = str(payload.get("char_guess") or "").strip()
+            confidence = payload.get("char_confidence")
+            try:
+                weak = confidence is not None and float(confidence) < 0.5
+            except (TypeError, ValueError):
+                weak = False
+            if owner and not weak:
+                by_character.setdefault(owner, []).append(item)
+            else:
+                other.append(item)
+
+        rows: list[dict[str, Any]] = []
+        urls: list[str] = []
+        for entry in table.get("characters") or []:
+            if not isinstance(entry, dict):
+                continue
+            name = str(entry.get("name") or "").strip()
+            if not name:
+                continue
+            url = avatars.get(name, "")
+            if url:
+                urls.append(url)
+            owned = by_character.get(name, [])
+            rows.append({
+                "name": name,
+                "codename": str(entry.get("codename") or ""),
+                "key": str(entry.get("key") or ""),
+                "avatar_url": url,
+                "avatar": "",          # 下面是本地文件名；还没下好就是空（前端用占位块）
+                "count": len(owned),
+                "mods": owned,
+            })
+
+        # 头像：**随包的优先**（用户 2026-10-07：「角色表和图直接随包」「是随 exe」），
+        # 随包里没有的（官网新角色）才走"官网直链 → 后台下载"这条路。
+        for row in rows:
+            row["avatar"] = character_avatars.find_avatar(self.config, row["name"])
+        missing = [row["avatar_url"] for row in rows
+                   if not row["avatar"] and row["avatar_url"]]
+        prepared = character_avatars.ensure_avatars(
+            self.config, missing, background=True,
+            log=lambda line: launcher._append_log(self.config, line))
+        port = modstore._SERVER.ensure(modstore.thumb_root(self.config))
+        files = prepared.get("files") or {}
+        for row in rows:
+            if not row["avatar"]:
+                row["avatar"] = files.get(row["avatar_url"], "")
+
+        return {
+            "ok": True,
+            "base": f"http://127.0.0.1:{port}" if port else "",
+            "characters": rows,
+            "other": {"count": len(other), "mods": other},
+            "pending": prepared.get("pending") or [],
+        }
+
+    def character_sync_now(self) -> dict[str, Any]:
+        """强制重抓一次官网角色表（顺带拿到最新的头像直链）—— 角色墙的「刷新」用。
+
+        官网直链里带构建 hash、**会随改版变**，所以头像不是"抓一次就永久有效"；
+        表太久没同步时由这里补一次。
+        """
+        from . import character_sync
+
+        try:
+            payload = character_sync.sync(
+                self.config, force=True, write=True,
+                log=lambda line: launcher._append_log(self.config, line))
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "message": f"官网角色表刷新失败：{exc}"}
+        total = payload.get("total") if isinstance(payload, dict) else 0
+        return {"ok": True, "total": int(total or 0)}
 
     def mod_store_thumbnail(self, url: str = "", width: Any = 0) -> dict[str, Any]:
         """**降级路径**：把一张图转成 data URI（本地图片服务起不来时才用）。

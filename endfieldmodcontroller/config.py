@@ -440,6 +440,12 @@ class AppConfig:
 
     theme: str = "light"
     last_tab: str = "library"
+    # 「角色视图」开关（用户 2026-10-07 要求）：
+    #   关（默认）= 现在这样（一屏 Mod 卡片）；
+    #   开 = 角色墙：先看所有角色（头像 + 名字 + 各自 Mod 数），**点进去才是该角色的 Mod**。
+    # ⚠️ 用**布尔**而不是布局名：用户明确「角色视图应该是一个开关而不是按钮」——
+    #    开关就该是布尔，起个 `library_layout` 字符串值反而要在 UI 上做映射。
+    library_character_view: bool = False
     inject_reshade_ui: bool = True
     # **「整合 Mod 快捷键」总开关**（2026-10-01 落地，取代旧的"面板还没做好"状态）。
     # True = 把每个 Mod 的 `[Key*]` 统一改写成 `VK_F24`，操作改到游戏内的统一面板

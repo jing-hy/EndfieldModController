@@ -41,6 +41,9 @@ _WEB_SRC = "web/dist" if (ROOT / "web" / "dist" / "index.html").is_file() else "
 ADD_DATA = [
     (_WEB_SRC, "web"),
     ("endfieldmodcontroller/characters.json", "endfieldmodcontroller"),
+    # 角色头像（34 张 PNG，约 3.8 MB）+ 索引 `index.json`：用户 2026-10-07 要求
+    # 「角色表和图直接随包」「**是随 exe**」⇒ 离线也有头像，也不受官网改版（直链带 hash）影响。
+    ("endfieldmodcontroller/characters", "endfieldmodcontroller/characters"),
     ("endfieldmodcontroller/hotkey_hints.json", "endfieldmodcontroller"),
     # ⚠️ **随包组件版本表**（2026-10-03 用户要求）：给"一键启动前的更新检查"用，
     # 读它是纯本地操作（微秒级），不像以前那样同步联网查 GitHub（实测 6.1 秒）。

@@ -402,3 +402,36 @@ def test_other_plugins_sees_disabled_poser(env):
     _write(env.game / "plugin" / "poser.dll.endfieldmodcontroller.disabled", FAKE_POSER_DLL)
     assert secondary_motion._other_plugin_dlls(env.game) == ["poser.dll"], \
         "停用副本必须被认出来，否则卸载乳摇会把 loader 一起还原"
+
+
+# ---------------------------------------------------------------------------
+# ⑧ get_state 不得做网络 IO（2026-10-07 实测定位）
+# ---------------------------------------------------------------------------
+
+
+def test_get_state_does_not_probe_poser_web_ui():
+    """★ 回归（2026-10-07）：`get_state` 跑在 GUI 线程上，**绝不能探测 Poser 的 Web UI**。
+
+    实测（cProfile）：Poser 的本地 HTTP 探测（`127.0.0.1:18923`）在 Poser 没运行时**不是
+    立刻被拒、而是等满超时** ⇒ `get_state` 每次 1.6 秒里 **1.515 秒全花在 socket.connect**；
+    而前端启动阶段密集调它（实测 1 秒内 5 次）⇒ 整个界面都发滞。改掉之后 1.98s → 0.07s。
+
+    为什么不写成行为测试：`get_state` 依赖整台机器的现场（tmp 环境下会在走到 poser 之前
+    就先抛异常，那条路测不到）。这里直接钉**那一行调用**的参数 —— 参数一退化就变红。
+    """
+    import inspect
+
+    from endfieldmodcontroller import api as api_mod
+
+    source = inspect.getsource(api_mod.EndfieldModControllerApi.get_state)
+    calls = [line for line in source.splitlines() if "poser.status(" in line]
+    assert calls, "get_state 里应当调用 poser.status"
+    assert all("include_web=False" in line for line in calls), \
+        f"get_state 里的 poser.status 必须带 include_web=False：{calls}"
+
+
+def test_poser_web_timeout_is_short():
+    """本地回环探测的超时必须短 —— 1.5 秒那种取值会把 GUI 线程拖住。"""
+    from endfieldmodcontroller import poser
+
+    assert poser.WEB_TIMEOUT <= 0.5, poser.WEB_TIMEOUT

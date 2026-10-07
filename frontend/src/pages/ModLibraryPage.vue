@@ -59,6 +59,114 @@ function siteRootLabel(root) {
 const selected = computed(
   () => new Set((((store.state.config || {}).selected_mods) || []).map(String)),
 );
+// ── 角色视图（用户 2026-10-07：「第一页展示所有角色（包括头像，可以从官网拉），
+//    然后点进去是他自己的 mod」）──────────────────────────────────────────────
+// 是一个**开关**（`config.library_character_view`），默认关 = 现在这样。
+// 数据来自后端 `character_gallery`：**全部角色**（含一个 Mod 都没有的），
+// 头像由后端从官网抓、经本地只读服务直出。
+const characterView = computed(() => !!((settings || {}).library_character_view));
+const gallery = ref({ characters: [], base: "", other: { count: 0 } });
+const character = ref("");        // 点进去的那个角色（空 = 还在角色墙那一层）
+let avatarTimer = null;
+
+async function loadGallery() {
+  try {
+    const result = await call("character_gallery");
+    if (!result || result.ok === false) return;
+    gallery.value = {
+      characters: result.characters || [],
+      base: result.base || "",
+      other: result.other || { count: 0 },
+    };
+    pollAvatars(result.pending || []);
+  } catch (e) { /* 拿不到就退化成占位块，不是错误 */ }
+}
+
+// 头像"后端后台抓 + 这里逐张问"（与商城图片同一套）：官网有快有慢，
+// 等整批会让整页空白，所以按 800ms 轮询、最多 40 轮。
+function pollAvatars(pending) {
+  if (avatarTimer || !(pending || []).length) return;
+  let rounds = 0;
+  avatarTimer = setInterval(async () => {
+    rounds += 1;
+    try {
+      const result = await call("character_gallery");
+      if (result && result.ok !== false) {
+        gallery.value = {
+          characters: result.characters || [],
+          base: result.base || "",
+          other: result.other || { count: 0 },
+        };
+        if (!(result.pending || []).length || rounds > 40) {
+          clearInterval(avatarTimer);
+          avatarTimer = null;
+        }
+      }
+    } catch (e) { /* 忽略这次，下一轮再来 */ }
+  }, 800);
+}
+
+// ⚠️ 头像文件名在**每一行的 `c.avatar`** 上（后端直接给本地文件名），
+//    不是 `result.files` 那个映射 —— 2026-10-07 我错读成后者，表现就是"角色墙一个头像都没有"。
+function avatarSrc(item) {
+  return item && item.avatar && gallery.value.base ? `${gallery.value.base}/${item.avatar}` : "";
+}
+
+function openCharacter(name) {
+  character.value = name;
+}
+
+// 「其他」= 认不出角色归属的那些（用户 2026-10-07：「不是说单列一个其他角色吗」）。
+// 它和其他角色**平级**地摆在角色墙里，点进去就能看到它们 —— 而不是只留一句说明文字。
+const OTHER_NAME = "其他";
+const otherIds = computed(
+  () => new Set(((gallery.value.other || {}).mods || []).map((m) => String(m.id))),
+);
+
+// 统一卡片的标题与角标（用户 2026-10-07：「全部合成一个卡片」）——
+// 三态共用一个 Card，标题跟着状态走，不再各开一张卡。
+const listTitle = computed(() => {
+  if (!characterView.value) return "Mod 列表";
+  return character.value ? `${character.value} 的 Mod` : "角色";
+});
+const listBadge = computed(() => {
+  if (!characterView.value) return "按角色分组显示";
+  if (character.value === OTHER_NAME) {
+    return `${((gallery.value.other || {}).count) || 0} 个`;
+  }
+  if (character.value) {
+    const row = gallery.value.characters.find((c) => c.name === character.value) || {};
+    return `${row.count || 0} 个`;
+  }
+  return `共 ${gallery.value.characters.length} 位 · 点进去看他的 Mod`;
+});
+
+function backToCharacters() {
+  character.value = "";
+  loadGallery();          // 回来时顺手再拉一次，把期间下好的头像补上
+}
+
+// ⚠️ **切换开关时必须自己去取数据**（2026-10-07 用户实测："刚进去都要正在读取角色表…"）：
+//    原先把"加载"挂在旧的 toggleLayout 上，改用 saveSetting 直接写开关之后就没人调它了 ——
+//    表现是开关打开了、角色表却一直不出现（那句"正在读取角色表…"是**卡住**，不是真在同步）。
+async function setCharacterView(next) {
+  await saveSetting("library_character_view", !!next);
+  character.value = "";
+  if (next) loadGallery();
+}
+
+// 兜底：无论是点开关、还是从别处改了配置（设置页/同步），只要它是开的就去取
+watch(characterView, (on) => {
+  if (on && !gallery.value.characters.length) loadGallery();
+});
+
+// 搜索是**全局**的（用户 2026-10-07：「搜索框搜索了自动切回 mod 列表」）：
+// 一输入关键字就退出角色详情 —— 否则搜出来的东西会被"某个角色"的过滤条件吃掉，
+// 表现得像"搜了没结果"。
+watch(keyword, (text) => {
+  if (String(text || "").trim()) character.value = "";
+});
+
 const groups = computed(() => {
   const g = {};
   const kw = keyword.value.trim().toLowerCase();
@@ -68,6 +176,15 @@ const groups = computed(() => {
     const key = String(mod.conflict_group || mod.group || "");
     if (key === "_deps" || mod.kind === "dependency" || mod.kind === "tool") continue;
     if (mod.kind === "assist") continue;
+    // 角色墙选中的那个角色 ⇒ 这张列表只留他的（"点进去是他自己的 mod"）；
+    // 选「其他」时按**后端给的 id 名单**匹配 —— 因为那些 Mod 的分组名五花八门，
+    // 不能拿"其他"去比分组名。
+    if (character.value === OTHER_NAME) {
+      if (!otherIds.value.has(String(mod.id))) continue;
+    } else if (character.value
+               && String(mod.conflict_group || mod.group || "") !== character.value) {
+      continue;
+    }
     const name = mod.conflict_group || mod.group || "未分类";
     (g[name] ||= []).push(mod);
   }
@@ -482,10 +599,13 @@ onMounted(() => {
 onMounted(async () => {
   await refreshState().catch(() => {});
   queueCovers(store.state.mods);
+  // 上次退出时开着角色视图 ⇒ 进来就把角色墙数据拉上（头像随包，本地就有）
+  if (characterView.value) loadGallery();
 });
 onUnmounted(() => {
   window.removeEventListener("keydown", onEscapeKey);
   if (timer) clearInterval(timer);
+  if (avatarTimer) { clearInterval(avatarTimer); avatarTimer = null; }
   stopFixPoll();
   coverQueue = [];
 });
@@ -536,7 +656,59 @@ watch(() => store.demoCovers, (val) => {
       </div>
     </Card>
 
-    <Card title="Mod 列表">
+    <!-- 「角色视图」开关**单独一张卡片**（用户 2026-10-07：「开关单独卡片，其他部分共用一张」）。
+         刚才是塞在「皮肤 Mod」卡里的，而那张卡管的是 EFMI / 互斥那些注入开关，
+         Mod 库的显示方式跟它们不是一回事，混在一起反而找不到。 -->
+    <Card title="Mod 库视图">
+      <div class="switch-row" @click="setCharacterView(!characterView)">
+        <span class="min-w-0">
+          <span class="text-sm font-medium">角色视图</span>
+          <span class="block text-xs mt-0.5" style="color: var(--text-muted)">
+            开启后：Mod 库先按<b>角色</b>排（头像 + 各自的 Mod 数），<b>点进去才是该角色的 Mod</b>。
+            左边小图是列表的样子，右边是角色视图的样子。<b>默认关闭</b> —— 关着就是现在这样。
+          </span>
+        </span>
+        <span class="flex items-center gap-2 shrink-0">
+          <span class="switch-state">{{ characterView ? "已开启" : "已关闭" }}</span>
+          <!-- 图示滑块（用户 2026-10-07：「做成滑块里是样式展示 —— 划到左边是一个框然后一个
+               横杠，到右边是几个框」）：左=列表（一个框 + 一根横杠）、右=角色视图（四个小框），
+               当前那侧用主题色高亮。 -->
+          <span class="flex items-center gap-1.5 px-1.5 py-1 rounded-full"
+                :style="{ background: 'var(--surface-2)', border: '1px solid var(--border)' }">
+            <span class="flex items-center justify-center"
+                  :style="{ width: '24px', height: '18px', gap: '2px', borderRadius: '4px',
+                            border: characterView ? '1px solid var(--border)' : '1px solid var(--accent)',
+                            background: characterView ? 'transparent' : 'var(--accent-soft)' }">
+              <span :style="{ width: '9px', height: '8px', borderRadius: '2px',
+                              background: characterView ? 'var(--text-muted)' : 'var(--accent)' }"></span>
+              <span :style="{ width: '6px', height: '2px', borderRadius: '1px',
+                              background: characterView ? 'var(--text-muted)' : 'var(--accent)' }"></span>
+            </span>
+            <span class="grid"
+                  :style="{ gridTemplateColumns: 'repeat(2, 1fr)', gap: '2px',
+                            width: '24px', height: '18px', padding: '2px', borderRadius: '4px',
+                            border: characterView ? '1px solid var(--accent)' : '1px solid var(--border)',
+                            background: characterView ? 'var(--accent-soft)' : 'transparent' }">
+              <span v-for="n in 4" :key="n"
+                    :style="{ borderRadius: '1px',
+                              background: characterView ? 'var(--accent)' : 'var(--text-muted)' }"></span>
+            </span>
+          </span>
+        </span>
+      </div>
+    </Card>
+
+    <!-- ══════════ Mod 列表（**只有一个卡片**）══════════
+         用户 2026-10-07：「你不要返回角色列表单开一个卡片，**全部合成一个卡片**，
+         还有**生成控制器那些不要放在角色里面，放在角色列表那里**」——
+         于是工具栏落在卡片顶部（属于整个 Mod 区域、不属于某个角色，两层都看得到），
+         内容按"角色墙 / 某个角色的 Mod / 全量列表"三态切换，不再各占一张卡。 -->
+    <Card :title="listTitle">
+      <template #badge>
+        <span class="text-xs" style="color: var(--text-muted)">{{ listBadge }}</span>
+      </template>
+
+      <!-- 工具栏：生成控制器那些放这儿（角色列表那一层） -->
       <div class="flex flex-wrap items-center gap-2">
         <Btn variant="primary" @click="prepare" :disabled="busy">生成控制器</Btn>
         <Btn @click="scan" :disabled="busy">重新扫描</Btn>
@@ -550,9 +722,59 @@ watch(() => store.demoCovers, (val) => {
         </span>
         <Btn @click="fixAll">一键修复所有 Mod</Btn>
         <span class="ml-auto flex items-center gap-2">
-          <input v-model="keyword" class="field" style="width: 200px" placeholder="搜索 Mod / 角色…" />
+          <input v-model="keyword" class="field" style="width: 220px" placeholder="搜索 Mod / 角色…" />
         </span>
       </div>
+
+      <!-- ① 角色墙（角色视图 + 还没点进去）-->
+      <div v-if="characterView && !character" class="mt-3">
+      <!-- 角色表和头像都**随包**（用户要求"直接随包"），所以这里正常是**一闪而过**。
+           不再写"首次会从官网同步"——那会让人以为要联网等，而实际上本地就有。 -->
+      <div v-if="!gallery.characters.length" class="text-sm" style="color: var(--text-muted)">
+        正在读取角色表…
+      </div>
+      <div v-else class="grid gap-3"
+           style="grid-template-columns: repeat(auto-fill, minmax(110px, 1fr))">
+        <button v-for="c in gallery.characters" :key="c.name"
+                class="rounded-lg border p-2 flex flex-col items-center gap-1.5"
+                style="border-color: var(--border)"
+                :title="`${c.name}${c.codename ? ' · ' + c.codename : ''} · ${c.count} 个 Mod`"
+                @click="openCharacter(c.name)">
+          <img v-if="avatarSrc(c)" :src="avatarSrc(c)"
+               class="rounded-full object-cover" style="width: 56px; height: 56px" alt="" />
+          <span v-else class="rounded-full flex items-center justify-center text-lg"
+                style="width: 56px; height: 56px; background: var(--surface-2); color: var(--accent)">
+            {{ (c.name || "?").slice(0, 1) }}
+          </span>
+          <span class="text-xs truncate w-full text-center">{{ c.name }}</span>
+          <span class="text-xs" style="color: var(--text-muted)">{{ c.count }} 个</span>
+        </button>
+        <!-- 「其他」单列（用户 2026-10-07：「不是说单列一个其他角色吗」）：
+             认不出角色归属的 Mod 全都挂这儿，点进去就是它们 —— **不硬塞给任何角色**
+             （硬塞会让同角色互斥误判，也可能把别人的皮肤算到某个角色头上）。 -->
+        <button v-if="gallery.other && gallery.other.count"
+                class="rounded-lg border p-2 flex flex-col items-center gap-1.5"
+                style="border-color: var(--border)"
+                :title="`没认出角色归属的 ${gallery.other.count} 个 Mod —— 点进去看，之后可以逐个指定`"
+                @click="openCharacter(OTHER_NAME)">
+          <span class="rounded-full flex items-center justify-center text-xl"
+                style="width: 56px; height: 56px; background: var(--surface-2); color: var(--text-muted)">?</span>
+          <span class="text-xs truncate w-full text-center">其他</span>
+          <span class="text-xs" style="color: var(--text-muted)">{{ gallery.other.count }} 个</span>
+        </button>
+      </div>
+      </div>
+
+      <!-- ② 点进去之后：一条明确的回头路 + 这个角色的 Mod（**都在同一个卡片里**）-->
+      <div v-if="characterView && character" class="flex items-center gap-2 flex-wrap mt-3">
+        <Btn @click="backToCharacters">← 返回角色列表</Btn>
+        <span class="text-xs" style="color: var(--text-muted)">
+          下面是 {{ character }} 的 Mod，操作（开关、⋯ 菜单、冲突提示）与列表视图完全一样
+        </span>
+      </div>
+
+      <!-- ③ 全量列表 / 某个角色的 Mod（内容按过滤条件走，渲染完全复用）-->
+      <div v-if="!characterView || character">
       <!-- ★ **"还没读到" ≠ "库里没有"**（用户 2026-10-07：「我要一进去就能出，要是要等待，
            就显示加载页面」）。首屏那一下 `get_state()` 可能还没回来（首次要扫库 +
            逐个 Mod 补修复状态），以前这里直接显示"还没有发现 Mod" ⇒ 看着像库是空的、
@@ -651,6 +873,7 @@ watch(() => store.demoCovers, (val) => {
             </div>
           </div>
         </div>
+      </div>
       </div>
     </Card>
 
