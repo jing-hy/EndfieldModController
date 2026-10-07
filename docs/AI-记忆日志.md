@@ -4,9 +4,9 @@
 > 目的：让「当时为什么这么改、踩过什么坑」跟着源码一起留在仓库里。
 > 想改内容 → 改记忆库（用记忆工具），再跑一次本脚本；不要直接编辑本文件。
 
-- 生成时间：2026-10-07 18:12:26
+- 生成时间：2026-10-07 22:33:13
 - 来源：`.dsh-meow/memory.db`
-- 条目：596 条（已跳过 archived / 其它项目的条目）
+- 条目：598 条（已跳过 archived / 其它项目的条目）
 
 ---
 
@@ -304,7 +304,7 @@
 
 `关键词：["可以自己推","只改源码","推送授权","push main","不必逐次问","发 Release 仍要等","push.py 先快照","结构树刷新"]`
 
-## 项目记忆（结构 / 决策 / 部署 / 待办）（34 条）
+## 项目记忆（结构 / 决策 / 部署 / 待办）（36 条）
 
 ### 项目概述
 
@@ -459,6 +459,19 @@ runtime\dlss5                      38 字符  ❌ 崩
 **教训**：写"回某条 issue"的草稿前，**先逐项核对是不是同一个人** —— 这次把 #16 与第四人的症状、显卡、根因写进了同一份草稿（还写了"你的显卡 5080"），靠用户一句质疑才发现。
 
 `关键词：["四个反馈者身份对照", "xingluo667是5070Ti", "PTTOOL第四人是5080", "HUAWEI是Intel-Arc", "lzh18是4060", "按runtime认人", "CameraFirstPerson不是决定因素", "写issue草稿前先核对身份"]`
+
+### 《终末地》雨雪效果的**实时链路符号落点**（从 glo…
+*2026-10-07 19:47*
+
+《终末地》雨雪效果的**实时链路符号落点**（从 global-metadata.dat 挖出，排查/改 mod 时直接搜这些名字）。
+**天气环境**：`Beyond.Gameplay.View.DynamicEnvironmentManager`（ChangeEnvironment / RevertEnvironment / get_isRaining / Tick）；`HG.Rendering.Runtime.HGEnvironmentManager`（_InterpolateVolumes / interpolateTimeFactor / _PipelineUpdate）。
+**湿润（淋雨/下水）**：`Beyond.Gameplay.Water.GameplayWetnessController`（Start / Tick / _OnGameplayWetUpdate / _UpdateWetToMax / ApplyWetnessIntensityToRenderers / SetImmediate / OverrideDrenchedSettings；参数 gameplayWetIntensity、targetWetIntensity、wetMaxImmediate、gameplayWetIntensityToMaxWetnessCurve、gameplayWetIntensityToDrenchSmoothTimeCurve、dryDrenchedAfterSeconds、m_outOfWetTimer）；传感器 `WaterSensorComponent` / `NpcWaterSensorComponent`（OnGameplayWetChange / SetGameplayWetnessMaxImmediate）；角色侧 `CharUIRainEffectMono.ApplyWetnessIntensityToRenderers` / `SetIsWet`、`CharUIModelMono.SetWetIntensity` / `_InitWetEffect`；动画可驱动 `CharacterAnimationBlackboard.fWetness`、`SetWetIntensityEventHandler`。
+**积雪**：`Beyond.Gameplay.Water.SnowController`（Tick / _OnSnowingUpdate / _UpdateSnowToMax / ApplySnowIntensityToRenderers / OverrideMeltSnowSettings；snowIntensity、snowIntensityToMaxSnowAmountCurve、snowIntensityToAccumulateSmoothTimeCurve、meltSnowAfterSeconds、meltSnowSmoothTime、m_outOfSnowTimer、snowMaxImmediate）。
+**渲染（每帧）**：`HGRainRenderer.RainAndWetnessPipelineUpdate` / `UpdateRainAndWetnessShaderVariables` / `UpdateRainAndWetnessData`；每摄像机 `RainWetnessRenderSeq`（PerFrameClear / _UpdateDeltaTime / _UpdateWetnessCommonParams / _UpdateWetnessShaderVariables / _RequestOcclusionMap → RainOcclusionMap 是实时遮雨，站屋檐下不湿）；`HGSnowRenderer.SnowPipelineUpdate` / `SnowOcclusion`；全局 shader 参数 `_RainWetnessGlobalParam0..10`、`HGRainAndWetnessSettingParameters`；内置资源 `Runtime/RenderPipelineResources/HGRainPresettingAsset.asset`、`HGSnowPresettingAsset.asset`、`Texture/SnowDetailNormal.tga`、`Mesh/Rain/SceneEffectRainMesh.mesh` + `RainSplashMesh.mesh` + `FarRainReceiver.mesh`；shader 变体 `HG_ENABLE_WETNESS` / `HG_RAIN_WETNESS_HIGH_QUALITY` / `LOW|HIGH_QUALITY_WETNESS_MASK` / `SNOW_COVERAGE` / `SNOW_THICKNESS` / `SNOWFLAKE_KW`。
+**建筑积雪**：`Beyond.Gameplay.Factory.BuildingSnowCoverageProcessor`（_ProcessSnowCoverageNode / _GetCurrentSnowIntensity / poweredSnowCoverageDuration，另有 Burst 编译的 _SnowCoverageStart/Maintain/End）。
+**Lua 侧没有天气逻辑**（Lua 里搜不到 rain/snow/wet/weather 独立词）—— 天气与湿润全在 C#（Beyond.Gameplay.Water / HG.Rendering）。
+
+`关键词：["GameplayWetnessController","SnowController","HGRainRenderer","HGSnowRenderer","RainWetnessRenderSeq","RainOcclusionMap","meltSnowAfterSeconds","dryDrenchedAfterSeconds","DynamicEnvironmentManager","HGSnowPresettingAsset","wetness参数","天气系统落点"]`
 
 ### 用户原话
 
@@ -630,6 +643,17 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 **仍未定案**：他与华硕那台 `0xC0000135` 的真因 —— 已排除：显卡驱动、VC++ 运行库、注入未进进程、旧版 Streamline（同机有两次跑完记录）。**第一人称"不支持相机控制"已定性为它的下游症状**（enhancer 靠进程内 `XLua.Runtime.dll` 找 Lua 环境，游戏极早退出时等不到）。
 
 `关键词：["当前状态唯一真源","最新 Release v1.2.1","release id 405589208","exe sha256 a9bfa904","assets-bundle sha256 ad0a88cc","main 825787d","快照 1.2.1","下一个版本号 1.2.2-beta","DLSS5 不出帧 preset 全名","Streamline 部署未执行","角色头像随 exe","issue 16 已回","AGENTS.md"]`
+
+### 《终末地》解包工具链已就位：`D:\zmdmod\终末地…
+*2026-10-07 19:47*
+
+《终末地》解包工具链已就位：`D:\zmdmod\终末地解包\`（EIHRTeam/EndfieldStudio，本地 commit ccf769b，2026-09-06 拉的；含源码+已编译 endfield-dump.dll + 便携 .NET 9 SDK 9.0.317 在 `dotnet9\` + 包装脚本 `dump.cmd`，其 `--vfs` 已内置）。
+游戏资源目录 `D:\Hypergryph Launcher\games\Endfield Game\Endfield_Data\StreamingAssets`（version=24577065 codeVersion=4）。
+实测性能（Ryzen 16 核）：`extract` 带 `--asset-name` 过滤仍会解压全部 253,670 个 bundle、7,014,489 个对象，约 **108 秒**（输出由过滤正则决定）；`dump --block Lua` 1338 文件数秒（1 个文件解密失败属正常）；`list` 数秒。
+**能力边界**：只导得出 Texture2D（`--types` 形同虚设，Material/Shader/Mesh/ScriptableObject 一律导不出）；AnimationClip 只出元数据（关键帧是 ACL `0xac11ac11` 未实现）；无 hot-update 目录 ⇒ `audio` 拿不到角色语音/剧情音频。
+il2cpp 符号从 `Endfield_Data\il2cpp_data\Metadata\global-metadata.dat`（57 MB）提：UTF-8 取串后按关键词 grep，能拿到全部类名/方法名/shader 属性名 —— 排查游戏机制最快的入口。
+
+`关键词：["终末地解包","EndfieldStudio","endfield-dump","dump.cmd","StreamingAssets","VFS解密","global-metadata.dat","il2cpp符号","dotnet9","贴图导出","Texture2D","解包工具位置"]`
 
 ### 待办
 
