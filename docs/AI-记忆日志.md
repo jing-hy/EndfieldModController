@@ -4,13 +4,13 @@
 > 目的：让「当时为什么这么改、踩过什么坑」跟着源码一起留在仓库里。
 > 想改内容 → 改记忆库（用记忆工具），再跑一次本脚本；不要直接编辑本文件。
 
-- 生成时间：2026-10-07 17:47:16
+- 生成时间：2026-10-07 17:48:56
 - 来源：`.dsh-meow/memory.db`
-- 条目：598 条（已跳过 archived / 其它项目的条目）
+- 条目：599 条（已跳过 archived / 其它项目的条目）
 
 ---
 
-## 设计原则 / 行为准则（24 条）
+## 设计原则 / 行为准则（25 条）
 
 ### 用户准则（原话）：「不是，你直接去官网拉」—— **一手…
 *2026-09-27 18:53*
@@ -296,6 +296,13 @@
 **推广**：以后凡是"拉个同类项目来参考"，第一步先看它的 LICENSE —— 上游一旦是 GPL/AGPL，就只做"思路对照"，不要 paste 代码。
 
 `关键词：["GPL-3.0","MIT","许可证冲突","copyleft","开源协议","JASM 参考","不能抄代码","思路重写","LICENSE 检查","分发合规"]`
+
+### 【授权更新（2026-10-07 用户原话：「只是改源码…
+*2026-10-07 17:48*
+
+【授权更新（2026-10-07 用户原话：「只是改源码你可以自己推」）】—— **只改源码（不发版）时，我不必再逐次问"推不推"，可以自行 push main**。⚠️ 边界不变：**发 Release 仍必须等他明确说**（旧规则"未经他明确说推绝不推送"收窄成"发版必须等授权"）；推送仍走 `scripts/push.py`（**先快照，快照失败就不推** → 刷新记忆日志 → 同步结构树 → 推 main），它**不会替我 commit 业务改动**。同类此前还有：他说「改好一个 bug 就更新结构树退一次 main（一定是我明确说明可以的）」—— 现在 main 这一步已获长期授权，**结构树仍需按规矩刷新**。
+
+`关键词：["可以自己推","只改源码","推送授权","push main","不必逐次问","发 Release 仍要等","push.py 先快照","结构树刷新"]`
 
 ## 项目记忆（结构 / 决策 / 部署 / 待办）（43 条）
 
@@ -693,18 +700,6 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 
 `关键词：["1.1.2-beta","Mod 商城落地","下载中心","modstore.py","downloads.py","StorePage.vue","DownloadsPage.vue","依赖页瘦身","1229 passed","selfupdate flaky","未构建 exe","已安装标记不亮"]`
 
-### 【modecontroller 当前状态唯一真源】（20…
-*2026-10-07 17:24*
-
-【modecontroller 当前状态唯一真源】（2026-10-07 17:25 更新）
-**Latest Release = `v1.2.1`**（2026-10-07T09:22:39Z 转正、release id `405589208`、Latest、遗留 draft 0）。**本地 = `1.2.1`**；**main = `737cc1d`**；快照 `D:\zmdmod\_snapshot_1.2.1-20261007-172051`。
-**v1.2.1 附件（远程 digest 与本地逐字节一致）**：exe `35,311,029 B` / sha256 `a9bfa904f01e1d1f16a3206c976f562ae62b0556554371a9f206e5f78b67bc2b`（比 v1.2.0 大 3.2 MB —— 随 exe 的角色头像 3.8 MB）；assets-bundle.zip `262,289,985 B` / sha256 `ad0a88cc8f0dfbf343aa43407377561b26981a83bb564b604cbb163eabf14a76`。
-**v1.2.1 内容（自 v1.2.0 起）**：① **DLSS5 不出帧** —— preset 里 technique 全名缺 effect 目录（应为 `MartysMods_Launchpad@iMMERSE\MartysMods_LAUNCHPAD.fx`），且行合并去重按技术名比 ⇒ 旧短名永远被当"已存在"、**修了等于没修**；② **Streamline 部署从未执行**（调用条件挂在已定案停用的 `mfg_unlock_enabled` 上，issue #16 的确认根因之一）；③ **依赖更新进度字节累加虚高**（回调每 256 KB 一次且给的是当前文件累计值 ⇒ 240 MB 的包显示成 230 GB）；④ **诊断包补采三项**（`dlss5-ReShadePreset.ini` / `dlss5-addon-placement.txt` / `dlss5-shaders-tree.txt`）；⑤ Mod 库「角色视图」开关 + 角色表与头像随 exe 分发。
-**issue #16（xingluo667）**：17:24 已回复（comment `6034982584`）—— 解释"国际服"只是渠道目录名差异（`Arknights Endfield`，不是他装错）、说明查到的两件事、请他更新 1.2.1 再试、并**告知国庆后更新频率显著降低** + 给出 DSH 自查路径（下载页 `https://deepseek.com/harness`，装好自带默认工作区、无需设置）与**可直接复制的提示词**（含仓库网址、他的管理器根目录 `C:\Users\<user>\Downloads`、要他 clone 源码翻日志、修好提 PR）。
-**仍未定案**：他（与华硕那台）`0xC0000135` 的真因 —— 已排除：显卡驱动、VC++ 运行库、注入未进进程（进程里 d3d11/d3d12/sbm/poser 都在）、旧版 Streamline（同机有两次正常跑完的记录，一次 5.5 万帧）。新采集已就位，等他更新后再导包即可用包内文件定案。
-
-`关键词：["当前状态唯一真源","Latest Release v1.1.0","release id 405355434","exe sha256 03092366","assets 262289985","伪旧版 from-1.1.0","启动提速 19 秒","launch_stage 分步进度","issue 16 已回","issue 17 已关","版本号 1.1.0 用户指定"]`
-
 ### 【本机有两套**互相独立**的 ReShade/DLSS…
 *2026-10-07 17:38*
 
@@ -717,6 +712,19 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 **③ 第一人称"不支持相机控制"的机制（从 `renodx-endfield-enhancer.addon64` 的字符串挖出）**：enhancer 靠**进程内存里的 `XLua.Runtime.dll`** 去找游戏的 Lua 环境（终末地用 XLua + **IL2CPP** 编译 —— 游戏目录里既没有 `Managed\` 也没有任何 `XLua*` 文件），字符串原文：`Waiting for LuaManager's game environment.` / `Waiting for the Lua bridge to start.` / `XLua.Runtime.dll image missing or ambiguous`。⇒ 游戏**极早退出**（还没加载到那个模块）时它就一直等 ⇒ 面板显示"不支持相机控制" ⇒ **这是"起不来"的下游症状，不是独立问题**。
 
 `关键词：["两套 ReShade 环境","reshade_dll 工作区外","RESHADE_BASE_PATH_OVERRIDE","runtime\\reshade\\ReShade.log","DLSS5 目录 shader 库","MartysMods_FFTBLOOM","MartysMods_INSIGHT","X3004 编译失败","CameraFirstPerson 0 与 1","按 F1 能用","XLua.Runtime.dll","IL2CPP","不支持相机控制","modtest 与源码差异"]`
+
+### 【modecontroller 当前状态唯一真源】（20…
+*2026-10-07 17:47*
+
+【modecontroller 当前状态唯一真源】（2026-10-07 17:48 更新）
+**Latest Release = `v1.2.1`**（2026-10-07T09:22:39Z 转正、release id `405589208`、Latest、遗留 draft 0）。**本地 = `1.2.1`**（与 Release 同号、不欠号）。**main = `825787d`**（已推；`737cc1d` = v1.2.1 构建时点，其后是两个纯文档提交）。快照 `D:\zmdmod\_snapshot_1.2.1-20261007-174715`。
+**v1.2.1 附件（远程 digest 与本地逐字节一致）**：exe `35,311,029 B` / sha256 `a9bfa904f01e1d1f16a3206c976f562ae62b0556554371a9f206e5f78b67bc2b`（比 v1.2.0 大 3.2 MB —— 随 exe 的角色头像 3.8 MB）；assets-bundle.zip `262,289,985 B` / sha256 `ad0a88cc8f0dfbf343aa43407377561b26981a83bb564b604cbb163eabf14a76`。
+**v1.2.1 内容（自 v1.2.0 起）**：① **DLSS5 不出帧** —— preset 里 technique 全名缺 effect 目录（应为 `MartysMods_Launchpad@iMMERSE\MartysMods_LAUNCHPAD.fx`），且行合并去重按技术名比 ⇒ 旧短名永远被当"已存在"、**修了等于没修**；② **Streamline 部署从未执行**（调用条件挂在已定案停用的 `mfg_unlock_enabled` 上，issue #16 的确认根因之一）；③ **依赖更新进度字节累加虚高**（回调每 256 KB 一次且给的是当前文件累计值 ⇒ 240 MB 的包显示成 230 GB）；④ **诊断包补采三项**（`dlss5-ReShadePreset.ini` / `dlss5-addon-placement.txt` / `dlss5-shaders-tree.txt`）；⑤ Mod 库「角色视图」开关 + 角色表与头像随 exe 分发。
+**v1.2.1 之后（`825787d`，纯文档，未发版）**：新增 **`AGENTS.md`**（给 AI 助手的说明：自己定位/自己改/自己测，交付方式按"有没有 GitHub 账号"分 —— 有就提 PR、没有就加 QQ 群 `1045239747`／验证答案 `jing_hy`；并复述三条硬边界与"修过的 bug 要有测试钉住+反向验证"）+ `CONTRIBUTING.md` 开头加指向。**下一步若要改代码，按规则升到 `1.2.2-beta`。**
+**issue #16（xingluo667）**：17:24 已回复（comment `6034982584`）—— 解释"国际服"只是渠道目录名差异（`Arknights Endfield`，不是他装错）、说明查到的两件事、请他更新 1.2.1 再试、告知国庆后更新频率显著降低、并给出 DSH 自查路径（`https://deepseek.com/harness`，装好自带默认工作区）与可复制提示词（含仓库网址、他的管理器根目录 `C:\Users\<user>\Downloads`）。
+**仍未定案**：他与华硕那台 `0xC0000135` 的真因 —— 已排除：显卡驱动、VC++ 运行库、注入未进进程、旧版 Streamline（同机有两次跑完记录）。**第一人称"不支持相机控制"已定性为它的下游症状**（enhancer 靠进程内 `XLua.Runtime.dll` 找 Lua 环境，游戏极早退出时等不到）。
+
+`关键词：["当前状态唯一真源","Latest Release v1.1.0","release id 405355434","exe sha256 03092366","assets 262289985","伪旧版 from-1.1.0","启动提速 19 秒","launch_stage 分步进度","issue 16 已回","issue 17 已关","版本号 1.1.0 用户指定"]`
 
 ### 待办
 
