@@ -4,9 +4,9 @@
 > 目的：让「当时为什么这么改、踩过什么坑」跟着源码一起留在仓库里。
 > 想改内容 → 改记忆库（用记忆工具），再跑一次本脚本；不要直接编辑本文件。
 
-- 生成时间：2026-10-07 00:45:37
+- 生成时间：2026-10-07 11:46:24
 - 来源：`.dsh-meow/memory.db`
-- 条目：573 条（已跳过 archived / 其它项目的条目）
+- 条目：576 条（已跳过 archived / 其它项目的条目）
 
 ---
 
@@ -906,7 +906,7 @@ issue #16（xingluo667，游戏加载过程中闪退）：已追加评论，让�
 
 `关键词：["DLSS5非50系方案", "终末地DX11", "DLSS5-Feeder", "dlss5-feed.addon64", "renodx-dlss5", "LumeniteFX运动矢量", "bridge与feeder分工", "DX11无多帧生成", "Forcing-GfxDevice-Direct3D-11", "DLSS5-Autopilot", "按架构选runtime"]`
 
-## 经验教训（被纠正过的、踩过的坑）（386 条）
+## 经验教训（被纠正过的、踩过的坑）（387 条）
 
 ### XXMI/EFMI 启动终末地是 Endfield.ex…
 *2026-09-27 14:58*
@@ -4440,7 +4440,17 @@ Mod 卡片的「⋯ 更多」在服装页与辅助页各有一套，加动作必
 
 `关键词：["官方矩阵不能当根因", "本机对照推翻结论", "renodx-dlss5 v4.7 × 617.14 实测正常", "count=60出帧正常", "两个neural addon同装才是根因", "判据要等于被观测事实", "nr_ran_ok前置条件", "自我纠正", "先找对照再下结论", "第三方文档不是一手判据"]`
 
-## 事实（细碎的原子信息）（86 条）
+### 【教训·2026-10-07 一天里踩四次的同一个坑：*…
+*2026-10-07 11:15*
+
+【教训·2026-10-07 一天里踩四次的同一个坑：**测试里的"静态判据"必须先去注释与 docstring**】
+现场：我写了几条"某某文案不许再出现"的静态测试，而**实现处的注释/docstring 里为了解释"别这么写"必然引用了那段旧文案** ⇒ 测试自己把自己弄红。一天踩四次：`test_component_toggle_log_labels.py`（注释）、`test_asset_expand_idempotent.py`（注释）、`test_log_wording_no_misleading.py`（先注释、改完又栽在 docstring）。
+**根治办法（已落地）**：判据先过一层 `_code_only()` —— 用 `ast.parse` + 删掉每个作用域开头的字符串表达式（docstring）+ `ast.unparse()` ⇒ 注释天然不在 AST 里、docstring 被剥掉，只剩可执行语句。**别再手写"去掉 `#` 开头的行"**（那只挡得住注释，挡不住 docstring）。
+**同族教训**：本项目已经有 4 处"日志/文案把人带偏"的实例 —— ① `mfg`（DLSS4）的开关日志被写成「第一人称」（害我把"开 DLSS4"读成"第一人称被停用"）；② `DLSS5 注入 开启` 实际写的是 **XXMI 注入库**（ReShade 底座+EFMI，四个功能共用），用户被问「为什么我没开 dlss5 日志也说按 dlss5」；③ `NR 自动开启: 已就位` 其实只是"挂上监视"，真按键在 `poll()` 且有开关判据；④ 同上的注释坑。**定式：日志文案要写清"这是什么机制"，不要用"某个功能名"去称呼共用底座/监视器** —— 日志是排查的第一手材料，名字错了等于用自己的日志把自己带偏，比真 bug 更费时间。
+
+`关键词：["静态判据 注释 docstring","日志文案 误导","DLSS5 注入 其实是注入库","NR 自动开启 已就位","mfg 写成第一人称","ast.unparse 去注释","测试自作自受","排查第一手材料","文案要写机制名","_code_only"]`
+
+## 事实（细碎的原子信息）（88 条）
 
 ### modecontroller：游戏目录 loader_l…
 *2026-09-27 14:58*
@@ -5343,6 +5353,31 @@ DLSS5 feeder 路线 50 系可用：本机 5080/驱动 617.14 实测 renodx-dlss5
 **唯一残余差异**：① **操作系统**（26 个诊断包里唯一一台 Win10，也是唯一 fail-closed）；② 日志层面 `D3D12 NGX hooks installed across **1** module copy(ies)`（他）vs **3** 份（本机，额外 detour 了游戏目录 nvngx_dlss.dll/nvngx_dlssd.dll）。两条都**未证实**。
 
 `关键词：["NR workset pool exhausted", "fail closed", "DLSS5 神经渲染", "一帧不出", "成功NR帧 4", "未匹配NR功能", "Windows 10 19045", "NGX hooks module copy", "queue fence", "诊断包", "P:\\TOOL", "RTX 5080"]`
+
+### 【强对照·2026-10-07 定案】`parseSer…
+*2026-10-07 09:51*
+
+【强对照·2026-10-07 定案】`parseServerManifest` 那 10 条报错 = **游戏自带 Streamline 2.10.3** 的产物；同一台机器上把游戏目录的 Streamline 换成 **2.14.1** 后**报错完全消失**。
+**证据（同机对照，唯一变量 = Streamline）**：本机 09-27 的**每一个**崩溃包（`crash-20260927-*`）里 `Player.log` 都是 `parseServerManifest = 10`（那时游戏目录是自带的 `sl.common.dll 674,432 B`(08-20)、`nvngx_dlssg.dll 7,518,320 B`）；而 2026-10-07 00:03 换成 Streamline 2.14.1（`sl.common.dll 843,392`、`nvngx_dlssg.dll 7,460,976`）之后，00:07 那份 `Player.log` 里 **`parseServerManifest = 0`**。
+**⚠️ 但"报错"与"早退"是两件事**：本机 09-27 带着那 10 条报错**跑到了 837 行**才崩，所以"有报错"不必然早退（不许合并成一句）。
+**issue #16 (`xingluo667`) 现状**：他已于 00:58 换上 **v1.0.29**（exe sha256 `67482ab2c5153748b7573be6fe785297f81ff6aaa300d57ab00f37e1d374b6c4`，与 Release 附件逐字节一致）；v1.0.29 的修复**确实生效**（日志：退役旧 NR、清单剔除退役条目、展开 `renodx-dlss5.addon64`，运行目录 NR 已是 7.0.0-rc8），**但游戏目录仍是自带的 Streamline 2.10.3**（他没装那个组件）⇒ **依旧 10 条报错 + 48 行早退**。
+**他没装 Streamline 的原因**：2026-10-07 起「一键启动」遇到"本地没有"**只报告 `update_available` 不下载**（为避免 263 MB 静默下载把启动拖到 129 秒）⇒ 依赖页手动点才会装。
+
+`关键词：["parseServerManifest","Streamline 2.10.3","Streamline 2.14.1","早退","MMapMemoryBlock","ota.cpp","NGX manifest","issue16","xingluo667","v1.0.29","neural addon","崩溃对照"]`
+
+### 【定案·2026-10-07】「**DLSS4 多帧生成…
+*2026-10-07 11:22*
+
+【定案·2026-10-07】「**DLSS4 多帧生成（MFG Unlock）在终末地上无效**」—— 用户拍板选 B：**默认禁用该开关 + 界面写明原因**。
+**三条互相印证的依据**（缺一条都不敢下这个结论）：
+① **终末地只有 DX11 启动模式**（没有 DX12 模式）。用户原话：「**终末地没有dx12启动模式，但是dx11启动会加载d3d12**」—— DX11 下确实会加载 d3d12（D3D11On12），但"加载了 d3d12" ≠ "游戏用原生 D3D12 跑"，而 addon 要的正是后者（它面板里 `Renderer: Direct3D 11` + 自己写着 `Dynamic MFG additionally requires D3D12`）。⚠️ 我一度提议"换成 `-force-d3d12`"⇒ **作废**（游戏没有那个模式）。
+② **游戏内没有调倍率的接口**（用户原话：「**游戏内没有调倍率的接口**」）⇒ 游戏**从不向 Streamline 提交帧生成请求**。
+③ **addon 侧实测完全就绪**：`rewrote 2 arch gate(s) (0x1b0 -> 0x190)` / `full Blackwell framework kernels applied` / `verified mapped DLSS-G provider candidate version 310.9.1.0` / `observed Streamline DLSS-G wrapper version 2.14.1.0` / `installed 4 hook(s) in sl.interposer.dll`；而 ReShade.log 里 **一次 `Game request observed` 都没有**，面板显示 `MFG: Not observed`、`Frame Generation: Game/provider controlled`（**不是 Active**）、`DLSS-G estimated VRAM: Waiting for DLSS-G options` ⇒ **没有请求可接**。
+**落点**：`deviceinfo.MFG_UNLOCK_DISABLED_FOR_THIS_GAME = True` + `MFG_UNLOCK_DISABLED_REASON`（常量旁注释写清三条依据与复活方式）；`mfg_unlock_supported()` 开头短路返回 `(False, 原因)`，**下面按显卡的原判据（40 系放行 / 50 系"能用但提升不大" / 其余锁）一字未删**；`api._mfg_available()` 透传 ⇒ 前端 `LaunchPage.vue` 的 `locked()` 自然灰掉并显示原因（**不用改前端**）。测试 `tests/test_mfg_unlock_scope.py` 6 条（含**复活路径不许腐烂**：常量翻回 False 时 40/50 系判据照旧生效），反向验证变红。
+**连带作废**：记忆里"40 系现在只有 2x ⇒ 提到 4x 仍有做的必要"—— 游戏既然不提供帧生成，40 系那条线同样无从下手。
+**⚠️ 我在此课题上被用户纠正过两次**：① 先推"服装 Mod（DX11）与帧生成（DX12）互斥"—— 错，D3D11On12 也是 d3d12；② 再推"去掉 `-force-d3d11` 让游戏走 D3D12"—— 错，终末地压根没有 DX12 启动模式。**教训：讲 API 归因前先问"这台机器/这个游戏实际怎么跑的"，别拿"DX11 vs DX12"当互斥条件。**
+
+`关键词：["DLSS4 多帧生成","MFG Unlock","终末地没有帧生成","只有DX11启动模式","Game request observed","Dynamic MFG Unavailable","游戏内没有调倍率接口","D3D11On12","DeviceInfo MFG_UNLOCK_DISABLED","复活的开关","40系 2x 作废"]`
 
 ## 用户偏好与环境（**含个人信息，公开前请自行取舍**）（18 条）
 
