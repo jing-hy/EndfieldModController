@@ -1575,6 +1575,11 @@ def import_bundle(
         f"（随包资产包应含 assets/…；单份运行库 zip 应含 nvngx_dlssnr.dll）")}
 
 
+#: addon 的"停用区"目录名 —— 与 `launcher.ADDON_DISABLED_DIR` **必须同一个值**
+#: （这里不直接 import launcher，避免模块级循环依赖；两处都改才算改）。
+ADDON_DISABLED_DIR = "_disabled"
+
+
 def asset_report(config: AppConfig) -> dict[str, dict[str, Any]]:
     """给依赖页用的状态：内置包是否可用、本地是否已展开、本机在用哪个运行库变体。"""
     report: dict[str, dict[str, Any]] = {}
@@ -1594,11 +1599,26 @@ def asset_report(config: AppConfig) -> dict[str, dict[str, Any]]:
         # 其余是备用候选（它们在 assets 里躺着，需要时才展开）。
         in_use = (not variant) or variant == effective
         present = bool(size_ok and in_use)
+        # ⚠️⚠️ **"已被开关停用" ≠ "还没展开"**（2026-10-07 反馈：依赖页上
+        #    `renodx-mfgunlock.addon64` 每次进游戏后都又变回"待展开"）。
+        #    机制是个死循环：一键启动的 `ensure_all` 按清单把它展开到根目录，
+        #    紧接着 `set_component_addons("mfg", False)`（多帧生成已定案禁用）又把它
+        #    搬进 `_disabled\` —— 而这里的判据**只看根目录**，于是每轮都报"待展开"、
+        #    每轮都白展开一次、日志也跟着吵。自检那边（`initialize._check_mfg_unlock`）
+        #    **同时看 `parked`**，两处判据必须一致。
+        parked_path = config.dlss5_path / ADDON_DISABLED_DIR / install_as
+        parked_ok = (parked_path.is_file()
+                     and (not expected_size
+                          or parked_path.stat().st_size == expected_size))
         packed_bytes = int(entry.get("packed_bytes") or 0)
         if variant and not in_use:
             status = "备用候选"
         elif present:
             status = "已就位"
+        elif parked_ok:
+            # 被开关收进 `_disabled\` —— 这是**正常状态**（用户/程序主动停用），
+            # 不是"没装好"，所以 `needed` 也随之置假，不再每轮白展开一次。
+            status = "已停用"
         elif parts_ok:
             status = "待展开"
         else:
@@ -1610,8 +1630,11 @@ def asset_report(config: AppConfig) -> dict[str, dict[str, Any]]:
             "install_dir": str(config.dlss5_path),
             "present": bool(present),
             "required": bool(in_use),
-            "needed": bool(in_use and not present),
+            # 被停用（`_disabled\` 里有）也算"处理过了"，不该再报 needed —— 否则
+            # 依赖页会一直催着展开，而展开后立刻又被开关搬走（见上面 parked_ok 的说明）。
+            "needed": bool(in_use and not present and not parked_ok),
             "status": status,
+            "parked": bool(parked_ok),
             "enabled": True,
             "version": f"{expected_size / 1048576:.1f} MB",
             "packed": f"{packed_bytes / 1048576:.2f} MB / {len(parts)} 卷" if packed_bytes else "",
