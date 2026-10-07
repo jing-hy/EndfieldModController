@@ -4,13 +4,13 @@
 > 目的：让「当时为什么这么改、踩过什么坑」跟着源码一起留在仓库里。
 > 想改内容 → 改记忆库（用记忆工具），再跑一次本脚本；不要直接编辑本文件。
 
-- 生成时间：2026-10-07 11:46:24
+- 生成时间：2026-10-07 12:20:19
 - 来源：`.dsh-meow/memory.db`
-- 条目：576 条（已跳过 archived / 其它项目的条目）
+- 条目：577 条（已跳过 archived / 其它项目的条目）
 
 ---
 
-## 设计原则 / 行为准则（22 条）
+## 设计原则 / 行为准则（23 条）
 
 ### 用户准则（原话）：「不是，你直接去官网拉」—— **一手…
 *2026-09-27 18:53*
@@ -278,6 +278,15 @@
 **本质**：这是"诊断包必须一次抓齐、不要搞好几轮"的**可执行版本** —— 每发现一个"排查需要但包里没有"的文件，就把采集范围推进一格。
 
 `关键词：["第一轮只看日志包", "未收先改收包范围", "大文件可以节选", "collect_diagnosis_files", "两个打包通道共用", "reshade-keylines", "诊断包一次抓齐", "别翻本地文件", "反馈者机器碰不到"]`
+
+### 【用户准则 · 工作区卫生】用户 2026-10-07 …
+*2026-10-07 12:19*
+
+【用户准则 · 工作区卫生】用户 2026-10-07 原话：「**还有 zmdmod 目录下，有一堆你塞在那里的零时文件，整理一下，以后不要把零时文件直接塞根目录**」，随后追加「**`_` 开头的都是你建的，直接处理掉就行**」。
+**含义与落地**：① **临时/中间产物一律不放在工作区根目录**，放进**专用命名空间子目录**（本次建了 `_tmp\scratch\` 放调试脚本、`_tmp\backups\`、`_tmp\diag\`、`_tmp\issues\`、`_tmp\misc\`、`_tmp\_archive\`）；② 根目录只允许出现"**用户的资产 + 项目仓库 + 功能性工作目录**"三类；③ `_` 前缀 = **我的东西**，用户已授权直接处理，**不必再逐项问**；但"处理掉" = **从根目录清走，不等于删除** —— 只对**确定可再生/已过期**的（如旧的 normify 静态导出、过期版本的 release notes）才删，其余**一律移动到 `_tmp\_archive\`**（可找回）；④ **体积大且可能是用户素材的**（本次 `_park` 14.5 GB，里面是「整合包(防和谐，先保存)…PC端整合包.zip」）**绝不删**，只挪走；⑤ **路径被脚本写死在根目录的功能性目录不许动**（`_snapshot_*` 是 `push.py` 的、`_mcassets` 是测试用本地 GitHub 源）。
+**本次实做**：根目录一次性清走 156 项（124 个调试脚本 + 各类备份/诊断/issue 目录），再归档 4 项（`_park` / `_modtest_settings_backup` / `_reports` / `_video`）、删 1 项过期文件；`D:\zmdmod` 根目录现在只剩用户数据与项目。
+
+`关键词：["临时文件不要塞根目录","工作区卫生","zmdmod 根目录整理","_tmp 命名空间","_archive 归档","下划线开头是我的","只移动不删除","_park 用户素材","_snapshot 路径写死","分工目录"]`
 
 ## 项目记忆（结构 / 决策 / 部署 / 待办）（38 条）
 
@@ -632,20 +641,18 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 `关键词：["变体机制落点", "best_rtx_sm唯一入口", "select_dlssnr_variant", "ensure_dlssnr", "dll_architectures扫fatbin", "dlssnr_variant.json marker", "baseline按变体判防抖", "dlss5:nr_arch自检", "dlss5_gpu_scope_applied迁移", "pack_nvngx_assets变体字段"]`
 
 ### 【modecontroller 当前状态唯一真源】（20…
-*2026-10-06 15:31*
+*2026-10-07 11:51*
 
-【modecontroller 当前状态唯一真源】（2026-10-06 15:31 更新）
-**Latest Release = `v1.0.24`**（2026-10-06T07:23:16Z，release id `404428526`，已转正 `--latest`）。**本地 = `1.0.24`**。main = `ff4d718`（已推）。
-**v1.0.24 内容**：① **Streamline 清理只查了 6 个 NVIDIA 位置里的 1 个** —— v1.0.23 修好了"判据读哪份日志"（反馈者日志里确实出现命中提示），紧接着却是「**没找到可清理的缓存文件**」；根因是诊断采集列了 **6 个候选根**（`%LOCALAPPDATA%\NVIDIA\{Streamline,NGX}`、`%LOCALAPPDATA%\NVIDIA Corporation\NGX`、`%PROGRAMDATA%` 下三个），而清理只写了一个 `%LOCALAPPDATA%\NVIDIA\NGX`。修法：抽出 **`crashwatch.nvidia_config_roots()` 作唯一入口**，采集与清理共用（原则：**"发现的路径"与"动手的路径"只能有一处定义**）。**实测证实**：本机（以及反馈者）的 NGX 配置其实在 **`%PROGRAMDATA%\NVIDIA\NGX`**。② **组件版本表**：`builtin.Poser` 0.5.42 → 0.5.43（被构建闸拦下后更新；⚠️ 键路径是 `builtin.Poser.latest`，别写成顶层 `Poser`）。③ 附件：exe 30,170,853 B / sha256 `0f445fc90859564172d48d1fbae40e52ea6c8febcb365ddeb06b626a9fb18378`；assets 261,970,243 B / sha256 `8a8cd6df20d5ab678c3e8837d100e3ed95d0defa8604ab0c8fd0212474866632`。
-**★ 顺带修掉一个数据安全问题**：`tests/test_streamline_manifest.py` 的 fixture 原来**没打桩 `USERPROFILE`/`PROGRAMDATA`** ⇒ `nvidia_config_roots()` 读到真实路径 ⇒ **测试把开发机真实的 `%PROGRAMDATA%\NVIDIA\NGX\...\nvngx_server_config.txt` 搬成了 `.mc-backup-<时间戳>`**（实测发生两次）。已还原、并让 fixture 统一打桩两处环境变量 + 跑完复检"真实目录没被动过"。**教训：凡涉及"按环境变量枚举真实目录"的函数，测试必须把环境变量一起打桩。**
-**★ 发版脚本 bug 已修**（`scripts/upload_release_assets.py`）：v1.0.24 发版时它报 `找不到 tag v1.0.24 的 Release（含 draft）` ⇒ **附件没上传**（最后手工 `gh release upload` 补的）。根因：`gh release create <tag> --draft` 的 `tag_name` 是 `untagged-<hash>`（tag 到转正才建立），而 `push.py` **只推 main、不推 tag** ⇒ 列表里按 tag 名匹配不上。修法：匹配不上时**若只有一个 draft 就认它**，多个 draft 明确报错不猜。测试 `tests/test_upload_release_assets.py`（4 条）。⚠️ **澄清**：脚本本身是**正确报错中止**的，不是静默继续 —— 是 shell 里用 `;` 串命令才看起来继续跑了。全量 **1029 passed**，已推 main（脚本不进 exe ⇒ 版本号不动）。
-**★ 流程变更**：`scripts/build_release.py` **构建完自动推 main**（`[9/9]` 步，调 `push.py`，`--no-push` 可跳过）—— 用户要求（两台电脑合作）。
-**★ issue 状态**：**#16（xingluo667）**已多轮回复，**最新一条**（[comment 6011486651](https://github.com/jing-hy/EndfieldModController/issues/16#issuecomment-6011486651)）给他一个**只读诊断采集脚本**（纯 ASCII PowerShell，放桌面生成 `collect-result-*.zip`；采 6 个 NVIDIA 根的全部文件+内容预览、游戏目录 NGX/Streamline 版本、Player.log 报错、ReShade 日志、注入库配置；**本机已实跑验证只读**）。他历史上反馈过 v1.0.21/1.0.22/1.0.23 都"还是不行"（每次都发新包）。**#17（Madao553）**回复已发（comment 6009468044）。**两个都未关闭**。
-**★ 其他线索**：采集时发现 `%PROGRAMDATA%\NVIDIA\Streamline\Endfield\<...>\sl-sha-.dmp` —— **5 份 Streamline 自己的崩溃转储**（各约 2.6 MB），Streamline 确实崩过；若 v1.0.24 仍未解决，这是新线索。
-**DLSS4 6 倍课题（用户已澄清）**：他要的是 **DLSS 4.5 在 50 系上的 6x 能力**，而**终末地官方上限就是 4x**；**关键**：**40 系现在只有 2x** ⇒ **"提到 4x"仍有做的必要**。报告 `D:\zmdmod\_video\dlss4_6x\研究报告.md`；4P 视频 `BV1KtJtJ6uEqw`（P3 实为毁灭战士+通用步骤）。官方 per-game 表：`Arknights: Endfield = NV, 4X`。40 系被挡 = **软件白名单**（`nvngx_dlssg.dll` 与 `0x1b0`(Blackwell) 比架构 id），**磁盘改字节会让帧生成消失**（签名校验）⇒ 只能改运行时内存。取证已齐：驱动 **617.14** ✓；终末地自带 **`nvngx_dlssg.dll` = 310.5.2**（在上游白名单 310.1.0~310.9.1 内 ⇒ **不必换游戏目录的库，只需加一个 ReShade addon**）；Streamline **2.10.3**；我们随包 `nvngx_dlss.dll` = **310.7**。用户已定形态：**DLSS5 与 DLSS4 互斥**（不共存）⇒ 正好规避上游"双 addon 同载卡顿"的风险。**下一步待用户拍板是否做最小验证**（把 `renodx-mfgunlock.addon64` 放进 modtest 的 `runtime\dlss5\`，只看 4x 出帧 + DLSS5 是否被搞坏）。
-**待办**：① 等 #16 跑采集脚本回报 ② DLSS4 4x 功能待拍板 ③ 下一版号 `1.0.25-beta`。
+【modecontroller 当前状态唯一真源】（2026-10-07 11:50 更新）
+**Latest Release = `v1.1.0`**（2026-10-07T03:47:53Z，release id `405355434`，`draft=false`/`prerelease=false`，已 `--latest`）。**本地 = `1.1.0`（正式号，不欠号）**。main = `43bbe8b`（已推）。快照 `D:\zmdmod\_snapshot_1.1.0-20261007-114623`。
+**v1.1.0 附件（digest 与本地逐字节一致）**：`EndfieldModController.exe` 32,027,643 B / sha256 `03092366c974137fbdc1c8cc0d61bae4f4bac68618c66a29dc8327330854af1d`；`assets-bundle.zip` 262,289,985 B / sha256 `adea0351d395c6bc7bad6a9fa980cfb7f683bd68ac2c07ab4c4b431b69056239`。**伪旧版**（仅本地留档、不上传）：`EndfieldModController-0.1.9-from-1.1.0.exe` 32,027,647 B（dist + 根目录各一份；用 `build_release.py --with-fake-old` 或直接调 `build_fake_old()` 构建，约 19 秒，构完自动把 version.py 改回）。
+**⚠️ 版本号由用户指定为 1.1.0**（不是规则算出来的 1.0.30）⇒ `build_release.py` 会打印一条 `[版本号] WARN 本地 1.1.0 不是「v1.0.29 + 1」` —— **那是预期的、以用户指令为准**，不是错误。
+**v1.1.0 内容（自 v1.0.29 起 7 个提交）**：① **启动提速 ~19s → ~0.1s** —— `runtime_assets.ensure_all` 里 `force=force or bool(fixed_items)` 恒为真 ⇒ 每轮强制重解压 165 MB（`fixed_items` = 清单里两条 `nvngx_dlssnr*`，恒非空），而同一次启动最多调用 4 轮（`ensure_injections` → `integrity.repair` → `initialize` → `launch`）；实测三轮 4.80/4.67/4.65s → 0.09/0/0。② **启动分步进度**：后端 `launcher.set_launch_stage()` 在 5 个节点写文案，前端 `LaunchPage.vue` 显示在按钮下方（复用现成轮询，未加通道）。③ **手动诊断包补设备/显卡/驱动段**（原来只有崩溃包那份带）。④ **游戏自带 Streamline 过旧时自动装随包 2.14.1**（判据 `crashwatch.streamline_manifest_broken()`；判据未命中时仍不下载）。⑤ **三处误导性日志文案**。⑥ **DLSS4 多帧生成在本作禁用 + 写明原因**（见另一条 fact `0muxjl8j`）。
+**★ 发布流程新增一步**：`python scripts/build_release.py` **不含伪旧版**（要 `--with-fake-old`）；构建完会自动推 main（`[9/9]`，`--no-push` 可跳过）；`prepare_release.py` → `gh release create --draft` → `upload_release_assets.py --tag`（本机 DoH 直连上传，262 MB 约 46 秒）→ `gh release edit --draft=false --latest` → **按 release id 核对 digest**（draft 阶段按 tag 查 404）。
+**★ issue 状态**：**#16（xingluo667）OPEN** —— 2026-10-07 已回（[comment 6030530865](https://github.com/jing-hy/EndfieldModController/issues/16#issuecomment-6030530865)）：承认上次"v1.0.29 已修好"不准确；说清 10 条 `parseServerManifest` = 游戏自带 Streamline 2.10.3 的产物、**不是**闪退原因；新增驱动对照线索（596.49 崩 / 616.92 能进 / 他的 573.01 最旧）建议更新驱动；**请他改用「一键启动」启动以拿到游戏退出码**。**#17（Madao553）CLOSED** —— 同日回复"修复了几个相似问题，应该可以使用了"后按用户指示关闭（comment 6030531099）。
+**待办**：① 等 #16 回报退出码 ② DLSS4 那条线已作废（游戏不提供帧生成）③ 下一版号规则：本地 = 正式号，下次动实质改动再升。
 
-`关键词：["当前状态唯一真源","Latest v1.0.24","nvidia_config_roots唯一入口","PROGRAMDATA里的NGX","测试污染真实NVIDIA配置","发版脚本draft兜底","构建后自动推main","issue16采集脚本已给","sl-sha-dmp崩溃转储","DLSS4 40系2x提4x","DLSS5与DLSS4互斥","main ff4d718"]`
+`关键词：["当前状态唯一真源","Latest Release v1.1.0","release id 405355434","exe sha256 03092366","assets 262289985","伪旧版 from-1.1.0","启动提速 19 秒","launch_stage 分步进度","issue 16 已回","issue 17 已关","版本号 1.1.0 用户指定"]`
 
 ### 待办
 
