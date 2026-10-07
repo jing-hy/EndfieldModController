@@ -167,6 +167,11 @@ class EndfieldModControllerApi:
         # 换掉 `_ui_ready` 事件（正在等的预热线程永远等不到），并**再起一个预热线程**
         # （重复全盘扫描、重复拉公告/角色表）。现在归位：setter 只赋值。
         self._mods_cache = None
+        # ★ 预热线程与首屏 `get_state()` 会**同时**想要这份扫描结果（2026-10-07）⇒ 加一把锁：
+        #   没有它，两边各扫一遍（首屏那遍等于白等），有它则后来者等先来的那次结果。
+        self._mods_lock = threading.RLock()
+        # 缓存代次：`_invalidate_mods()` 一加，正在进行的扫描结果就作废（见 `_mods`）
+        self._mods_gen = 0
         self._dep_task: dict[str, Any] | None = None
         # Mod 下载（粘贴网址 → 并行下载 → 自动解压入库）：任务表 + 一把入库锁
         # （下载并行、解压入库串行 —— 用户 2026-10-02 要求"并行多线程下载"）
@@ -429,6 +434,28 @@ class EndfieldModControllerApi:
 
     def _warm_up(self) -> None:
         """后台预热：全盘探测 + 清理上次自更新残留。**别把重活挪回 __init__。**"""
+        # ★★ **抢在"界面就绪"之前先把 Mod 库扫一遍**（2026-10-07 用户实测反馈：
+        #    「打开管理器后，Mod 库列表要等一会才显示出来」）。
+        #    本函数其余部分都要先等 `ui_ready`（最多 15 秒）才动，而这一段**不等** ——
+        #    它与"创建窗口 + WebView2 加载前端 + 前端 JS 起来"并行跑（本机实测扫一遍
+        #    13 GB / 36 个 Mod 约 0.25 秒，但大盘库是秒级），等首屏那次 `get_state()`
+        #    进来时 `_mods_cache` 已经填好 ⇒ 列表直接出来，不用再等。
+        #    只读扫描，失败静默；与首屏同时想要结果时由 `_mods_lock` 串起来。
+        #    ⚠️ **整段零写盘**（2026-10-07）：预热只是"省时间"，失败也无害（首屏那次
+        #    `get_state()` 会自己扫一遍，真要出问题会在那里暴露）。而写日志会打乱
+        #    "清空 launch.log"这类动作的时序 —— 构建连挂三轮的 `test_launch_log_read_and_clear`
+        #    抓到的就是"清完立刻又被写回一行"。
+        try:
+            _started = time.perf_counter()
+            self._mods()
+            _spent = time.perf_counter() - _started
+            if _spent >= 5.0:
+                # 只有**特别慢**才留痕（这时"首屏为什么慢"需要解释）；正常不写、不刷日志。
+                # 注意：这里仍走 `_append_log`，但 5 秒阈值意味着测试与日常都不会触发。
+                launcher._append_log(
+                    self.config, f"预热: Mod 库扫描用了 {_spent:.1f} 秒")
+        except Exception:  # noqa: BLE001 - 预热失败静默（见上）
+            pass
         self._ui_ready.wait(timeout=15)
         try:
             if self.config.autofill(deep=True):
@@ -551,10 +578,40 @@ class EndfieldModControllerApi:
     # ------------------------------------------------------------------
     # helpers
     # ------------------------------------------------------------------
+    def _mods_generation(self) -> int:
+        """Mod 列表缓存的代次（见 `_mods`）。
+
+        ⚠️ 用 `getattr` 兜底：本项目多处测试与工具会**绕开 `__init__`** 造轻量实例
+        （只塞 `_mods_cache` / `_mods_lock` 那几项），直接访问会 `AttributeError`
+        —— 2026-10-07 构建时就是被 `test_hot_reload_semantics` 这批拦下来的。
+        """
+        return getattr(self, "_mods_gen", 0)
+
+    def _bump_mods_generation(self) -> int:
+        self._mods_gen = self._mods_generation() + 1
+        return self._mods_gen
+
     def _mods(self):
-        if self._mods_cache is None:
-            self._mods_cache = core.scan_library(self.config.library_path, self.config.staging_mods_path)
-        return self._mods_cache
+        """Mod 列表（带缓存）。**并发安全 + 不许写回过期结果**。
+
+        预热线程会在"界面就绪之前"先扫一次（用户要求首屏直接出列表），于是会有
+        "预热正在扫、同时有人 invalidate"的窗口：若不管它，预热那次扫出来的**旧列表**
+        会盖在 invalidate 之后 ⇒ 用户看到的是加 Mod 之前的状态。
+        代次号（`_mods_gen`）就是干这个的：扫描期间代次变了 ⇒ 结果作废、重扫。
+        """
+        while True:
+            if self._mods_cache is not None:
+                return self._mods_cache
+            with self._mods_lock:
+                if self._mods_cache is not None:
+                    return self._mods_cache
+                generation = self._mods_generation()
+                result = core.scan_library(
+                    self.config.library_path, self.config.staging_mods_path)
+                if generation != self._mods_generation():
+                    continue          # 扫描期间被 invalidate ⇒ 这份结果已经过期，重来
+                self._mods_cache = result
+                return result
 
     def _invalidate_mods(self) -> None:
         """只让 Mod 列表缓存失效。
@@ -566,6 +623,7 @@ class EndfieldModControllerApi:
         从头再来"。下载任务的清理交给它自己（worker 的 finally）。
         """
         self._mods_cache = None
+        self._bump_mods_generation()   # 让"正在进行的那次扫描"的结果作废（见 `_mods`）
         self._modfix_cache = {}
 
     def _enrich_modfix_state(self, payload: list[dict[str, Any]], mods: list[Any]) -> None:
@@ -3081,7 +3139,12 @@ class EndfieldModControllerApi:
             return {"ok": False, "message": f"先从勾选里去掉这一步失败了，没有删除任何东西：{exc}"}
 
         try:
-            shutil.rmtree(top)
+            # ★ **与后台预热扫描互斥**（2026-10-07）：预热会在"界面就绪之前"扫库，
+            #   而扫描会打开每个 Mod 的文件；Windows 上"文件正被读"时重命名/删除目录
+            #   会偶发失败（构建时连跑三轮、每轮挂在不同的用例上就是这个）。
+            #   锁是 RLock（`_mods()` 内部也会拿它）。
+            with self._mods_lock:
+                shutil.rmtree(top)
         except OSError as exc:
             return {"ok": False, "message": f"删除失败: {exc}"}
 
@@ -3129,23 +3192,30 @@ class EndfieldModControllerApi:
         # ⚠️ **把 id 钉进 sidecar**：id 由 `stable_id(路径, 名字)` 算出，名字一变 id 就会变
         # —— 而"勾选状态"存的是 id，一变就等于把用户已经选好的 Mod 丢了。
         payload.setdefault("id", mod.id)
-        try:
-            meta_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        except OSError as exc:
-            return {"ok": False, "message": f"写 mod.meta.json 失败: {exc}"}
-
-        try:
-            top.rename(target)
-        except OSError as exc:
-            # 文件夹没改成 ⇒ 把 sidecar 恢复原样，别留下"名字和文件夹对不上"的现场
+        # ★ **写 sidecar + 改目录名这两步与后台预热扫描互斥**（2026-10-07）：
+        #   扫描正在读这个 Mod 的 `mod.meta.json` 时改名/改文件，Windows 上会偶发失败
+        #   （构建时连跑三轮、每轮挂在不同的用例上）。锁是 RLock。
+        # ★ **"写 sidecar + 改目录名"是一个不可分割的库变更**，整段与后台预热扫描互斥
+        #   （2026-10-07）：扫描会打开这个 Mod 的文件，而 Windows 上"文件正被读"时改名会
+        #   偶发失败（构建连挂三轮、每轮挂在不同用例上就是这个）。锁是 RLock。
+        with self._mods_lock:
             try:
-                if before is None:
-                    meta_path.unlink(missing_ok=True)
-                else:
-                    meta_path.write_text(before, encoding="utf-8")
-            except OSError:
-                pass
-            return {"ok": False, "message": f"改名失败（已还原）: {exc}"}
+                meta_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2),
+                                     encoding="utf-8")
+            except OSError as exc:
+                return {"ok": False, "message": f"写 mod.meta.json 失败: {exc}"}
+            try:
+                top.rename(target)
+            except OSError as exc:
+                # 文件夹没改成 ⇒ 把 sidecar 恢复原样，别留下"名字和文件夹对不上"的现场
+                try:
+                    if before is None:
+                        meta_path.unlink(missing_ok=True)
+                    else:
+                        meta_path.write_text(before, encoding="utf-8")
+                except OSError:
+                    pass
+                return {"ok": False, "message": f"改名失败（已还原）: {exc}"}
 
         self._invalidate_mods()
         launcher._append_log(self.config, f"重命名 Mod: {top.name} → {new}")

@@ -44,6 +44,11 @@ class ModBackupTests(unittest.TestCase):
         (target / "Textures").mkdir(parents=True, exist_ok=True)
         (target / "mod.ini").write_text(MOD_INI, encoding="utf-8")
         (target / "Textures" / "skin.dds").write_bytes(b"D" * extra_bytes)
+        # ⚠️ **改了库就要让缓存失效**（2026-10-07）：预热线程现在会在"界面就绪之前"
+        #    先扫一次库（用户要求首屏直接出列表），所以这里若照旧不 invalidate，
+        #    备份看到的还是**加 Mod 之前**那份列表。真实路径同样会失效
+        #    （导入/收编/确认归属都走 `_invalidate_mods()`，用户手放则点「重新扫描」）。
+        self.api._invalidate_mods()
         return target
 
     def test_new_mod_is_copied_into_backup_dir(self) -> None:
