@@ -268,6 +268,31 @@ def rtx_cards(adapters: list[dict[str, Any]]) -> list[tuple[str, int]]:
     return sorted(cards, key=lambda item: item[1])
 
 
+# ★★ 「DLSS4 多帧生成」在**本作**上无效 —— 2026-10-07 用户定案，选了"默认禁用 + 写明原因"。
+#
+# **定案依据（三条互相印证，缺一条都不敢下这个结论）**：
+#   ① 终末地**只有 DX11 启动模式**（没有 DX12 模式；DX11 下虽然会加载 d3d12 —— D3D11On12，
+#      但那不等于"游戏用原生 D3D12 跑"，而 addon 要的正是后者）；
+#   ② **游戏内没有调倍率的接口**（用户原话）⇒ 游戏**从不向 Streamline 提交帧生成请求**；
+#   ③ addon 侧实测**完全就绪**：`rewrote 2 arch gate(s) (0x1b0 -> 0x190)`、
+#      `full Blackwell framework kernels applied`、`verified mapped DLSS-G provider candidate
+#      version 310.9.1.0`、`observed Streamline DLSS-G wrapper version 2.14.1.0` ——
+#      而 ReShade 日志里 **一次 `Game request observed` 都没有**，面板 `MFG: Not observed`、
+#      `Frame Generation: Game/provider controlled`（不是 `Active`）⇒ **没有请求可接**。
+#
+# ⇒ 这个开关在本作上属于"看起来能用、实际永远没效果"，正是用户最反感的那种形态
+#   （「那些滑块要真的有用，不要就做表面功夫」）⇒ **默认禁用，并把原因写在界面上**。
+#
+# ⚠️ **复活方式**：以后若终末地加入帧生成，把下面这个常量改回 `False` 即可 ——
+#    原有的按显卡判据（40 系放行 / 50 系"能用但提升不大" / 其余锁）**原样保留、一字未删**，
+#    改回后立刻恢复原行为（`tests/test_mfg_unlock_scope.py` 钉住了这条路径没有腐烂）。
+MFG_UNLOCK_DISABLED_FOR_THIS_GAME = True
+MFG_UNLOCK_DISABLED_REASON = (
+    "终末地游戏内没有帧生成接口（它只有 DX11 启动模式），所以这个解锁在本作不会生效 —— "
+    "程序与驱动这一侧都正常，是游戏本身不提供帧生成。"
+)
+
+
 def mfg_unlock_supported(refresh: bool = False) -> tuple[bool, str]:
     """这台机器能不能用「**DLSS4 多帧生成解锁**」（**只放 40 系**）。
 
@@ -280,7 +305,12 @@ def mfg_unlock_supported(refresh: bool = False) -> tuple[bool, str]:
       * **30/20 系、GTX、A 卡、核显 ⇒ 锁** —— 连 Ada 的插值内核都没有，解锁也没意义。
 
     返回 `(能用吗, 给用户看的一句话)`。多卡机器取"**最高代次**"（与 `dlss5_supported` 同一口径）。
+
+    ⚠️ **本作当前恒返回不可用**（见文件上方 `MFG_UNLOCK_DISABLED_FOR_THIS_GAME` 的三条定案依据）。
+    下面那套按显卡的判据**完整保留**，`MFG_UNLOCK_DISABLED_FOR_THIS_GAME = False` 即恢复。
     """
+    if MFG_UNLOCK_DISABLED_FOR_THIS_GAME:
+        return False, MFG_UNLOCK_DISABLED_REASON
     try:
         info = collect(refresh=refresh)
     except Exception as exc:  # noqa: BLE001
