@@ -101,14 +101,27 @@ def _process_state(pid: int | None) -> dict[str, Any]:
         return {"pid": int(pid), "error": str(exc)}
     if not entry:
         return {"pid": int(pid), "alive": False}
-    modules = [os.path.basename(path) for path in (entry.get("modules") or [])]
+    raw_modules = list(entry.get("modules") or [])
+    modules = [os.path.basename(path) for path in raw_modules]
     names = {name.lower() for name in modules}
+    # ★★ **同名 loader 进了两份**（2026-10-07，lzh18 现场）：进程里同时出现
+    #    `…\library\d3d11.dll` 与 `…\XXMI\EFMI\d3d11.dll` —— 两个 D3D11 loader 抢 hook，
+    #    游戏在 `GfxDevice: creating device client` 阶段崩（0xC0000005，故障模块 ACE-Base64.dll）。
+    #    光看"该进的两条在不在"是**看不出来**的（都在），必须按**路径**去重计数。
+    dupes: dict[str, list[str]] = {}
+    for path in raw_modules:
+        name = os.path.basename(path).lower()
+        if name in ("d3d11.dll", "d3d12.dll", "dxgi.dll"):
+            dupes.setdefault(name, []).append(path)
+    duplicate_loaders = {name: paths for name, paths in dupes.items() if len(paths) > 1}
     return {
         "pid": int(pid),
         "alive": True,
         "module_count": entry.get("module_count"),
         "third_party_count": entry.get("third_party_count"),
         "modules": modules,
+        "third_party_modules": raw_modules,
+        "duplicate_loaders": duplicate_loaders,
         "expect_missing": [name for name in _EXPECT_IN_PROCESS if name.lower() not in names],
     }
 
@@ -188,6 +201,8 @@ def _one_line(entry: dict[str, Any]) -> str:
         parts.append(f"进程 pid={process.get('pid')} 第三方模块 {process.get('third_party_count')} 个")
         missing = process.get("expect_missing") or []
         parts.append("**缺 " + "、".join(missing) + "**" if missing else "该进的两条都在")
+        for name, paths in (process.get("duplicate_loaders") or {}).items():
+            parts.append(f"**{name} 进了 {len(paths)} 份（两个 loader 会撞）**")
     elif process.get("error"):
         parts.append(f"进程采样失败: {process['error']}")
     injections = entry.get("game_injections") or {}
@@ -246,6 +261,12 @@ def render(entries: list[dict[str, Any]] | None = None, *, config: Any = None) -
             missing = process.get("expect_missing") or []
             lines.append("        ⚠ 该进进程却没进的: " + "、".join(missing) if missing
                          else "        ✓ 该进进程的两条（d3d12.dll / d3d11.dll）都在")
+            # ★ 同名 loader 进了两份：这是"两条都在"却依然起不来的典型（2026-10-07 lzh18）
+            for name, paths in (process.get("duplicate_loaders") or {}).items():
+                lines.append(f"        ⚠⚠ 进程里有 {len(paths)} 份不同路径的 {name} —— "
+                             "多个 loader 抢同一套 hook，游戏会在创建 D3D11 设备时崩：")
+                for path in paths:
+                    lines.append(f"             {path}")
         elif process.get("error"):
             lines.append(f"      进程采样失败: {process['error']}")
         elif process:

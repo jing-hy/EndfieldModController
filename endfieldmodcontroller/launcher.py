@@ -1395,6 +1395,209 @@ def component_addon_status(config: AppConfig) -> dict[str, Any]:
     return {name: probe(globs) for name, globs in COMPONENT_ADDON_GLOBS.items()}
 
 
+def xxmi_importer_folder(config: AppConfig) -> dict[str, Any]:
+    """XXMI 配置里「当前生效那个 importer 的运行目录」——原值 + 解析后的绝对路径。
+
+    ⚠️ 这个字段**决定 XXMI 自己去注入哪个 `d3d11.dll`**：它把
+    `<importer_folder>\\d3d11.dll` 当 EFMI loader 注入，并在这个目录里找/写 `d3dx.ini`。
+    我们以往只关心"我们往注入库里列哪一份"，没管它 —— 于是出现过
+    「XXMI 注入库里的那份／它自己那份」**不是同一个文件**的现场（见
+    `ensure_efmi_importer_folder()`），那也是两份 loader 同时进进程的来源。
+    """
+    launcher = config.xxmi_launcher_path
+    state: dict[str, Any] = {
+        "raw": "",
+        "path": None,
+        "config_path": None,
+        "active": "EFMI",
+        "root": None,
+        "in_xxmi_tree": False,
+        "has_loader": False,
+        "has_d3dx_ini": False,
+    }
+    if launcher is None:
+        return state
+    launcher = Path(launcher)
+    root = launcher.parent.parent.parent
+    state["root"] = root
+    try:
+        config_path = reshade_integration.xxmi_config_path(launcher)
+    except Exception:  # noqa: BLE001
+        config_path = None
+    if config_path is None or not Path(config_path).is_file():
+        return state
+    state["config_path"] = Path(config_path)
+    try:
+        data = json.loads(Path(config_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return state
+    importers = data.get("Importers") or {}
+    active = str((data.get("Launcher") or {}).get("active_importer") or "EFMI")
+    state["active"] = active
+    block = importers.get(active) or importers.get("EFMI") or {}
+    raw = str((block.get("Importer") or {}).get("importer_folder") or "")
+    state["raw"] = raw
+    if not raw.strip():
+        # 字段为空 = 用 XXMI 的默认布局（`<XXMI 根>\\<IMPORTER>`）
+        folder = root / active
+    else:
+        folder = Path(raw.strip().replace("/", "\\"))
+        if not folder.is_absolute():
+            folder = root / folder
+    state["path"] = folder
+    state["has_loader"] = (folder / "d3d11.dll").is_file()
+    state["has_d3dx_ini"] = (folder / "d3dx.ini").is_file()
+    try:
+        state["in_xxmi_tree"] = folder.resolve().is_relative_to(root.resolve())
+    except OSError:
+        state["in_xxmi_tree"] = False
+    return state
+
+
+def _efmi_folder_is_sane(folder: Path, root: Path) -> bool:
+    """这个目录像不像 EFMI 的运行目录：存在 + 在**这个 XXMI 自己的树内** + 有 `d3d11.dll`。
+
+    不要求 `d3dx.ini` 存在：内置 XXMI 首次运行时 loader 还没被部署到 `EFMI\\`，
+    `d3dx.ini` 也是 XXMI 启动那一下才铺的 —— 拿它当硬判据会把正常环境判成坏的
+    （2026-10-06 实测栽过一次）。
+    """
+    try:
+        if not folder.is_dir():
+            return False
+        if not folder.resolve().is_relative_to(root.resolve()):
+            return False
+    except OSError:
+        return False
+    return (folder / "d3d11.dll").is_file()
+
+
+def xxmi_foreign_loader(config: AppConfig) -> Path | None:
+    """XXMI **自己会去注入**、但落在这个 XXMI 目录树之外的那份 `d3d11.dll`（没有则 None）。
+
+    用来回答一个要命的问题：「我们往注入库里列的那条，和 XXMI 自己那条，是不是同一个文件？」
+    现场（2026-10-07，反馈者 `C:\\Users\\lzh18`）`importer_folder` 被指到 Mod 库
+    `C:/Users/lzh18/Downloads/library` ⇒ XXMI 注入 `…\\library\\d3d11.dll`，而注入库那边
+    列的是 `…\\XXMI\\EFMI\\d3d11.dll` ⇒ **两份不同的 D3D11 loader 同时进进程**。
+
+    ⚠️ **判据不看"那个文件现在在不在"**：XXMI 会把自带那份**部署到它认的目录里**再注入，
+    所以"字段指向树外"本身就已经意味着"会有另一份"。字段为空（= 用 XXMI 默认布局
+    `<根>\\<IMPORTER>`）不算。
+    """
+    state = xxmi_importer_folder(config)
+    folder = state.get("path")
+    root = state.get("root")
+    if folder is None or root is None:
+        return None
+    if not str(state.get("raw") or "").strip():
+        return None                     # 空值 = XXMI 的默认布局，落在树内
+    if state.get("in_xxmi_tree"):
+        return None
+    return Path(folder) / "d3d11.dll"
+
+
+def ensure_efmi_importer_folder(config: AppConfig, *,
+                                log: Callable[[str], None] | None = None) -> dict[str, Any]:
+    """把 XXMI 的 `importer_folder` 纠正成**真正的 EFMI 运行目录**（不对就自动改）。
+
+    **现场（2026-10-07，反馈者 `C:\\Users\\lzh18`，诊断包 `diagnostics-20261007-124733`）**：
+      * 配置里 `Importers.EFMI.Importer.importer_folder = 'C:/Users/lzh18/Downloads/library'`
+        —— 被指到了**用户的 Mod 库**（那个目录里有某个 Mod 自带的同名 `d3d11.dll`）；
+      * XXMI 于是把 `…\\library\\d3d11.dll` 当 EFMI loader 注入，并在库里找 `d3dx.ini`
+        （它自己的日志：`缺少关键文件：d3dx.ini！文件 '…\\library\\d3dx.ini' 不存在！`）；
+      * 注入库那边为了"顺序对"又列了 `…\\runtime\\builtin\\XXMI\\EFMI\\d3d11.dll`
+        ⇒ 进程里**同时进了两份 d3d11 loader**
+        （WER：`LoadedModule[16]=…\\library\\d3d11.dll`、`[61]=…\\XXMI\\EFMI\\d3d11.dll`）；
+      * `Player.log` 走到 `GfxDevice: creating device client` 就 `Crash!!!`，
+        `exit_code=0xC0000005`、故障模块 `ACE-Base64.dll`，游戏活 24~39 秒
+        ⇒ XXMI 等不到窗口，弹「EFMI 加载失败：无法检测到游戏进程 Endfield.exe 的窗口」。
+      * **前两次修复都没解决它**：v1.0.10（注入顺序）、v1.0.29（不再列库里那份 loader）
+        修的都是"**我们列哪一份**"，而 XXMI 自己那份一直照旧被注入 ——
+        从"单份假 loader（`0xC0000135`）"变成"**双份 loader（`0xC0000005`）**"。
+
+    ⇒ 正本清源：**把这个字段改回这个 XXMI 自己的 importer 目录**（内置实测
+    `…\\runtime\\builtin\\XXMI\\EFMI`）。它改对之后，`active_efmi_loader()` 解析出来的
+    就是同一个文件，XXMI 去重 ⇒ 进程里只有一份 loader。
+
+    **只动 XXMI 自己的配置**（先备份、可回滚），**不碰用户的 Mod 库**（红线：任何情况下不删/
+    不移库里的东西）；写绝对路径（XXMI 现在读的就是绝对值，已证明它能吃）。
+    """
+    state = xxmi_importer_folder(config)
+    result: dict[str, Any] = {
+        "ok": True,
+        "changed": False,
+        "message": "",
+        "before": state.get("raw") or "",
+        "after": state.get("raw") or "",
+    }
+    config_path = state.get("config_path")
+    root = state.get("root")
+    folder = state.get("path")
+    if config_path is None or root is None or folder is None:
+        # 配置还不存在（XXMI 首次运行前）⇒ **不是错误**：`ensure_injections` 会先尝试
+        # `bootstrap_xxmi_config()` 把它拉起来，这一轮没有可判的东西而已。
+        result["message"] = ""
+        return result
+    root = Path(root)
+    folder = Path(folder)
+    target = config.efmi_dir or (root / str(state.get("active") or "EFMI"))
+    # ① 已经指向正确目录（或这个目录本身合法）⇒ 什么都不动
+    try:
+        same_target = folder.resolve() == Path(target).resolve()
+    except OSError:
+        same_target = False
+    if same_target or _efmi_folder_is_sane(folder, root):
+        result["after"] = result["before"]
+        return result
+    # ② 需要纠正 —— 目标目录里必须真有 loader，否则改过去只会更糟
+    wanted = Path(target) / "d3d11.dll"
+    if not wanted.is_file():
+        result["ok"] = False
+        result["message"] = (f"XXMI 的 EFMI 目录被指向了 {folder}（不是这个 XXMI 自己的目录），"
+                             f"但正确位置 {wanted} 里没有 loader，暂时没法自动改回来")
+        _append_log(config, "注入自检: " + result["message"])
+        if log:
+            log(result["message"])
+        return result
+    new_value = str(Path(target)).replace("\\", "/")
+    if new_value == result["before"]:
+        result["after"] = new_value
+        return result
+    try:
+        data = json.loads(Path(config_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        result["ok"] = False
+        result["message"] = f"XXMI 配置文件读不出来，没法自动改回 EFMI 目录: {exc}"
+        _append_log(config, "注入自检: " + result["message"])
+        return result
+    importers = data.setdefault("Importers", {})
+    active = str(state.get("active") or "EFMI")
+    block = importers.setdefault(active if active in importers else "EFMI", {})
+    importer = block.setdefault("Importer", {})
+    importer["importer_folder"] = new_value
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    backup = Path(config_path).with_name(f"{Path(config_path).name}.mc-before-importer-folder-{stamp}.bak")
+    try:
+        shutil.copy2(config_path, backup)
+        Path(config_path).write_text(json.dumps(data, ensure_ascii=False, indent=4), encoding="utf-8")
+    except OSError as exc:
+        result["ok"] = False
+        result["message"] = f"写入 XXMI 配置失败（{exc}）—— EFMI 目录仍是 {folder}"
+        _append_log(config, "注入自检: " + result["message"])
+        return result
+    result["changed"] = True
+    result["after"] = new_value
+    result["backup"] = str(backup)
+    result["message"] = (
+        f"已把 XXMI 的 EFMI 运行目录改回这个 XXMI 自己的那份：'{result['before']}' → '{new_value}'"
+        f"（原值指向别处，XXMI 会去那里找 d3dx.ini、并把那里的同名 d3d11.dll 当 loader 注入，"
+        f"与我们注入库里的那份撞成两个 loader ⇒ 游戏起不来；原配置已备份到 {backup.name}）"
+    )
+    _append_log(config, "注入自检: " + result["message"])
+    if log:
+        log(result["message"])
+    return result
+
+
 def active_efmi_loader(config: AppConfig) -> Path | None:
     """**当前生效那个 XXMI 自己的 EFMI loader（`d3d11.dll`）**在哪。
 
@@ -1532,7 +1735,24 @@ def dlss5_injection_targets(config: AppConfig) -> list[str]:
     #    它排在上面那条 `d3d12.dll` **之后**，这正是顺序要求（ReShade 必须先于 EFMI 进进程）。
     if bool(getattr(config, "extra_libraries_include_efmi_dll", True)):
         _efmi = active_efmi_loader(config)
-        if _efmi is not None and _efmi.is_file():
+        # ★★ **先看 XXMI 自己会不会注入另一份**（2026-10-07，lzh18 现场的第二层）：
+        #    `importer_folder` 一旦指向这个 XXMI 之外（实测是用户的 Mod 库），XXMI 就会去注入
+        #    那个目录里的 `d3d11.dll`；而 `active_efmi_loader()` 会（正确地）跳过那份、
+        #    回退到 `…\XXMI\EFMI\d3d11.dll` —— 两条**不同路径**的文件 ⇒ XXMI 去重不掉
+        #    ⇒ 进程里两份 D3D11 loader ⇒ 游戏在 `GfxDevice: creating device client` 阶段崩
+        #    （`0xC0000005`）。`ensure_efmi_importer_folder()` 会去把配置改回来；配置改不动时
+        #    **宁可少列一条**，也不要让两份 loader 撞在一起。
+        _foreign = xxmi_foreign_loader(config)
+        if _foreign is not None:
+            _append_log(
+                config,
+                f"注入自检: 不再叠加第二条 loader —— XXMI 自己会注入 {_foreign}"
+                f"（它在这个 XXMI 的目录之外），与注入库准备列的 {_efmi} 不是同一份；"
+                "两份 d3d11 loader 同时进进程会让游戏在创建 D3D11 设备时崩（0xC0000005）。"
+                "已尝试把 XXMI 的 EFMI 运行目录改回 …\\XXMI\\EFMI，"
+                "若这条日志反复出现说明那个配置文件改不动（检查只读/占用）"
+            )
+        elif _efmi is not None and _efmi.is_file():
             targets.append(str(_efmi))
     # 乳摇：可选用「注入 sbm.dll」的方式（config.secondary_motion_dll 指向短路径下的
     # sbm.dll）。这样游戏目录不用替换 d3dcompiler_47.dll / vulkan-1.dll，
@@ -1598,6 +1818,17 @@ def configure_dlss5_injection(config: AppConfig, enabled: bool = True) -> dict[s
     config_path = reshade_integration.xxmi_config_path(launcher)
     if config_path is None:
         raise LaunchError("找不到 XXMI Launcher Config.json")
+    # ★★ **先把 `importer_folder` 纠正好，再重新读配置**（2026-10-07，lzh18 现场）。
+    #    顺序绝不能反：下面写 `extra_libraries` 用的是**手上这份 JSON 副本**，
+    #    若"先读后纠正"，纠正结果会被这份旧副本盖回去（项目里已经栽过一次
+    #    "后写覆盖先写" —— `Security.user_signature` 就是这么被盖回空值的）。
+    folder_state: dict[str, Any] = {}
+    try:
+        folder_state = ensure_efmi_importer_folder(config)
+    except Exception as exc:  # noqa: BLE001 - 纠正失败不能让整条启动挂掉
+        folder_state = {"ok": False, "changed": False,
+                        "message": f"检查 XXMI 的 EFMI 运行目录失败: {exc}"}
+        _append_log(config, "注入自检: " + str(folder_state["message"]))
     data = json.loads(config_path.read_text(encoding="utf-8"))
     importer = data.setdefault("Importers", {}).setdefault("EFMI", {}).setdefault("Importer", {})
     backup = config_path.with_suffix(config_path.suffix + ".mc.bak")
@@ -1633,6 +1864,7 @@ def configure_dlss5_injection(config: AppConfig, enabled: bool = True) -> dict[s
         "config_path": str(config_path),
         "backup": str(backup),
         "extra_libraries": targets,
+        "importer_folder": folder_state,
     }
 
 
@@ -1905,13 +2137,22 @@ def ensure_injections(config: AppConfig) -> dict[str, Any]:
     if config.dlss5_injection:
         try:
             injection = configure_dlss5_injection(config, enabled=True)
+            # ★ 纠正 `importer_folder` 的结果要**报出来**（自检里是一条"已修好"，
+            #   不是"请你自己去改"）：它直接决定 XXMI 去注入哪份 loader。
+            folder_state = injection.get("importer_folder") or {}
+            if folder_state.get("changed"):
+                actions.append(str(folder_state.get("message")))
+            elif folder_state and not folder_state.get("ok"):
+                warnings.append(str(folder_state.get("message")))
             actions.append("XXMI 注入库: " + " + ".join(injection["extra_libraries"]))
         except Exception as exc:  # noqa: BLE001
             warnings.append(f"写入 XXMI 注入库失败: {exc}")
     else:
         # 关闭时必须主动清空，否则会保留上一次写进去的 DLL（滑块看着关了、实际还在注入）
         try:
-            configure_dlss5_injection(config, enabled=False)
+            cleared = configure_dlss5_injection(config, enabled=False)
+            if (cleared.get("importer_folder") or {}).get("changed"):
+                actions.append(str(cleared["importer_folder"].get("message")))
             actions.append("XXMI 注入库已清空（注入底座关闭）")
         except Exception as exc:  # noqa: BLE001
             warnings.append(f"清空 XXMI 注入库失败: {exc}")

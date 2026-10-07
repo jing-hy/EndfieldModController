@@ -2234,6 +2234,42 @@ def _xxmi_summary(config: Any) -> list[str]:
     lines.append(f"Importers 段      : {sorted(importers.keys())}")
     importer = ((importers.get("EFMI") or {}).get("Importer") or {})
     libs = [item.strip() for item in str(importer.get("extra_libraries") or "").splitlines() if item.strip()]
+    # ★★ **`importer_folder` 必须单独报**（2026-10-07，lzh18 现场）：
+    #    它决定 **XXMI 自己去注入哪份 `d3d11.dll`**（`<importer_folder>\d3d11.dll`），
+    #    以及它在哪找 `d3dx.ini`。指向 Mod 库时 XXMI 会注入库里的同名 dll，
+    #    而注入库那边列的是另一条路径的 loader ⇒ **两份 loader 同时进进程**
+    #    ⇒ 游戏在创建 D3D11 设备时崩（`0xC0000005`）。以前这一项在包里完全没有，
+    #    只能靠"库里那个 dll"这类旁证去猜（v1.0.10 / v1.0.29 两次都只修了"我们列哪份"）。
+    folder_raw = str(importer.get("importer_folder") or "")
+    lines.append(f"EFMI.importer_folder = {folder_raw!r}")
+    if folder_raw.strip():
+        try:
+            from . import launcher as _launcher
+
+            state = _launcher.xxmi_importer_folder(config)
+            folder = state.get("path")
+            root = state.get("root")
+            lines.append(f"    解析后目录     : {folder}")
+            lines.append(f"    里面有 d3d11.dll: {'是' if state.get('has_loader') else '**否**'}"
+                         f"    d3dx.ini: {'是' if state.get('has_d3dx_ini') else '**否**'}"
+                         "（EFMI 运行目录应当有 d3dx.ini）")
+            lines.append(f"    在这个 XXMI 目录内: {'是' if state.get('in_xxmi_tree') else '**否**'}"
+                         f"（XXMI 根 = {root}）")
+            foreign = _launcher.xxmi_foreign_loader(config)
+            if foreign is not None:
+                ours = _launcher.active_efmi_loader(config)
+                same = False
+                try:
+                    same = ours is not None and Path(ours).resolve() == Path(foreign).resolve()
+                except OSError:
+                    same = False
+                lines.append(f"    ⚠ XXMI 自己会注入 `{foreign}`（不在这个 XXMI 里），"
+                             f"注入库列的是 `{ours}` ⇒ "
+                             + ("**同一份（会被去重，正常）**" if same
+                                else "**不是同一份 ⇒ 进程里会有两份 d3d11 loader，"
+                                     "游戏会在创建 D3D11 设备时崩（0xC0000005）**"))
+        except Exception as exc:  # noqa: BLE001 - 取证不能反噬主流程
+            lines.append(f"    （解析失败: {exc}）")
     lines.append(f"EFMI.extra_libraries_enabled = {importer.get('extra_libraries_enabled')!r}")
     lines.append(f"EFMI.extra_libraries（{len(libs)} 条）:")
     for lib in libs:
