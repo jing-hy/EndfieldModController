@@ -475,11 +475,16 @@ def ensure_streamline(
     产物落 `<数据根>/runtime/streamline/`；真正写进游戏目录由
     `deploy_streamline_libs()` 负责（**先备份、可一键还原**）。
 
-    ⚠️⚠️ **绝不在一键启动里下载 263 MB**（2026-10-07 用户现场：启动花了 129 秒、界面毫无进度）。
-    规则与别的组件不同 —— 别的组件是"缺了就补"，**它是"只在用户明确要求时才下"**：
+    ⚠️⚠️ **绝不在一键启动里无条件下载 263 MB**（2026-10-07 用户现场：启动花了 129 秒、界面毫无进度）。
+    规则：
       * `force=True`（依赖页点「一键更新全部组件」）⇒ 真的下载；
-      * 一键启动（`force=False`）且本地没有 ⇒ 返回 `update_available`（带远端版本号，
-        前端可据此引导去依赖页），**一个字节都不下**；
+      * **★ 判据命中 ⇒ 也真的下载**（见下面 `_manifest_repair_needed()`）——
+        游戏自带的 Streamline 太旧时，游戏会在启动阶段反复报
+        `ota.cpp:329[parseServerManifest] Unexpected line in manifest file`；
+        **换成随包的 2.14.1 后该报错消失**（同机实测：旧版那份日志 10 条、换后 0 条）。
+        这属于"按判据修故障"，不是"静默下大包"，所以放行。
+      * 一键启动（`force=False`）且本地没有、**判据也没命中** ⇒ 返回 `update_available`
+        （带远端版本号，前端可引导去依赖页），**一个字节都不下**；
       * 本地已有 ⇒ 照旧走 `_skip_online_check`（自动更新关着就一次网络都不发）。
     """
     target = Path(config.runtime_path) / "streamline"
@@ -487,6 +492,24 @@ def ensure_streamline(
     marker = _read_marker(target)
     if progress:
         progress(0, 3, STREAMLINE_KEY, "checking")
+
+    # ★ 判据：游戏 `Player.log` 里出现"Streamline 读不懂 server manifest"⇒ 游戏自带的太旧
+    repair_reason = ""
+    if not force:
+        try:
+            from . import crashwatch
+
+            repair_reason = crashwatch.streamline_manifest_broken(config)
+        except Exception:  # noqa: BLE001 —— 判据异常不影响主流程
+            repair_reason = ""
+        if repair_reason:
+            # ⚠️ `runtime_deps` 里**没有** `_log()` 这个辅助（别的模块有）；日志是调用方传进来的
+            #    `log` 回调和模块内的 `_note()`。这里用调用方那份，保持与文件内其它处一致。
+            if log:
+                log("游戏自带 Streamline 太旧（" + repair_reason.split("——")[0].strip()
+                    + "）⇒ 本次装随包运行库来修")
+            force = True
+
     if core.is_file():
         skipped = _skip_online_check(config, STREAMLINE_KEY, marker, target,
                                      marker.get("version") or "", progress, 2, force=force)

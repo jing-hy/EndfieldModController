@@ -981,6 +981,21 @@ def collect_environment_report(config: Any, game_dir: Path | None = None) -> tup
 
     lines: list[str] = []
     notes: list[str] = []
+    # ★★ **设备 / 显卡 / 驱动**（2026-10-07 补 —— 这条缺口让一条关键差异一直没露出来）：
+    #    两个入口的 `environment.txt` 内容原本**不一样** —— 崩溃包那份（`crashwatch._environment_text`）
+    #    带"设备与显卡"段，而**手动诊断包**这份（本函数）**没有**。
+    #    现场代价：反馈者用**手动导出**的包报"启动即退出"，我们手里就**没有他的显卡驱动版本**；
+    #    而把各家的包对起来看，"驱动 596.49 崩 / 616.92 能进 / 573.01 崩"是一条很干净的
+    #    剂量-反应链 —— 这条线因为缺字段，一直没能被摆到台面上。
+    #    ⚠️ 读注册表、毫秒级、无子进程（`deviceinfo` 的设计约束），放在最前面不影响耗时的判断。
+    try:
+        from . import deviceinfo
+
+        # ⚠️ `deviceinfo.summary_lines()` **自带** `-- 设备与显卡 … --` 标题行，这里不要再加一条，
+        #    否则报告里会出现两个几乎一样的标题（实测踩到过）。
+        lines.extend(line for line in deviceinfo.summary_lines() if line)
+    except Exception as exc:  # noqa: BLE001
+        lines.append(f"（设备信息读取失败：{exc}）")
     lines.append("-- Windows 事件（Application：错误/挂起/WER，近 60 分钟；含任何提到 Endfield 的事件）--")
     events, err = _powershell(
         "Get-WinEvent -FilterHashtable @{LogName='Application';StartTime=(Get-Date).AddMinutes(-60)} "
