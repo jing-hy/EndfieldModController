@@ -11,19 +11,19 @@ description:
   en: >
       Every toggle and path the settings page touches: hotkey takeover, DLSS5 / component add-on / Poser switches, mod-backup switch and directory picker, download acceleration settings, path choosers and the open-in-explorer entries.
       
-revision: 7c36babb44091a5965ab7f0da97455ec81ad7f61
-updated_at: "2026-10-07T07:30:40.225Z"
-fingerprint: 0f608d60724207320bfff4f39b5fe520386e86f6e9fd3eab28611d3942a453de
+revision: 20521577d9cf0d2206617a54825953f305763895
+updated_at: "2026-10-07T14:32:31.331Z"
+fingerprint: ccf7e6da62fbc5fd85c1836a1d4e69d7b5520a7f3320ac3dddf0ca06aae773bb
 source:
   - path: "endfieldmodcontroller/api.py"
     line: 406
     end_line: 1543
   - path: "endfieldmodcontroller/api.py"
-    line: 1923
-    end_line: 3207
+    line: 1929
+    end_line: 3247
   - path: "endfieldmodcontroller/api.py"
-    line: 3046
-    end_line: 7591
+    line: 3066
+    end_line: 7857
 apis:
   - protocol: rpc
     path: "set_hotkey_takeover"

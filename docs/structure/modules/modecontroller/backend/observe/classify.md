@@ -11,19 +11,19 @@ description:
   en: >
       Turn evidence into a verdict: only an uploaded crash dump counts as a crash; then attribute it — GPU shader compiler, mod resource conflict, or something else — and cross-check the DLSS5 add-on's own crash record so one verdict never contradicts another.
       
-revision: 7c36babb44091a5965ab7f0da97455ec81ad7f61
-updated_at: "2026-10-07T07:30:40.244Z"
-fingerprint: d395cbd50158a817057382c2277cd0ed05e76529d7998e3966418282db11f388
+revision: 20521577d9cf0d2206617a54825953f305763895
+updated_at: "2026-10-07T14:32:31.346Z"
+fingerprint: 4bf7bb265341b41be4a347c6da397babeb121ac7387d84bd27164badca610ff7
 source:
   - path: "endfieldmodcontroller/crashwatch.py"
     line: 142
-    end_line: 2718
+    end_line: 2816
   - path: "endfieldmodcontroller/crashwatch.py"
     line: 1081
-    end_line: 2798
+    end_line: 2896
   - path: "endfieldmodcontroller/crashwatch.py"
     line: 1026
-    end_line: 2718
+    end_line: 2816
 apis:
   - protocol: rpc
     path: "is_crash"

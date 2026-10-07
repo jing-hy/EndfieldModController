@@ -11,13 +11,13 @@ description:
   en: >
       The memory that keeps the program from nagging: which mod combinations crashed before, which ones later proved they run fine (so the warning is withdrawn), and which conflicts were disproved by a successful run — plus the current staged mod list and the pre-launch risk payload.
       
-revision: 7c36babb44091a5965ab7f0da97455ec81ad7f61
-updated_at: "2026-10-07T07:30:40.251Z"
-fingerprint: d395cbd50158a817057382c2277cd0ed05e76529d7998e3966418282db11f388
+revision: 20521577d9cf0d2206617a54825953f305763895
+updated_at: "2026-10-07T14:32:31.348Z"
+fingerprint: 4bf7bb265341b41be4a347c6da397babeb121ac7387d84bd27164badca610ff7
 source:
   - path: "endfieldmodcontroller/crashwatch.py"
     line: 1161
-    end_line: 4358
+    end_line: 4456
 apis:
   - protocol: rpc
     path: "crashwatch.remember_crash"

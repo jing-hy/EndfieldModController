@@ -4,12 +4,12 @@
 
 ## modecontroller（https://github.com/jing-hy/EndfieldModController）
 
-- modecontroller — EndfieldModController / EndfieldModController — 《明日方舟：终末地》的一站式 Mod 管理器：把 DLSS5 神经渲染、第一人称视角、服装 Mod（EFMI）、乳摇物理、摆姿与 MMD 播放统一到一次「一键启… — [模块 170 · API 392]
+- modecontroller — EndfieldModController / EndfieldModController — 《明日方舟：终末地》的一站式 Mod 管理器：把 DLSS5 神经渲染、第一人称视角、服装 Mod（EFMI）、乳摇物理、摆姿与 MMD 播放统一到一次「一键启… — [模块 171 · API 394]
   - modecontroller.addon — 游戏内面板（C++ add-on） / In-game Panel (C++ add-on) — 自研 ReShade add-on：把 `actions.tsv` 渲染成"**每一项就是一个按钮**"的 Mod 控制面板，并把按钮点击变成该 Mod 原键的… — [模块 4 · API 8]
     - modecontroller.addon.panel — 面板本体与清单渲染 / Panel UI & Action List — 面板本体：加载 `actions.tsv`（`hint` / `key_label` / `char_group` / `condition`）、按 **角色 … — [模块 1 · API 3]
     - modecontroller.addon.tests — 面板注入离线自测 / Offline Injection Self-test — 离线验证注入链路：造一个“假 EFMI”（**只通过导入表轮询 `GetAsyncKeyState`**，与真 EFMI 同一种读法）+ 一个宿主 exe，逐条… — [模块 1 · API 2]
     - modecontroller.addon.vkey-inject — 进程内按键注入 / In-Process Key Injection — 不经 Windows 输入队列的按键注入：找 EFMI 的 `d3d11.dll` → 遍历它的**导入表**把 `GetAsyncKeyState` 换成我们… — [模块 1 · API 3]
-  - modecontroller.backend — 后端 Python 包 / Backend Python Package — endfieldmodcontroller/ 包：管理器全部业务逻辑 —— 配置与路径、Mod 库扫描与识别、激活 staging、一键启动与注入库维护、启动自… — [模块 113 · API 318]
+  - modecontroller.backend — 后端 Python 包 / Backend Python Package — endfieldmodcontroller/ 包：管理器全部业务逻辑 —— 配置与路径、Mod 库扫描与识别、激活 staging、一键启动与注入库维护、启动自… — [模块 114 · API 320]
     - modecontroller.backend.activation — 激活与中转 / Activation & Staging — 把「勾选」变成「游戏真正加载的东西」：解同角色互斥与按需依赖，决定每份依赖用哪一份，把选中的 Mod 拷进 EFMI 的 Mods 中转区、处理热键、写控制器产… — [模块 6 · API 10]
       - modecontroller.backend.activation.guard — Mod 库安全护栏 / Library Safety Guard — “用户的 Mod 库一概不动”这道硬闸：当中转目录就是库、在库内部、或库的上级时，直接报错并拒绝执行 —— 因为曾经就是这种配置把一位用户的整库删光了。 — [模块 1 · API 1]
       - modecontroller.backend.activation.manual-import — 手动 Mod 收编 / Manual Mod Adoption — 收编用户直接丢进游戏 Mods 目录的 Mod：找出不是控制器生成的目录，靠 namespace 特征识别（改名也认得），搬进库，并只在能证明安全时才删掉原目录… — [模块 1 · API 2]
@@ -87,7 +87,7 @@
       - modecontroller.backend.library.scan — 库扫描 / Library Scan — 遍历库把目录变成 Mod 条目：支持扁平 / 分组 / _deps 三种布局，穿透单层包裹目录，按内容指纹标注重复副本，并产出带 group/kind/置信度的… — [模块 1 · API 4]
       - modecontroller.backend.library.user-vars — d3dx 持久变量 / Persisted Variables — 定位并编辑 d3dx_user.ini（3DMigoto 的持久变量文件），让程序能读出“当前哪些 Mod 选项是开着的”并在下次启动时预选，同时保证命名空间化… — [模块 1 · API 3]
       - modecontroller.backend.library.util — 通用小工具 / Shared Helpers — 库层到处用的小工具：容错文本读取、字符串 sha256、目录名清洗、TSV 单元格转义，以及由路径推出的稳定 id。 — [模块 1 · API 4]
-    - modecontroller.backend.observe — 崩溃监控与诊断 / Crash Watch & Diagnostics — 看清到底发生了什么：盯游戏进程并每几秒采样，收崩溃证据（CrashSight 标记、Player.log、模块列表、事件日志），判定崩因，打崩溃包/诊断包，维护… — [模块 15 · API 34]
+    - modecontroller.backend.observe — 崩溃监控与诊断 / Crash Watch & Diagnostics — 看清到底发生了什么：盯游戏进程并每几秒采样，收崩溃证据（CrashSight 标记、Player.log、模块列表、事件日志），判定崩因，打崩溃包/诊断包，维护… — [模块 16 · API 36]
       - modecontroller.backend.observe.bundle — 崩溃包 / Crash Bundle — 把现场打包给人类 / issue：把控制器日志、游戏日志、崩溃转储、事件日志片段、配置摘录与 Mods 目录树收进一个 zip，并附一份渲染好的报告 —— 因为… — [模块 1 · API 3]
       - modecontroller.backend.observe.classify — 崩溃判定 / Crash Verdict — 把证据变成判断：只有真的上传了崩溃转储才算崩；再判它属于哪类 —— 显卡着色器编译器、Mod 资源冲突、还是其它 —— 并对照 DLSS5 插件自己写的崩溃记录… — [模块 1 · API 2]
       - modecontroller.backend.observe.conflict-state — 冲突结论留痕 / Conflict Verdict State — 把最近一次的静态冲突结论落盘，好让崩溃监视器（跑在另一线程、常常是下一次会话）仍能判断这次崩溃背后有没有已知冲突 —— 并保证结论绑定在“当时那批 staged… — [模块 1 · API 2]
@@ -96,6 +96,7 @@
       - modecontroller.backend.observe.evidence — 证据收集 / Evidence Collection — 收集判定所需的一切证据：注入快照（哪个 dll 在哪）、CrashSight 标记（分成 reportException 与 uploadCrash）、Play… — [模块 1 · API 2]
       - modecontroller.backend.observe.file-watch — 关键文件守护 / Key-File Watchdog — 盯住程序依赖的关键文件：如果某一个老是被删（杀毒、别的工具），要发现、要记住哪些已经被确认过，并给出“把某个文件夹加白名单”的建议，而不是等到后面默默失败。 — [模块 1 · API 3]
       - modecontroller.backend.observe.inject-trace — 注入现场时间线 / Injection Timeline — 在启动链的五个时机各拍一张「注入现场」照片：注入库内容与签名长度、runtime\dlss5 关键文件、游戏目录注入物、以及游戏进程里实际进了哪些模块（含「该进… — [模块 1 · API 3]
+      - modecontroller.backend.observe.kernel-instability — 机器侧稳定性 / Machine-side Stability — 从 System 日志读这台机器自己的内核级事件：蓝屏（BugCheck 1001）、非正常关机（Kernel-Power 41 / EventLog 6008… — [模块 1 · API 2]
       - modecontroller.backend.observe.logs — 事件与会话日志 / Event & Session Logs — 程序自己的日志：会话/每日/启动三份日志、结构化 log_event 行、异常捕获、系统与运行时快照，以及那份“游戏到底加没加载我们中转的文件”的 EFMI 状… — [模块 1 · API 3]
       - modecontroller.backend.observe.memory — 崩溃记忆与已验证组合 / Crash Memory & Proven Combos — 让程序不唠叨的那份记忆：“哪套组合之前崩过”、“哪套后来证明能跑”（于是撤回警告）、“哪些冲突被一次成功运行否掉”，加上当前 staged Mod 清单与启动前… — [模块 1 · API 6]
       - modecontroller.backend.observe.proc-monitor — 子进程监视 / Child Process Monitor — 盯住拉起来的进程，别让一次“静默失败”被丢掉：轮询它、截住输出尾部，退出时记下退出码与死亡现场 —— 辅助进程崩了不会就这么消失。 — [模块 1 · API 1]

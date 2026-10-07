@@ -11,13 +11,13 @@ description:
   en: >
       Build the single-file exe with PyInstaller: the exact flag set (one-file, windowed, bundled web assets, admin manifest, bundled webview/clr/cryptography) that the shipped binary has to be built with.
       
-revision: 7c36babb44091a5965ab7f0da97455ec81ad7f61
-updated_at: "2026-10-07T07:30:40.264Z"
-fingerprint: 8a8888b6b20e560e8855b14665a56d2fd53e8daaff682f10bdef19002bd3d626
+revision: 20521577d9cf0d2206617a54825953f305763895
+updated_at: "2026-10-07T14:32:31.354Z"
+fingerprint: 8988209187d1a4e80a700a2f9ad53dbbaac07f19b8e484b75e0448405857a341
 source:
   - path: "scripts/build_exe.py"
     line: 1
-    end_line: 158
+    end_line: 164
 apis:
   - protocol: rpc
     path: "scripts.build_exe"

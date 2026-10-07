@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "id": "modecontroller.backend.observe",
-  "updated_at": "2026-10-07T04:59:52.973Z",
+  "updated_at": "2026-10-07T14:33:00.874Z",
   "mode": "groups",
   "reading": {
-    "zh": "按一次事故的脉络读：采集事实（证据 / 运行时采样 / 注入现场时间线）→ 判定是不是崩了、崩在哪 → 记住它（或者后来跑通了就把记忆撤掉）→ 把现场打包给人看 → 继续盯守，好让下一次也被抓到。",
-    "en": "Follow one incident: collect the facts (evidence, runtime sampling, injection timeline), judge whether it was a crash and why, remember it (or withdraw the memory when a later run succeeds), package the scene for a human, and keep watching so the next one is captured too."
+    "zh": "按一次事故的脉络读：采集事实（证据 / 运行时采样 / 注入现场时间线 / 机器自身的稳定性）→ 判定是不是崩了、崩在哪 → 记住它（或者后来跑通了就把记忆撤掉）→ 把现场打包给人看 → 继续盯守，好让下一次也被抓到。",
+    "en": "Follow one incident: collect the facts (evidence, runtime sampling, injection timeline, the machine's own stability), judge whether it was a crash and why, remember it (or withdraw the memory when a later run succeeds), package the scene for a human, and keep watching so the next one is captured too."
   },
   "order": [
     "modecontroller.backend.observe.evidence",
@@ -13,6 +13,7 @@
     "modecontroller.backend.observe.inject-trace",
     "modecontroller.backend.observe.logs",
     "modecontroller.backend.observe.device",
+    "modecontroller.backend.observe.kernel-instability",
     "modecontroller.backend.observe.classify",
     "modecontroller.backend.observe.memory",
     "modecontroller.backend.observe.conflict-state",
@@ -35,7 +36,8 @@
         "modecontroller.backend.observe.sample",
         "modecontroller.backend.observe.inject-trace",
         "modecontroller.backend.observe.logs",
-        "modecontroller.backend.observe.device"
+        "modecontroller.backend.observe.device",
+        "modecontroller.backend.observe.kernel-instability"
       ]
     },
     {
