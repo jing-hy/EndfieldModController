@@ -1,6 +1,6 @@
 # EndfieldModController —— 详细文档
 
-当前版本 **1.1.1-beta** ｜ [下载最新版](https://github.com/jing-hy/EndfieldModController/releases)
+当前版本 **1.1.1** ｜ [下载最新版](https://github.com/jing-hy/EndfieldModController/releases)
 
 > 这是详细版：安装、各页面用法、目录结构、逐项排查都在这里。
 > 只想快速上手的话看 **[简略版 README](../README.md)**；想改代码看 **[维护者指南](../CONTRIBUTING.md)**。
