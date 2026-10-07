@@ -11,19 +11,19 @@ description:
   en: >
       The anti-cheat safe mode and proxy switching: record what was on before entering safe mode, disable game ReShade proxies and the global ReShade app entry, swap dxgi for our d3d12 proxy, and put everything back exactly as it was.
       
-revision: 4c6f9c516371a0e037c4a033a394270fa154178d
-updated_at: "2026-10-07T05:13:35.520Z"
-fingerprint: 09ca401ab6e7fda97dc608eb873f5ff95c8fa44602ea3193d25a8f2373ed5b46
+revision: 7c36babb44091a5965ab7f0da97455ec81ad7f61
+updated_at: "2026-10-07T07:30:40.236Z"
+fingerprint: 579c0bf450b6000c75e0f9ae57af2aecd763af15c3e87277dba4b37d6f1743a6
 source:
   - path: "endfieldmodcontroller/reshade_integration.py"
-    line: 1317
-    end_line: 2463
+    line: 1326
+    end_line: 2481
   - path: "endfieldmodcontroller/reshade_integration.py"
-    line: 1502
-    end_line: 2729
+    line: 1511
+    end_line: 2747
   - path: "endfieldmodcontroller/reshade_integration.py"
-    line: 1690
-    end_line: 2909
+    line: 1699
+    end_line: 2927
 apis:
   - protocol: rpc
     path: "reshade_integration.safe_mode_active"

@@ -11,8 +11,8 @@ description:
   en: >
       Snapshots the injection scene at five points along the launch chain: injection-library contents and signature length, key runtime\dlss5 files, game-directory injections, and which modules actually loaded in the game process — including the two judgements that separate "looked injected but never entered the process" from "two same-named loaders colliding".
       
-revision: 4c6f9c516371a0e037c4a033a394270fa154178d
-updated_at: "2026-10-07T05:13:35.530Z"
+revision: 7c36babb44091a5965ab7f0da97455ec81ad7f61
+updated_at: "2026-10-07T07:30:40.250Z"
 fingerprint: 1c5f3f545193f7b3029ed4c02aca4cea0441ecb86fe27e6d74aacac28c1844dc
 source:
   - path: "endfieldmodcontroller/injecttrace.py"

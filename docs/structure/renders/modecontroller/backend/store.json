@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "id": "modecontroller.backend.store",
+  "updated_at": "2026-10-07T07:30:40.078Z",
+  "mode": "grid",
+  "reading": {
+    "zh": "先看 catalog（数据层：香蕉网访问、各种缓存、图片缓存），再看 tasks（纯整形，下载页与侧栏徽标共用）。数据层不替用户下载文件。",
+    "en": "Catalog is the data layer (GameBanana access, caches, image cache); tasks is the pure shaping that both the downloads page and the sidebar badge read. The data layer never downloads files for the user by itself."
+  },
+  "order": [
+    "modecontroller.backend.store.catalog",
+    "modecontroller.backend.store.tasks"
+  ]
+}

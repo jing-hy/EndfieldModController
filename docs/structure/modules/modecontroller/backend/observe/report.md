@@ -11,16 +11,16 @@ description:
   en: >
       Render the human-readable crash/exit report: process lifetime, injection snapshot, XXMI injection records, CrashSight summary, the game's crash stack excerpt, and the Player.log tail — every fact with its source, no speculation.
       
-revision: 4c6f9c516371a0e037c4a033a394270fa154178d
-updated_at: "2026-10-07T05:13:35.531Z"
-fingerprint: 1f6266d1aca64db85ba254b5d330cbcb42f96ca5d851b23e2503ed0d3713ff92
+revision: 7c36babb44091a5965ab7f0da97455ec81ad7f61
+updated_at: "2026-10-07T07:30:40.252Z"
+fingerprint: d395cbd50158a817057382c2277cd0ed05e76529d7998e3966418282db11f388
 source:
   - path: "endfieldmodcontroller/crashwatch.py"
-    line: 2561
-    end_line: 4797
+    line: 2589
+    end_line: 4853
   - path: "endfieldmodcontroller/crashwatch.py"
-    line: 2642
-    end_line: 4947
+    line: 2670
+    end_line: 5003
 apis:
   - protocol: rpc
     path: "write_report"

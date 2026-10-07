@@ -11,13 +11,13 @@ description:
   en: >
       Log display (Vue): pure-black log box fed by dependency progress polling.
       
-revision: 4c6f9c516371a0e037c4a033a394270fa154178d
-updated_at: "2026-10-07T05:13:35.548Z"
-fingerprint: 067d3cbdb87e1e47c1e1bd69983bc829cecd0c67e9c5090fc6f2c0e850489105
+revision: 7c36babb44091a5965ab7f0da97455ec81ad7f61
+updated_at: "2026-10-07T07:30:40.286Z"
+fingerprint: 19a7e6fba50a03be6c521b0c57b2dd2215a94f540e72031631629e38446ed9eb
 source:
   - path: "frontend/src/pages/DepsPage.vue"
     line: 1
-    end_line: 1640
+    end_line: 1468
 apis:
   - protocol: rpc
     path: "web.logLine"

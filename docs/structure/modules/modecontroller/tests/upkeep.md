@@ -11,16 +11,16 @@ description:
   en: >
       Tests for upkeep and data: mod package repair and rollback, library backup, the Poser plugin, character-table sync, jiggle-parameter sync, alert version gating, and the integrity check chain.
       
-revision: 4c6f9c516371a0e037c4a033a394270fa154178d
-updated_at: "2026-10-07T05:13:35.546Z"
-fingerprint: bc3e11683efdf10c5ed11be663a3f87a94355d14405636eae370db04bfdfef79
+revision: 7c36babb44091a5965ab7f0da97455ec81ad7f61
+updated_at: "2026-10-07T07:30:40.282Z"
+fingerprint: ad699ca7e93bc02405f7a7a57bf6b32390d15c808bd719842ac369b6c5b49449
 source:
   - path: "tests/test_modfix.py"
     line: 1
     end_line: 179
   - path: "tests/test_mod_backup.py"
     line: 1
-    end_line: 228
+    end_line: 238
   - path: "tests/test_poser.py"
     line: 1
     end_line: 270

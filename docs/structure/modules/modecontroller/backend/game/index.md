@@ -11,8 +11,8 @@ description:
   en: >
       Everything that touches the game folder itself: cleaning third-party files aside with a reversible backup, installing/removing the Poser posing plugin through its own deploy.ps1, injecting the jiggle-physics dll, and glueing ReShade (base dll + addons + preset) into the launch chain.
       
-revision: 4c6f9c516371a0e037c4a033a394270fa154178d
-updated_at: "2026-10-07T05:13:35.518Z"
+revision: 7c36babb44091a5965ab7f0da97455ec81ad7f61
+updated_at: "2026-10-07T07:30:40.234Z"
 fingerprint: d223688ce480c8dab0e4e9c0c6bb2a10667eaad836ff8ad1646d861898a3923f
 source:
   - path: "endfieldmodcontroller/game_clean.py"
