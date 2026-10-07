@@ -4,13 +4,13 @@
 > 目的：让「当时为什么这么改、踩过什么坑」跟着源码一起留在仓库里。
 > 想改内容 → 改记忆库（用记忆工具），再跑一次本脚本；不要直接编辑本文件。
 
-- 生成时间：2026-10-07 12:31:33
+- 生成时间：2026-10-07 13:51:10
 - 来源：`.dsh-meow/memory.db`
-- 条目：579 条（已跳过 archived / 其它项目的条目）
+- 条目：587 条（已跳过 archived / 其它项目的条目）
 
 ---
 
-## 设计原则 / 行为准则（23 条）
+## 设计原则 / 行为准则（24 条）
 
 ### 用户准则（原话）：「不是，你直接去官网拉」—— **一手…
 *2026-09-27 18:53*
@@ -288,7 +288,16 @@
 
 `关键词：["临时文件不要塞根目录","工作区卫生","zmdmod 根目录整理","_tmp 命名空间","_archive 归档","下划线开头是我的","只移动不删除","_park 用户素材","_snapshot 路径写死","分工目录"]`
 
-## 项目记忆（结构 / 决策 / 部署 / 待办）（38 条）
+### 【许可证红线：JASM 是 GPL-3.0，modeco…
+*2026-10-07 13:06*
+
+【许可证红线：JASM 是 GPL-3.0，modecontroller 是 MIT ⇒ 只能读思路、不能抄代码】2026-10-07 用户要求拉取 JASM 并查证"开不开源"。结论：Jorixon/JASM 与 Moonholder/JASM（中文版）**都开源、都是 GPL-3.0**（仓库根有标准 FSF GPLv3 全文），**无附加条款**，源码完整可自编译。
+**落地约束**：① GPL-3.0 是强 copyleft —— **把 JASM 的代码（哪怕片段）复制进 modecontroller（MIT）是禁止的**，一旦复制，整个项目就要按 GPL-3.0 分发；② 允许的做法 = **读它的实现思路、自己重写**（`hot_reload.py` 里"改配置 → 发 F10"就是这么来的，没抄代码）；③ 自用修改、私有编译不分发则不受 GPL 约束；④ 需要引用其**功能描述/快捷键/字段名**（如 `.JASM_` 前缀侧车文件）属于事实性兼容，不受限。
+**推广**：以后凡是"拉个同类项目来参考"，第一步先看它的 LICENSE —— 上游一旦是 GPL/AGPL，就只做"思路对照"，不要 paste 代码。
+
+`关键词：["GPL-3.0","MIT","许可证冲突","copyleft","开源协议","JASM 参考","不能抄代码","思路重写","LICENSE 检查","分发合规"]`
+
+## 项目记忆（结构 / 决策 / 部署 / 待办）（39 条）
 
 ### 项目概述
 
@@ -505,6 +514,17 @@ runtime\dlss5                      38 字符  ❌ 崩
 
 `关键词：["NR引擎换版定案", "Deep Fried Chicken是什么", "两个neural addon同装", "Never install two neural add-ons", "官方7.0.0-rc8", "自带中文语言表", "UiLanguage系统区域", "rhi-repo来源", "retire_stale_nr_addons", "DLSS5_ADDON_GLOBS收窄", "汉化版退役", "renodx-dlss5.addon64"]`
 
+### 【两份 loader 冲突的完整机理与落点（2026-1…
+*2026-10-07 13:00*
+
+【两份 loader 冲突的完整机理与落点（2026-10-07 lzh18 现场定案，v1.1.1-beta 修复）】
+**现场**：XXMI 配置 `Importers.EFMI.Importer.importer_folder = 'C:/Users/lzh18/Downloads/library'`（指到 **Mod 库**，库里有某个 Mod 带的同名 `d3d11.dll`、没有 `d3dx.ini`）。XXMI 因此注入 `…\library\d3d11.dll`（它自己的日志：`缺少关键文件：d3dx.ini！`），而注入库第二条列的是 `…\XXMI\EFMI\d3d11.dll` ⇒ 进程里**两份不同路径的 D3D11 loader**（WER `LoadedModule[16]` 与 `[61]`）⇒ `Player.log` 停在 `GfxDevice: creating device client` 后 `Crash!!!`，exit `0xC0000005`、故障模块 `ACE-Base64.dll`，活 24~39 秒 ⇒ XXMI 弹「EFMI 加载失败：无法检测到游戏进程 Endfield.exe 的窗口」。
+**为何前两次修复无效**：v1.0.10（注入顺序）、v1.0.29（不再列库里那份 loader）改的都是"**注入库列哪一份**"，而 XXMI 依 `importer_folder` **自己注入的那份一直没变** —— 症状从单份假 loader（`0xC0000135`）变成双份 loader（`0xC0000005`）。
+**落点（launcher.py）**：`xxmi_importer_folder()`（读原值/解析路径/是否在 XXMI 树内/有无 d3d11.dll 与 d3dx.ini）、`ensure_efmi_importer_folder()`（不对就自动改回这个 XXMI 自己的 EFMI 目录：绝对路径 + 改前备份 `.mc-before-importer-folder-<时间戳>.bak` + 其它字段不动 + 幂等；目标没 loader 时如实报 ok=False 且不写）、`xxmi_foreign_loader()`（识别"XXMI 会注入但落在本 XXMI 之外"的那份）。`configure_dlss5_injection()` 里**先纠正、再重新读配置**才写 extra_libraries（顺序反了会被旧副本盖回去）；命中 foreign 时 `dlss5_injection_targets()` **不叠加第二条**。
+**取证**：`injecttrace._process_state()` 按**路径**统计同名 loader（d3d11/d3d12/dxgi），两份就在时间线报警；`diagnostics._xxmi_summary()` 报 importer_folder 现状 + "两侧是否同一份"。测试 `tests/test_efmi_importer_folder.py` 16 条，全量 1174 passed。
+
+`关键词：["importer_folder","ensure_efmi_importer_folder","xxmi_foreign_loader","active_efmi_loader","两份 loader","injecttrace duplicate_loaders","诊断包 importer_folder","lzh18 现场","0xC0000005","0xC0000135","注入库 extra_libraries","EFMI loader"]`
+
 ### 部署与数据
 
 ### 乳摇插件（SecondaryMotion / Shaki…
@@ -641,16 +661,15 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 `关键词：["变体机制落点", "best_rtx_sm唯一入口", "select_dlssnr_variant", "ensure_dlssnr", "dll_architectures扫fatbin", "dlssnr_variant.json marker", "baseline按变体判防抖", "dlss5:nr_arch自检", "dlss5_gpu_scope_applied迁移", "pack_nvngx_assets变体字段"]`
 
 ### 【modecontroller 当前状态唯一真源】（20…
-*2026-10-07 11:51*
+*2026-10-07 13:00*
 
-【modecontroller 当前状态唯一真源】（2026-10-07 11:50 更新）
-**Latest Release = `v1.1.0`**（2026-10-07T03:47:53Z，release id `405355434`，`draft=false`/`prerelease=false`，已 `--latest`）。**本地 = `1.1.0`（正式号，不欠号）**。main = `43bbe8b`（已推）。快照 `D:\zmdmod\_snapshot_1.1.0-20261007-114623`。
-**v1.1.0 附件（digest 与本地逐字节一致）**：`EndfieldModController.exe` 32,027,643 B / sha256 `03092366c974137fbdc1c8cc0d61bae4f4bac68618c66a29dc8327330854af1d`；`assets-bundle.zip` 262,289,985 B / sha256 `adea0351d395c6bc7bad6a9fa980cfb7f683bd68ac2c07ab4c4b431b69056239`。**伪旧版**（仅本地留档、不上传）：`EndfieldModController-0.1.9-from-1.1.0.exe` 32,027,647 B（dist + 根目录各一份；用 `build_release.py --with-fake-old` 或直接调 `build_fake_old()` 构建，约 19 秒，构完自动把 version.py 改回）。
-**⚠️ 版本号由用户指定为 1.1.0**（不是规则算出来的 1.0.30）⇒ `build_release.py` 会打印一条 `[版本号] WARN 本地 1.1.0 不是「v1.0.29 + 1」` —— **那是预期的、以用户指令为准**，不是错误。
-**v1.1.0 内容（自 v1.0.29 起 7 个提交）**：① **启动提速 ~19s → ~0.1s** —— `runtime_assets.ensure_all` 里 `force=force or bool(fixed_items)` 恒为真 ⇒ 每轮强制重解压 165 MB（`fixed_items` = 清单里两条 `nvngx_dlssnr*`，恒非空），而同一次启动最多调用 4 轮（`ensure_injections` → `integrity.repair` → `initialize` → `launch`）；实测三轮 4.80/4.67/4.65s → 0.09/0/0。② **启动分步进度**：后端 `launcher.set_launch_stage()` 在 5 个节点写文案，前端 `LaunchPage.vue` 显示在按钮下方（复用现成轮询，未加通道）。③ **手动诊断包补设备/显卡/驱动段**（原来只有崩溃包那份带）。④ **游戏自带 Streamline 过旧时自动装随包 2.14.1**（判据 `crashwatch.streamline_manifest_broken()`；判据未命中时仍不下载）。⑤ **三处误导性日志文案**。⑥ **DLSS4 多帧生成在本作禁用 + 写明原因**（见另一条 fact `0muxjl8j`）。
-**★ 发布流程新增一步**：`python scripts/build_release.py` **不含伪旧版**（要 `--with-fake-old`）；构建完会自动推 main（`[9/9]`，`--no-push` 可跳过）；`prepare_release.py` → `gh release create --draft` → `upload_release_assets.py --tag`（本机 DoH 直连上传，262 MB 约 46 秒）→ `gh release edit --draft=false --latest` → **按 release id 核对 digest**（draft 阶段按 tag 查 404）。
-**★ issue 状态**：**#16（xingluo667）OPEN** —— 2026-10-07 已回（[comment 6030530865](https://github.com/jing-hy/EndfieldModController/issues/16#issuecomment-6030530865)）：承认上次"v1.0.29 已修好"不准确；说清 10 条 `parseServerManifest` = 游戏自带 Streamline 2.10.3 的产物、**不是**闪退原因；新增驱动对照线索（596.49 崩 / 616.92 能进 / 他的 573.01 最旧）建议更新驱动；**请他改用「一键启动」启动以拿到游戏退出码**。**#17（Madao553）CLOSED** —— 同日回复"修复了几个相似问题，应该可以使用了"后按用户指示关闭（comment 6030531099）。
-**待办**：① 等 #16 回报退出码 ② DLSS4 那条线已作废（游戏不提供帧生成）③ 下一版号规则：本地 = 正式号，下次动实质改动再升。
+【modecontroller 当前状态唯一真源】（2026-10-07 13:00 更新）
+**Latest Release = `v1.1.0`**（2026-10-07T03:47:53Z，release id `405355434`，`--latest`）。**本地 = `1.1.1-beta`（未发布）**；main 本地已到 `ad16939`（**未推**，等用户明确说推）。
+**v1.1.1-beta 内容（自 v1.1.0 起）**：① 两份 README 重写为面向使用者 + `docs/dev/` 归档 + `docs/README.md` 索引重排；② 注释与文案审计（4 处改写）；③ **修「EFMI 加载失败：无法检测到游戏进程窗口」** —— XXMI 的 `importer_folder` 被指到 Mod 库 ⇒ 两份 d3d11 loader ⇒ `0xC0000005`（详见 decisions 条 `0muxn2v0`）；落点 `launcher.ensure_efmi_importer_folder()` 等，测试 `tests/test_efmi_importer_folder.py` 16 条，全量 1174 passed。
+**发布流程（不变）**：`build_release.py`（`--with-fake-old` 才产伪旧版）→ `prepare_release.py` → `gh release create --draft` → `upload_release_assets.py --tag` → `gh release edit --draft=false --latest` → **按 release id 核对 digest**。附件只推 `EndfieldModController.exe` + `assets-bundle.zip`（都不带版本号）。**未经用户明确说"推"/"发"绝不推送、绝不发 Release**（他说「Releases 没更新啊」只是陈述事实）。
+**结构树**：本会话已按四步更新（realign 72 模块/382 行号 → refresh(all,activate) → validate 0 error → build+render），**新增模块 `modecontroller.backend.observe.inject-trace`**（此前 `injecttrace.py` 未被结构树覆盖），并把 `dlss5-targets` 更名为「XXMI 注入库」；产 164 模块 / 375 API，HTML 58 万字节。
+**issue 状态**：**#16（xingluo667）OPEN**（2026-10-07 已回 comment 6030530865：说清 10 条 `parseServerManifest` 是游戏自带 Streamline 2.10.3 的产物、不是闪退原因；建议更新驱动；请他用「一键启动」启动以拿退出码）。**#17 CLOSED**。
+**待办**：① 等 #16 回报退出码；② 下一版发布前把 `RELEASE_NOTES.md`（现已是 v1.1.1 正文）随构建确认；③ DLSS4 多帧生成线已作废。
 
 `关键词：["当前状态唯一真源","Latest Release v1.1.0","release id 405355434","exe sha256 03092366","assets 262289985","伪旧版 from-1.1.0","启动提速 19 秒","launch_stage 分步进度","issue 16 已回","issue 17 已关","版本号 1.1.0 用户指定"]`
 
@@ -913,7 +932,7 @@ issue #16（xingluo667，游戏加载过程中闪退）：已追加评论，让�
 
 `关键词：["DLSS5非50系方案", "终末地DX11", "DLSS5-Feeder", "dlss5-feed.addon64", "renodx-dlss5", "LumeniteFX运动矢量", "bridge与feeder分工", "DX11无多帧生成", "Forcing-GfxDevice-Direct3D-11", "DLSS5-Autopilot", "按架构选runtime"]`
 
-## 经验教训（被纠正过的、踩过的坑）（388 条）
+## 经验教训（被纠正过的、踩过的坑）（390 条）
 
 ### XXMI/EFMI 启动终末地是 Endfield.ex…
 *2026-09-27 14:58*
@@ -4469,7 +4488,25 @@ Mod 卡片的「⋯ 更多」在服装页与辅助页各有一套，加动作必
 
 `关键词：["遗留 draft 顶在最前","1.0.25 比 1.1.0 新","GitHub Releases 排序","draft 数量必须为 0","gh release delete","页面排序 vs 更新检查","is_newer 是对的","发布流程补检查","draft 阶段按 tag 404"]`
 
-## 事实（细碎的原子信息）（89 条）
+### 【教训 · 2026-10-07）**改文件后若 mti…
+*2026-10-07 12:31*
+
+【教训 · 2026-10-07）**改文件后若 mtime 与字节数都没变，Python 会复用旧 `.pyc` ⇒ 你会看到"幽灵旧内容"**】
+现场：我做"注释/文案审计"的反向验证时，脚本把 `launcher.py` 的 docstring 改成旧文案、跑测试、再改回来 —— **同一秒内、字节数也一样** ⇒ Python 判定 `.pyc` 未过期 ⇒ 之后 `inspect.getdoc()` **一直读到旧文案**，而 `Select-String` 读文件却说"没有这串"。
+**表现**：测试单跑红、`git diff` 看着也对，但文件原文其实已经是对的 —— 我为此绕了两轮（还一度怀疑"是不是有重复定义"）。
+**定式**：① 出现"测试结果与文件内容不符"时，**先 `Remove-Item -Recurse -Force <pkg>\__pycache__` 再复跑**，别急着改代码；② **反向验证脚本**最容易触发这个坑（短时间内把同一文件改回原长度），跑完要顺手清一次缓存；③ 判断依据用**文件原文的 `repr()`**（`pathlib.read_text().splitlines()[n]`），别用 `inspect.getsource/getdoc` —— 后者走的是**内存里的模块对象**，可能是旧字节码。
+**同族**：本项目在同一天里还出现过「静态判据把注释里的旧文案算上」（踩四次，改用 AST 剥注释 + docstring 解决），两者都是"看到的内容不是真实内容"这一类。
+
+`关键词：["pycache 陈旧字节码","mtime size 没变 复用 pyc","幽灵旧内容","inspect.getdoc 读到旧的","反向验证脚本触发","清 __pycache__ 再复跑","读文件用 repr","测试与文件内容不符"]`
+
+### XXMI 的 importer_folder 指向 Mo…
+*2026-10-07 13:00*
+
+XXMI 的 importer_folder 指向 Mod 库时，注入库再列另一份 d3d11 loader ⇒ 进程里两份 loader ⇒ 游戏建 D3D11 设备即崩（0xC0000005 / 故障模块 ACE-Base64）。
+
+`关键词：["importer_folder","两份 d3d11 loader","EFMI 加载失败","无法检测到游戏进程窗口","0xC0000005","ACE-Base64","GfxDevice creating device client","GfxDevice","extra_libraries","注入库","XXMI 配置","双 loader 冲突"]`
+
+## 事实（细碎的原子信息）（93 条）
 
 ### modecontroller：游戏目录 loader_l…
 *2026-09-27 14:58*
@@ -5408,6 +5445,35 @@ DLSS5 feeder 路线 50 系可用：本机 5080/驱动 617.14 实测 renodx-dlss5
 ⚠️ 按准则：**做不了就如实说"做不了"，别假装同步了**。
 
 `关键词：["结构树待补刷新","normify 四步没做","本会话无 normify 工具","push.py 只同步镜像","设置启动分步进度","DLSS4 禁用 deviceinfo","ensure_all force 修复","staging 指纹","诊断包补驱动段"]`
+
+### 【JASM 参考源码：只留中文版】2026-10-07 …
+*2026-10-07 13:08*
+
+【JASM 参考源码：只留中文版】2026-10-07 拉取两个版本后，用户定调「**我主要中文的 release 版本，停更的英文版可以删掉了**」→ 英文上游 `D:\zmdmod\JASM\upstream`（Jorixon/JASM）**已删除**，现在只剩 **`D:\zmdmod\JASM\zh-cn` = Moonholder/JASM（「JASM - Just Another Skin Manager 中文版」）**，138 MB，C#/WinUI 3 + .NET 9，348 个 .cs + 46 个 .xaml + 8 个 .csproj（Elevator / GIMI-ModManager.Core / .WinUI / JASM.Tests 等），比上游多 156 提交，代码最新 2026-04-04（v2.29.3 于 2026-08-18 用同一 commit 重发，无新代码），另有 `installer\setup.iss`。仓库里保留了一个指向 `Jorixon/JASM` 的 `upstream` remote（clone fork 时带的，只占引用不占空间），需要对比上游时仍可用。可借鉴点集中在 `src\Elevator`（提权辅助进程 + 命名管道，只等一个 "1" 就向游戏发 F10）。本机**没有**安装 JASM 桌面程序（`%LOCALAPPDATA%\JASM` 不存在）。
+
+`关键词：["JASM","Just Another Skin Manager","中文版","Moonholder","zh-cn","皮肤管理器","Elevator","命名管道","F10 刷新","WinUI3","参考源码","英文版已删"]`
+
+### 【JASM 中文版发布包（本地）】2026-10-07 …
+*2026-10-07 13:09*
+
+【JASM 中文版发布包（本地）】2026-10-07 应用户「我要中文版 release」下载到 `D:\zmdmod\JASM\release\`：`JASM_v2.29.3.7z`（71.09 MB，SHA256 9544CF8B…E809B）+ `JASM_v2.29.3_Setup.exe`（75.48 MB，SHA256 92CF1FE9…C111BC，**未数字签名**，FileVersion 2.29.3 / Company=Moonholder）。**v2.29.3（2026-08-18）是 pre.1 预发布**，最后一个正式版 = **v2.29.1**（2026-04-04）。7z 绿色版已解压到 `D:\zmdmod\JASM\app\`，双击 `JASM\JASM - Just Another Skin Manager.exe` 即用；包内 `JASM\Elevator.exe` 就是发 F10 的提权辅助进程，`JASM\Assets\7z\7z.exe` 是自带解压器。**包内自带终末地资源**：`Assets\Games\Endfield\`（characters/weapons/npcs/objects/regions/elements/game.json + 28 张角色图 + `Languages\zh-cn\`），可用来对照我们自己的角色表，但 JASM 是 GPL-3.0、**这些资产同样不能直接搬进 MIT 的 modecontroller**。
+
+`关键词：["JASM release","中文版发布包","JASM_v2.29.3","Setup.exe","7z 绿色版","Elevator.exe","Endfield 资源","characters.json","未签名","预发布","下载位置"]`
+
+### 【JASM 专用的隔离 XXMI 环境】2026-10-…
+*2026-10-07 13:13*
+
+【JASM 专用的隔离 XXMI 环境】2026-10-07 用户原话「帮我 copy 一个 xxmi 进 jasm 的隔离文件夹」→ 按他的选择（源 = ① `D:\zmdmod\XXMI2`）整份复制到 **`D:\zmdmod\JASM\xxmi`**：951.2 MB / 1359 文件，robocopy `/E /COPY:DAT /MT:8` 零失败，**逐文件 SHA256 与源比对差异 0**。入口 = `D:\zmdmod\JASM\xxmi\Resources\Bin\XXMI Launcher.exe`（同目录有 EFMI 注入链需要的 python313.dll 等）。它的 `XXMI Launcher Config.json`：`active_importer=EFMI`、EFMI 的 `game_folder = D:\Hypergryph Launcher\games\Endfield Game`、`loader = XXMI Launcher.exe`。
+⚠️ **这份副本的 `EFMI\Mods` 里只有 1 个 mod**（`zhuang_fangyi_ink_cheongsam_full_ver_52` 目录 + `MC_Probe.ini`）；**完整 mod 库在 `D:\zmdmod\modecontroller\runtime\builtin\XXMI`（3.7 GB）** —— 若他要 JASM 管完整库，需要另从此处补拷 Mods。
+
+`关键词：["JASM 隔离文件夹","隔离 XXMI","copy xxmi","JASM\\xxmi","XXMI2 副本","XXMI Launcher.exe","EFMI Mods","robocopy","SHA256 一致","game_folder","Hypergryph Launcher"]`
+
+### 本机终末地真实安装目录 = **`D:\Hypergry…
+*2026-10-07 13:13*
+
+本机终末地真实安装目录 = **`D:\Hypergryph Launcher\games\Endfield Game`**（2026-10-07 实测该目录下确有 `Endfield.exe`；XXMI2 的配置里 EFMI `game_folder` 写的也是它）。曾经的 `D:\TapTap\PC Games\232326\games\Enfield Game` 路径**已不存在**（旧视频/旧记录里的路径，别再据此找游戏）。
+
+`关键词：["游戏目录","Endfield.exe","Hypergryph Launcher","Endfield Game","本机安装路径","TapTap 路径已失效","game_folder","XXMI 配置"]`
 
 ## 用户偏好与环境（**含个人信息，公开前请自行取舍**）（18 条）
 
