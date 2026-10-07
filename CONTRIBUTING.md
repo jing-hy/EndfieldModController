@@ -145,7 +145,35 @@ python scripts/upload_release_assets.py --tag v1.0.x     # DoH 查真实 IP + cu
 
 ---
 
-## 五、自动生成的产物（**不要手改**）
+## 五、模块职责
+
+后端约 2.9 万行，都在 `endfieldmodcontroller\`。改代码前先在这里定位该动哪个文件。
+
+| 模块 | 职责 |
+| --- | --- |
+| `config.py` | 配置读写（原子写 / 损坏隔离）、路径解析、内嵌组件探测（带缓存，分"深/浅"两档） |
+| `core.py` | Mod 库扫描、角色识别、ini 解析与热键改写（`patch_mod_hotkeys` **默认不启用**）、控制器产物生成、`d3dx_user.ini` 读写 |
+| `activation.py` | 选择解析（同角色互斥 / 依赖按需）、staging 生成与清理（**库保护护栏在这里**） |
+| `launcher.py` | 一键启动、注入库维护、注入器配置读写、ReShade 运行时准备、进程收尾 |
+| `api.py` | 暴露给前端的接口层（pywebview `js_api`）；**构造必须保持"快"**，重活丢后台预热线程 |
+| `initialize.py` | 初始化自检（重建配置时**必须保留所有段**、shader / preset / 运动矢量、游戏目录运行库、Mod 冲突检测） |
+| `runtime_assets.py` | 随包资产的展开与基线（**DLSS 运行库按显卡架构选变体的唯一落点在 `ensure_dlssnr()`**） |
+| `runtime_deps.py` / `dependencies.py` | 内置组件清单与安装（XXMI / Libraries / EFMI / Poser / 物理效果）、下载与解压（逐文件原子替换） |
+| `dlss5_fetcher.py` / `reshade_integration.py` | DLSS5 组件、ReShade 集成与游戏目录注入审计 |
+| `secondary_motion.py` / `sbm_data_sync.py` | 物理效果：状态、注入、模板实例化；角色参数后台拉取（**只补本地缺失的角色**，绝不碰 `presets\User.json`） |
+| `poser.py` | 摆姿 / MMD：状态、安装包下载、调**它自己的**安装向导、开关（重命名 dll）、只读读它的摆姿页 |
+| `game_clean.py` | 游戏目录净化 / 还原（备份式、内容级判定、越界拒绝） |
+| `fastnet.py` / `github.py` / `fsutil.py` | 下载（并发 / 镜像 / 校验）、GitHub 查询与缓存、哈希与原子写等公共件 |
+| `diagnostics.py` / `crashwatch.py` | 日志、诊断包采集、崩溃监视与归因 |
+| `deviceinfo.py` | 设备与显卡（只读注册表 + ctypes，**不起子进程**）：写进诊断包，用来判断"是不是显卡不支持" |
+| `filewatch.py` | 文件守护：**曾经在 + 连续两次启动都缺 + 同组还有别的文件** ⇒ 提示加杀软白名单 |
+| `hot_reload.py` | 热重载：找游戏窗口并发按键 |
+| `version.py` | **全项目唯一版本口径**（别再各处自己写正则抠数字） |
+| `frontend\src\` | 前端源码（Vue 3 + Vite）；产物 `web\dist\index.html` 随 exe 打包，**改了必须先 build** |
+
+---
+
+## 六、自动生成的产物（**不要手改**）
 
 | 路径 | 由谁生成 | 说明 |
 | --- | --- | --- |
