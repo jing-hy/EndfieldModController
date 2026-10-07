@@ -769,9 +769,19 @@ class EndfieldModControllerApi:
             launcher.configure_dlss5_injection(self.config, enabled=True)
         except Exception as exc:  # noqa: BLE001
             result["warning"] = f"重写注入库失败: {exc}"
+        # ⚠️ 日志名字要**逐组件写全**（2026-10-07 修）：原来是
+        #    `'DLSS5' if component == 'dlss5' else '第一人称'` ⇒ **mfg（DLSS4）被打印成"第一人称"**，
+        #    于是现场日志里"DLSS4 被启用"看起来像"第一人称被停用" ⇒ 排查时**误读了自己的日志**
+        #    （实测：把"开 DLSS4 ⇒ 互斥关 DLSS5 ⇒ 又开 DLSS5 ⇒ 互斥关 DLSS4"这条链读成
+        #      "第一人称被停用"）。三个组件的名字一律走这张表。
+        _component_label = {
+            "dlss5": "DLSS5 神经渲染",
+            "firstperson": "第一人称",
+            "mfg": "DLSS4 多帧生成",
+        }.get(component, component)
         launcher._append_log(
             self.config,
-            f"{'DLSS5' if component == 'dlss5' else '第一人称'} 插件{'启用' if enabled else '停用'}"
+            f"{_component_label} 插件{'启用' if enabled else '停用'}"
             f"（移动 {len(result.get('moved') or [])} 个文件）",
         )
         return result
