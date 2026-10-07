@@ -4,7 +4,7 @@
 > 目的：让「当时为什么这么改、踩过什么坑」跟着源码一起留在仓库里。
 > 想改内容 → 改记忆库（用记忆工具），再跑一次本脚本；不要直接编辑本文件。
 
-- 生成时间：2026-10-07 15:26:08
+- 生成时间：2026-10-07 15:31:27
 - 来源：`.dsh-meow/memory.db`
 - 条目：593 条（已跳过 archived / 其它项目的条目）
 
@@ -670,19 +670,6 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 
 `关键词：["变体机制落点", "best_rtx_sm唯一入口", "select_dlssnr_variant", "ensure_dlssnr", "dll_architectures扫fatbin", "dlssnr_variant.json marker", "baseline按变体判防抖", "dlss5:nr_arch自检", "dlss5_gpu_scope_applied迁移", "pack_nvngx_assets变体字段"]`
 
-### 【modecontroller 当前状态唯一真源】（20…
-*2026-10-07 13:52*
-
-【modecontroller 当前状态唯一真源】（2026-10-07 13:53 更新）
-**Latest Release = `v1.1.1`**（2026-10-07T05:52:40Z = 北京时间 13:52，release id `405424097`，`draft=false`/`prerelease=false`/`--latest`）。**本地 = `1.1.1`（正式号，与 Release 同号，不欠号）**；main = `688afc3`（已推，含记忆日志与结构树镜像提交）。快照 `D:\zmdmod\_snapshot_1.1.1-20261007-135110`。
-**v1.1.1 附件（digest 与本地逐字节一致）**：`EndfieldModController.exe` 32,040,403 B / sha256 `392d264c00f357c1ae55ee1abe5088b954a7a34a70b24552880f1f54360a3f62`；`assets-bundle.zip` 262,289,985 B / sha256 `182e5508f5d7c73818dcc3af981bb3527cd715c0e3715a9545304c084a4a91bc`。**伪旧版本版未构建**（要 `--with-fake-old`）。
-**v1.1.1 内容（自 v1.1.0 起）**：① **修「EFMI 加载失败：无法检测到游戏进程窗口」** —— XXMI 的 `importer_folder` 被指到 Mod 库 ⇒ 两份 d3d11 loader ⇒ `0xC0000005`（落点 `launcher.ensure_efmi_importer_folder()` / `xxmi_foreign_loader()`；详见 decisions 条 `0muxn2v0`）；② **修「DLSS4 关掉还留在生效目录」** —— 资产展开把 `renodx-mfgunlock.addon64` 放回顶层，而归位兜底只覆盖 DLSS5 ⇒ 收口成 `launcher.realign_component_addons()`（三组件 + 面板），`ensure_injections` 与 `initialize.ensure_all` 都调；③ **首屏 Mod 列表提前就绪** —— `_warm_up` 先扫库再等 `ui_ready`（与窗口创建并行）、`_mods()` 加锁 + 代次号、改库操作与扫描互斥（RLock）、预热段零写盘；前端加首屏加载页（12 秒兜底）；④ README/docs 重写整理 + 注释文案审计。
-**流程（不变）**：`build_release.py --no-push`（本地验证）/ 不带参数会**自动推 main** → `prepare_release.py`（备附件并打印 sha256）→ `gh release create --draft --notes-file RELEASE_NOTES.md` → `upload_release_assets.py --tag`（DoH 直连，262 MB 约 47 秒）→ `gh release edit --draft=false --latest` → **按 release id 核对 digest**（draft 阶段按 tag 查会 404）→ 发完**必查有无遗留 draft**。附件只推 `EndfieldModController.exe` + `assets-bundle.zip`（都不带版本号）。
-**issue 状态**：**#16（xingluo667）OPEN**（2026-10-07 已回 comment 6030530865：说清 10 条 `parseServerManifest` 是游戏自带 Streamline 2.10.3 的产物、不是闪退原因；建议更新驱动；请他用「一键启动」启动以拿退出码）。**#17 CLOSED**。
-**待办**：① 等 #16 回报退出码；② 下一步版本号规则：本地 = 正式号，下次动实质改动再写 `1.1.2-beta`；③ DLSS4 多帧生成线已作废（游戏不提供帧生成）。
-
-`关键词：["当前状态唯一真源","Latest Release v1.1.0","release id 405355434","exe sha256 03092366","assets 262289985","伪旧版 from-1.1.0","启动提速 19 秒","launch_stage 分步进度","issue 16 已回","issue 17 已关","版本号 1.1.0 用户指定"]`
-
 ### 【modecontroller 当前状态（2026-10…
 *2026-10-07 14:15*
 
@@ -694,6 +681,20 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 **下一步**：① 等用户确认裸版本；② 之后才 `scripts/build_release.py` 构建；③ normify 结构树四步（realign → refresh → validate → build+render）**尚未做**；④ 未经明确说"推/发"不动 GitHub。
 
 `关键词：["1.1.2-beta","Mod 商城落地","下载中心","modstore.py","downloads.py","StorePage.vue","DownloadsPage.vue","依赖页瘦身","1229 passed","selfupdate flaky","未构建 exe","已安装标记不亮"]`
+
+### 【modecontroller 当前状态唯一真源】（20…
+*2026-10-07 15:28*
+
+【modecontroller 当前状态唯一真源】（2026-10-07 15:28 更新）
+**Latest Release = `v1.2.0`**（2026-10-07T07:27:46Z = 北京 15:27，release id `405493403`，draft=false / prerelease=false / --latest；**遗留 draft = 0**）。**本地 = `1.2.0`（与 Release 同号，不欠号）**；main = `7c36bab`（已推）。快照 `D:\zmdmod\_snapshot_1.2.0-20261007-152608`。
+**v1.2.0 附件（digest 与本地逐字节一致）**：`EndfieldModController.exe` 32,109,271 B / sha256 `ab467b5b933809e9ad2ca2bd663454b07c518cd4645c73744bebf4dc2ca90c16`；`assets-bundle.zip` 262,289,985 B / sha256 `1d4893b6c1ad75575ad57ab16532d4f31e5010f8de0085dbf95b6f3280b99975`。
+**v1.2.0 内容（自 v1.1.1 起）**：① **Mod 商城**（GameBanana 浏览/搜索/分类+角色筛选/四种排序/页内详情/R18 三档/批量扫描与一键更新）；② **下载中心**独立页签（统一任务列表、暂停继续取消清空、队列可追加）；③ **修国际服日志目录厂商段写死**（`Hypergryph` vs `Gryphline`，`fsutil.endfield_local_low_dirs()` 四处共用）—— 这是 issue #16「说好的自动换 Streamline 从未生效」的根因；④ **补退出时刻取证**（`game-exited`/`crash` 两时机此前从未落盘：含它们的 `crashwatch.postmortem` 在实际生效的监视路径上没被调用，改由 `diagnostics._capture_postmortem` 记录并加 `pid` 参数）；⑤ 商城图片链路重做（本地只读图片服务 + 三档 + 懒加载 + 连接复用，12 张 38.0s→4.6s）；⑥ 角色名中文化；⑦ 索引/分类缓存加 `STORE_SCHEMA` 版本号。
+**发版流程（不变）**：`build_release.py`（**会自动推 main**）→ `prepare_release.py` → `gh release create --draft --notes-file RELEASE_NOTES.md` → `upload_release_assets.py --tag` → `gh release edit --draft=false --latest` → **按 release id 核对 digest**（draft 阶段按 tag 查会 404）→ 查遗留 draft。附件只推 `EndfieldModController.exe` + `assets-bundle.zip`（都不带版本号）。
+⚠️ 版本号 WARN：`scripts/release_version.py` 会提示"1.2.0 不是 v1.1.1+1"—— 那是**用户主动跳号**（1.1.2 → 1.2.0，因为加了商城这个量级的功能），属预期，不阻断构建。
+**issue 状态**：**#16（xingluo667）OPEN** —— 回复草稿已备好（撤回驱动建议 + 说明厂商段 bug 已修 + 请他更新 1.2.0 后照常一键启动试、不用改设置），**等用户检查后再发**。
+**待办**：① 发 #16 回复；② normify 结构树四步（本轮改动大：realign → refresh → validate → build+render）；③ 宣传片脚本仍停在 v0.3.2。
+
+`关键词：["当前状态唯一真源","Latest Release v1.1.0","release id 405355434","exe sha256 03092366","assets 262289985","伪旧版 from-1.1.0","启动提速 19 秒","launch_stage 分步进度","issue 16 已回","issue 17 已关","版本号 1.1.0 用户指定"]`
 
 ### 待办
 
