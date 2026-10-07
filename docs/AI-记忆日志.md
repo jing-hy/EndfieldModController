@@ -4,9 +4,9 @@
 > 目的：让「当时为什么这么改、踩过什么坑」跟着源码一起留在仓库里。
 > 想改内容 → 改记忆库（用记忆工具），再跑一次本脚本；不要直接编辑本文件。
 
-- 生成时间：2026-10-07 17:48:56
+- 生成时间：2026-10-07 18:05:47
 - 来源：`.dsh-meow/memory.db`
-- 条目：599 条（已跳过 archived / 其它项目的条目）
+- 条目：596 条（已跳过 archived / 其它项目的条目）
 
 ---
 
@@ -304,7 +304,7 @@
 
 `关键词：["可以自己推","只改源码","推送授权","push main","不必逐次问","发 Release 仍要等","push.py 先快照","结构树刷新"]`
 
-## 项目记忆（结构 / 决策 / 部署 / 待办）（43 条）
+## 项目记忆（结构 / 决策 / 部署 / 待办）（34 条）
 
 ### 项目概述
 
@@ -355,19 +355,6 @@ EndfieldModController =《明日方舟：终末地》的 **Mod 一站式管理�
 
 `关键词：["ensure_all枢纽", "builtin_report字段", "预发布版接口", "依赖清单dependencies.json", "_deps安装目录", "collect_required_dependency_names", "library_conflict护栏", "proxy_loader加载全部dll", "poser-install.json", "公告只读alerts.json", "无本地后门", "一键更新分母"]`
 
-### **modecontroller · 包与目录索引**（…
-*2026-10-05 02:19*
-
-**modecontroller · 包与目录索引**（后端约 2.9 万行）
-**后端 `endfieldmodcontroller\`**：`config.py`（配置原子写/损坏隔离/路径推导/探测缓存）、`core.py`（Mod 库扫描、角色识别、ini 解析、控制器产物、`d3dx_user.ini`）、`activation.py`（选择解析、同角色互斥、staging、依赖计划）、`launcher.py`（一键启动、注入库维护、XXMI 配置读写、进程收尾、`active_efmi_loader()`）、`api.py`（pywebview `js_api` 层，构造必须快、重活丢后台预热；`hot_reload()` 在此）、`hot_reload.py`（**热重载**：找游戏窗口 + 发 F10）、`initialize.py`（启动自检）、`dependencies.py`/`runtime_deps.py`（下载解压安装）/`runtime_assets.py`（随包资产）、`poser.py`/`secondary_motion.py`/`dlss5_fetcher.py`/`reshade_integration.py`/`game_clean.py`（净化还原）、`modfix.py`/`modbackup.py`/`moddl.py`、`fastnet.py`（多线路下载引擎）/`github.py`、`fsutil.py`（**公共工具：原子写+退避重试 / sha256 / 路径包含判定 / JSON 读写 / 编码容错**）、`alerts.py`/`diagnostics.py`/`crashwatch.py`/`filewatch.py`/`updates.py`/`selfupdate.py`/`integrity.py`/`ini_lint.py`/`deviceinfo.py`/`character_sync.py`/`sbm_data_sync.py`/`version.py`（**全项目唯一版本口径**）。
-**前端**：源码 `frontend\src`（Vue 3 + Vite）—— `pages\` 六个页签（Mod 库 / 辅助 / 依赖 / 启动 / 设置 / 说明）、`components\`（含 `ui\` 通用件）、`lib\bridge.js` 是**唯一**桥接点（`call("后端方法")`）、`store.js` 存 `get_state()` 快照；构建产物 `web\dist\index.html`（单文件，随 exe 打包）。
-**运行时目录**（数据根 = exe 所在目录）：`runtime\builtin\XXMI`（XXMI+Libraries+EFMI）、`runtime\dlss5`、`runtime\secondary_motion`、`runtime\poser`、`runtime\game_backup\<时间戳>`、`runtime\logs\launch.log`、`runtime\_state`、`library\`（**用户的 Mod 库，任何自动清理都不碰**）、`assets\`（随包资产）。
-**脚本 `scripts\`**：build_exe / build_release / build_assets_bundle / prepare_release / push / snapshot / upload_release_assets / release_version / normify_realign / fetch_characters / gen_character_pinyin / make_demo / self_check。
-**测试**：`python -m pytest tests -q`（**不要**在仓库根全量跑，`_tmp\` 会污染）。
-**硬约定**：内嵌组件一律用**相对 PROJECT_ROOT 的相对路径**、`config.json` 里不出现盘符；外部组件用 `available_drives()` 动态枚举，「内置优先、外部兜底」；游戏用 `auto_detect_game_dir()` 自动搜索。
-
-`关键词：["包与目录索引", "endfieldmodcontroller 模块", "hot_reload.py", "active_efmi_loader", "前端 frontend src", "bridge.js 唯一桥接", "运行时目录", "library 只读", "scripts 脚本清单", "pytest tests -q", "相对路径硬约定"]`
-
 ### **normify 结构树**（2026-10-02 建…
 *2026-10-05 13:35*
 
@@ -378,18 +365,19 @@ EndfieldModController =《明日方舟：终末地》的 **Mod 一站式管理�
 
 `关键词：["normify 结构树", "功能单元粒度", "normify-modecontroller profile", "docs/structure 镜像", "normify_realign --apply", "normify_module_refresh", "normify_validate 0 error", "normify_build render", "planned 转 active", "push.py 只同步镜像"]`
 
-### **「连续启动失败 3 次 → 弹窗 → 强力修复」的落…
-*2026-10-05 18:03*
+### **modecontroller · 包与目录索引**（…
+*2026-10-07 18:05*
 
-**「连续启动失败 3 次 → 弹窗 → 强力修复」的落点**（2026-10-05 用户要求，v1.0.12-beta 实现）。
-用户原话：「**如果连续启动三次失败，加个弹窗，做个强力修复功能，一键还原终末地，然后清空依赖并重新下载**，注意：**还原终末地需要把其他第三方的也还原掉**」。
-**判据**（`crashwatch.record_launch_result`）直接复用 `combo_succeeded`：**崩了** 或 **没活过 120 秒且无正常退出卸载统计**（静默闪退）都算一次失败 —— ⚠️ 只数崩溃是错的，2026-10-05 那位反馈者每次活 20 秒、一条 WER 都没有，只数崩溃他永远等不到弹窗。
-**落点**：`crashwatch` 新增 `runtime\_state\launch_failures.json`（`streak`/`prompted_streak`/`history`，文件写坏当"无记录"）+ `strong_repair_status`（`ready = streak>=3 且 streak>prompted_streak`，**同一档只弹一次**）+ `mark_strong_repair_prompted` + `reset_launch_failures`；`start_watch` 在游戏退出后调 `record_launch_result`；`api.crash_bundle_status` 顺带带出 `strong_repair`（前端共用同一个 3 秒轮询）。
-**`api.force_repair()` 两步、顺序不能反**：① `game_clean.backup_and_clean` —— 判据是"原版会不会有这个文件"，所以**不管谁铺的**第三方注入全搬走 + 把系统原版补回游戏目录（这就是用户说的"把其他第三方的也还原掉"）；② `reset_dependencies_and_redownload(restore_first=False, keep_game_backup=True)` —— **必须 `restore_first=False`**（默认那一步会把刚搬走的第三方**放回**游戏目录，方向相反）、**保留 `game_backup`**（用户唯一能「撤销清除」的东西）。护栏：净化失败 ⇒ 中止、什么都不清；游戏在跑 ⇒ 拒绝。
-**前端** `App.vue`：`strongRepairModal`（说明）+ `forceRepair`（**二次确认 + `focusCancel`**），修完跳依赖页 `autoStartDeps=true`。
-**测试**：`tests/test_force_repair.py` 10 条，反向验证 4/4 变红，全量 800 passed。
+**modecontroller · 包与目录索引**（后端约 3 万行）
+**后端 `endfieldmodcontroller\`**：`config.py`（配置原子写/损坏隔离/路径推导/探测缓存）、`core.py`（Mod 库扫描、角色识别、ini 解析、控制器产物、`d3dx_user.ini`）、`activation.py`（选择解析、同角色互斥、staging、依赖计划）、`launcher.py`（一键启动、注入库维护、XXMI 配置读写、进程收尾、`active_efmi_loader()`/`ensure_efmi_importer_folder()`/`realign_component_addons()`）、`api.py`（pywebview `js_api` 层，构造必须快、重活丢后台预热；`hot_reload()` 在此）、`hot_reload.py`（热重载：找游戏窗口 + 发 F10）、`initialize.py`（启动自检 `ensure_all`）、`dependencies.py`/`runtime_deps.py`（下载解压安装）/`runtime_assets.py`（随包资产、变体选择、`retire_stale_nr_addons`）、`modstore.py`（GameBanana 商城数据层）/`downloads.py`（下载任务归一化，2026-10-07 加）、`poser.py`/`secondary_motion.py`/`dlss5_fetcher.py`/`reshade_integration.py`/`game_clean.py`、`modfix.py`/`modbackup.py`/`moddl.py`、`fastnet.py`（多线路下载引擎）/`github.py`、`fsutil.py`（**公共工具：原子写+退避重试 / sha256 / 路径包含判定 / JSON 读写 / 编码容错**）、`alerts.py`/`diagnostics.py`/`injecttrace.py`（注入现场时间线）/`watchsample.py`/`crashwatch.py`/`filewatch.py`/`updates.py`/`selfupdate.py`/`integrity.py`/`ini_lint.py`/`deviceinfo.py`/`character_sync.py`/`sbm_data_sync.py`/`version.py`（**全项目唯一版本口径**）。
+**前端**：源码 `frontend\src`（Vue 3 + Vite）—— `pages\` 八个页签（Mod 库 / 辅助 / **商城** / **下载** / 依赖 / 启动 / 设置 / 说明）、`components\`（含 `ui\` 通用件）、`lib\bridge.js` 是**唯一**桥接点（`call("后端方法")`）、`store.js` 存 `get_state()` 快照；构建产物 `web\dist\index.html`（单文件，随 exe 打包，**改了前端必须 `node node_modules/vite/bin/vite.js build` 再打包**）。
+**随 exe 的资源**：`endfieldmodcontroller/characters.json` + `characters/`（34 张角色头像 PNG + `index.json` 索引 —— **按索引查文件名，别按角色 key 猜**：`prelica.*.png` vs key `perlica`、管理员拆成 `endministrator1/2`）、`hotkey_hints.json`、`component_versions.json`。
+**运行时目录**（数据根 = exe 所在目录）：`runtime\builtin\XXMI`（XXMI+Libraries+EFMI）、`runtime\dlss5`、`runtime\secondary_motion`、`runtime\poser`、`runtime\game_backup\<时间戳>`、`runtime\logs\launch.log`、`runtime\_state`、`library\`（**用户的 Mod 库，任何自动清理都不碰**）、`assets\`（随包资产）。
+**脚本 `scripts\`**：build_exe / build_release / build_assets_bundle / prepare_release / push / snapshot / upload_release_assets / release_version / normify_realign / check_component_versions / pack_nvngx_assets / fetch_characters / gen_character_pinyin / make_demo / self_check。
+**测试**：`python -m pytest tests -q -n 4`（**不要**在仓库根全量跑，`_tmp\` 会污染）。
+**硬约定**：内嵌组件一律用**相对 PROJECT_ROOT 的相对路径**、`config.json` 里不出现盘符；外部组件用 `available_drives()` 动态枚举，「内置优先、外部兜底」；游戏用 `auto_detect_game_dir()` 自动搜索。
 
-`关键词：["连续启动失败 3 次", "强力修复 force_repair", "一键还原终末地", "把其他第三方的也还原掉", "launch_failures.json", "strong_repair_status", "prompted_streak 只弹一次", "静默闪退也算失败", "backup_and_clean 净化", "restore_first=False", "keep_game_backup 保留还原点", "reset_dependencies_and_redownload"]`
+`关键词：["包与目录索引","后端模块清单","前端 pages 与 bridge.js","modstore.py","downloads.py","StorePage DownloadsPage","characters 头像索引 index.json","运行时目录 runtime","scripts 脚本清单","pytest -n 4","相对路径硬约定"]`
 
 ### 技术决策
 
@@ -458,43 +446,6 @@ runtime\dlss5                      38 字符  ❌ 崩
 
 `关键词：["DLSS5按架构选运行库", "去掉非50系锁", "RTX20系及以上支持", "official-sf-rtx40变体", "nvngx_dlssnr目标名不变", "随包两份覆盖全代次", "一键启动零下载", "tensor core判据", "GTX16系锁定", "社区镜像rhi-repo"]`
 
-### 【重大架构发现：取证链只挂在一个监视器上，主路径从未执行…
-*2026-10-06 00:19*
-
-【重大架构发现：取证链只挂在一个监视器上，主路径从未执行（2026-10-05 从反馈者包里查出）】
-项目里有**两套**进程监视器：
-① `diagnostics._monitor_process`（**主路径唯一在跑的那个**：读退出码、命令行采集、句柄降级、**NR 自动开启**）；
-② `crashwatch.start_watch`（**只在"以系统默认方式 os.startfile 启动 XXMI"那条分支**的末尾被调用，全项目仅此一处）。
-而整套取证**只长在 ② 身上** ⇒ 主路径下**从来没有**：5 秒运行时采样、注入快照、崩溃归因、崩溃记忆与跑通台账、**「连续三次失败 → 强力修复」计数**。旁证：反馈者的诊断包里**连 `watch-samples.jsonl` 都不存在**，他崩了 5 次+"重装两轮"也从没弹过那个窗。
-**修法（用户选定"一个监视器干完"）**：抽 `crashwatch.on_game_exit()`（证据→报告→归因→记账→崩溃包→建议）+ `arm_runtime_watch()`/`poll_runtime_watch()`（采样与注入时间线）两个共用入口，**两边都调**；并把它们装进 `_monitor_process`。
-⚠️ **不是**把主路径切到 `start_watch` —— 那会丢掉退出码、命令行、句柄降级和 **NR 自动开启**。
-**同时修掉**：随包资产**并发展开**（`ensure_file` 的临时文件原先固定名 `<目标>.mc-tmp`，两条路径同时展开 ⇒ 互踩 ⇒ 日志假报「sha256 校验失败（得到 2d8b3e2f…，期望 e16bcf15…）」，极端情况把半成品落位）⇒ 现在 `ensure_all` 串行化 + 临时文件带 `pid-threadid` 唯一命名。
-
-`关键词：["取证链只挂在一个监视器", "两套进程监视器", "_monitor_process主路径", "start_watch只在os.startfile分支", "采样从未跑过", "强力修复计数失效", "on_game_exit统一入口", "arm_runtime_watch共用", "资产并发展开", "临时文件固定名互踩", "sha256假失败", "ensure_all串行化"]`
-
-### 【相机 hook 与 NR 的共存条件（2026-10-…
-*2026-10-06 00:42*
-
-【相机 hook 与 NR 的共存条件（2026-10-06 用户实测定案，**修正 10-05 那条旧结论**）】
-**新事实**（用户原话「**都正常了，就这样**」）：`CameraFirstPerson=1` 时，`NeuralUplift=1`（**启动就开 DLSS5**）与相机 hook **可以共存** —— 日志里 `Camera controls installed.`（arm 后 18 秒）先出现，`feature 18 created` + `inline feature 18 evaluation succeeded` 紧随其后。
-**这次才看清的机制**：**`CameraFirstPerson=0` 时 enhancer 根本不去装相机 hook** ⇒ 日志里永远没有 `Camera controls installed.` ⇒ `nr_autostart`（等这句话才按 F6）**永远不动作** —— 用户现象「又测了一次，就是没自动开 nr」的真因就是它（当时 ini 里是 addon 写的出厂值 0）。
-**因此修正 2026-10-05 那条**「NR 抢在 hook 前激活 ⇒ hook 装不上（error 8）」：那天失败/成功的对照里 `NeuralUplift` **不是唯一变量**（`CameraFirstPerson` 一直是 0、hook 靠用户按 F1 才触发）⇒ 真正决定 hook 装不装的是 **`CameraFirstPerson`**。
-**实测可用的一组**：`runtime\reshade\ReShade.ini` 里 `NeuralUplift=1` + config `auto_enable_nr_after_camera_hook=False`（后者让 `_check_defer_nr_until_camera_hook` 完全跳过、`nr_autostart` 整体停用 —— 因为 NR 已在启动时开好，不需要模拟按键）。
-**用户明确要求**：**不许覆写他的第一人称开启状态配置** —— `CameraFirstPerson` 已从 `launcher._sync_enhancer_section` 的同步列表里**撤掉**，测试钉住「用户设的 0 必须原样保留」。
-
-`关键词：["CameraFirstPerson决定hook", "Camera controls installed不出现", "启动就开DLSS5可行", "NeuralUplift=1与hook共存", "修正NR抢trampoline结论", "nr_autostart等不到hook", "auto_enable_nr_after_camera_hook关闭", "不许覆写第一人称开关", "同步列表撤掉CameraFirstPerson"]`
-
-### 【修正：`CameraFirstPerson=0` 时相…
-*2026-10-06 08:19*
-
-【修正：`CameraFirstPerson=0` 时相机 hook **照样会装**（2026-10-06 从反馈者包查出，**推翻当日更早的结论**）】
-反馈者（数据根 `P:\TOOL`、游戏 `K:\game\...`、**RTX 5080**）生效 `ReShade.ini` 里 `CameraFirstPerson=0`，而 ReShade 日志里 `[RenoDX: Arknights Endfield Enhancer] Endfield enhancer: Camera controls installed.` **照样出现**（arm 后仅 **26 秒**）⇒ 「`=0` ⇒ enhancer 不装 hook ⇒ `nr_autostart` 永远等不到」**作废**。
-⚠️ **仍未解释**：本机 modtest 那次（同样 `=0`，00:22:11 arm → 00:23:38 退出，87 秒）**没有**这句话 —— 两台条件相近却不同，原因待查。
-**同时查出的真根因（他那台"开不了 DLSS5"）**：他把 NR 快捷键设成小键盘键，addon 日志写成 `hotkeys: NR toggle NUM`，而键表认不出 ⇒ **退回按了 F6** ⇒ NR 从未打开（面板停在「成功NR帧 4」，那几帧正是这次误按留下的；`feature ready` + `frame 1/2/3 delivered` 都在误按之后）。与显卡、与 hook 均无关。
-**修法**：键表补 `NUM`/`NUMLOCK`(0x90)、`NUM0..9`(0x60..69)、`NUM±*/` 与 `ADD/SUBTRACT/MULTIPLY/DIVIDE/DECIMAL`；`_HOTKEY_RE` 的字符类从 `[A-Za-z0-9]` 补成 `[A-Za-z0-9+*/.−]`（否则 `NUM+` 只匹配到 `NUM`，解析成 NumLock）。测试 `test_numpad_hotkey_names_are_recognised`，反向验证 W 项。
-
-`关键词：["CameraFirstPerson=0照样装hook", "推翻不装hook的结论", "Camera controls installed", "NR快捷键NUM", "退回按F6", "小键盘键名键表", "_HOTKEY_RE字符类补符号", "成功NR帧4真相"]`
-
 ### 【四个反馈者的身份对照（2026-10-06 用户质疑「…
 *2026-10-06 08:20*
 
@@ -508,40 +459,6 @@ runtime\dlss5                      38 字符  ❌ 崩
 **教训**：写"回某条 issue"的草稿前，**先逐项核对是不是同一个人** —— 这次把 #16 与第四人的症状、显卡、根因写进了同一份草稿（还写了"你的显卡 5080"），靠用户一句质疑才发现。
 
 `关键词：["四个反馈者身份对照", "xingluo667是5070Ti", "PTTOOL第四人是5080", "HUAWEI是Intel-Arc", "lzh18是4060", "按runtime认人", "CameraFirstPerson不是决定因素", "写issue草稿前先核对身份"]`
-
-### 【NR 引擎换代定案（2026-10-06 用户实测批准…
-*2026-10-06 11:35*
-
-【NR 引擎换代定案（2026-10-06 用户实测批准）】**随包的 `renodx-dlss5` 从 4.70 汉化版换成官方 `7.0.0-rc8`**。
-**DFC 是什么**：`Deep Fried Chicken`（`deep-fried-chicken.addon64`，作者 Alexander，只从 Discord `discord.gg/g2v2XGqvR` 分发）是 **DLSS5-Feeder 官方推荐的"神经渲染 addon"**。Feeder 只管喂 DLSS 请求，真正做神经渲染的必须是**第二个 addon**，位置**只能有一个占用者**，两个候选 = `renodx-dlss5`(Krish) 与 DFC。Feeder 原文：「**Never install two neural add-ons.** If Deep Fried Chicken finds RenoDX's add-on … loaded beside it, **it does nothing at all for the whole session — silently**. Pick one.」
-**反馈者现场**：`runtime\dlss5\` 里 DFC 与随包 `renodx-dlss5-4.7_汉化.addon64` 并存 ⇒ Feeder 打 WARN + `Deep Fried Chicken: ARMED -- consuming the synthetic contract` ⇒ `feature 18 create intercepted` 之后**再没有 `feature 18 created`** ⇒ `evaluate raised 0xC0000005 (reading address FFFFFFFFFFFFFFFF)`，fault stack `D3D12Core.dll <- nvngx_dlssnr.dll` ⇒ 崩。
-**新旧中文的真相**：我们那份 `_汉化` 与官方 4.70 **同为 1,732,608 B、仅差 1684 字节**（别人在语言表上做的**等长替换**）；而**官方 7.0.0-rc8 自带多语言表**（2173 处中文，键 `UiLanguage`/`ui_language`，用 `EnumSystemLocalesW` **跟随系统区域**）⇒ **不需要再维护汉化版**。
-**来源**：`RankFTW/rhi-repo`（我们取 DLSS5 运行库的同一镜像仓，GitHub 可直接下）tag `renodx-dlss5-7.0.0-rc8`，资产 `renodx-dlss5_7.0.0-rc8.zip`(630,308 B) → `renodx-dlss5.addon64` 1,921,024 B sha256 `ff8b9738738265e09f01a1c470a0cb0a59eb021b2b23797c3df7cea722a724b6`（随包 `.xz` 464,908 B）。
-**代码落点**：`assets\dlss5\manifest.json` 条目换成 `renodx-dlss5.addon64`；`runtime_assets.retire_stale_nr_addons()`（展开前把旧名搬进 `dlss5\_retired_addons\`，**只搬不删**）+ `RETIRED_NR_ADDONS`；`launcher.DLSS5_ADDON_GLOBS` 从 `renodx-dlss5*.addon64` **收窄成精确名**（否则旧文件进 `_disabled` 后一开开关又被"放回"）；`filewatch` 条目、`runtime_assets`/`initialize` 文案同步。
-
-`关键词：["NR引擎换版定案", "Deep Fried Chicken是什么", "两个neural addon同装", "Never install two neural add-ons", "官方7.0.0-rc8", "自带中文语言表", "UiLanguage系统区域", "rhi-repo来源", "retire_stale_nr_addons", "DLSS5_ADDON_GLOBS收窄", "汉化版退役", "renodx-dlss5.addon64"]`
-
-### 【两份 loader 冲突的完整机理与落点（2026-1…
-*2026-10-07 13:00*
-
-【两份 loader 冲突的完整机理与落点（2026-10-07 lzh18 现场定案，v1.1.1-beta 修复）】
-**现场**：XXMI 配置 `Importers.EFMI.Importer.importer_folder = 'C:/Users/lzh18/Downloads/library'`（指到 **Mod 库**，库里有某个 Mod 带的同名 `d3d11.dll`、没有 `d3dx.ini`）。XXMI 因此注入 `…\library\d3d11.dll`（它自己的日志：`缺少关键文件：d3dx.ini！`），而注入库第二条列的是 `…\XXMI\EFMI\d3d11.dll` ⇒ 进程里**两份不同路径的 D3D11 loader**（WER `LoadedModule[16]` 与 `[61]`）⇒ `Player.log` 停在 `GfxDevice: creating device client` 后 `Crash!!!`，exit `0xC0000005`、故障模块 `ACE-Base64.dll`，活 24~39 秒 ⇒ XXMI 弹「EFMI 加载失败：无法检测到游戏进程 Endfield.exe 的窗口」。
-**为何前两次修复无效**：v1.0.10（注入顺序）、v1.0.29（不再列库里那份 loader）改的都是"**注入库列哪一份**"，而 XXMI 依 `importer_folder` **自己注入的那份一直没变** —— 症状从单份假 loader（`0xC0000135`）变成双份 loader（`0xC0000005`）。
-**落点（launcher.py）**：`xxmi_importer_folder()`（读原值/解析路径/是否在 XXMI 树内/有无 d3d11.dll 与 d3dx.ini）、`ensure_efmi_importer_folder()`（不对就自动改回这个 XXMI 自己的 EFMI 目录：绝对路径 + 改前备份 `.mc-before-importer-folder-<时间戳>.bak` + 其它字段不动 + 幂等；目标没 loader 时如实报 ok=False 且不写）、`xxmi_foreign_loader()`（识别"XXMI 会注入但落在本 XXMI 之外"的那份）。`configure_dlss5_injection()` 里**先纠正、再重新读配置**才写 extra_libraries（顺序反了会被旧副本盖回去）；命中 foreign 时 `dlss5_injection_targets()` **不叠加第二条**。
-**取证**：`injecttrace._process_state()` 按**路径**统计同名 loader（d3d11/d3d12/dxgi），两份就在时间线报警；`diagnostics._xxmi_summary()` 报 importer_folder 现状 + "两侧是否同一份"。测试 `tests/test_efmi_importer_folder.py` 16 条，全量 1174 passed。
-
-`关键词：["importer_folder","ensure_efmi_importer_folder","xxmi_foreign_loader","active_efmi_loader","两份 loader","injecttrace duplicate_loaders","诊断包 importer_folder","lzh18 现场","0xC0000005","0xC0000135","注入库 extra_libraries","EFMI loader"]`
-
-### 【Mod 库「角色视图」+ 角色表/头像随 exe（20…
-*2026-10-07 16:19*
-
-【Mod 库「角色视图」+ 角色表/头像随 exe（2026-10-07 用户要求，落地中）】
-**用户原话**：「还有服装mod库加个改布局的开关，**默认关就是现在这样**，开了之后变成**像jasm那样**，**第一页展示所有任务（角色，包括头像，可以从官网拉），然后点进去是他自己的mod**」；随后「**角色表和图直接随包**」「**是随exe**」；「**角色视图应该是一个开关而不是按钮**」；「那个开关能不能做成**滑块里是样式展示**——划到左边是一个框然后一个横杠，到右边是几个框」；「**不是说单列一个其他角色吗**」。
-**落地**：① 开关 = `config.library_character_view`（**布尔、默认 False**），**放在「皮肤 Mod」卡的开关区**（用现成的 `switch-row` 样式，与其它开关并排）—— ⚠️ 我先放在 Mod 列表工具栏那排小按钮里，用户直接回「**我没看到你说的开关**」，位置太挤就是没看到；② 控件是**图示滑块**（左：一个框+一横杠=列表；右：四个小框=角色墙，当前那侧主题色高亮）；③ 角色墙（`character_gallery`）→ 点角色 ⇒ **角色墙隐藏、只显示该角色的 Mod + 「← 返回角色列表」**（不是"墙 + 下面列表"）；④ **「其他」与角色平级成一格**（认不出角色归属的 Mod，点进去用后端给的 **id 名单**过滤，不能拿"其他"去比分组名 —— 那些 Mod 的分组名五花八门）。
-**随 exe**：头像 34 张 PNG/3.8 MB 放 `endfieldmodcontroller/characters/`（与 `characters.json` 同级，已加进 `scripts/build_exe.py` 的 `--add-data`）+ **索引 `index.json`**（角色名→文件名）。⚠️ **必须用索引，不能按 key 猜文件名**：佩丽卡官网文件是 `prelica.*.png` 而表里 key 是 `perlica`；管理员在官网被拆成 `endministrator1/2` 两条。查找顺序 = **随包 → 运行时缓存**（官网新角色才联网下），实测 34 位角色全有头像、待下载 0（离线可用）。`modstore.ThumbServer` 的 `translate_path` 同时查随包与缓存两个头像目录。
-**踩过的坑**：① 前端错读 `result.files`（后端给的是**每行自带 `avatar`**）⇒ 一个头像都不显示；② 改开关后 `onMounted` 里仍写着旧变量名 `layout` ⇒ 报错、`loadGallery()` 从不执行 ⇒ 用户看到「正在读取角色表…」卡住（**表其实早就随包了**）；③ 删掉 `toggleLayout` 后**切换开关不再触发加载** ⇒ 必须显式 `setCharacterView()` + `watch(characterView)` 兜底。
-
-`关键词：["角色视图","library_character_view","角色墙","头像随包","随exe","characters/index.json","prelica perlica 拼写","endministrator1 2","其他 单列","点进去看mod","图示滑块","switch-row 位置","thumbnail 没显示"]`
 
 ### 用户原话
 
@@ -688,18 +605,6 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 
 `关键词：["变体机制落点", "best_rtx_sm唯一入口", "select_dlssnr_variant", "ensure_dlssnr", "dll_architectures扫fatbin", "dlssnr_variant.json marker", "baseline按变体判防抖", "dlss5:nr_arch自检", "dlss5_gpu_scope_applied迁移", "pack_nvngx_assets变体字段"]`
 
-### 【modecontroller 当前状态（2026-10…
-*2026-10-07 14:15*
-
-【modecontroller 当前状态（2026-10-07 14:15，本期 = Mod 商城 + 下载中心）】
-**版本 = `1.1.2-beta`**（version.py 与两份 README 三处一致，`scripts/release_version.py` 校验通过 = v1.1.1 + 1）；**未提交、未推送、未构建 exe**（用户要求"我确认裸版本没问题之后再进行构建"）。
-**本轮改动**（14 改 + 6 新）：后端新增 `modstore.py`(705 行，GameBanana 数据层) 与 `downloads.py`(180 行，任务归一化)；`api.py` +652 行（商城接口 `mod_store_list/categories/detail/thumbnail/prefetch/check_updates/update_all/installed_list/installed_map/task_status` + 下载中心 `downloads_snapshot/active_count/pause/resume/cancel/clear` + `start_mod_download` 改追加语义 + `_mod_download_worker` 改循环取件 + 旧接口全部兼容转发）；前端新增 `pages/StorePage.vue`(434 行) 与 `pages/DownloadsPage.vue`(297 行)，`App.vue`/`store.js` 加两个页签与下载徽标轮询（每 2 秒 `downloads_active_count`，就是用户要的"动态"），`DepsPage.vue` 瘦身 -190 行（删进度条/速度/日志框/Mod 控制按钮，两列改单列），所有"下载跳转"从 `dependencies` 改指 `downloads`；测试新增 `tests/test_modstore.py`(23 条) 与 `tests/test_download_center.py`(15 条)，`test_mod_download.py` 里"第二批被拒"那条按新契约改成"追加"（+3 条）。
-**验证**：全量 `pytest tests -q -n 4` → **1229 passed / 1 failed**，失败的是 `test_selfupdate_forensics`（既有并行 flaky：单独跑 15/15 通过、与相邻测试并行 3/3 通过，我未触碰 selfupdate/crashwatch）；另有真机冒烟（工作区真 config 调新接口，列表/分类/详情/缩略图/任务快照全部 OK）。
-**已知事实**：工作区 `library` 里 36 个 Mod **全是手工/整合包放进来的**（0 份 `download-info.json`）⇒ 商城卡片上的「已安装」在当前这份库上**不会亮**（程序不猜，属正确行为）；从程序下载过的 Mod 才会标。
-**下一步**：① 等用户确认裸版本；② 之后才 `scripts/build_release.py` 构建；③ normify 结构树四步（realign → refresh → validate → build+render）**尚未做**；④ 未经明确说"推/发"不动 GitHub。
-
-`关键词：["1.1.2-beta","Mod 商城落地","下载中心","modstore.py","downloads.py","StorePage.vue","DownloadsPage.vue","依赖页瘦身","1229 passed","selfupdate flaky","未构建 exe","已安装标记不亮"]`
-
 ### 【本机有两套**互相独立**的 ReShade/DLSS…
 *2026-10-07 17:38*
 
@@ -714,7 +619,7 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 `关键词：["两套 ReShade 环境","reshade_dll 工作区外","RESHADE_BASE_PATH_OVERRIDE","runtime\\reshade\\ReShade.log","DLSS5 目录 shader 库","MartysMods_FFTBLOOM","MartysMods_INSIGHT","X3004 编译失败","CameraFirstPerson 0 与 1","按 F1 能用","XLua.Runtime.dll","IL2CPP","不支持相机控制","modtest 与源码差异"]`
 
 ### 【modecontroller 当前状态唯一真源】（20…
-*2026-10-07 17:47*
+*2026-10-07 18:04*
 
 【modecontroller 当前状态唯一真源】（2026-10-07 17:48 更新）
 **Latest Release = `v1.2.1`**（2026-10-07T09:22:39Z 转正、release id `405589208`、Latest、遗留 draft 0）。**本地 = `1.2.1`**（与 Release 同号、不欠号）。**main = `825787d`**（已推；`737cc1d` = v1.2.1 构建时点，其后是两个纯文档提交）。快照 `D:\zmdmod\_snapshot_1.2.1-20261007-174715`。
@@ -724,31 +629,9 @@ SBM（SecondaryMotion）自维护 fork 的**构建/数据/部署**要点（2026-
 **issue #16（xingluo667）**：17:24 已回复（comment `6034982584`）—— 解释"国际服"只是渠道目录名差异（`Arknights Endfield`，不是他装错）、说明查到的两件事、请他更新 1.2.1 再试、告知国庆后更新频率显著降低、并给出 DSH 自查路径（`https://deepseek.com/harness`，装好自带默认工作区）与可复制提示词（含仓库网址、他的管理器根目录 `C:\Users\<user>\Downloads`）。
 **仍未定案**：他与华硕那台 `0xC0000135` 的真因 —— 已排除：显卡驱动、VC++ 运行库、注入未进进程、旧版 Streamline（同机有两次跑完记录）。**第一人称"不支持相机控制"已定性为它的下游症状**（enhancer 靠进程内 `XLua.Runtime.dll` 找 Lua 环境，游戏极早退出时等不到）。
 
-`关键词：["当前状态唯一真源","Latest Release v1.1.0","release id 405355434","exe sha256 03092366","assets 262289985","伪旧版 from-1.1.0","启动提速 19 秒","launch_stage 分步进度","issue 16 已回","issue 17 已关","版本号 1.1.0 用户指定"]`
+`关键词：["当前状态唯一真源","最新 Release v1.2.1","release id 405589208","exe sha256 a9bfa904","assets-bundle sha256 ad0a88cc","main 825787d","快照 1.2.1","下一个版本号 1.2.2-beta","DLSS5 不出帧 preset 全名","Streamline 部署未执行","角色头像随 exe","issue 16 已回","AGENTS.md"]`
 
 ### 待办
-
-### 【modecontroller 项目待办】（2026-1…
-*2026-10-05 19:46*
-
-【modecontroller 项目待办】（2026-10-05 20:00 更新）
-**本轮已清**：v1.0.12 已发布并转正为 Latest；**`v1.0.5` 正文修正已作废**（用户 2026-10-05 原话：「**v1.0.5 正文修正别管了**」⇒ 不再做、不再提）。
-**仍欠**：
-① **normify 结构树四步**（`normify_realign.py --apply` → `normify_module_refresh(all=true)` → `normify_validate` → `normify_build` + `normify_render`）：`push.py` 只同步镜像（本次 187 个文件到 `docs\structure`）；后三步是**插件工具**，必须在**带 normify 插件的会话**里做 ⇒ 本会话没有该工具时**做不了，要如实说**，别假装同步了；
-② **dxgi 崩溃的两个实验**仍待反馈者回报（游戏目录 `dxgi.dll` 改名启动一次 / 只关第一人称启动一次）；
-③ **宣传片脚本**（`docs\宣传视频脚本-2分钟.md`）还停在 v0.3.2，未体现 DLSS5 已修好；
-④ **MMD 播放测试**、**提弗洛斯运动数值三选一**（sbm 侧）；
-⑤ **`sbm.dll` 自维护那条线**：本次只把**上游 3.1.2 的成品**随包，我们自己的 `sbm-fork`（v2.4.0 源）**没动** —— 要不要跟上游对齐待定。
-**下一个号**：`1.0.13-beta`。
-
-`关键词：["项目待办", "v1.0.5 正文别管了 已作废", "normify 四步要有插件会话", "dxgi 崩溃两个实验", "宣传片脚本待更新", "MMD 播放测试", "提弗洛斯运动数值", "sbm-fork 未跟上上游", "下一个号 1.0.13-beta"]`
-
-### issue #16（xingluo667，游戏加载过程中…
-*2026-10-05 20:09*
-
-issue #16（xingluo667，游戏加载过程中闪退）：已追加评论，让他更新 v1.0.12 后自己试开关组合 —— 第一组全关（DLSS5 神经渲染/第一人称/皮肤 Mod/乳摇/Poser），能进则按 DLSS5 → 乳摇 → 皮肤 Mod → Poser 逐项加回，回报"哪组崩/不崩"，不再要诊断包。本机两次对照已证伪"注入组合必然闪退"。等回报。
-
-`关键词：["issue 16", "开关组合测试", "全关再逐项加回", "DLSS5 神经渲染", "ShakingBreastManager", "皮肤 Mod", "Endfield Poser", "v1.0.12 开关生效", "等反馈者回报", "游戏加载过程中闪退"]`
 
 ### **B站宣传片（EndfieldModControlle…
 *2026-10-07 15:33*
@@ -761,7 +644,20 @@ issue #16（xingluo667，游戏加载过程中闪退）：已追加评论，让�
 
 `关键词：["B站宣传片", "BGM 选曲", "Elektronomia Sky High", "TheFatRat Xenogenesis", "B站音频库按使用量", "视频简介 A版", "置顶评论文案", "DLSS5 无需额外设置", "物理效果中性表述", "宣传视频脚本待更新"]`
 
-## 话题（一件事的前因后果）（25 条）
+### 【modecontroller 待办（2026-10-0…
+*2026-10-07 18:05*
+
+【modecontroller 待办（2026-10-07 17:50 更新）】
+① **等 issue #16（xingluo667）回报** —— 他与华硕那台 `0xC0000135` 的真因仍未定案（已排除：显卡驱动 / VC++ 运行库 / 注入未进进程 / 旧版 Streamline），已请他更新 1.2.1 再试；「第一人称不支持相机控制」已定性为它极早退出的下游症状。
+② **改了后端源码要补 normify 结构树四步**（`normify_realign.py --apply` → `normify_module_refresh(all=true,activate=true)` → `normify_validate` 0 error → `normify_build` + `normify_render`）；`push.py` 只同步镜像、**不重算**。
+③ **商城的「已安装」标记**依赖 Mod 目录里的 `download-info.json`（只有本程序下载过的才有）—— 工作区 `library` 里 36 个 Mod 全是手工/整合包放进来的（0 份）⇒ 卡片不会亮，**这是正确行为，别当 bug 去修**。
+④ **`sbm.dll` 自维护那条线**：随包用的是上游 3.1.2 成品，我们自己的 `sbm-fork`（v2.4.0 源）没动 —— 要不要跟上游对齐待定。
+⑤ **MMD 播放测试**（Poser 侧）与**提弗洛斯运动数值三选一**（sbm 侧）仍未做。
+**下一个号**：再改代码 ⇒ `1.2.2-beta`；发版时去掉 beta。
+
+`关键词：["项目待办","issue 16 等回报","0xC0000135 未定案","结构树四步","download-info.json 已安装不亮","sbm-fork 是否对齐上游","MMD 播放测试","提弗洛斯数值三选一","下一个号 1.2.2-beta"]`
+
+## 话题（一件事的前因后果）（28 条）
 
 ### 诊断并稳定终末地换装 Mod 的 DX11/EFMI 路线
 *2026-09-27 18:24*
@@ -1010,7 +906,38 @@ issue #16（xingluo667，游戏加载过程中闪退）：已追加评论，让�
 
 `关键词：["游戏起不来","第一人称","firstperson_addon_enabled","只开第一人称不行","ReShade 底座","d3d12.dll","最小注入不是变量","Streamline 旁支","deploy_streamline_libs 部署条件","mfg_unlock_enabled","AppConfig.load save","0xC0000135"]`
 
-## 经验教训（被纠正过的、踩过的坑）（394 条）
+### 修掉 lzh18 的两份 d3d11 loader 冲突（EFMI 加载失败弹窗）
+*2026-10-07 18:04*
+
+话题目标：修掉 lzh18「EFMI 加载失败：无法检测到游戏进程 Endfield.exe 的窗口」，并把判据固化下来。
+2026-10-07 用户发来诊断包 `diagnostics-20261007-124733` + XXMI 弹窗截图。查明：游戏启动后 24~39 秒以 `0xC0000005` 退出（`Player.log` 停在 `GfxDevice: creating device client` 后 `Crash!!!`，WER 故障模块 `ACE-Base64.dll`），XXMI 等不到窗口 60 秒才弹框。根因 = XXMI 配置 `importer_folder` 被指到 Mod 库（`…\Downloads\library`，库里有同名 `d3d11.dll`、没有 `d3dx.ini`）⇒ XXMI 注入库里的那份，而注入库第二条是 `…\XXMI\EFMI\d3d11.dll` ⇒ 进程里两份不同路径的 D3D11 loader（WER `LoadedModule[16]` 与 `[61]`）。
+前两次修复（v1.0.10 注入顺序、v1.0.29 不再列库里那份）改的都只是「我们往注入库列哪一份」，XXMI 依 `importer_folder` 自己注入的那份从未变 ⇒ 症状从单份假 loader（`0xC0000135`）变成双份 loader（`0xC0000005`）。
+修法：启动自检自动纠正该字段（备份/幂等/不动库）+ 纠正不了就不叠加第二条 + 时间线与诊断包按路径统计同名 loader。测试 16 条。随 v1.1.1（13:52 转正）发布。
+
+`关键词：["EFMI 加载失败","无法检测到游戏进程窗口","两份 d3d11 loader","0xC0000005","ACE-Base64","GfxDevice creating device client","importer_folder 指向 Mod 库","LoadedModule 16 61","lzh18 诊断包","ensure_efmi_importer_folder","injecttrace 同名 loader","v1.1.1 修复"]`
+
+### 查清「DLSS4 关掉还是能开」并把按开关归位收口
+*2026-10-07 18:04*
+
+话题目标：弄清用户报的「现在 dlss4 还是能开」到底哪里没关住。
+2026-10-07 用户报两条观察：DLSS4 关掉后还能开；一进管理器 Mod 库要等一会才出内容。
+查证（先排除开关层）：后端 `set_component_addon('mfg', True)` 实测被拒（`rejected=mfg_unsupported_gpu`，配置一字不写），前端那一行也是灰的 ⇒ **不是开关没锁**。真因是**资产展开不认开关**：`runtime_assets.ensure_all` / `initialize._check_bundled_assets` 只看「`runtime\dlss5\` 顶层有没有这个文件」，缺了就再解压一份 ⇒ 撤销「按开关搬进 `_disabled\`」；而归位兜底写在两处，`initialize.ensure_all` 末尾那处**只覆盖 DLSS5**（第一人称/MFG/面板都没管）⇒ 走「初始化自检」这条不经过一键启动的路时，`renodx-mfgunlock.addon64` 被放回顶层、再无一步收它（实证：该文件 mtime 正是点自检的那一秒，而 `mfg_unlock_enabled=False`、`_disabled\` 不存在）。用户随后选 A（那一行能点开/变亮）⇒ 核对 `runtime\_update\last_check.json` 的 `current=1.0.29`，即他跑的是旧版（禁用判据 v1.1.0 才引入）。
+修法：`launcher.realign_component_addons()` 收口（三个组件 + 面板，唯一实现），`ensure_injections` 与 `initialize.ensure_all` 都调；自检项改 `addons:realigned`。随 v1.1.1 发布。
+
+`关键词：["dlss4 还是能开","mfg_unlock_enabled","renodx-mfgunlock 放回顶层","资产展开不认开关","realign_component_addons","初始化自检 那条路","addons:realigned","last_check.json current 1.0.29","开关是灰的 后端拒绝","按开关归位只覆盖 DLSS5"]`
+
+### 首屏 Mod 列表立即可见，并处理预热引出的并发问题后发出 v1.1.1
+*2026-10-07 18:04*
+
+话题目标：让 Mod 库列表「一进去就能出」，把由此引出的并发问题修干净，并发出这一版。
+2026-10-07 用户选 A（「打开管理器后，Mod 库列表要等一会才显示出来」）。先量测：本机扫库 0.25 秒、首次 `get_state` 0.8 秒 —— 慢的不是扫描，而是「还没读到」被显示成了空库「还没有发现 Mod」。
+修法两步：① `_warm_up()` 先扫一遍库再等 `ui_ready`（与「创建窗口 + WebView2 加载前端」并行，首屏那次 `get_state` 直接命中缓存）；② 前端加首屏加载页（12 秒兜底给「先进界面」），两个列表页未就绪时显示「正在读取 Mod 库…」，计数不再先显示 0。
+副作用（构建连挂三轮、每轮挂在不同用例）：预热与主线程改库抢文件 ⇒ Windows 上「文件正被读时改名/删目录」偶发失败 ⇒ 加 RLock 让改库操作与扫描互斥、用代次号丢弃过期扫描结果、并让预热段**零写盘**（否则打乱「清空 launch.log」的时序）。
+收尾：用户说「不要测了，赶快构建」「现在还是beta，构正式版直接发」⇒ 改正式号 1.1.1、构建（自动推 main）、`prepare_release` → draft → 上传 → `--latest` 转正，按 release id 核对 digest 与「无遗留 draft」。
+
+`关键词：["一进去 Mod 库要等","首屏加载页","预热扫库 _warm_up","store.ready","正在读取 Mod 库","构建连挂三轮 flaky","_mods_lock RLock 互斥","代次号 _mods_gen","预热零写盘","不要测了赶快构建","构正式版直接发","v1.1.1 发布 digest 核对"]`
+
+## 经验教训（被纠正过的、踩过的坑）（396 条）
 
 ### XXMI/EFMI 启动终末地是 Endfield.ex…
 *2026-09-27 14:58*
@@ -4577,13 +4504,6 @@ Mod 卡片的「⋯ 更多」在服装页与辅助页各有一套，加动作必
 
 `关键词：["pycache 陈旧字节码","mtime size 没变 复用 pyc","幽灵旧内容","inspect.getdoc 读到旧的","反向验证脚本触发","清 __pycache__ 再复跑","读文件用 repr","测试与文件内容不符"]`
 
-### XXMI 的 importer_folder 指向 Mo…
-*2026-10-07 13:00*
-
-XXMI 的 importer_folder 指向 Mod 库时，注入库再列另一份 d3d11 loader ⇒ 进程里两份 loader ⇒ 游戏建 D3D11 设备即崩（0xC0000005 / 故障模块 ACE-Base64）。
-
-`关键词：["importer_folder","两份 d3d11 loader","EFMI 加载失败","无法检测到游戏进程窗口","0xC0000005","ACE-Base64","GfxDevice creating device client","GfxDevice","extra_libraries","注入库","XXMI 配置","双 loader 冲突"]`
-
 ### 【模式：把"单批下载"改成"可追加队列"的正确做法（20…
 *2026-10-07 14:15*
 
@@ -4636,6 +4556,27 @@ XXMI 的 importer_folder 指向 Mod 库时，注入库再列另一份 d3d11 load
 **准则**：① **结构类问题（标签、括号、缩进层级）用工具定位，不要靠读代码猜** —— 人眼在几百行嵌套 HTML 里追配对极不可靠；② 脚本要**带行号**输出，且优先报"**哪一对**不匹配"（只说"缺 end tag"等于没说）；③ 加/删一层包裹元素时，**同时想清楚它的闭合在哪**（本次就是"加了开头、忘了结尾"，而且中间还夹着一个原本就对的可疑 `</div>`，把我带偏两次）；④ 前端构建是**唯一的验证**：`vite build` 通过才算改对，光看代码不算（同族：记忆 `0musj7g19`「前端点了没反应先怀疑组件没 import」—— 那次也是**静默失败**，靠静态测试/实跑才抓到）。
 
 `关键词：["标签不配对","Element is missing end tag","vite build 报错","标签栈脚本","行号定位","别靠猜","加了一层包裹忘了闭合","frontend 结构问题"]`
+
+### XXMI 的 importer_folder 指向 Mo…
+*2026-10-07 18:04*
+
+XXMI 的 importer_folder 指向 Mod 库时，注入库再列另一份 d3d11 loader ⇒ 进程里两份 loader ⇒ 游戏建 D3D11 设备即崩（0xC0000005 / 故障模块 ACE-Base64）。
+
+`关键词：["importer_folder","两份 d3d11 loader","EFMI 加载失败","无法检测到游戏进程窗口","0xC0000005","ACE-Base64","GfxDevice creating device client","GfxDevice","extra_libraries","注入库","XXMI 配置","双 loader 冲突"]`
+
+### 把后台动作从"等就绪信号之后"提到"立刻执行"（2026…
+*2026-10-07 18:04*
+
+把后台动作从"等就绪信号之后"提到"立刻执行"（2026-10-07 预热扫库）会同时踩两个坑：① 它与主线程的改库操作抢文件 ⇒ Windows 上偶发失败（构建连挂三轮、每轮挂在不同用例上）⇒ 读写两侧必须同一把锁（RLock）；② 它写盘会打乱"清空 launch.log"这类动作的时序。判据：后台任务碰用户目录时，与所有改动该目录的操作双向互斥，且默认不写盘。
+
+`关键词：["预热线程","后台扫描与改库竞争","RLock 互斥","Windows 文件被读时改目录失败","预热零写盘","清空 launch.log 时序","测试变偶发失败","构建连挂三轮","_mods_lock","后台任务碰用户目录","代次号丢弃过期扫描"]`
+
+### 用户报「某功能还能用 / 还能开」时，**先确认他跑的是…
+*2026-10-07 18:04*
+
+用户报「某功能还能用 / 还能开」时，**先确认他跑的是哪个版本**：本机数据根的 `runtime\_update\last_check.json`（`current` 字段）与 `applied.json`，或拿 exe 的 sha256 对 Release 附件。2026-10-07 实测：他说「dlss4 还是能开」，而本机 `last_check.json` 的 `current=1.0.29` —— 禁用判据是 v1.1.0 才加的，所以现象与代码现状并不矛盾（差点按代码现状去解释一个旧版行为）。
+
+`关键词：["先确认用户跑哪个版本","last_check.json current","applied.json","exe sha256 对 Release 附件","dlss4 还是能开","旧版行为","现象与代码现状矛盾","版本核对","自更新缓存","他手上是旧 exe"]`
 
 ## 事实（细碎的原子信息）（94 条）
 
@@ -5623,7 +5564,7 @@ DLSS5 feeder 路线 50 系可用：本机 5080/驱动 617.14 实测 renodx-dlss5
 
 `关键词：["GameBanana","apiv11","Mod/Index","Subfeed","csvProperties","nPerpage 上限 50","分类端点 INPUT_ERRORS","dl 直链","缩略图降级链","NSFW 判据","下载量只在详情","400 不重试"]`
 
-## 用户偏好与环境（**含个人信息，公开前请自行取舍**）（18 条）
+## 用户偏好与环境（**含个人信息，公开前请自行取舍**）（19 条）
 
 ### 用户要求 AI 不要用 computer 工具操作鼠标键…
 *2026-09-27 14:58*
@@ -5768,4 +5709,11 @@ DLSS5 feeder 路线 50 系可用：本机 5080/驱动 617.14 实测 renodx-dlss5
 项目特定的完整发布与交付规则见 modecontroller 的 rules 条（推送前快照、Release notes 要写 issue 号、资产只推不带版本号的 exe 等）。
 
 `关键词：["上传github", "开源发布EndfieldModController", "没推只领先一个", "未经同意不推送", "发Release要明确说", "确认不算授权", "开goal做到完成", "帮我发就走完整流程", "端到端自测别重复下载", "零配置启动即用", "发布规则"]`
+
+### 用户 2026-10-07 原话：「**不要测了，赶快构…
+*2026-10-07 18:04*
+
+用户 2026-10-07 原话：「**不要测了，赶快构建，测这么多次干嘛**」—— 他要的是**产物**，不是测试过程：一次到位的验证（含必要的反向验证）就够，**别反复跑同一套全量测试**、别把测试当交付前的仪式；卡在验证环节会让他干等。
+
+`关键词：["不要测了赶快构建","测这么多次干嘛","别反复跑全量测试","要产物不要过程","验证一次到位","反向验证够用即止","构建优先","他不耐烦重复测试","交付节奏"]`
 
