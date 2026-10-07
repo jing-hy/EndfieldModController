@@ -113,16 +113,38 @@ python scripts/push.py
 发 Release（**必须由项目所有者明确授权**）：
 
 ```bash
-gh release create v1.0.x --title "…" --notes-file RELEASE_NOTES.md --latest
+gh release create v1.0.x --draft --title "…" --notes-file RELEASE_NOTES.md
 python scripts/upload_release_assets.py --tag v1.0.x     # DoH 查真实 IP + curl 直连
+gh release edit v1.0.x --draft=false --latest            # 转正
 ```
 
-* ⚠️ `gh release create` 建出来的 release **不带附件**，附件靠上一条命令补。
+* ⚠️ `gh release create` 建出来的 release **不带附件**，附件靠中间那条命令补。
+* **先建 draft、上传附件、最后再转正**（顺序别反）—— **draft 阶段按 tag 查 release 会 404**，
+  所以核对附件要**按 release id**：`gh api repos/<owner>/<repo>/releases/<id>`。
 * 附件只推**两个、且都不带版本号**：`EndfieldModController.exe` + `assets-bundle.zip`；
   带版本号的副本、伪旧版（`-0.1.9-from-<版本>.exe`）**只本地留档**。
 * 发完核对附件 sha256 与 `prepare_release.py` 打印的值一致。
 * 快照落在工作区**外**：`D:\zmdmod\_snapshot_<标签>-<时间戳>\`（不进 git）。
 * **`push main` ≠ 发 Release**：只推源码不动下载页 / Latest。
+
+### ⚠️ 发完必查：**别留下未发布的 draft**
+
+```bash
+gh api repos/jing-hy/EndfieldModController/releases --jq '[.[] | select(.draft==true)] | length'
+# 必须是 0
+```
+
+**GitHub 会把 Draft 排在 Releases 列表的最前面**（草稿对访客不可见、对作者可见），
+所以只要遗留一个旧草稿，项目所有者打开 Releases 页就会看到**旧版本顶在新版本上面** ——
+看起来就像"旧版本号比新版本号还新"（2026-10-07 实际发生过：v1.0.25 的草稿压在 v1.1.0 之上，
+而它的内容早就在 v1.0.26 正式发过了，白占 262 MB 附件）。
+
+**注意**：这只影响 GitHub 页面显示 ——
+`/releases/latest`、网页 302、以及程序里的 `version.parse_version` 比较**都是对的**
+（`is_newer("1.0.25", "1.1.0")` 返回 `False`）。所以排查这类问题时，
+**先分清"页面排序"与"更新检查逻辑"两件事**，别去改版本比较代码。
+
+遗留 draft 的处理：确认其内容已由后续正式版发布过，再 `gh release delete <tag> --repo <repo> --yes`。
 
 ---
 
