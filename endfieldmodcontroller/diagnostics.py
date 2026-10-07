@@ -996,6 +996,28 @@ def collect_environment_report(config: Any, game_dir: Path | None = None) -> tup
         lines.extend(line for line in deviceinfo.summary_lines() if line)
     except Exception as exc:  # noqa: BLE001
         lines.append(f"（设备信息读取失败：{exc}）")
+
+    # ── **机器侧稳定性**（2026-10-07 加）─────────────────────────────────────────
+    # 为什么单开一段：本程序查"是不是外部把游戏干掉了"一直只看 Application 日志，
+    # 而"这台机器自己稳不稳"（内核蓝屏 / 非正常关机 / WHEA / 谁发起的关机）
+    # **一条都采不到**。实测证据：一份 283 项的包里，`windows-events-*.log` 的
+    # Provider 只有 `Windows Error Reporting` 与 `RestartManager` 两类，System 侧 0 条 ——
+    # 现有窗口只有"崩溃前 5 分钟"，30 天的回溯窗口根本不存在。缺了它，"游戏随机起不来"
+    # 就永远没有机器侧对照，只能反复在 Mod 侧打转。
+    # ⚠️ **只作背景判据，不下结论**：不改 `crashwatch.classify_cause()` 的任何优先级
+    #    （蓝屏是整机事件，相关不等于因果）；采集失败如实写"没查到"，
+    #    **绝不**渲染成"机器是稳的"（见 `kernel_instability` 模块头部的三条纪律）。
+    lines.append("")
+    try:
+        from . import kernel_instability
+
+        lines.extend(kernel_instability.summary_lines(kernel_instability.collect()))
+        lines.append("")
+    except Exception as exc:  # noqa: BLE001 —— 取证失败不能反噬报告本身
+        lines.append("-- 机器侧稳定性（System 日志）--")
+        lines.append(f"  （采集失败：{exc}）")
+        lines.append("  ⚠️「没查到」**不等于**「机器是稳的」。")
+
     lines.append("-- Windows 事件（Application：错误/挂起/WER，近 60 分钟；含任何提到 Endfield 的事件）--")
     events, err = _powershell(
         "Get-WinEvent -FilterHashtable @{LogName='Application';StartTime=(Get-Date).AddMinutes(-60)} "
