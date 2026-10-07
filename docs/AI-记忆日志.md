@@ -4,9 +4,9 @@
 > 目的：让「当时为什么这么改、踩过什么坑」跟着源码一起留在仓库里。
 > 想改内容 → 改记忆库（用记忆工具），再跑一次本脚本；不要直接编辑本文件。
 
-- 生成时间：2026-10-07 12:20:19
+- 生成时间：2026-10-07 12:22:28
 - 来源：`.dsh-meow/memory.db`
-- 条目：577 条（已跳过 archived / 其它项目的条目）
+- 条目：579 条（已跳过 archived / 其它项目的条目）
 
 ---
 
@@ -913,7 +913,7 @@ issue #16（xingluo667，游戏加载过程中闪退）：已追加评论，让�
 
 `关键词：["DLSS5非50系方案", "终末地DX11", "DLSS5-Feeder", "dlss5-feed.addon64", "renodx-dlss5", "LumeniteFX运动矢量", "bridge与feeder分工", "DX11无多帧生成", "Forcing-GfxDevice-Direct3D-11", "DLSS5-Autopilot", "按架构选runtime"]`
 
-## 经验教训（被纠正过的、踩过的坑）（387 条）
+## 经验教训（被纠正过的、踩过的坑）（388 条）
 
 ### XXMI/EFMI 启动终末地是 Endfield.ex…
 *2026-09-27 14:58*
@@ -4457,7 +4457,19 @@ Mod 卡片的「⋯ 更多」在服装页与辅助页各有一套，加动作必
 
 `关键词：["静态判据 注释 docstring","日志文案 误导","DLSS5 注入 其实是注入库","NR 自动开启 已就位","mfg 写成第一人称","ast.unparse 去注释","测试自作自受","排查第一手材料","文案要写机制名","_code_only"]`
 
-## 事实（细碎的原子信息）（88 条）
+### 【教训 · 2026-10-07）「旧版本号看起来比新版…
+*2026-10-07 12:22*
+
+【教训 · 2026-10-07）「旧版本号看起来比新版本号还新」= GitHub 上的**遗留 Draft**，不是版本比较的 bug】
+用户报「**你先处理一下为什么1.0.25比1.1.0要新**」，随后澄清「**在github**」。
+**根因**：`v1.0.25` 是我 10-06 建的一个 **Draft（未发布草稿）**，后来发了 v1.0.29 就把它忘了；**GitHub 会把 Draft 排在 Releases 列表最前面**（草稿对访客不可见、对作者可见）⇒ 项目所有者打开页面看到旧版本顶在新版本上面。它的内容（DLSS4 多帧生成那批）**早已在 v1.0.26 正式发布过**，还白占 **262 MB** 附件。已删除（`gh release delete v1.0.25 --yes`），draft 数量归 0。
+**排查要领（可复用）**：**先分清"页面排序"与"更新检查逻辑"两件事** —— 我一开始去查 `version.parse_version`，实测 `is_newer("1.0.25","1.1.0") = False` ✓、六处版本解析（`updates`/`selfupdate`/`github`/`alerts`/`dlss5_fetcher`，都已委托 `version.py`）✓、`/releases/latest` 与网页 302 都指向 v1.1.0 ✓ ⇒ **逻辑全对**，问题只在 GitHub 的展示排序。⚠️ 别因为看到排序异常就去改版本比较代码。
+**已固化**：`CONTRIBUTING.md` 的发布流程新增「**发完必查：别留下未发布的 draft**」（`gh api ... --jq '[.[] | select(.draft==true)] | length'` 必须为 0），并写清"这只影响页面显示"与遗留 draft 的处理办法。
+**顺带澄清的发布顺序**：`gh release create --draft` → 上传附件 → `gh release edit --draft=false --latest` 转正；**draft 阶段按 tag 查会 404**，核对附件要**按 release id**。
+
+`关键词：["遗留 draft 顶在最前","1.0.25 比 1.1.0 新","GitHub Releases 排序","draft 数量必须为 0","gh release delete","页面排序 vs 更新检查","is_newer 是对的","发布流程补检查","draft 阶段按 tag 404"]`
+
+## 事实（细碎的原子信息）（89 条）
 
 ### modecontroller：游戏目录 loader_l…
 *2026-09-27 14:58*
@@ -5385,6 +5397,17 @@ DLSS5 feeder 路线 50 系可用：本机 5080/驱动 617.14 实测 renodx-dlss5
 **⚠️ 我在此课题上被用户纠正过两次**：① 先推"服装 Mod（DX11）与帧生成（DX12）互斥"—— 错，D3D11On12 也是 d3d12；② 再推"去掉 `-force-d3d11` 让游戏走 D3D12"—— 错，终末地压根没有 DX12 启动模式。**教训：讲 API 归因前先问"这台机器/这个游戏实际怎么跑的"，别拿"DX11 vs DX12"当互斥条件。**
 
 `关键词：["DLSS4 多帧生成","MFG Unlock","终末地没有帧生成","只有DX11启动模式","Game request observed","Dynamic MFG Unavailable","游戏内没有调倍率接口","D3D11On12","DeviceInfo MFG_UNLOCK_DISABLED","复活的开关","40系 2x 作废"]`
+
+### 【待办 · modecontroller 结构树未刷新】…
+*2026-10-07 12:22*
+
+【待办 · modecontroller 结构树未刷新】（2026-10-07 记，**本会话做不了**）
+`v1.1.0` 这批改动动过源码，但 **normify 结构树的"刷新"三步没做** —— 本会话**没有 normify 插件工具**，`push.py` 只能**同步镜像**（`docs/structure/`，本次 187 文件、无变化），不能重算。
+**需要补的**（在带 normify 插件的会话里做）：① `python scripts/normify_realign.py --apply` → ② `normify_module_refresh(all=true, repoRoot=…)` → ③ `normify_validate`（必须 0 error）→ ④ `normify_build` + `normify_render`。
+**本次动过的源码文件（对应要刷新的模块）**：`deviceinfo.py`（新增 DLSS4 在本作禁用的开关与原因）、`api.py` / `launcher.py` / `nr_autostart.py`（三处日志文案 + 启动分步进度 `set_launch_stage`）、`runtime_assets.py`（`ensure_all` 的 force 修复、退役条目过滤）、`activation.py`（staging 指纹快路径）、`diagnostics.py`（诊断包补设备/驱动段）、`runtime_deps.py`（Streamline 太旧自动装）、`crashwatch.py`（采集范围）。
+⚠️ 按准则：**做不了就如实说"做不了"，别假装同步了**。
+
+`关键词：["结构树待补刷新","normify 四步没做","本会话无 normify 工具","push.py 只同步镜像","设置启动分步进度","DLSS4 禁用 deviceinfo","ensure_all force 修复","staging 指纹","诊断包补驱动段"]`
 
 ## 用户偏好与环境（**含个人信息，公开前请自行取舍**）（18 条）
 
