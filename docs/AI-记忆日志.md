@@ -5782,3 +5782,29 @@ EMC issue #16「游戏加载过程中闪退」自 2026-10-05 持续至今：用�
 在刚 clone 的空工作区跑 scripts/push.py 会毁掉 docs/AI-记忆日志.md：memory_log.py 从「本工作区记忆库」(.dsh-meow/memory.db) 全量导出并覆盖，新工作区记忆库是空的，于是仓库里长期积累的日志被清掉（实测 3901 行 → 24 行，-5718 行）。补救：git checkout <推送前 commit> -- docs/AI-记忆日志.md 再单独提交并手动 push（不要再跑 push.py，会二次覆盖）。
 
 `关键词：["push.py","memory_log.py","AI-记忆日志","覆盖","新工作区","记忆库","数据丢失","git checkout 恢复","push main","空工作区陷阱"]`
+
+<!-- 增量追加 2026-10-08 22:04 · 新增 3 条（历史条目一律保留）-->
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### scripts/memory_log.py 于 2026…
+*2026-10-08 21:43*
+
+scripts/memory_log.py 于 2026-10-08 按用户要求（原话「修一下记忆，只增量」）改为只增量：目标文件已有内容一律保留，新条目块追加到末尾，按整块规范化文本判重（重复跑不追加，幂等），级别标注用独立注释行（塞进块首行会打断判重）；--full 才整份重写。原因：原实现整份覆盖，在记忆库很空的工作区跑 push.py 会删掉仓库长期积累的日志（实测 3901 行→24 行）。同批修掉 out.relative_to(ROOT) 在输出目录不在仓库内时抛 ValueError（改用容错的 _rel()）。tests/test_memory_log.py 加了 3 条回归（保内容 / 幂等 / --full 反向验证）。
+
+`关键词：["memory_log.py","只增量","AI-记忆日志","增量追加","幂等","判重","--full","push.py","回归测试","_rel","relative_to ValueError"]`
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### EMC 的 exe 是 PyInstaller 单文件版…
+*2026-10-08 21:56*
+
+EMC 的 exe 是 PyInstaller 单文件版：每次启动先把 ~336 个文件解压到 %TEMP%\_MEIxxxxx（约 10 秒），解压发生在 Python 代码之前，所以 config 里的 single_instance 保护来不及生效。重复双击会让第二个实例崩，报 FileNotFoundError: ...\_MEIxxxxx\base_library.zip（窗口标题 "Unhandled exception in script"）。**根因已定位并修复（commit 0660e5e，2026-10-08）**：app._cleanup_stale_mei_dirs() 原先会删掉 %TEMP% 下除自己以外的所有 _MEI* 目录，把另一个实例正在解压的目录（其 base_library.zip 还没落盘）一起删了；现在加 STALE_MEI_MIN_AGE_SECONDS=300（最后写入不足 5 分钟的目录一律不碰），且没有 sys._MEIPASS（源码方式启动）时一个都不动，够老的残留照旧清。测试 tests/test_stale_temp_cleanup.py（+3 条回归）。
+
+`关键词：["PyInstaller","onefile","_MEI","base_library.zip","FileNotFoundError","重复启动","单实例","single_instance","解压失败","启动报错","Unhandled exception"]`
+
+<!-- user · 用户偏好与环境（**含个人信息，公开前请自行取舍**） -->
+### 用户（jing-hy）平时开发 EMC 的工作区是 D:…
+*2026-10-08 21:43*
+
+用户（jing-hy）平时开发 EMC 的工作区是 D:\zmdmod\modecontroller，那里的 .dsh-meow/memory.db（约 2 MB）是他长期积累的记忆库（仓库里 3901 行的 docs/AI-记忆日志.md 就出自它）；D:\emc 是 2026-10-08 新 clone 的工作区，记忆库是空的 —— 在空工作区跑 push.py 曾把记忆日志覆盖掉。
+
+`关键词：["工作区","D:\\zmdmod\\modecontroller","记忆库","memory.db","D:\\emc","新 clone","AI-记忆日志","开发环境","jing-hy"]`
