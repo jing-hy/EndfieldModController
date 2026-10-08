@@ -310,7 +310,19 @@ def _warn_already_running() -> None:
         pass
 
 
-def _cleanup_stale_mei_dirs(bases: list[str] | None = None) -> list[str]:
+# 只清理**够老**的 `_MEI*` 残留：比这更年轻的，可能正是**另一个实例正在解压**的目录。
+# 根因（2026-10-08 用户实测「双击第二次报 Traceback」）：onefile 每次启动都要先把自己解压到
+# `%TEMP%\_MEIxxxxxx`（约 336 个文件、10 秒上下），而**解压发生在 Python 代码之前** ——
+# 单实例锁那一刻还没写。于是第一个实例起来后跑本清理，把第二个实例**正在解压**的目录当垃圾
+# 删掉；第二个实例接着就 `FileNotFoundError: …\_MEIxxxxxx\base_library.zip`
+# （窗口标题 "Unhandled exception in script"）。5 分钟足够覆盖"解压 + 启动到写锁"整段窗口，
+# 又不会让真正的残留长期堆积。
+STALE_MEI_MIN_AGE_SECONDS = 300
+
+
+def _cleanup_stale_mei_dirs(bases: list[str] | None = None, *,
+                            min_age_seconds: float = STALE_MEI_MIN_AGE_SECONDS,
+                            now: float | None = None) -> list[str]:
     """删掉 `%TEMP%` 下**上次没删掉**的 `_MEI*` 目录，返回被删掉的目录名。
 
     PyInstaller onefile 退出时会删自己的 `_MEIxxxxxx`；删不掉（子进程继承、杀软扫描等）
@@ -318,12 +330,22 @@ def _cleanup_stale_mei_dirs(bases: list[str] | None = None) -> list[str]:
     这里在**下次启动时**补删：
     * 只认 `_MEI` 开头的目录（PyInstaller 的命名），别的一律不碰；
     * **跳过当前进程正在用的那个**（`sys._MEIPASS`）；
+    * **跳过不够老的**（最后写入距今 < `min_age_seconds`）—— 那多半是**另一个实例
+      正在解压/启动**的目录，删了它对方就会在 import 标准库时崩（见常量处的注释）；
     * 删不掉（正被别的进程用着）就**静默跳过**，下次启动再试 —— 绝不报错、绝不打扰用户。
     """
     import shutil
     import tempfile
+    import time as _time
 
     current = str(getattr(sys, "_MEIPASS", "") or "")
+    if not current:
+        # 不是 onefile 跑起来的（源码方式启动 / 被别的宿主塞进来）：**没有"自己的"目录可比对**，
+        # 谁在跑完全看不出来 —— 那就一个都别动。删错的话，正在运行的那个实例会**当场崩**
+        # （它的 DLL/标准库就在被删的目录里），比启动时崩更糟。
+        return []
+    moment = _time.time() if now is None else now
+    threshold = max(0.0, float(min_age_seconds))
     roots = bases if bases is not None else [
         tempfile.gettempdir(), os.environ.get("TEMP", ""), os.environ.get("TMP", ""),
     ]
@@ -336,6 +358,9 @@ def _cleanup_stale_mei_dirs(bases: list[str] | None = None) -> list[str]:
         for item in entries:
             try:
                 if not item.is_dir() or str(item) == current:
+                    continue
+                # 太新 ⇒ 极可能是"另一个实例刚解压到一半"，绝不能碰（2026-10-08 崩溃根因）
+                if moment - item.stat().st_mtime < threshold:
                     continue
                 shutil.rmtree(item)
                 removed.append(item.name)
