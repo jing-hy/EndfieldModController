@@ -7,11 +7,19 @@
 在仓库里就能看到"当时为什么这么改、踩过什么坑"。
 
 **做法**：读 `<工作区>/.dsh-meow/memory.db`（meow-memory 的七张表），
-挑出与**本项目 + 全局**相关的条目，按层级分组、按最后更新时间排序，整份重写目标文件。
+挑出与**本项目 + 全局**相关的条目，按层级分组、按最后更新时间排序。
+
+**⚠️ 只增量（用户 2026-10-08 原话：「修一下记忆，只增量」）**：目标文件里**已有的内容一律保留**，
+本次只把「文件里还没有的」条目块**追加**到末尾（同一块按规范化正文判重，不重复追加）。
+原实现是整份重写 —— 于是在一个记忆库很空的工作区里跑 `push.py`，会把仓库里长期积累的
+日志整段删掉（实测 3901 行 → 24 行，事后已回滚）。要整份重来（换了记忆库、想清掉历史）
+用 `--full`。
+
 跑一次很快（毫秒级），所以直接挂在 `scripts/push.py` 里 —— **每次推送都会刷新它**。
 
 用法：
-    python scripts/memory_log.py                 # 写 docs/AI-记忆日志.md
+    python scripts/memory_log.py                 # 只增量：追加新条目，保留已有内容
+    python scripts/memory_log.py --full          # 整份重写（慎用：会丢掉文件里的历史）
     python scripts/memory_log.py --out other.md  # 换输出文件
     python scripts/memory_log.py --print         # 只打印条数，不写文件
 """
@@ -133,6 +141,7 @@ def build(db: Path, project: str) -> tuple[str, int]:
         "# AI 记忆日志（自动生成，请勿手改）",
         "",
         "> 这份文件由 `scripts/memory_log.py` 从工作区记忆库导出，**每次 `push.py` 推送前自动刷新**。",
+        "> **只增量**：文件里已有的内容一概保留，新条目追加到末尾 —— 历史不丢。",
         "> 目的：让「当时为什么这么改、踩过什么坑」跟着源码一起留在仓库里。",
         "> 想改内容 → 改记忆库（用记忆工具），再跑一次本脚本；不要直接编辑本文件。",
         "",
@@ -184,12 +193,56 @@ def _render(rows: list[dict]) -> list[str]:
     return out
 
 
+# --------------------------------------------------------------- 只增量
+def collect_blocks(db: Path, project: str) -> list[tuple[str, str]]:
+    """按 level 收集**单条**渲染块（增量追加用：一条一块，便于跟文件里已有的比对）。"""
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        blocks: list[tuple[str, str]] = []
+        for level in LEVELS:
+            for item in _rows(conn, level, project):
+                block = "\n".join(_render([item])).strip()
+                if block:
+                    blocks.append((level, block))
+        return blocks
+    finally:
+        conn.close()
+
+
+def _norm(text: str) -> str:
+    """把空白折叠成一个空格 —— 「这条是不是已经在文件里」就用它比对。"""
+    return re.sub(r"\s+", " ", text or "").strip()
+
+
+def merge(existing: str, blocks: list[tuple[str, str]], *, when: str) -> tuple[str, int]:
+    """只增量：**保留 `existing` 全文**，把文件里还没有的条目块追加到末尾。
+
+    判重拿的是整块（标题 + 时间 + 正文 + 关键词）的规范化文本 —— 正文改过的记忆会被当成
+    **新的一版**追加，旧的那版留在历史里（这正是「只增量、不丢历史」的含义）。
+    """
+    known = _norm(existing)
+    fresh = [(level, block) for level, block in blocks if _norm(block) not in known]
+    if not fresh:
+        return existing, 0
+    parts = [existing.rstrip("\n"), "",
+             f"<!-- 增量追加 {when} · 新增 {len(fresh)} 条（历史条目一律保留）-->", ""]
+    for level, block in fresh:
+        # ⚠️ 级别标注必须**独立成行**、不能塞进块的首行：块要原样落盘，
+        # 下次判重才能按整块匹配命中（塞进首行会打断匹配 ⇒ 每跑一次重复追加一遍）。
+        parts.append(f"<!-- {level} · {LEVEL_TITLES.get(level, level)} -->")
+        parts.append(block)
+        parts.append("")
+    return "\n".join(parts).rstrip("\n") + "\n", len(fresh)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="把记忆库导出成 docs/AI-记忆日志.md")
     parser.add_argument("--db", default=str(DEFAULT_DB))
     parser.add_argument("--out", default=str(DEFAULT_OUT))
     parser.add_argument("--project", default="modecontroller")
     parser.add_argument("--print", dest="dry", action="store_true", help="只报条数，不写文件")
+    parser.add_argument("--full", action="store_true",
+                        help="整份重写（默认只增量：文件里已有的内容一律保留）")
     args = parser.parse_args()
 
     db = Path(args.db)
@@ -198,14 +251,31 @@ def main() -> int:
         print(f"[memory-log] 没有记忆库 {db}，跳过（不影响推送）")
         return 0
 
-    text, total = build(db, args.project)
     if args.dry:
+        _text, total = build(db, args.project)
         print(f"[memory-log] {total} 条（未写文件）")
         return 0
+
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
+
+    # 只增量：目标文件已有内容时**只追加新条目**，绝不整份重写（见模块 docstring）。
+    existing = ""
+    if out.is_file() and not args.full:
+        existing = out.read_text(encoding="utf-8", errors="replace")
+    if existing.strip():
+        merged, added = merge(existing, collect_blocks(db, args.project),
+                              when=datetime.now().strftime("%Y-%m-%d %H:%M"))
+        if added:
+            out.write_text(merged, encoding="utf-8", newline="\n")
+            print(f"[memory-log] 增量追加 {added} 条 → {_rel(out)}（已有内容全部保留）")
+        else:
+            print(f"[memory-log] 没有新条目 → {_rel(out)} 未改动")
+        return 0
+
+    text, total = build(db, args.project)
     out.write_text(text, encoding="utf-8", newline="\n")
-    print(f"[memory-log] 已写 {out.relative_to(ROOT)}（{total} 条 / {len(text)} 字节）")
+    print(f"[memory-log] 全量写出 {_rel(out)}（{total} 条 / {len(text)} 字节）")
     return 0
 
 

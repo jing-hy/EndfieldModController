@@ -107,3 +107,52 @@ def test_missing_db_does_not_crash(tmp_path: Path, monkeypatch) -> None:
     """没有记忆库（别人 clone 下来跑）时**不能抛异常** —— 它挂在 push 流程里。"""
     monkeypatch.setattr(sys, "argv", ["memory_log.py", "--db", str(tmp_path / "nope.db"), "--print"])
     assert memory_log.main() == 0
+
+
+# ---------------------------------------------------------------- 只增量（2026-10-08）
+def _run(monkeypatch, db: Path, out: Path, *extra: str) -> int:
+    monkeypatch.setattr(sys, "argv",
+                        ["memory_log.py", "--db", str(db), "--out", str(out),
+                         "--project", "modecontroller", *extra])
+    return memory_log.main()
+
+
+def test_incremental_never_deletes_existing_content(tmp_path: Path, db: Path, monkeypatch) -> None:
+    """★ 回归（2026-10-08）：记忆库比现有文件少时，**不许删掉文件里已有的内容**。
+
+    现场：在一个刚 clone 的空工作区里跑 `push.py` —— 那边记忆库只有 3 条，导出结果把
+    仓库里长期积累的日志整段覆盖掉了（实测 3901 行 → 24 行）。
+    用户原话：「修一下记忆，**只增量**」。
+    """
+    out = tmp_path / "AI-记忆日志.md"
+    out.write_text("# AI 记忆日志\n\n### 历史条目\n*2026-10-01 10:00*\n\n很久以前的记忆\n",
+                   encoding="utf-8")
+
+    assert _run(monkeypatch, db, out) == 0
+
+    text = out.read_text(encoding="utf-8")
+    assert "很久以前的记忆" in text, "增量模式下不许删掉文件里已有的内容"
+    assert "本项目的一条教训" in text, "记忆库里的新条目要追加上去"
+
+
+def test_incremental_is_idempotent(tmp_path: Path, db: Path, monkeypatch) -> None:
+    """同样的记忆库跑第二次**不该重复追加** —— 否则每次 push 都会把同一批内容灌一遍。"""
+    out = tmp_path / "AI-记忆日志.md"
+    out.write_text("# AI 记忆日志\n\n### 历史条目\n\n很久以前的记忆\n", encoding="utf-8")
+
+    assert _run(monkeypatch, db, out) == 0
+    first = out.read_text(encoding="utf-8")
+    assert _run(monkeypatch, db, out) == 0
+    assert out.read_text(encoding="utf-8") == first, "第二次跑不该再追加一遍"
+
+
+def test_full_still_rewrites(tmp_path: Path, db: Path, monkeypatch) -> None:
+    """反向验证：`--full` 走的仍是整份重写 —— 增量是**默认**，不是唯一路径。"""
+    out = tmp_path / "AI-记忆日志.md"
+    out.write_text("# AI 记忆日志\n\n### 历史条目\n\n很久以前的记忆\n", encoding="utf-8")
+
+    assert _run(monkeypatch, db, out, "--full") == 0
+
+    text = out.read_text(encoding="utf-8")
+    assert "很久以前的记忆" not in text, "--full 应当是整份重写"
+    assert "本项目的一条教训" in text

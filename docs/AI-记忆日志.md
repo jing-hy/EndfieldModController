@@ -5741,3 +5741,44 @@ DLSS5 feeder 路线 50 系可用：本机 5080/驱动 617.14 实测 renodx-dlss5
 
 `关键词：["不要测了赶快构建","测这么多次干嘛","别反复跑全量测试","要产物不要过程","验证一次到位","反向验证够用即止","构建优先","他不耐烦重复测试","交付节奏"]`
 
+<!-- 增量追加 2026-10-08 21:29 · 新增 5 条（历史条目一律保留）-->
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### EMC = jing-hy/EndfieldModCon…
+*2026-10-08 21:29*
+
+EMC = jing-hy/EndfieldModController（《明日方舟：终末地》一站式 Mod 管理器，Python 后端 + Vue 前端）。本地工作区 D:\emc，以 git init + remote add origin + fetch + checkout 方式落地（origin=https://github.com/jing-hy/EndfieldModController.git，main 跟踪 origin/main），.dsh-meow/ 已写入 .git/info/exclude。2026-10-08 拉取时 HEAD=f8e0368（随 1.2.3-beta 同步结构树），latest release=v1.2.2。
+
+`关键词：["EndfieldModController","EMC","终末地","Mod管理器","D:\\emc","origin/main","工作区","1.2.3-beta","v1.2.2","源码仓库","git checkout"]`
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### EMC 的远程通知机制：唯一发布入口是仓库根 alert…
+*2026-10-08 21:29*
+
+EMC 的远程通知机制：唯一发布入口是仓库根 alerts.json（改完 push main 即生效，不用发版、不用客户端升级）。两档：info/warning=公告（启动首屏就绪后弹一次、按 id 记已读、不拦启动）；critical=异常状态预警（每次点「一键启动」都强制弹、不记已读、无开关、强制停留 hold_seconds 默认 10 上限 120、三选一：还原配置〔关全部注入+备份移走游戏目录第三方文件，可撤销〕/保持配置不启动/仍然启动）。客户端经 api.github.com contents 每次真查，失败回退 raw 网页路线（经 fastnet 第三方镜像）再用上次成功缓存。版本区间 min_version/max_version 留空=所有版本可见，critical 同样受该区间限制。2026-10-08 已发出首条 critical「2026-10-08-official-warning-wave」（多人反馈收到官方警告、建议先停用注入暂避；hold=20、until=2026-10-20、版本区间留空）。
+
+`关键词：["alerts.json","异常状态预警","critical","公告","一键启动","强制停留","还原配置","版本区间","official-warning-wave","until 2026-10-20","发布入口"]`
+
+<!-- topic · 话题（一件事的前因后果） -->
+### 定位并修复 EMC issue #16 的游戏启动闪退（退出码 0xC0000135）
+*2026-10-08 21:29*
+
+EMC issue #16「游戏加载过程中闪退」自 2026-10-05 持续至今：用户 xingluo667 点「一键启动」后终末地自己退出，退出码 0xC0000135（STATUS_DLL_NOT_FOUND），无 WER 报告。已排除注入失败、显卡型号、驱动版本（维护者已撤回该建议）、VC++ 运行库；期间修掉多个真 bug（注入库列错 d3d11 导致重复注入、NVIDIA 配置判据路径与清理位置、随包清单旧引擎、读日志目录写死国服、自动换新运行库挂在停用开关）。1.2.1 后反馈者未再回测，维护者已建议其装 DSH 自行排查。
+
+`关键词：["issue 16","闪退","0xC0000135","STATUS_DLL_NOT_FOUND","终末地","streamline","DLL 注入","NVIDIA 配置缓存","诊断包","xingluo667","一键启动"]`
+
+<!-- lesson · 经验教训（被纠正过的、踩过的坑） -->
+### 用本机用户级 GH_TOKEN 让 git 拉 GitH…
+*2026-10-08 21:13*
+
+用本机用户级 GH_TOKEN 让 git 拉 GitHub 仓库时，-c http.extraheader="AUTHORIZATION: bearer <token>" 会报 invalid credentials；可行做法是注入 $env:GH_TOKEN 后执行 git -c credential.helper= -c "credential.helper=!gh auth git-credential" fetch origin。
+
+`关键词：["git fetch","GH_TOKEN","credential.helper","gh auth git-credential","http.extraheader","invalid credentials","认证失败","GitHub 拉取","git clone"]`
+
+<!-- lesson · 经验教训（被纠正过的、踩过的坑） -->
+### 在刚 clone 的空工作区跑 scripts/push…
+*2026-10-08 21:29*
+
+在刚 clone 的空工作区跑 scripts/push.py 会毁掉 docs/AI-记忆日志.md：memory_log.py 从「本工作区记忆库」(.dsh-meow/memory.db) 全量导出并覆盖，新工作区记忆库是空的，于是仓库里长期积累的日志被清掉（实测 3901 行 → 24 行，-5718 行）。补救：git checkout <推送前 commit> -- docs/AI-记忆日志.md 再单独提交并手动 push（不要再跑 push.py，会二次覆盖）。
+
+`关键词：["push.py","memory_log.py","AI-记忆日志","覆盖","新工作区","记忆库","数据丢失","git checkout 恢复","push main","空工作区陷阱"]`
