@@ -15,6 +15,15 @@
   ],
   "alerts": [
     {
+      "id": "2026-10-08-official-warning-wave",
+      "level": "critical",
+      "title": "多人反馈收到官方警告：建议先停用注入、暂避一下",
+      "hold_seconds": 20,
+      "until": "2026-10-20",
+      "body": "最近两天，我们陆续收到多位用户反馈：**收到了官方的警告**。\n\n目前还不清楚触发条件，也不能确定是不是注入本身导致的，所以先按最保守的做法来 —— **建议你暂时停用全部注入，等查清之后再恢复**。\n\n点下面的「还原配置」就行（推荐）：它会关掉全部注入开关（DLSS5 神经渲染 / 皮肤 Mod / ShakingBreastManager / Endfield Poser），并把游戏目录里的第三方文件**备份移走**（只搬不删、随时能恢复）。\n\n**你的 Mod 库、配置、已导入的 Mod 一个都不会丢。**\n\n如果你也收到过警告，请到 Issues 说一声：大概时间、当时开了哪些插件、收到的是什么形式 —— 你的一条反馈可能帮很多人保住账号。",
+      "url": "https://github.com/jing-hy/EndfieldModController/issues"
+    },
+    {
       "id": "v1.0.17-1.0.20-selfupdate-beta-loop",
       "level": "warning",
       "title": "v1.0.17 ~ v1.0.20 的「自动更新」会一直提示，请手动换一次 exe",
