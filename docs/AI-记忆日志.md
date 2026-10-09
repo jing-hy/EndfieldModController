@@ -5844,3 +5844,13 @@ EMC 的 exe 是 PyInstaller 单文件版：每次启动先把 ~336 个文件解�
 用户的 EMC **测试目录是 `D:\emc-modtest`**（与工作区 `D:\emc` 平级），等效于脚本里 `modtest` 的角色；他以后都在这里测试。**构建出 exe 之后要复制一份进去**（先清掉那里的 `*.exe`，只放最新版）。注意 `scripts/build_release.py` 原本算的是 `ROOT.parent/"modtest"`（即 `D:\modtest`，本机不存在），与这个目录对不上，已按 `<工作区名>-modtest` 的约定修正。
 
 `关键词：["emc-modtest","测试目录","modtest","构建产物","exe 复制","D:\\emc","build_release","测试环境","用户约定"]`
+
+<!-- 增量追加 2026-10-09 21:37 · 新增 1 条（历史条目一律保留）-->
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### EMC 在 `D:\emc` 工作区构建：命令 `pyt…
+*2026-10-09 21:23*
+
+EMC 在 `D:\emc` 工作区构建：命令 `python scripts/build_release.py --skip-addon --no-push`（约 62 秒）。两个本机坑：① 没有 C++ 编译器（cl/gcc/clang 全缺），而 `assets/addon/endfieldmodcontroller.addon64` 不在 git（`*.addon64` 被 .gitignore）—— 从已发布 exe 里提取即可：`PyInstaller.archive.readers.CArchiveReader(exe).extract('assets\\addon\\endfieldmodcontroller.addon64')`（面板源码没改时可用，1.2.2 提出来 390,144 B）。② 构建前会联网核对 `component_versions.json`，对不上就中止（如 Poser 该写 0.5.57）。产物同步到测试目录 `D:\emc-modtest`；若 Endfield/XXMI/管理器在跑，脚本会跳过同步（不杀进程），此时手动复制 `dist\EndfieldModController.exe`。
+
+`关键词：["构建","build_release.py","addon64","CArchiveReader","提取","编译器缺失","component_versions.json","emc-modtest","同步测试目录","--skip-addon"]`
