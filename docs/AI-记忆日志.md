@@ -5854,3 +5854,21 @@ EMC 的 exe 是 PyInstaller 单文件版：每次启动先把 ~336 个文件解�
 EMC 在 `D:\emc` 工作区构建：命令 `python scripts/build_release.py --skip-addon --no-push`（约 62 秒）。两个本机坑：① 没有 C++ 编译器（cl/gcc/clang 全缺），而 `assets/addon/endfieldmodcontroller.addon64` 不在 git（`*.addon64` 被 .gitignore）—— 从已发布 exe 里提取即可：`PyInstaller.archive.readers.CArchiveReader(exe).extract('assets\\addon\\endfieldmodcontroller.addon64')`（面板源码没改时可用，1.2.2 提出来 390,144 B）。② 构建前会联网核对 `component_versions.json`，对不上就中止（如 Poser 该写 0.5.57）。产物同步到测试目录 `D:\emc-modtest`；若 Endfield/XXMI/管理器在跑，脚本会跳过同步（不杀进程），此时手动复制 `dist\EndfieldModController.exe`。
 
 `关键词：["构建","build_release.py","addon64","CArchiveReader","提取","编译器缺失","component_versions.json","emc-modtest","同步测试目录","--skip-addon"]`
+
+<!-- 增量追加 2026-10-09 22:03 · 新增 2 条（历史条目一律保留）-->
+
+<!-- rules · 设计原则 / 行为准则 -->
+### 本机（用户的机器）的测试/构建规矩（2026-10-09…
+*2026-10-09 22:00*
+
+本机（用户的机器）的测试/构建规矩（2026-10-09 定，分两次补充）：① **构建与测试拆成两个脚本**——构建 `scripts/build_release.py`（默认不跑测试，要跑加 `--with-tests`）、测试 `scripts/run_tests.py`；两件事不并行做，谁都不替谁做主。② 测试的**并发按开始前的 CPU 占用**决定：`run_tests.py` 开跑前采一次占用，**< 30% 就 `-n 4`**，否则单线程（读不到占用、没装 xdist 也走单线程；`--serial` 可强制单线程，直接传 `-n N` 则以用户参数为准）。③ 除发 Release 外不要跑全量测试；要跑就用 `run_tests.py`。发 Release 时由 `build_release.py --with-tests` 跑全量。
+
+`关键词：["全量测试","run_tests.py","build_release.py","CPU 占用","30% 阈值","4 并发","-n 4","单线程","发 Release","--with-tests","拆两个脚本"]`
+
+<!-- lesson · 经验教训（被纠正过的、踩过的坑） -->
+### **坑（2026-10-09，已修）**：`.gitig…
+*2026-10-09 21:38*
+
+**坑（2026-10-09，已修）**：`.gitignore` 的凭据规则 `*token*` 按**子串**匹配，把 `frontend/src/styles/tokens.css` 误当成 token 文件 —— 于是它**从未进过 git**（含全部历史），而 `main.js` 一直 import 它 ⇒ 任何 clone 跑 `vite build` 必然失败（`Could not resolve "./styles/tokens.css"`）。修法：加路径式例外 `!frontend/src/styles/tokens.css`（否定规则必须排在被否定的规则之后），并把该文件入库。教训：写"防凭据"这类通配规则时要想到它可能吃掉正经源码文件；关键文件入库后应确认 `git ls-files` 真能看到它。
+
+`关键词：["gitignore","*token*","tokens.css","误伤","前端构建失败","Could not resolve","否定规则","凭据规则","git ls-files","clone 构建不了"]`
