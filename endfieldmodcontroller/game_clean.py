@@ -68,6 +68,7 @@ CATEGORY_LABELS = {
     "reshade": "ReShade 注入痕迹",
     "dlss5_lib": "DLSS5 专属运行库（游戏原版没有）",
     "nvngx_overridden": "被替换过的 NVIDIA 运行库",
+    "injector_backup": "注入器/加载器遗留的备份文件（原版游戏目录不会有）",
 }
 
 Log = Callable[[str], None] | None
@@ -326,6 +327,47 @@ def audit(config: AppConfig, *, log: Log = None) -> dict[str, Any]:
                         f"{'在 ' + original.name if original.is_file() else '不存在，需重装或校验文件'}"),
             ))
 
+    # ⑤ 游戏目录里遗留的**备份文件**（2026-10-09 用户要求：「在终末地本体清空之后，不要留
+    #    备份在终末地的文件夹，全部处理到外面」）。
+    #
+    # 为什么单列一类：`<game>\d3dcompiler_47.dll.bak` 这类原版备份是**注入过程的副产品**
+    # （loader 把原版挪成 `.bak`、再把自己的 proxy 放上去）。净化把 proxy 移走后，这些 `.bak`
+    # 就成了没有主人的残留 —— 原版游戏目录里不会有它们，而用户看到的是"我点了还原、目录里
+    # 还是一堆备份文件"。所以它们要和 proxy 一样被搬进**外部**备份区（只移动、可还原）。
+    #
+    # ⚠️ 只认**已知注入相关名字**的备份变体（`<名字>.bak*` / `<名字>.game_original` /
+    #    `<名字>.mc.bak*`）：游戏自己带的、用户自己放的 `.bak` 一律不碰。
+    # ⚠️⚠️ 顺序上它们必须**最后搬**（见 `backup_and_clean`）：`<name>.bak` 是"把系统原版放回
+    #    游戏目录"的来源，先搬走就只能退而从 System32 取，用的就不是游戏原本那份了。
+    backup_bases = (
+        list(reshade_integration.LOADER_PROXY_MODULES)
+        + list(RESHADE_MARKERS)
+        + list(DLSS5_ONLY_LIBS)
+        + list(NEW_NVNGX_SIZES)
+        + list(getattr(reshade_integration, "INJECTOR_DATA_NAMES", ()))
+        + list(getattr(reshade_integration, "GAME_INJECTION_ARTIFACTS", ()))
+    )
+    for base in backup_bases:
+        if "/" in base or "\\" in base:
+            continue                      # 带路径的条目不是根目录文件名，跳过
+        for pattern in (f"{base}.bak*", f"{base}.game_original", f"{base}.mc.bak*"):
+            try:
+                candidates = sorted(game_dir.glob(pattern))
+            except OSError:
+                continue
+            for item in candidates:
+                try:
+                    if not item.is_file():
+                        continue
+                    findings.append(Finding(
+                        "injector_backup", item.name, str(item),
+                        size=item.stat().st_size, sha256=_sha256(item),
+                        detail=("第三方注入器/加载器留下的备份文件；净化会一并搬到外部备份区，"
+                                "还原时按清单原样搬回（完全可还原）"),
+                    ))
+                except OSError:
+                    continue
+
     # 去重（2026-10-04 加）：同一路径可能被两个分类扫到（例如 `ShaderFixes` 既在
     # 加载器痕迹清单里、目录里又可能有 ReShade 痕迹）—— 重复条目会让净化把同一份
     # 东西搬两次，第二次源已不在 ⇒ 报成错误、`ok=False`（"失败保留原状"看起来坏了）。
@@ -356,6 +398,36 @@ def _copy_tree(src: Path, dest: Path) -> None:
     else:
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dest)
+
+
+def _move_finding(finding: Finding, files_dir: Path, log: Log,
+                  entries: list[dict[str, Any]], moved: list[dict[str, Any]],
+                  errors: list[str]) -> bool:
+    """把一条 finding **复制进备份区**、再从原位移走（只移动、不删除）。
+
+    ① 和 ② 的顺序不能反：**先确认备份区里已经有完整一份，才允许动原位** —— 反过来
+    （先移走再备份）一旦中途失败，那份文件就既不在游戏目录、也不在备份区，**不可还原**。
+
+    备份区在**游戏目录之外**（`runtime\\game_backup\\<时间戳>\\files\\`），清单里的相对路径
+    就是还原时唯一的落点依据：`restore()` 按 `files/<相对路径>` 原样搬回游戏目录，
+    所以子目录下的条目（如 `AntiCheatExpert/dxgi.dll`）同样完全可还原。
+    """
+    source = Path(finding.absolute)
+    dest = files_dir / finding.relative
+    try:
+        _copy_tree(source, dest)          # ① 先复制一份到备份区
+        if source.is_dir():
+            shutil.rmtree(source)          # ② 确认备份成功后才移除原位
+        else:
+            source.unlink()
+    except OSError as exc:
+        errors.append(f"{finding.relative}: {exc}")
+        _log(log, f"⚠ 处理 {finding.relative} 失败: {exc}")
+        return False
+    entries.append({**finding.to_dict(), "backup_relative": finding.relative})
+    moved.append(finding.to_dict())
+    _log(log, f"备份并移走 [{finding.category}] {finding.relative}")
+    return True
 
 
 def _restore_system_module(game_dir: Path, name: str, log: Log) -> dict[str, Any] | None:
@@ -569,25 +641,18 @@ def backup_and_clean(
     except OSError as exc:
         errors.append(f"写清单失败: {exc}")
 
-    for finding in findings:
-        source = Path(finding.absolute)
-        dest = files_dir / finding.relative
-        try:
-            _copy_tree(source, dest)          # ① 先复制一份到备份区
-            if source.is_dir():
-                shutil.rmtree(source)          # ② 确认备份成功后才移除原位
-            else:
-                source.unlink()
-        except OSError as exc:
-            errors.append(f"{finding.relative}: {exc}")
-            _log(log, f"⚠ 处理 {finding.relative} 失败: {exc}")
-            continue
-        entries.append({**finding.to_dict(), "backup_relative": finding.relative})
-        moved.append(finding.to_dict())
-        _log(log, f"备份并移走 [{finding.category}] {finding.relative}")
+    # ⚠️ **备份文件（`injector_backup`）要最后搬**（2026-10-09）：它们是"把系统原版放回
+    #    游戏目录"的来源（`<name>.bak`）。先搬走它们，`_restore_system_module` 就只能退而
+    #    从 System32 取 —— 能跑，但用的不是**游戏原本那份**。所以顺序是：
+    #    ① 搬走注入物 → ② 用 .bak 把系统原版放回 → ③ 再把 .bak 搬进外部备份区。
+    backup_findings = [f for f in findings if f.category == "injector_backup"]
+    main_findings = [f for f in findings if f.category != "injector_backup"]
+
+    for finding in main_findings:
+        _move_finding(finding, files_dir, log, entries, moved, errors)
 
     # proxy 移走后必须把系统模块补回去，否则游戏会缺 d3dcompiler_47/vulkan-1
-    for finding in findings:
+    for finding in main_findings:
         if finding.category != "loader_proxy":
             continue
         name = Path(finding.relative).name
@@ -598,6 +663,13 @@ def backup_and_clean(
             # 2026-10-01 修（⑤c）：proxy 已移走却补不回系统模块 → 游戏目录会缺
             # d3dcompiler_47/vulkan-1（游戏可能起不来），不能只写一行日志还报 ok=True。
             errors.append(f"{name}: 已移走但无法补回系统原版，游戏可能启动失败（请用「还原」）")
+
+    # ③ **最后**把游戏目录里遗留的备份文件也搬进外部备份区（用户 2026-10-09：
+    #    「在终末地本体清空之后，不要留备份在终末地的文件夹，全部处理到外面」）。
+    #    只移动、不删除，照样写进同一份清单 ⇒ `restore()` 会把它们原样搬回，**完全可还原**。
+    #    这一步也让"以前用过还原、备份文件留在游戏目录"的老用户，在下次净化时自动被搬到外部。
+    for finding in backup_findings:
+        _move_finding(finding, files_dir, log, entries, moved, errors)
 
     manifest = {
         "stamp": stamp,
