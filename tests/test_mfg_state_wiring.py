@@ -48,7 +48,11 @@ def test_get_state_really_exposes_the_field() -> None:
 def test_frontend_reads_from_the_same_place() -> None:
     """★ 前端：必须从 `store.state.component_addon_status.config` 读，**不能**用 `settings`。"""
     lines = LAUNCH_PAGE.read_text(encoding="utf-8").splitlines()
-    start = next(i for i, line in enumerate(lines, 1) if "mfg_unlock_enabled" in line)
+    # ⚠️ 必须定位到**开关定义那一行**（`{ k: "mfg_unlock_enabled" …`）：2026-10-09 起文件里
+    #    更早处也会出现这个词（`RESHADE_DEPENDENT` 数组、`reshadeLocked()` 调用），
+    #    只按"含这个词的第一行"取窗口会取到那一段、把断言带偏（实测：改成总闸那次它就红了）。
+    start = next(i for i, line in enumerate(lines, 1)
+                 if "mfg_unlock_enabled" in line and "k:" in line)
     # 只看**代码行**：注释里会把 `settings.mfg_unlock_available` 当反面例子写着，不能算数
     body = "\n".join(
         line for line in lines[start - 1:start + 9]

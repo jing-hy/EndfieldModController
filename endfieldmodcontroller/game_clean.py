@@ -788,7 +788,10 @@ def auto_clean_before_launch(config: AppConfig, *, log: Log = None) -> dict[str,
     游戏正在跑时**跳过**：proxy 被游戏进程占用，动它既可能失败，也会毁掉用户
     正在用的那次会话。
     """
-    if not getattr(config, "clear_game_injections_on_launch", True):
+    # ★★ **总闸开着时无视上面那个设置**（2026-10-09）：「禁用所有 ReShade 注入」对用户的承诺是
+    #    "就算之前有 reshade 注入，也能清理出终末地" —— 那是**保险**，不该被另一个开关关掉。
+    forced = bool(getattr(config, "reshade_disabled", False))
+    if not forced and not getattr(config, "clear_game_injections_on_launch", True):
         return {"ok": True, "skipped": "switch_off", "moved": [], "backup_dir": "",
                 "message": "设置里关掉了「启动前清除第三方注入」"}
     if _game_running():

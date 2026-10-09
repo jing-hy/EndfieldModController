@@ -343,6 +343,17 @@ class AppConfig:
     reshade_injection: str = "xxmi_extra"
     # 内置 DLSS5 / 第一人称 ReShade 目录（d3d12.dll + ReShade.ini + 两个 addon + reshade-shaders）
     dlss5_dir: str = "runtime/dlss5"
+    # ★★ **禁用所有 ReShade 注入**（2026-10-09 用户要求：「在注入开关最上边做一个和其他
+    #   不一样一点、明显一点的，写禁用所有 reshade 注入，详情写明阻止所有 reshade 注入，
+    #   会导致…不可用，但能大幅提升账号安全性（风险不为零）」）。
+    #   它是**总闸**：开了之后一个 ReShade 底座 / addon 都不注入，并把游戏目录里已经存在的
+    #   ReShade 痕迹清出去（只移动、有备份、可撤销）。
+    #   代价：所有依赖 ReShade 的功能不可用 —— DLSS5 神经渲染 / 第一人称视角 /
+    #   DLSS4 多帧生成解锁 / 统一管理器面板（含面板快捷键）；
+    #   换来的是账号安全性大幅提升（风险不为零，只是把这一整档注入面去掉）。
+    #   ⚠️ **与那些功能双向互斥**：开任一 ReShade 功能会自动关掉本闸
+    #   （与 DLSS4 ↔ DLSS5 同一套做法，见 `api.set_component_addon`）。
+    reshade_disabled: bool = False
     dlss5_injection: bool = True
     # 底座下两个插件可独立启停（同一 ReShade 底座，靠移动 addon 文件实现）
     dlss5_addon_enabled: bool = True          # RenoDX-DLSS5 神经渲染

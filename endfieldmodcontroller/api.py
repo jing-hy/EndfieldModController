@@ -741,6 +741,18 @@ class EndfieldModControllerApi:
         #    点「DLSS4 多帧生成」被"未知组件: mfg"直接拒掉，用户看到的是"开了没反应"。
         if component not in launcher.COMPONENT_ADDON_GLOBS:
             return {"ok": False, "message": f"未知组件: {component}"}
+        # ★★ **总闸最优先**（2026-10-09 用户定：「不是 dlss4 互斥，是**禁用**，直接不能点开
+        #    开关那种」）：它开着时，任何依赖 ReShade 的开关都**直接拒、且不写配置**
+        #    （前端会把开关弹回去）。刻意放在显卡判据**之前** —— 总闸优先级最高，
+        #    免得用户在非 40 系机器上收到"显卡不支持"这种文不对题的理由。
+        if enabled and bool(getattr(self.config, "reshade_disabled", False)):
+            return {
+                "ok": False,
+                "rejected": "reshade_disabled",
+                "message": ("「禁用所有 ReShade 注入」正开着 —— 它开着的时候，任何需要 "
+                            "ReShade 的功能都打不开。\n\n"
+                            "要开这个功能，先到启动页最上面把那个总闸关掉。"),
+            }
         # **按显卡支持范围闸门**（用户 2026-10-01 要求「开启时检测机器，不是 50 系就默认关、
         # 开启时弹窗说明拒绝」；**2026-10-05 范围扩大**：原话「去掉所有对非 50 系的锁，
         # 换成对 a 卡和 10 系及以下和核显」）。判据的唯一实现仍是 `deviceinfo.dlss5_supported()`：
@@ -868,6 +880,15 @@ class EndfieldModControllerApi:
         """
         from . import launcher
 
+        # ★★ 总闸开着 ⇒ 这个也"点不开"（2026-10-09，与 `set_component_addon` 同一道闸门）
+        if enabled and bool(getattr(self.config, "reshade_disabled", False)):
+            return {
+                "ok": False,
+                "rejected": "reshade_disabled",
+                "message": ("「禁用所有 ReShade 注入」正开着 —— 统一管理器用的是同一个 ReShade "
+                            "底座，所以它同样打不开。\n\n要开它，先到启动页最上面把那个总闸关掉。"),
+            }
+
         self.config.minimal_injection = bool(enabled)
         try:
             self.config.save()
@@ -888,6 +909,91 @@ class EndfieldModControllerApi:
         result["config"] = {
             "minimal_injection": bool(enabled),
             # 关掉统一管理器时锁键会被强制关 —— 前端要照后端落盘的结果回显
+            "hotkey_takeover": bool(getattr(self.config, "hotkey_takeover", False)),
+        }
+        return result
+
+    def set_reshade_disabled(self, enabled: bool = True) -> dict[str, Any]:
+        """启动页最上面那道**总闸**：「禁用所有 ReShade 注入」。
+
+        用户 2026-10-09 原话：「在注入开关最上边做一个和其他不一样一点、明显一点的，写禁用
+        所有 reshade 注入，详情写明阻止所有 reshade 注入，会导致…（所有需要 reshade 的）
+        不可用，但能大幅提升账号安全性（风险不为零）……这个开了之后**就像现在 dlss4 的那个
+        一样阻止所有 reshade 注入**，要加一层保险，就算之前有 reshade 注入，也能清理出终末地」。
+
+        **开**：
+        1. 落盘 `reshade_disabled=True` ⇒ `reshade_base_wanted()` 直接返回 False：注入库里
+           **不会再列任何 ReShade 底座**，面板 / addon 也不会被铺回去；
+        2. **关掉四个依赖 ReShade 的开关**（DLSS5 / 第一人称 / DLSS4 / 统一管理器）——
+           总闸开着时它们本来就"点不开"了，留着"开着"只会让人以为还在生效；
+        3. **保险**：把游戏目录里**已经存在**的 ReShade 痕迹与第三方注入搬出去
+           （`game_clean.backup_and_clean`，只移动、写清单、可一键还原）——
+           专门覆盖"以前装过、这次才想起来要禁"的场景。
+
+        **关**：只落盘，**不会**自动把那些功能开回来（要不要开由用户自己决定）。
+        """
+        from . import game_clean, launcher
+
+        enabled = bool(enabled)
+        closed: list[str] = []
+        warnings: list[str] = []
+        if enabled:
+            # ② 四个依赖 ReShade 的开关一律关掉（在"真正执行动作的这一层"做，不只改配置）
+            for key, label, closer in (
+                ("dlss5_addon_enabled", "DLSS5 神经渲染",
+                 lambda: launcher.set_component_addons(self.config, "dlss5", False)),
+                ("firstperson_addon_enabled", "第一人称视角",
+                 lambda: launcher.set_component_addons(self.config, "firstperson", False)),
+                ("mfg_unlock_enabled", "DLSS4 多帧生成",
+                 lambda: launcher.set_component_addons(self.config, "mfg", False)),
+                ("minimal_injection", "统一管理器",
+                 lambda: launcher.apply_minimal_injection(
+                     self.config, log=lambda m: launcher._append_log(self.config, m))),
+            ):
+                if not bool(getattr(self.config, key, False)):
+                    continue
+                setattr(self.config, key, False)
+                try:
+                    closer()
+                except Exception as exc:  # noqa: BLE001
+                    warnings.append(f"关闭「{label}」时出错: {exc}")
+                closed.append(label)
+        self.config.reshade_disabled = enabled
+        try:
+            self.config.save()
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "message": f"写配置失败: {exc}"}
+
+        # 注入库跟着重写：底座不再列（关掉总闸时按其它开关重算）
+        try:
+            launcher.configure_dlss5_injection(self.config, enabled=True)
+        except Exception as exc:  # noqa: BLE001
+            warnings.append(f"重写注入库失败: {exc}")
+
+        result: dict[str, Any] = {"ok": True, "closed": closed, "moved": [], "backup_dir": ""}
+        if enabled:
+            # ③ 保险：把游戏目录里已有的 ReShade 痕迹 / 第三方注入清出去（只移动、可还原）
+            try:
+                cleaned = game_clean.backup_and_clean(
+                    self.config, log=lambda m: launcher._append_log(self.config, m))
+                result["moved"] = cleaned.get("moved") or []
+                result["backup_dir"] = cleaned.get("backup_dir") or ""
+            except Exception as exc:  # noqa: BLE001 —— 清理失败不该让这个开关本身失败
+                warnings.append(f"清理游戏目录注入失败: {exc}")
+        if warnings:
+            result["warnings"] = warnings
+        launcher._append_log(
+            self.config,
+            f"「禁用所有 ReShade 注入」{'开启' if enabled else '关闭'}"
+            + (f"（已关闭 {'、'.join(closed)}；清理 {len(result['moved'])} 项）" if closed else ""),
+        )
+        # 前端要照后端落盘的结果回显（这几个键都可能被这次操作改掉）
+        result["config"] = {
+            "reshade_disabled": enabled,
+            "dlss5_addon_enabled": bool(getattr(self.config, "dlss5_addon_enabled", False)),
+            "firstperson_addon_enabled": bool(getattr(self.config, "firstperson_addon_enabled", False)),
+            "mfg_unlock_enabled": bool(getattr(self.config, "mfg_unlock_enabled", False)),
+            "minimal_injection": bool(getattr(self.config, "minimal_injection", False)),
             "hotkey_takeover": bool(getattr(self.config, "hotkey_takeover", False)),
         }
         return result

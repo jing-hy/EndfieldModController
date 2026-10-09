@@ -122,6 +122,14 @@ def reshade_base_wanted(config: AppConfig) -> tuple[bool, str]:
 
     三个入口（DLSS5 神经渲染 / 第一人称视角 / DLSS4 多帧生成）**任意一个开着**就要底座。
     """
+    # ★★ **总闸优先**（2026-10-09）：「禁用所有 ReShade 注入」开着就一个底座都不注入 ——
+    #    这正是用户明说的效果（「这个开了之后就像现在 dlss4 的那个一样阻止所有 reshade 注入」）。
+    #    放在最前面：它必须**压过** minimal_injection 与三个 addon 开关，否则用户点了总闸
+    #    却发现"面板还在"，那就等于没生效。
+    if bool(getattr(config, "reshade_disabled", False)):
+        return False, ("「禁用所有 ReShade 注入」开着 ⇒ 不会注入 ReShade 底座"
+                       "（DLSS5 神经渲染 / 第一人称视角 / DLSS4 多帧生成 / 统一管理器面板"
+                       "都因此不可用）")
     if bool(getattr(config, "minimal_injection", False)):
         return True, ""                      # 最小注入模式**就是**只要底座 + 面板
     if (bool(getattr(config, "dlss5_addon_enabled", True))

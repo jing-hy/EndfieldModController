@@ -101,15 +101,39 @@ async function hotReload() {
 // 界面弹回「已开启」+ 下次一键启动照旧注入（用户原话：「这两个按钮关不掉」）。
 // 现在后端在这三个接口里统一落 `secondary_motion_injection` / `poser_injection`
 // （`api._persist_injection_switch`），开关状态与"下次启动要不要注入"永远一致。
+// ★★ **总闸**放在最前面（2026-10-09 用户要求：「在注入开关最上边做一个和其他不一样一点、
+//    明显一点的」）：开了之后一个 ReShade 底座 / addon 都不注入，并把游戏目录里已有的
+//    ReShade 痕迹清出去（有备份、可撤销）。
+//    它开着时，下面四个依赖 ReShade 的开关**灰掉、点不开**（用户定的是「禁用，直接不能点开
+//    开关那种」，不是互斥自动关）—— 后端在 `set_component_addon` / `set_minimal_injection`
+//    里也会再拒一次，前端这道只是别让用户白点。
+const RESHADE_DEPENDENT = ["minimal_injection", "dlss5_addon_enabled",
+                           "firstperson_addon_enabled", "mfg_unlock_enabled"];
+const reshadeLocked = (k) => !!settings.reshade_disabled && RESHADE_DEPENDENT.includes(k);
+const RESHADE_LOCK_REASON = "「禁用所有 ReShade 注入」开着 —— 先关掉它才能开这个";
+
 const SWITCHES = [
+  { k: "reshade_disabled", name: "禁用所有 ReShade 注入", emphasis: true,
+    desc: "阻止所有 ReShade 注入：不往游戏目录写、也不往游戏进程注入任何 ReShade 底座与 addon。"
+      + "代价是**所有依赖 ReShade 的功能都不可用**——DLSS5 神经渲染、第一人称视角、"
+      + "DLSS4 多帧生成解锁、统一管理器面板（含面板快捷键）。"
+      + "换来的是**大幅提升账号安全性**：把这一整档注入面去掉（风险不为零，只是少了一大块）。"
+      + "开启后即使之前已经有 ReShade 注入，也会在启动前把它清理出终末地（有备份、可撤销）。",
+    apply: (v) => call("set_reshade_disabled", v) },
   // ★ 统一管理器（2026-10-06 用户定名与语义：「那个开关就要叫统一管理器，不要讲那么多，
   //   默认开，如果这个不开，锁快捷键强制关，如果开锁快捷键，这个强制开」）。
   { k: "minimal_injection", name: "统一管理器", desc: "注入 ReShade 与统一管理器面板",
-    apply: (v) => call("set_minimal_injection", v) },
+    apply: (v) => call("set_minimal_injection", v),
+    locked: () => reshadeLocked("minimal_injection"),
+    lockReason: () => RESHADE_LOCK_REASON },
   { k: "dlss5_addon_enabled", name: "DLSS5 神经渲染", desc: "把游戏自身的 DLSS 输出替换成 DLSS5 神经渲染",
-    apply: (v) => call("set_component_addon", "dlss5", v) },
+    apply: (v) => call("set_component_addon", "dlss5", v),
+    locked: () => reshadeLocked("dlss5_addon_enabled"),
+    lockReason: () => RESHADE_LOCK_REASON },
   { k: "firstperson_addon_enabled", name: "第一人称视角", desc: "进游戏按 F1 切换第一人称",
-    apply: (v) => call("set_component_addon", "firstperson", v) },
+    apply: (v) => call("set_component_addon", "firstperson", v),
+    locked: () => reshadeLocked("firstperson_addon_enabled"),
+    lockReason: () => RESHADE_LOCK_REASON },
   // ★ DLSS4 多帧生成解锁（2026-10-06 用户要求："单列开关，与 dlss5 互斥，
   //   50 系和其他用不了的锁，默认关"；随后又要求"**说明要跟随显卡改变**"）。
   //   · **能不能用由后端判据决定**（`mfg_unlock_available`），不满足时这一行**禁用**并显示原因；
@@ -125,9 +149,13 @@ const SWITCHES = [
     // ⚠️ 能不能用**不在 `settings` 里**（`settings` = `store.state.config` = AppConfig 的字段），
     //    而在 `store.state.component_addon_status.config`。2026-10-06：我第一版用 settings 读，
     //    恒为 undefined ⇒ 那一行**对所有人都灰**（40 系也一样"开不了"）。
-    locked: () => !(store.state.component_addon_status?.config?.mfg_unlock_available),
-    lockReason: () => store.state.component_addon_status?.config?.mfg_unlock_reason
-      || "这台机器用不了这个功能" },
+    // 两道锁：① 总闸开着 ⇒ 谁都开不了（2026-10-09）；② 这台机器用不了（非 40 系）。
+    locked: () => reshadeLocked("mfg_unlock_enabled")
+      || !(store.state.component_addon_status?.config?.mfg_unlock_available),
+    lockReason: () => reshadeLocked("mfg_unlock_enabled")
+      ? RESHADE_LOCK_REASON
+      : (store.state.component_addon_status?.config?.mfg_unlock_reason
+         || "这台机器用不了这个功能") },
   { k: "efmi_injection", name: "皮肤 Mod", desc: "EFMI 服装 Mod 注入（关掉后不加载任何皮肤）" },
   { k: "secondary_motion_injection", name: "ShakingBreastManager", desc: "乳摇物理效果",
     // 拨动即装卸（不止写配置）：开启走 `secondary_motion_install`（装 proxy + plugin\sbm.dll
@@ -789,13 +817,16 @@ useLogAutoScroll(logBox, () => consoleLog.value);
     <Card title="注入开关">
       <div class="divide-y" style="border-color: var(--border)">
         <div v-for="sw in SWITCHES" :key="sw.k" class="switch-row"
-             :style="sw.locked && sw.locked() ? 'opacity:.55;cursor:not-allowed' : ''"
+             :style="[sw.locked && sw.locked() ? 'opacity:.55;cursor:not-allowed' : '',
+                      sw.emphasis
+                        ? 'border:1.5px solid #f59e0b;background:rgba(245,158,11,.10);border-radius:10px;padding:10px 12px;margin:2px 0 8px'
+                        : '']"
              @click="toggleSwitch(sw)">
           <div class="min-w-0">
             <div class="font-medium">
-              {{ sw.name }}
+              <span v-if="sw.emphasis" style="color:#f59e0b">⚠ </span>{{ sw.name }}
               <span v-if="sw.locked && sw.locked()" class="text-xs"
-                    style="color: var(--text-muted)">（本机不适用）</span>
+                    style="color: var(--text-muted)">（不可用）</span>
             </div>
             <div class="text-xs mt-0.5" style="color: var(--text-muted)">
               {{ sw.locked && sw.locked() ? sw.lockReason() : swText(sw) }}
