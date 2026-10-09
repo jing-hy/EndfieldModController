@@ -601,6 +601,14 @@ def _download_sequential(
                 # 这样每秒都能检查一次 `cancel()` ⇒ 点「暂停/终止」立刻生效。
                 _seq_waited = 0.0
                 _seq_window = float(STALL_SECONDS)
+                # ⚠️ **`_mbps` 也必须在循环外兜底**（2026-10-07）：它原来只在
+                # `if _sock is not None:` 那个分支里被赋值，而下面的
+                # `response.read(_adaptive_read_size(_mbps))` 是**无条件**用的 ⇒
+                # 取不到底层 socket 时（Python 版本 / TLS 包装 / 代理差异）直接
+                # `UnboundLocalError: cannot access local variable '_mbps'`，下载当场中断。
+                # 实测：`tests/test_dependencies.py::DependencyTests::test_update_from_url_zip`
+                # 就是这个异常（它走的是真实下载路径）。
+                _mbps = 0.0
                 while True:
                     if cancel and cancel():
                         raise Cancelled("用户终止")

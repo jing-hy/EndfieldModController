@@ -2004,6 +2004,41 @@ def _game_injection_summary(config: Any, game_dir: Path | None) -> list[str]:
         backup = path.with_name(name + ".bak")
         lines.append(f"{name}: loader proxy（归属={kind}）{size:,} B；"
                      f"原版备份 {backup.name}：{'在' if backup.is_file() else '**缺失 —— 无法安全还原**'}")
+    # ★ 2026-10-07 加：**proxy 顶替系统模块这件事本身要连同后果一起写出来**，
+    #   不能只留 "loader proxy（归属=poser）" 这种中性描述。
+    #   （实测：这种状态下游戏每次启动都在 25–33 秒后以 0xC0000135 退出，
+    #     而自检当时全部就绪、用户从界面上看不出来。）
+    try:
+        from . import secondary_motion
+
+        hijacked: list[str] = []
+        for name in secondary_motion.PROXY_NAMES:
+            path = game / name
+            try:
+                if path.is_file() and reshade_integration.looks_like_loader_proxy(path):
+                    hijacked.append(name)
+            except OSError:
+                continue
+        if hijacked:
+            owners: list[str] = []
+            if bool(getattr(config, "poser_injection", False)):
+                owners.append("Poser")
+            if bool(getattr(config, "secondary_motion_injection", False)):
+                owners.append("乳摇")
+            if owners:
+                who = f"对应注入开关开着：{'、'.join(owners)}"
+            else:
+                who = "对应注入开关都已关闭 ⇒ 属于净化后没清干净的残留"
+            lines.append(
+                "⚠ **系统模块被 loader proxy 顶替**：" + "、".join(hijacked) + f"（{who}）"
+                "—— 可用配方要求这两个文件是游戏原版；实测这种状态游戏会在启动约 30 秒后以 "
+                "`0xC0000135 STATUS_DLL_NOT_FOUND` 退出（`Player.log` 可见 "
+                "`Could not load symbol HGSetupCustomVulkan`）。"
+                "要让游戏能进：启动页关掉 Poser / 乳摇 的注入开关后重新一键启动"
+                "（启动前净化会把原版还原回去）。"
+            )
+    except Exception:  # noqa: BLE001 —— 诊断包不能因为多一段判定就整包失败
+        pass
     plugin = game / reshade_integration.PLUGIN_DIR_NAME
     if plugin.is_dir():
         try:

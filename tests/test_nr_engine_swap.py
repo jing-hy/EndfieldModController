@@ -60,7 +60,11 @@ def test_retire_is_idempotent(env):
 
 def test_the_shipped_asset_is_the_new_engine():
     """随包资产必须已经是 `renodx-dlss5.addon64`（旧的 4.7_汉化 条目要退役掉）。"""
-    manifest = runtime_assets.load_manifest(Path(r"D:\zmdmod\modecontroller\assets\dlss5"))
+    # ⚠️ 2026-10-07 修：原来钉死作者本机路径（`D:\zmdmod\...`），在任何别的机器上
+    # 都会 `KeyError: 'files'`（那个目录不存在 ⇒ 读到的是空 manifest），于是这条测试
+    # 在别人机器上永远红。随包资产就在仓库里的 `assets/dlss5`，改成相对路径后与机器无关。
+    manifest = runtime_assets.load_manifest(
+        Path(__file__).resolve().parents[1] / "assets" / "dlss5")
     names = list(manifest["files"])
     assert "renodx-dlss5.addon64" in names
     assert not [n for n in names if n.startswith("renodx-dlss5-4.7")], names

@@ -2621,6 +2621,81 @@ def _check_proxy_backups(config: AppConfig, report: Report, log: Callable[[str],
                    f"{len(proxies)} 个 loader proxy 都有原版备份，可安全还原")
 
 
+def _check_system_modules_not_hijacked(
+    config: AppConfig, report: Report, log: Callable[[str], None] | None
+) -> None:
+    """游戏目录的两个系统模块有没有被 loader proxy 顶替 —— 顶替了游戏就起不来。
+
+    **为什么必须单列这一项**（2026-10-07 实测，就是要防这个现场）：
+    `docs\\dev\\可用状态配方.md` 与 `docs\\dev\\交接文档.md` §5.3 记的「游戏能进」基线要求
+    `<game>\\d3dcompiler_47.dll`（4,524,496 B）与 `<game>\\vulkan-1.dll`（1,730,096 B）
+    是**游戏原版**。被 Poser / 乳摇 的 loader proxy（35,840 / 56,832 B）顶替时，
+    **每一次**启动都在 25–33 秒后以 `exit_code=0xC0000135 STATUS_DLL_NOT_FOUND`
+    结束（`Player.log` 首行就是 `Could not load symbol HGSetupCustomVulkan`）。
+    而 `_check_proxy_backups` 只保证"proxy 有 `.bak` 可还原"——那种状态下它报
+    "可安全还原"，自检**全部就绪**，用户从界面上完全看不出游戏其实进不去。
+
+    **为什么只报、不自动拆**：proxy 在位有两个来源 ——（a）本程序按开关铺的；
+    （b）用户**独立**安装的 Poser / 乳摇（它们有自己的向导与安装记录）。
+    单看文件分不出是哪一种，而 2026-10-03 的事故（「mmd 的 Mod 的开关关了之后再点
+    就打不开了」）正是"管理器自作主张把还在用的 loader 拆掉"造成的。
+    所以这里只把事实、后果与确切出口讲清楚；真正动手交给启动前净化
+    （`game_clean.auto_clean_before_launch`）与「清理游戏目录注入」——
+    那两条路有备份清单、可一键撤销。
+    """
+    from . import reshade_integration, secondary_motion
+
+    try:
+        game = reshade_integration.detect_game_dir(config)
+    except Exception as exc:  # noqa: BLE001
+        report.add("game_dir:system_modules", False, f"定位游戏目录失败: {exc}", manual=True)
+        return
+    if game is None:
+        return
+
+    hijacked: list[str] = []
+    for name in secondary_motion.PROXY_NAMES:
+        path = Path(game) / name
+        try:
+            if path.is_file() and reshade_integration.looks_like_loader_proxy(path):
+                hijacked.append(name)
+        except OSError:
+            continue
+    if not hijacked:
+        report.add("game_dir:system_modules", True,
+                   "游戏目录的 d3dcompiler_47.dll / vulkan-1.dll 是系统原版"
+                   "（= 可用配方里「游戏能进」的基线）")
+        return
+
+    owners: list[str] = []
+    if bool(getattr(config, "poser_injection", False)):
+        owners.append("Poser")
+    if bool(getattr(config, "secondary_motion_injection", False)):
+        owners.append("乳摇")
+
+    consequence = (
+        "**实测后果**：这种状态游戏会在启动约 30 秒后以 "
+        "`0xC0000135 STATUS_DLL_NOT_FOUND` 退出"
+        "（`Player.log` 里有 `Could not load symbol HGSetupCustomVulkan`）"
+    )
+    if owners:
+        message = (
+            f"{'、'.join(hijacked)} 已被 {'/'.join(owners)} 的 loader proxy 顶替"
+            f"（对应注入开关**开着**，是本程序铺的）。{consequence}；"
+            f"可用配方要求这两个文件是游戏原版。要让游戏能进：在启动页关掉 "
+            f"{'、'.join(owners)} 的注入开关，再一键启动 —— 启动前净化会把原版还原回去。"
+        )
+    else:
+        message = (
+            f"{'、'.join(hijacked)} 已被 loader proxy 顶替，但 Poser / 乳摇 的注入开关"
+            f"**都已关闭** —— 说明是独立安装的 Poser/乳摇 留下的，或上一次净化没清干净。"
+            f"{consequence}；可用配方要求这两个文件是游戏原版。"
+            f"先确认你不需要在别处单独用它们，再点启动页「清理游戏目录注入」"
+            f"（会先备份、可一键撤销）。"
+        )
+    report.add("game_dir:system_modules", False, message, manual=True)
+
+
 def _check_controller(config: AppConfig, report: Report, log: Callable[[str], None] | None) -> None:
     controller_ini = config.controller_dir / "controller.ini"
     actions_tsv = config.controller_dir / "actions.tsv"
@@ -2869,6 +2944,11 @@ def ensure_all(config: AppConfig, log: Callable[[str], None] | None = None) -> d
     # 两个 loader 都在位之后再查"原版备份在不在"（proxy 是它们铺的）：
     # 缺 .bak 时**自动从 System32 补**，补不到就明确告诉用户"先别点还原"。
     _check_proxy_backups(config, report, log)
+    # ★ 再查一次"proxy 顶替系统模块"这件事**本身**（2026-10-07 加）：
+    #   `_check_proxy_backups` 只保证"proxy 有 .bak、可安全还原"——proxy 在位时它照样
+    #   报 OK；而可用配方要求这两个文件是**游戏原版**，顶替状态下游戏根本进不去。
+    #   这一项就是"界面全绿、游戏却起不来"的兜底，必须排在两个 loader 之后。
+    _check_system_modules_not_hijacked(config, report, log)
 
     # ⚠️⚠️ **本函数展开过资产 ⇒ 最后必须按开关把所有 addon 与面板归位一次**（必须放最后）。
     # 为什么非要在最后：本函数**第 1 步** `_check_bundled_assets` 会把随包 addon
