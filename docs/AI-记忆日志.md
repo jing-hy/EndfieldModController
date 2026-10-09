@@ -5818,3 +5818,29 @@ EMC 的 exe 是 PyInstaller 单文件版：每次启动先把 ~336 个文件解�
 本机（用户的机器）上，**除了发 Release，一律不要跑全量测试**（`python -m pytest tests`）—— 只跑与本次改动相关的针对性测试。发 Release 时由 `scripts/build_release.py` 自动跑全量。原因：全量套件要 11~15 分钟、吃满 CPU，在本机上代价过高。（用户 2026-10-09 明确要求）
 
 `关键词：["全量测试","pytest tests","不要全量","针对性测试","发 Release","build_release.py","本机规则","测试策略","耗时"]`
+
+<!-- 增量追加 2026-10-09 21:23 · 新增 3 条（历史条目一律保留）-->
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 2026-10-09 净化改动①「备份外置」（用户原话：…
+*2026-10-09 21:15*
+
+2026-10-09 净化改动①「备份外置」（用户原话：「在终末地本体清空之后，不要留备份在终末地的文件夹，全部处理到外面，如果部分用户之前用过还原，那些备份文件也要能自动处理到外部，还原也是用外部还原」）：`game_clean.audit()` 新增分类 `injector_backup`，把游戏目录里的备份（`<名字>.bak*` / `<名字>.game_original` / `<名字>.mc.bak*`，**只认已知注入相关名字**）也纳入净化，搬到游戏目录之外的 `runtime\game_backup\<时间戳>\files\`。顺序必须「① 搬注入物 → ② 用 `.bak` 把系统原版放回 → ③ 再搬 `.bak`」（反了就只会从 System32 取原版）。commit 2b71f74。
+
+`关键词：["备份外置","injector_backup","game_clean",".bak","game_backup","外部备份区","完全还原","净化","user 要求","_move_finding"]`
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 2026-10-09 净化改动②「含 exe 的子目录也…
+*2026-10-09 21:15*
+
+2026-10-09 净化改动②「含 exe 的子目录也纳入」（用户要求「新 issue 也加进来，要求能完全还原」）：新增 `reshade_integration.GAME_INJECTION_SCAN_DIRS = ("AntiCheatExpert","CefView","plugins","plugin")` 与 `injection_scan_roots()`（有界、不递归），`audit_game_dir_injections()`（界面/自检）、`game_clean.audit()`（proxy 段 + ReShade 痕迹段）、`diagnostics._game_injection_summary()`（诊断包）三处都改走它。原实现只扫游戏根 ⇒ 13 份诊断包全漏报了 `<game>\AntiCheatExpert\` 里整套 ReShade（dlss5oneclick 认错 exe 装进去的）。`game_clean._relative_label()` 保证清单相对路径带目录名（`AntiCheatExpert/dxgi.dll`），restore 按它放回原位 ⇒ 子目录结构完全可还原；判据仍是内容级，反作弊自己的 exe 不碰。commit 0934f50。
+
+`关键词：["子目录","AntiCheatExpert","GAME_INJECTION_SCAN_DIRS","injection_scan_roots","注入审计","漏报","完全还原","_relative_label","dlss5oneclick","诊断包"]`
+
+<!-- user · 用户偏好与环境（**含个人信息，公开前请自行取舍**） -->
+### 用户的 EMC **测试目录是 `D:\emc-modt…
+*2026-10-09 21:17*
+
+用户的 EMC **测试目录是 `D:\emc-modtest`**（与工作区 `D:\emc` 平级），等效于脚本里 `modtest` 的角色；他以后都在这里测试。**构建出 exe 之后要复制一份进去**（先清掉那里的 `*.exe`，只放最新版）。注意 `scripts/build_release.py` 原本算的是 `ROOT.parent/"modtest"`（即 `D:\modtest`，本机不存在），与这个目录对不上，已按 `<工作区名>-modtest` 的约定修正。
+
+`关键词：["emc-modtest","测试目录","modtest","构建产物","exe 复制","D:\\emc","build_release","测试环境","用户约定"]`
