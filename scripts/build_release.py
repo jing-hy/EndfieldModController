@@ -2,6 +2,7 @@
 
 用法：
     python scripts/build_release.py                  # 正常构建（推荐）
+    python scripts/build_release.py --with-tests     # 构建前顺便跑全量测试（内部走 run_tests.py）
     python scripts/build_release.py --skip-checks    # 跳过静态检查（只在明确知道原因时用）
     python scripts/build_release.py --skip-addon     # 不重编 ReShade 面板（沿用上次产物）
     python scripts/build_release.py --skip-modtest   # 不同步进测试目录
@@ -27,7 +28,11 @@ python scripts/build_release.py --modtest-both     # 最新版与伪旧版**都*
 
     1) 所有 Python 模块 py_compile
     2) 前端产物新鲜度校验（web/dist/index.html 不得比 frontend/src 旧）
-    3) `python -m pytest tests -q`（必须指定 tests 目录，否则会被 `_tmp\\` 污染）
+
+⚠️ **单元测试已经拆出去**（2026-10-09 用户要求：「本机不做**并行**构建和测试，你要拆两个
+脚本出来」）—— 独立入口是 `scripts/run_tests.py`（**单线程**、不并行）。默认**不跑**：
+构建与测试各自独立、都能单独重跑；要在构建流程里带上就加 `--with-tests`（内部仍走那个
+脚本，本文件里不再另起一套 pytest 参数，也不再用 `-n 4` 并行）。
 
 发布（上传）不在本脚本里 —— 见 `scripts/prepare_release.py`。
 """
@@ -50,9 +55,23 @@ OLD_DIR = DIST / "_old"
 VERSION_PY = ROOT / "endfieldmodcontroller" / "version.py"
 APP_NAME = "EndfieldModController"
 FAKE_VERSION = "0.1.9"
-# 测试目录：默认是工作区**旁边**的 modtest（D:\zmdmod\modtest）。构建完自动把最新版 exe
-# 同步进去（用户 2026-09-30：「这个需要构建脚本自动处理」—— 以前每次都要他提醒我复制）。
-MODTEST_DIR = ROOT.parent / "modtest"
+# 测试目录：默认是工作区**旁边**的 modtest（`D:\zmdmod\modecontroller` → `D:\zmdmod\modtest`）。
+# 构建完自动把最新版 exe 同步进去（用户 2026-09-30：「这个需要构建脚本自动处理」——
+# 以前每次都要他提醒我复制）。
+#
+# ⚠️ 2026-10-09 加 `<工作区名>-modtest` 这条判据：用户把工作区放在 `D:\emc`，而他的测试
+#    目录叫 `D:\emc-modtest`（不是 `D:\modtest`）。用户原话：「以后 D:\emc-modtest 等效于
+#    那边的 modtest，我都会在这里测试，你构建完也复制一份进来」。
+#    工作区名不带 `-modtest` 后缀且那个目录不存在时，退回原来的 `<父目录>\modtest`，
+#    老布局（`D:\zmdmod`）不受影响。
+def _resolve_modtest_dir() -> Path:
+    sibling = ROOT.parent / f"{ROOT.name}-modtest"
+    if sibling.is_dir():
+        return sibling
+    return ROOT.parent / "modtest"
+
+
+MODTEST_DIR = _resolve_modtest_dir()
 # 这几个进程在跑 = "控制器/游戏/XXMI 正开着"：此时**不替换 exe、也不杀进程**，等他自己退出。
 GUARD_PROCESSES = ("Endfield", "XXMI Launcher", "EndfieldModController")
 
@@ -126,7 +145,7 @@ def run(cmd: list[str], *, label: str) -> None:
     print(f"[build] {label} 完成（{time.time() - started:.1f}s）", flush=True)
 
 
-def static_checks() -> None:
+def static_checks(*, with_tests: bool = False) -> None:
     print("[1/7] 静态检查", flush=True)
     # ① Python 语法/编译
     modules = sorted((ROOT / "endfieldmodcontroller").glob("*.py"))
@@ -190,52 +209,29 @@ def static_checks() -> None:
         # 现在只有这一条路：产物必须在。没有就直接失败，别静默打出没有界面的包。
         raise SystemExit("!! 缺少 web/dist/index.html —— 先 cd frontend && npm install && npm run build")
 
-    # ③ 单元测试（必须指定 tests 目录）
-    run_tests()
+    # ③ 单元测试：**已经拆出去**（见 `scripts/run_tests.py`；本文件不再自带 pytest 参数）。
+    #    默认**不跑** —— 本机不做"并行构建和测试"，两件事各自独立、都能单独重跑。
+    if with_tests:
+        run_tests_script()
+    else:
+        print("      单元测试：已跳过（单独跑 `python scripts/run_tests.py`；"
+              "要在构建里带上就加 --with-tests）", flush=True)
 
 
-def run_tests(attempts: int = 3) -> None:
-    """跑单元测试；**偶发失败要重试**（最多 `attempts` 次）。
+def run_tests_script() -> None:
+    """跑 `scripts/run_tests.py`（**单线程**、偶发失败自动重试）—— 只在 `--with-tests` 时调用。
 
-    为什么重试：`test_sbm_data_sync` 里会真的调 `robocopy`，在临时目录下**有概率**失败
-    （2026-10-03 遇到一次：`ok: False` 但单独跑又全过）。按本项目已定的约定
-    「**批量不要 fail-fast、失败项自动重试、上限 3 次**」，构建入口也不该被一次偶发卡死
-    ——不过重试完仍失败就必须中止（不能靠重试掩盖真失败），并把失败的测试名列出来。
+    测试实现只有一份，就在那个脚本里（重试、失败行摘录也都在那边）；本脚本不再自带 pytest
+    参数、也不再并行 —— 用户 2026-10-09 要求「本机不做并行构建和测试，你要拆两个脚本出来」。
+    失败即中止：不许产出半成品。
     """
-    last_output = ""
-    # ⚠️ **静态检查用多线程跑**（2026-10-03 提速，用户问「到底静态检查干啥了这么久，能不能多线程」）。
-    # 实测：单线程 37.2s → `-n auto` **15.5s（2.4 倍）**；失败重试时省的更多
-    #（最坏情况从 3×37≈111s 降到 3×15.5≈47s）。
-    # 没装 `pytest-xdist` 时**优雅降级**回单线程，绝不因为缺插件而让构建失败。
-    try:
-        import xdist  # noqa: F401
-
-        # ⚠️ **用固定的 4 个 worker，不用 `-n auto`**（2026-10-03 实测）：
-        # `auto` 会按逻辑核数开满（本机 8 核 → 8 个），而这套测试有大量文件 IO
-        #（复制/解压/扫描真实目录），worker 一多就互相拖 —— 实测同样 523 个用例，
-        # `-n auto` 偶尔要 **114 秒**、`-n 4` 稳定在 **17~40 秒**，
-        # 并且并行度越高越容易出现互相干扰导致的偶发失败（构建脚本因此白跑重试）。
-        parallel_args = ["-n", "4"]
-    except ImportError:
-        parallel_args = []
-    for attempt in range(1, attempts + 1):
-        result = subprocess.run(
-            [sys.executable, "-m", "pytest", "tests", "-q", *parallel_args],
-            cwd=str(ROOT), capture_output=True, text=True,
-        )
-        last_output = (result.stdout or "") + (result.stderr or "")
-        if result.returncode == 0:
-            summary = [ln for ln in last_output.splitlines() if " passed" in ln]
-            if attempt > 1:
-                print(f"[build] pytest 第 {attempt} 次通过（前 {attempt - 1} 次是偶发失败）", flush=True)
-            print(f"      {summary[-1] if summary else 'pytest ok'}", flush=True)
-            return
-        failed = [ln.strip() for ln in last_output.splitlines() if ln.startswith("FAILED")]
-        detail = "；".join(failed[:5]) or "（没解析出 FAILED 行，见下方输出）"
-        print(f"      pytest 第 {attempt}/{attempts} 次失败：{detail}", flush=True)
-    raise SystemExit(
-        f"!! pytest 连续 {attempts} 次失败，已中止，未产出任何产物\n{last_output[-4000:]}"
-    )
+    script = ROOT / "scripts" / "run_tests.py"
+    if not script.is_file():
+        raise SystemExit(f"!! 找不到 {script} —— 测试入口已拆出去，缺了它别带 --with-tests 构建")
+    print("      调 scripts/run_tests.py（单线程）…", flush=True)
+    result = subprocess.run([sys.executable, str(script)], cwd=str(ROOT))
+    if result.returncode != 0:
+        raise SystemExit("!! 测试未通过，已中止，未产出任何产物")
 
 
 def archive_old_exes(version: str) -> list[str]:
@@ -464,7 +460,7 @@ def main() -> int:
         run([sys.executable, "scripts/build_addon.py"], label="编译 ReShade 面板")
 
     if "--skip-checks" not in args:
-        static_checks()
+        static_checks(with_tests=("--with-tests" in args))
     else:
         print("[1/7] 已按参数跳过静态检查", flush=True)
 
