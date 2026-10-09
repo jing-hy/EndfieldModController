@@ -89,6 +89,19 @@ def _sha256(path: Path) -> str:
         return ""
 
 
+def _relative_label(game_dir: Path, path: Path) -> str:
+    """条目在**备份清单**里的相对路径（相对游戏目录，用 `/` 分隔）。
+
+    ⚠️ 子目录里的条目**必须**带上目录名（`AntiCheatExpert/dxgi.dll`）：它同时是
+    `_move_finding()` 写进备份区的落点、也是 `restore()` 放回时的唯一依据 ——
+    丢了目录名就会把文件还原到游戏根目录去（净化前它在子目录里）。
+    """
+    try:
+        return path.relative_to(game_dir).as_posix()
+    except ValueError:
+        return path.name
+
+
 def _looks_like_reshade_payload(path: Path) -> bool:
     """内容级判定：这个 dll 是否真的是 ReShade / 我们的注入载荷。
 
@@ -164,31 +177,34 @@ def audit(config: AppConfig, *, log: Log = None) -> dict[str, Any]:
 
     findings: list[Finding] = []
 
-    # ① 加载器 proxy
-    for name in reshade_integration.LOADER_PROXY_MODULES:
-        path = game_dir / name
-        if not path.is_file():
-            continue
-        # 2026-10-01：判据从"内容像 loader proxy（sbm / poser 标记）"放宽为
-        # `is_third_party_proxy()` —— 内容标记、**OptiScaler 特征**、或"与 System32
-        # 原版不同（被顶替）"三条任一命中即算第三方。用户要求「**一键还原游戏本体要
-        # 全部移走**」：原先 OptiScaler 的 `winhttp.dll` 既不在名单、内容也没有我们的
-        # 标记 → **整体漏判**，用户以为还原干净了、其实注入链还挂在那儿。
-        origin = reshade_integration.is_third_party_proxy(path)
-        if not origin:
-            continue
-        backup = path.with_name(name + ".bak")
-        origin_label = {
-            "sbm": "乳摇 loader",
-            "poser": "Poser loader",
-            "optiscaler": "OptiScaler（DLSS-NR 注入器）",
-            "third-party": "第三方 proxy（顶替了系统模块）",
-        }.get(origin, origin)
-        findings.append(Finding(
-            "loader_proxy", name, str(path), size=path.stat().st_size,
-            sha256=_sha256(path),
-            detail=f"{origin_label}；系统原版备份{'存在' if backup.is_file() else '不存在'}（{backup.name}）",
-        ))
+    # ① 加载器 proxy（**含可执行文件的子目录也要扫**，2026-10-09 —— 见
+    #    `reshade_integration.GAME_INJECTION_SCAN_DIRS` 的注释：反作弊目录之类同样是
+    #    有效的劫持位，只扫根目录会整体漏掉"反作弊目录里躺着一整套 ReShade"）。
+    for root in reshade_integration.injection_scan_roots(game_dir):
+        for name in reshade_integration.LOADER_PROXY_MODULES:
+            path = root / name
+            if not path.is_file():
+                continue
+            # 2026-10-01：判据从"内容像 loader proxy（sbm / poser 标记）"放宽为
+            # `is_third_party_proxy()` —— 内容标记、**OptiScaler 特征**、或"与 System32
+            # 原版不同（被顶替）"三条任一命中即算第三方。用户要求「**一键还原游戏本体要
+            # 全部移走**」：原先 OptiScaler 的 `winhttp.dll` 既不在名单、内容也没有我们的
+            # 标记 → **整体漏判**，用户以为还原干净了、其实注入链还挂在那儿。
+            origin = reshade_integration.is_third_party_proxy(path)
+            if not origin:
+                continue
+            backup = path.with_name(name + ".bak")
+            origin_label = {
+                "sbm": "乳摇 loader",
+                "poser": "Poser loader",
+                "optiscaler": "OptiScaler（DLSS-NR 注入器）",
+                "third-party": "第三方 proxy（顶替了系统模块）",
+            }.get(origin, origin)
+            findings.append(Finding(
+                "loader_proxy", _relative_label(game_dir, path), str(path),
+                size=path.stat().st_size, sha256=_sha256(path),
+                detail=f"{origin_label}；系统原版备份{'存在' if backup.is_file() else '不存在'}（{backup.name}）",
+            ))
 
     # ①.5 第三方注入器留下的**配置/日志**（OptiScaler.ini / OptiScaler.log / OptiScaler.dll）：
     #      proxy 都移走了、这些还留着，用户会以为"没还原干净"。用户 2026-10-01 明确要求
@@ -250,29 +266,34 @@ def audit(config: AppConfig, *, log: Log = None) -> dict[str, Any]:
                 detail="Endfield Poser 的数据目录（姿态库 / 表情校准 / 安装备份）",
             ))
 
-    for name in RESHADE_MARKERS:
-        path = game_dir / name
-        # ⚠️ **去重**（2026-10-05）：`d3d12.dll` / `dxgi.dll` 这些名字**同时**出现在
-        # ① 段的 `LOADER_PROXY_MODULES` 里 —— 一个文件既被判"第三方 proxy"（① 段）、
-        # 内容又像 ReShade 载荷（这一段）时会被报**两次**，净化清单里同一份文件出现两条
-        # （备份/还原时两边互相打架）。同相对路径只留先出现的那条。
-        if any(item.relative == name for item in findings):
-            continue
-        if path.is_file():
-            # dll 走内容级判定（见 _looks_like_reshade_payload）：只有真的像
-            # ReShade 载荷才移走，避免误伤游戏自带/他方的 d3d12.dll。
-            if name.lower().endswith(".dll") and not _looks_like_reshade_payload(path):
-                _log(log, f"跳过 {name}：内容不像 ReShade 载荷（可能是游戏自带或他方注入）")
+    # ③ ReShade 痕迹（**含可执行文件的子目录也要扫**，2026-10-09）：真实误装的形态就是
+    #    子目录里躺着一整套（`AntiCheatExpert\dxgi.dll` + `ReShade.ini` + `reshade-shaders\`）。
+    for root in reshade_integration.injection_scan_roots(game_dir):
+        for name in RESHADE_MARKERS:
+            path = root / name
+            label = _relative_label(game_dir, path)
+            # ⚠️ **去重**（2026-10-05）：`d3d12.dll` / `dxgi.dll` 这些名字**同时**出现在
+            # ① 段的 `LOADER_PROXY_MODULES` 里 —— 一个文件既被判"第三方 proxy"（① 段）、
+            # 内容又像 ReShade 载荷（这一段）时会被报**两次**，净化清单里同一份文件出现两条
+            # （备份/还原时两边互相打架）。同相对路径只留先出现的那条。
+            if any(item.relative == label for item in findings):
                 continue
-            findings.append(Finding(
-                "reshade", name, str(path), size=path.stat().st_size, sha256=_sha256(path),
-                detail="ReShade 痕迹：本方案的承诺是不往游戏目录写这些东西",
-            ))
-        elif path.is_dir():
-            total = sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
-            findings.append(Finding(
-                "reshade", name, str(path), is_dir=True, size=total, detail="ReShade shader 目录残留",
-            ))
+            if path.is_file():
+                # dll 走内容级判定（见 _looks_like_reshade_payload）：只有真的像
+                # ReShade 载荷才移走，避免误伤游戏自带/他方的 d3d12.dll。
+                if name.lower().endswith(".dll") and not _looks_like_reshade_payload(path):
+                    _log(log, f"跳过 {label}：内容不像 ReShade 载荷（可能是游戏自带或他方注入）")
+                    continue
+                findings.append(Finding(
+                    "reshade", label, str(path), size=path.stat().st_size, sha256=_sha256(path),
+                    detail="ReShade 痕迹：本方案的承诺是不往游戏目录写这些东西",
+                ))
+            elif path.is_dir():
+                total = sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
+                findings.append(Finding(
+                    "reshade", label, str(path), is_dir=True, size=total,
+                    detail="ReShade shader 目录残留",
+                ))
     # ReShade 的**轮转日志**（`ReShade.log1` / `ReShade.log2`…）：`RESHADE_MARKERS` 只能列精确名，
     # 于是"游戏目录里装过 ReShade"的铁证会一直留着（2026-10-05 反馈者的包里就有 `ReShade.log1`，
     # 净化完全不认它）。按 `ReShade.log<数字>` 扫，一并备份移走；`ReShade.log` 本身由上面那段管。

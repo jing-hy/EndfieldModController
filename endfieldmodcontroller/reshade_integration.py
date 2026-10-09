@@ -1680,36 +1680,75 @@ def _resolve_game_dir(config: AppConfig, game_dir: Path | None = None) -> Path |
     return detect_game_dir(config)
 
 
+#: 除游戏根之外，还需要检查"注入物"的**含可执行文件**的子目录（**有界、不递归** ——
+#: 游戏目录里还有上百 GB 的 VFS 分卷，整树扫描不可接受）。
+#:
+#: 为什么需要（2026-10-07 实测）：Windows 解析非 KnownDLL 时**先找"应用程序所在目录"**，
+#: 所以游戏目录下任何一个**含 exe 的子目录**都是有效的劫持位。第三方一键工具
+#: `dlss5oneclick 0.13.20` 把反作弊的服务程序认成了游戏主程序（它自己的报告里写着
+#: `wrong exe picked, or a launcher starts a different one`），于是把整套 ReShade
+#: （`dxgi.dll` 5,592,064 B + `ReShade.ini` + `reshade-shaders\`）装进了
+#: `<game>\AntiCheatExpert\`；而审计只扫游戏根目录 ⇒ **13 份诊断包一份都没报过它**
+#: （每份的「游戏目录注入」段都写着"没有检测到第三方注入 proxy"）。
+GAME_INJECTION_SCAN_DIRS = ("AntiCheatExpert", "CefView", "plugins", "plugin")
+
+
+def injection_scan_roots(game_dir: Path | None) -> list[Path]:
+    """检查注入物时要看的目录：**游戏根 + 已存在的含 exe 子目录**（有界、不递归）。
+
+    顺序稳定（根在最前），调用方据此拼"相对游戏目录"的展示路径。
+    """
+    if game_dir is None:
+        return []
+    root = Path(game_dir)
+    roots = [root]
+    for name in GAME_INJECTION_SCAN_DIRS:
+        candidate = root / name
+        try:
+            if candidate.is_dir() and candidate not in roots:
+                roots.append(candidate)
+        except OSError:
+            continue
+    return roots
+
+
 def audit_game_dir_injections(config: AppConfig, game_dir: Path | None = None) -> dict[str, Any]:
-    """Report foreign injection artifacts that live in the game directory."""
+    """Report foreign injection artifacts that live in the game directory.
+
+    ⚠️ 扫的是 ``injection_scan_roots()``：**游戏根 + 含 exe 的子目录**（2026-10-09）。
+    只看根目录会漏掉"反作弊目录里躺着一整套 ReShade"这类真实误装（见常量处的注释）。
+    """
     target = _resolve_game_dir(config, game_dir)
     if target is None:
         return {"ok": False, "message": "没有找到游戏目录", "suspicious": [], "disabled": []}
 
     suspicious: list[dict[str, Any]] = []
     disabled: list[dict[str, Any]] = []
-    for name in LOADER_PROXY_MODULES:
-        path = target / name
-        if path.is_file() and looks_like_loader_proxy(path):
-            backup = path.with_name(name + ".bak")
-            suspicious.append({
-                "kind": "loader_proxy",
-                "name": name,
-                "path": str(path),
-                "size": path.stat().st_size,
-                "backup": str(backup) if backup.is_file() else None,
-                "detail": "第三方加载器 DLL：转发系统导出并注入 plugin/*.dll",
-            })
-        parked = path.with_name(name + LOADER_PROXY_DISABLED_SUFFIX)
-        if parked.is_file():
-            backup = path.with_name(name + ".bak")
-            disabled.append({
-                "kind": "loader_proxy",
-                "name": name,
-                "disabled": str(parked),
-                "original_present": path.is_file(),
-                "backup": str(backup) if backup.is_file() else None,
-            })
+    for root in injection_scan_roots(target):
+        for name in LOADER_PROXY_MODULES:
+            # 子目录里的条目要把目录名带出来 —— 否则用户看到 `dxgi.dll` 会以为说的是根目录。
+            label = name if root == target else f"{root.name}/{name}"
+            path = root / name
+            if path.is_file() and looks_like_loader_proxy(path):
+                backup = path.with_name(name + ".bak")
+                suspicious.append({
+                    "kind": "loader_proxy",
+                    "name": label,
+                    "path": str(path),
+                    "size": path.stat().st_size,
+                    "backup": str(backup) if backup.is_file() else None,
+                    "detail": "第三方加载器 DLL：转发系统导出并注入 plugin/*.dll",
+                })
+            parked = path.with_name(name + LOADER_PROXY_DISABLED_SUFFIX)
+            if parked.is_file():
+                backup = path.with_name(name + ".bak")
+                disabled.append({
+                    "kind": "loader_proxy",
+                    "name": label,
+                    "disabled": str(parked),
+                    "original_present": path.is_file(),
+                    "backup": str(backup) if backup.is_file() else None,
+                })
 
     plugin_dir = target / PLUGIN_DIR_NAME
     if plugin_dir.is_dir():

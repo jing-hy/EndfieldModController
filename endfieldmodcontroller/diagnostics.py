@@ -1990,20 +1990,25 @@ def _game_injection_summary(config: Any, game_dir: Path | None) -> list[str]:
         lines.append(f"（没有游戏目录：{game_dir}）")
         return lines
     game = Path(game_dir)
-    for name in reshade_integration.LOADER_PROXY_MODULES:
-        path = game / name
-        if not path.is_file():
-            continue
-        try:
-            if not reshade_integration.looks_like_loader_proxy(path):
+    # ⚠️ 扫 **游戏根 + 含 exe 的子目录**（2026-10-09）：只扫根目录时，
+    #    `<game>\AntiCheatExpert\` 里躺着一整套 ReShade 也**一份包都报不出来**
+    #    （实测 13 份诊断包的这一段全写着"没有检测到第三方注入 proxy"）。
+    for root in reshade_integration.injection_scan_roots(game):
+        for name in reshade_integration.LOADER_PROXY_MODULES:
+            path = root / name
+            if not path.is_file():
                 continue
-            kind = reshade_integration.loader_kind(path) or "未知"
-            size = path.stat().st_size
-        except (OSError, AttributeError):
-            continue
-        backup = path.with_name(name + ".bak")
-        lines.append(f"{name}: loader proxy（归属={kind}）{size:,} B；"
-                     f"原版备份 {backup.name}：{'在' if backup.is_file() else '**缺失 —— 无法安全还原**'}")
+            try:
+                if not reshade_integration.looks_like_loader_proxy(path):
+                    continue
+                kind = reshade_integration.loader_kind(path) or "未知"
+                size = path.stat().st_size
+            except (OSError, AttributeError):
+                continue
+            label = name if root == game else f"{root.name}/{name}"
+            backup = path.with_name(name + ".bak")
+            lines.append(f"{label}: loader proxy（归属={kind}）{size:,} B；"
+                         f"原版备份 {backup.name}：{'在' if backup.is_file() else '**缺失 —— 无法安全还原**'}")
     # ★ 2026-10-07 加：**proxy 顶替系统模块这件事本身要连同后果一起写出来**，
     #   不能只留 "loader proxy（归属=poser）" 这种中性描述。
     #   （实测：这种状态下游戏每次启动都在 25–33 秒后以 0xC0000135 退出，
