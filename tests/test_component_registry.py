@@ -1,9 +1,8 @@
 """组件登记必须齐：`component_addon_status()` 与 `set_component_addons()` 不能脱节（2026-10-06）。
 
-**现场**：v1.0.25 发布后，用户点「DLSS4 多帧生成」弹窗
-`launch failed: 'mfg'`，日志 `启动失败: 'mfg'` —— 那是 `KeyError: 'mfg'`：
-我在 `ensure_injections` 的组件循环里加了 `("mfg", …)`，而 `component_addon_status()`
-只登记了 `dlss5` / `firstperson` ⇒ 循环取 `status["mfg"]` 直接炸 ⇒ **一键启动整个失败**。
+**现场**：v1.0.25 发布后，用户点某个插件开关弹窗 `launch failed: 'xxx'`、
+日志 `启动失败: 'xxx'` —— 那是 `KeyError`：`ensure_injections` 的组件循环里加了新组件，
+而 `component_addon_status()` **没登记它** ⇒ 循环取 `status[组件]` 直接炸 ⇒ **一键启动整个失败**。
 
 要守住两条：
 * `component_addon_status()` 的键 **必须覆盖** `set_component_addons()` 认的每个组件；
@@ -21,7 +20,7 @@ from endfieldmodcontroller import launcher
 from endfieldmodcontroller.config import AppConfig
 
 # `set_component_addons` 认的组件（它按 component 选 glob）
-KNOWN_COMPONENTS = ("dlss5", "firstperson", "mfg")
+KNOWN_COMPONENTS = ("dlss5", "firstperson")
 
 
 @pytest.fixture()
@@ -35,7 +34,7 @@ def env(tmp_path, monkeypatch):
 def test_api_accepts_every_known_component(env, monkeypatch):
     """★★ **`api.set_component_addon()` 必须接受真源里的每一个组件。**
 
-    2026-10-06 用户现场：点「DLSS4 多帧生成」弹 `没能改这个开关 / 未知组件: mfg`
+    用户现场：点某个插件开关弹 `没能改这个开关 / 未知组件: xxx`
     ⇒ 开关**被后端直接拒掉**、配置没改 ⇒ 感受就是"开了没反应"。
     根因是那个方法开头有一张**写死的白名单** `("dlss5", "firstperson")`，
     加组件时漏改（同一天 `component_addon_status` 漏登记是同一类错误）。
@@ -95,7 +94,6 @@ def test_set_component_addons_accepts_every_component(env):
     name_by_component = {
         "dlss5": launcher.DLSS5_ADDON_GLOBS[0],
         "firstperson": launcher.FIRSTPERSON_ADDON_GLOBS[0],
-        "mfg": launcher.MFG_ADDON_GLOBS[0],
     }
     disabled = env.dlss5_path / launcher.ADDON_DISABLED_DIR
     disabled.mkdir(parents=True, exist_ok=True)

@@ -104,11 +104,11 @@ async function hotReload() {
 // ★★ **总闸**放在最前面（2026-10-09 用户要求：「在注入开关最上边做一个和其他不一样一点、
 //    明显一点的」）：开了之后一个 ReShade 底座 / addon 都不注入，并把游戏目录里已有的
 //    ReShade 痕迹清出去（有备份、可撤销）。
-//    它开着时，下面四个依赖 ReShade 的开关**灰掉、点不开**（用户定的是「禁用，直接不能点开
+//    它开着时，下面三个依赖 ReShade 的开关**灰掉、点不开**（用户定的是「禁用，直接不能点开
 //    开关那种」，不是互斥自动关）—— 后端在 `set_component_addon` / `set_minimal_injection`
 //    里也会再拒一次，前端这道只是别让用户白点。
 const RESHADE_DEPENDENT = ["minimal_injection", "dlss5_addon_enabled",
-                           "firstperson_addon_enabled", "mfg_unlock_enabled"];
+                           "firstperson_addon_enabled"];
 const reshadeLocked = (k) => !!settings.reshade_disabled && RESHADE_DEPENDENT.includes(k);
 const RESHADE_LOCK_REASON = "「禁用所有 ReShade 注入」开着 —— 先关掉它才能开这个";
 
@@ -116,7 +116,7 @@ const SWITCHES = [
   { k: "reshade_disabled", name: "禁用所有 ReShade 注入", emphasis: true,
     desc: "阻止所有 ReShade 注入：不往游戏目录写、也不往游戏进程注入任何 ReShade 底座与 addon。"
       + "代价是**所有依赖 ReShade 的功能都不可用**——DLSS5 神经渲染、第一人称视角、"
-      + "DLSS4 多帧生成解锁、统一管理器面板（含面板快捷键）。"
+      + "统一管理器面板（含面板快捷键）。"
       + "换来的是**大幅提升账号安全性**：把这一整档注入面去掉（风险不为零，只是少了一大块）。"
       + "开启后即使之前已经有 ReShade 注入，也会在启动前把它清理出终末地（有备份、可撤销）。",
     apply: (v) => call("set_reshade_disabled", v) },
@@ -134,28 +134,6 @@ const SWITCHES = [
     apply: (v) => call("set_component_addon", "firstperson", v),
     locked: () => reshadeLocked("firstperson_addon_enabled"),
     lockReason: () => RESHADE_LOCK_REASON },
-  // ★ DLSS4 多帧生成解锁（2026-10-06 用户要求："单列开关，与 dlss5 互斥，
-  //   50 系和其他用不了的锁，默认关"；随后又要求"**说明要跟随显卡改变**"）。
-  //   · **能不能用由后端判据决定**（`mfg_unlock_available`），不满足时这一行**禁用**并显示原因；
-  //   · **与 DLSS5 互斥**：后端在开关入口与保存配置两处都会自动关掉另一个，这里如实提示；
-  //   · ★ **说明跟随本机显卡**：后端的 `mfg_unlock_reason` 本来就是按显卡生成的
-  //     （40 系 = "被挡在 2x 是软件白名单造成的，解锁后可开 3x/4x"；
-  //      50 系 = "本身就有官方多帧生成，解锁提升不大"）—— 所以**别再写死"40 系"**，
-  //     否则 50 系解锁之后显示的就是错的那句（这正是用户提的"说明要跟随显卡"）。
-  { k: "mfg_unlock_enabled", name: "DLSS4 多帧生成",
-    desc: () => store.state.component_addon_status?.config?.mfg_unlock_reason
-      || "把多帧生成从 2x 解锁到更高倍率（与 DLSS5 神经渲染互斥，同时只能开一个）",
-    apply: (v) => call("set_component_addon", "mfg", v),
-    // ⚠️ 能不能用**不在 `settings` 里**（`settings` = `store.state.config` = AppConfig 的字段），
-    //    而在 `store.state.component_addon_status.config`。2026-10-06：我第一版用 settings 读，
-    //    恒为 undefined ⇒ 那一行**对所有人都灰**（40 系也一样"开不了"）。
-    // 两道锁：① 总闸开着 ⇒ 谁都开不了（2026-10-09）；② 这台机器用不了（非 40 系）。
-    locked: () => reshadeLocked("mfg_unlock_enabled")
-      || !(store.state.component_addon_status?.config?.mfg_unlock_available),
-    lockReason: () => reshadeLocked("mfg_unlock_enabled")
-      ? RESHADE_LOCK_REASON
-      : (store.state.component_addon_status?.config?.mfg_unlock_reason
-         || "这台机器用不了这个功能") },
   { k: "efmi_injection", name: "皮肤 Mod", desc: "EFMI 服装 Mod 注入（关掉后不加载任何皮肤）" },
   { k: "secondary_motion_injection", name: "ShakingBreastManager", desc: "乳摇物理效果",
     // 拨动即装卸（不止写配置）：开启走 `secondary_motion_install`（装 proxy + plugin\sbm.dll
@@ -188,9 +166,8 @@ const SWITCHES = [
 //      "关了又开"**（日志里能看到同一秒内 uninstall 和 install 交替）。加一把互斥锁。
 const pendingSwitches = new Set();
 function swText(sw) {
-  // ★ 开关的说明文字：**允许写成函数**（2026-10-06 用户要求"DLSS4 的说明要跟随显卡改变"）
-  //    —— 例如 DLSS4 那条要显示后端按本机显卡生成的理由（40 系 = 解锁到 3x/4x；
-  //    50 系 = 提升不大），写死一句"40 系…"在 50 系上就是错的。
+  // ★ 开关的说明文字：**允许写成函数**（2026-10-06 用户要求"说明要跟随本机情况改变"）
+  //    —— 有些说明必须由后端按本机情况生成（写死一句话在别的机器上就是错的）。
   //    其它开关仍可直接写字符串，这里兼容两种写法。
   if (!sw) return "";
   return typeof sw.desc === "function" ? (sw.desc() || "") : (sw.desc || "");
@@ -198,7 +175,7 @@ function swText(sw) {
 
 async function toggleSwitch(sw) {
   if (pendingSwitches.has(sw.k)) return;       // 上一个动作还没落地，忽略这次点击
-  // ★ **锁住的开关点不动**（2026-10-06）：判据来自后端（`mfg_unlock_available`）；
+  // ★ **锁住的开关点不动**（2026-10-06）：判据来自后端；
   //   后端在 `set_component_addon` 里还会再拒一次 —— 这里只是别让用户白点。
   if (typeof sw.locked === "function" && sw.locked()) return;
   const next = !settings[sw.k];

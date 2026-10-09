@@ -43,7 +43,7 @@ def _code_only(text: str) -> str:
 def test_injection_docstring_names_the_shared_base():
     doc = inspect.getdoc(launcher.configure_dlss5_injection) or ""
     assert "共用" in doc or "底座" in doc, "文档串没写清它管的是共用注入底座"
-    for name in ("DLSS4", "第一人称"):
+    for name in ("第一人称", "面板"):
         assert name in doc, f"文档串没说明它也服务于 {name}"
     # ⚠️ 只看"有没有提到共用底座"是不够的（正文里提一句、首行仍自称 DLSS5 注入也能过）——
     #    反向验证时就是这么漏掉的。所以**首行也不许**用 DLSS5 命名这件事。

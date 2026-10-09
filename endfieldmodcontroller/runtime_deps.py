@@ -907,22 +907,4 @@ def builtin_report(config: AppConfig) -> dict[str, dict]:
             "version": _read_marker(config.poser_path).get("version", ""),
             "enabled": bool(config.poser_injection),
         },
-        # ★ Streamline 运行库（2026-10-06 加）：多帧生成解锁的 6x 依赖它。
-        #   它跟别的组件有一点不同 —— **下载之后要写进游戏目录**（游戏自带的
-        #   `nvngx_dlssg.dll 310.5.2` / Streamline `2.10.3` 达不到 addon 的要求）。
-        #   写进去之前**先备份原版到管理器统一的备份区**（一键还原能直接还原）。
-        "Streamline": {
-            "display": "Streamline 运行库（多帧生成 6x 用）",
-            "source": "builtin",
-            "install_dir": str(Path(config.runtime_path) / "streamline"),
-            "present": (Path(config.runtime_path) / "streamline" / "nvngx_dlssg.dll").is_file(),
-            # 只有开了「DLSS4 多帧生成」才需要它 —— 别的组合装了也没用。
-            "required": False,
-            "needed": bool(getattr(config, "mfg_unlock_enabled", False)),
-            "status": ("已安装" if (Path(config.runtime_path) / "streamline" / "nvngx_dlssg.dll").is_file()
-                       else ("缺失" if getattr(config, "mfg_unlock_enabled", False) else "无需")),
-            "version": _read_marker(Path(config.runtime_path) / "streamline").get("version", ""),
-            "enabled": bool(getattr(config, "mfg_unlock_enabled", False)),
-            "touches_game_dir": True,
-        },
     }

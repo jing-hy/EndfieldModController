@@ -122,7 +122,7 @@ def check_integrity(config: AppConfig) -> dict:
         #      `integrity missing: dlss5_enhancer_addon -> …\renodx-endfield-enhancer.addon64`
         #      → `repair: 展开内置资产 renodx-endfield-enhancer.addon64`
         #    而 ReShade 日志显示它接着就被加载了 ⇒ 用户报「第一人称还是注入进去了」。
-        #    ⚠️ 同族的还有下面的 DLSS5 神经渲染与 DLSS4 多帧生成 —— 都按开关判。
+        #    ⚠️ 同族的还有下面的 DLSS5 神经渲染 —— 都按开关判。
         if bool(getattr(config, "firstperson_addon_enabled", True)):
             add("dlss5_enhancer_addon", enhancer, enhancer.is_file(),
                 "第一人称插件 renodx-endfield-enhancer.addon64")

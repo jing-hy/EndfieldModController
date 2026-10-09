@@ -5,8 +5,7 @@
 ⇒ "只换 exe、没换 assets"的升级**拿不到任何新增/替换的随包资产**。
 
 实测现场（`E:\\ZMDMOD`）：
-* DLSS4 开关开着，但 `renodx-mfgunlock.addon64` 的条目不在旧清单里 ⇒ 永远展不出来
-  ⇒ ReShade 里没有 `MFG Unlock` 页签；
+* 某个 addon 的条目不在旧清单里 ⇒ 永远展不出来（用户装了却没这东西）；
 * NR 引擎换代变成自相矛盾：先"已停用旧版 NR 引擎 `4.7汉化`…已改用随包的 `7.0.0-rc8`"，
   紧接着又"展开内置资产 `renodx-dlss5-4.7_汉化.addon64`"（照旧清单把旧的装了回来）。
 
@@ -36,7 +35,6 @@ def _root(base: pathlib.Path, entries: dict[str, dict]) -> pathlib.Path:
 OLD_ENTRY = {"renodx-dlss5-4.7_汉化.addon64": {"size": 1732608, "parts": ["a.xz"]}}
 NEW_ENTRY = {
     "renodx-dlss5.addon64": {"size": 1921024, "parts": ["b.xz"]},
-    "renodx-mfgunlock.addon64": {"size": 1191424, "parts": ["c.xz"]},
 }
 
 
@@ -50,14 +48,13 @@ def test_merges_entries_across_roots(tmp_path, monkeypatch):
     rows = list(ra.iter_assets(object()))
     names = [name for _g, _r, name, _e in rows]
     assert "renodx-dlss5-4.7_汉化.addon64" in names, "用户自己那份要保留（优先级最高）"
-    assert "renodx-mfgunlock.addon64" in names, (
-        "★ 内嵌那份的新条目没被合并进来 ⇒ 升级用户永远拿不到 DLSS4 的 addon"
+    assert "renodx-dlss5.addon64" in names, (
+        "★ 内嵌那份的新条目没被合并进来 ⇒ 升级用户永远拿不到随包的新 addon"
     )
     assert "renodx-dlss5.addon64" in names
 
     # 每个条目要带上**它自己所在的根**（解压时要按那个目录找 .xz 分卷）
     by_name = {name: root for _g, root, name, _e in rows}
-    assert by_name["renodx-mfgunlock.addon64"] == inner_root
     assert by_name["renodx-dlss5-4.7_汉化.addon64"] == user_root
 
 
@@ -117,6 +114,6 @@ def test_exe_packs_the_addon_xz_files():
     """★ 清单 + 四个 addon 的 `.xz` 必须真的打进 exe（否则合并也补不出文件）。"""
     src = pathlib.Path(ra.__file__).resolve().parents[1] / "scripts" / "build_exe.py"
     text = src.read_text(encoding="utf-8")
-    for name in ("assets/dlss5/manifest.json", "assets/dlss5/renodx-mfgunlock.addon64.xz",
+    for name in ("assets/dlss5/manifest.json",
                  "assets/dlss5/renodx-dlss5.addon64.xz"):
         assert name in text, f"打包清单里没有 {name} —— 升级用户拿不到它"

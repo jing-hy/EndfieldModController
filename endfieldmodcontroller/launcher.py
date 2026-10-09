@@ -977,10 +977,6 @@ DLSS5_ADDON_GLOBS = ("renodx-dlss5.addon64", "dlss5-feed.addon64", "trans-zh.add
 #   * **停用**还要覆盖这些退役旧名 —— 关掉 DLSS5 时，残留在底座目录里的旧引擎也必须
 #     一起移进 `_disabled\`，否则 ReShade 照样加载它。
 DLSS5_RETIRED_GLOBS = ("renodx-dlss5-4.7*.addon64",)
-# ★ **DLSS4 多帧生成解锁（40 系）**（2026-10-06 用户要求"单列开关、与 dlss5 互斥"）：
-#   上游 `MFGAdaUnlock-RenoDx` 是**一个 ReShade addon**（MIT 1.4.1，只改运行时内存），
-#   所以启停方式与 DLSS5 完全一样 —— 在 `runtime\dlss5\` 与 `_disabled\` 之间搬文件。
-MFG_ADDON_GLOBS = ("renodx-mfgunlock.addon64",)
 FIRSTPERSON_ADDON_GLOBS = ("renodx-endfield-enhancer.addon64",)
 # 「喂帧组件」单独一档（2026-10-01）：它平时跟 DLSS5 组件一起启停，但在**游戏自带 DLSS**
 # 的机器上会与游戏自己的 DLSS 抢同一条 NGX 链路 —— `dlss5-feed` 组件自己在日志里就写着
@@ -1172,7 +1168,7 @@ COMPONENT_ADDON_GLOBS: dict[str, tuple[str, ...]] = {}
 def set_component_addons(config: AppConfig, component: str, enabled: bool) -> dict[str, Any]:
     """单独启停 DLSS5 或第一人称插件（移动 addon 文件，可逆）。
 
-    component: "dlss5" | "firstperson" | "mfg"
+    component: "dlss5" | "firstperson"
     """
     globs = COMPONENT_ADDON_GLOBS.get(component)
     if globs is None:
@@ -1238,8 +1234,7 @@ def realign_component_addons(config: AppConfig, *,
     moved: list[str] = []
     errors: list[str] = []
     for component, flag in (("dlss5", "dlss5_addon_enabled"),
-                            ("firstperson", "firstperson_addon_enabled"),
-                            ("mfg", "mfg_unlock_enabled")):
+                            ("firstperson", "firstperson_addon_enabled")):
         try:
             result = set_component_addons(config, component, bool(getattr(config, flag, False)))
             if not result.get("ok"):
@@ -1411,7 +1406,6 @@ def feed_addon_status(config: AppConfig) -> dict[str, Any]:
 COMPONENT_ADDON_GLOBS.update({
     "dlss5": DLSS5_ADDON_GLOBS,
     "firstperson": FIRSTPERSON_ADDON_GLOBS,
-    "mfg": MFG_ADDON_GLOBS,
 })
 
 
@@ -1850,7 +1844,7 @@ def configure_dlss5_injection(config: AppConfig, enabled: bool = True) -> dict[s
     **所有功能共用的注入底座**（2026-10-07 用户就被这个名字误导过：
     「为什么我没开 dlss5 日志也说按 dlss5」）：
 
-    开 = 写入注入库（`d3d12.dll` 底座 + `EFMI\\d3d11.dll`）—— DLSS4 多帧生成、DLSS5 神经渲染、
+    开 = 写入注入库（`d3d12.dll` 底座 + `EFMI\\d3d11.dll`）—— DLSS5 神经渲染、
          第一人称、游戏内面板**全靠这两条**；
     关 = 清空注入库（只跑服装 Mod，ReShade 与上面那些插件都不加载）
     """
@@ -1893,11 +1887,11 @@ def configure_dlss5_injection(config: AppConfig, enabled: bool = True) -> dict[s
     # ⚠️ 日志**不要**写成"DLSS5 注入"（2026-10-07 用户被它误导：「为什么我没开dlss5
     #    日志也说按dlss5」）。这里的 `targets` 是 **XXMI 的注入库**（`extra_libraries`）
     #    —— 即 **ReShade 底座 + EFMI**，**所有功能共用的地基**：
-    #    DLSS4 多帧生成、DLSS5 神经渲染、第一人称、游戏内面板全靠这两条。
+    #    DLSS5 神经渲染、第一人称、游戏内面板全靠这两条。
     #    它与「DLSS5 神经渲染」那个**开关**没有任何关系（关掉那个开关本条照样打印）。
     _append_log(
         config,
-        f"注入库已写入（ReShade 底座 + EFMI，DLSS4/DLSS5/第一人称共用）: "
+        f"注入库已写入（ReShade 底座 + EFMI，DLSS5/第一人称共用）: "
         f"{targets or '(注入库已清空)'}",
     )
     return {
@@ -2154,7 +2148,6 @@ def ensure_injections(config: AppConfig) -> dict[str, Any]:
     for component, key, label in (
         ("dlss5", "dlss5_addon_enabled", "DLSS5 神经渲染"),
         ("firstperson", "firstperson_addon_enabled", "第一人称 Endfield Enhancer"),
-        ("mfg", "mfg_unlock_enabled", "DLSS4 多帧生成（40 系解锁）"),
     ):
         want = bool(getattr(config, key, True))
         if bool(status[component]["on"]) != want:
@@ -2219,7 +2212,7 @@ def ensure_injections(config: AppConfig) -> dict[str, Any]:
     #       依赖页**下载好了 263 MB**、游戏目录里却还是 660 KB 的旧 `sl.common.dll`
     #       ⇒ 判据每次都命中、每次都没救到。（判断依据：旧版 674,432 B / 新版 843,392 B）
     #    ⇒ **判据命中也算部署理由**：那是在**修故障**，与用不用多帧生成无关。
-    if bool(getattr(config, "mfg_unlock_enabled", False)) or _streamline_repair_needed(config):
+    if _streamline_repair_needed(config):
         try:
             deployed = runtime_deps.deploy_streamline_libs(
                 config, log=lambda message: _append_log(config, message))
@@ -3403,8 +3396,7 @@ def launch(
         try:
             apply_minimal_injection(config, log=lambda message: _append_log(config, message))
             for _component, _flag in (("dlss5", "dlss5_addon_enabled"),
-                                      ("firstperson", "firstperson_addon_enabled"),
-                                      ("mfg", "mfg_unlock_enabled")):
+                                      ("firstperson", "firstperson_addon_enabled")):
                 set_component_addons(config, _component,
                                      bool(getattr(config, _flag, False)))
         except Exception as exc:  # noqa: BLE001 - 对齐失败不该拦住启动

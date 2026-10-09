@@ -1,6 +1,6 @@
 """验证「开关关着就不该留在根目录」这条（2026-10-06 用户现场）。
 
-现场：`config.mfg_unlock_enabled = False`，而 `runtime\\dlss5\\renodx-mfgunlock.addon64` 还在
+现场：`config.firstperson_addon_enabled = False`，而 `runtime\\dlss5\\renodx-endfield-enhancer.addon64` 还在
 根目录、`_disabled\\` 是空的 ⇒ ReShade 照样加载它 ⇒ 用户报「关了为什么还是注入了」。
 根因是 `ensure_injections()` 里"按配置搬运"跑在"展开资产"**之前**，展开又把文件放回根目录。
 
@@ -33,10 +33,10 @@ def env(tmp_path, monkeypatch):
 def test_disabled_component_must_not_stay_in_root(env):
     """★ 关着的组件不能留在根目录（留在那儿 = ReShade 会加载它 = 开关形同虚设）。"""
     config, dlss5 = env
-    name = launcher.MFG_ADDON_GLOBS[0]
+    name = launcher.FIRSTPERSON_ADDON_GLOBS[0]
     (dlss5 / name).write_bytes(b"addon")           # 模拟"展开之后又被放回根目录"
 
-    launcher.set_component_addons(config, "mfg", False)
+    launcher.set_component_addons(config, "firstperson", False)
 
     assert not (dlss5 / name).is_file(), "关掉之后根目录里不能还有它"
     assert (dlss5 / launcher.ADDON_DISABLED_DIR / name).is_file(), "应当被搬进 _disabled\\"
@@ -150,25 +150,25 @@ def test_panel_realign_also_happens_after_expand():
 def test_enabling_puts_it_back(env):
     """对照：打开时应当把 addon 放回根目录。"""
     config, dlss5 = env
-    name = launcher.MFG_ADDON_GLOBS[0]
+    name = launcher.FIRSTPERSON_ADDON_GLOBS[0]
     disabled = dlss5 / launcher.ADDON_DISABLED_DIR
     disabled.mkdir(parents=True, exist_ok=True)
     (disabled / name).write_bytes(b"addon")
 
-    launcher.set_component_addons(config, "mfg", True)
+    launcher.set_component_addons(config, "firstperson", True)
 
     assert (dlss5 / name).is_file(), "打开后应当回到根目录"
 
 
 # ---------------------------------------------------------------------------
 # ★★ 2026-10-07：归位必须**所有入口都做**，而且**三个组件 + 面板一个都不能漏**
-#    （现场：`mfg_unlock_enabled=False`，走"初始化自检"这条路时
-#     `renodx-mfgunlock.addon64` 被展开放回顶层 ⇒ ReShade 照样加载它）
+#    （现场：开关明明关着，走"初始化自检"这条路时 addon 被展开放回顶层
+#     ⇒ ReShade 照样加载它）
 # ---------------------------------------------------------------------------
 def _plant_all(dlss5: pathlib.Path, *, at_root: bool = True) -> list[str]:
-    """把四个对象摆到（或搬离）底座根目录，返回它们的文件名。"""
+    """把各个 addon 与面板摆到（或搬离）底座根目录，返回它们的文件名。"""
     names = ["renodx-dlss5.addon64", "dlss5-feed.addon64", "trans-zh.addon64",
-             launcher.FIRSTPERSON_ADDON_GLOBS[0], launcher.MFG_ADDON_GLOBS[0],
+             launcher.FIRSTPERSON_ADDON_GLOBS[0],
              launcher.UNIFIED_PANEL_ADDON]
     target = dlss5 if at_root else dlss5 / launcher.ADDON_DISABLED_DIR
     target.mkdir(parents=True, exist_ok=True)
@@ -178,12 +178,11 @@ def _plant_all(dlss5: pathlib.Path, *, at_root: bool = True) -> list[str]:
 
 
 def test_realign_covers_every_component_and_the_panel(env):
-    """★ 开关全关 ⇒ 四个对象**一个都不许留在根目录**（含 DLSS4 那把）。"""
+    """★ 开关全关 ⇒ 摆上去的每一个对象**一个都不许留在根目录**。"""
     config, dlss5 = env
     names = _plant_all(dlss5)
     config.dlss5_addon_enabled = False
     config.firstperson_addon_enabled = False
-    config.mfg_unlock_enabled = False          # 本作禁用时的默认值
     config.minimal_injection = False
 
     result = launcher.realign_component_addons(config)
@@ -200,7 +199,6 @@ def test_realign_puts_enabled_ones_back(env):
     names = _plant_all(dlss5, at_root=False)
     config.dlss5_addon_enabled = True
     config.firstperson_addon_enabled = True
-    config.mfg_unlock_enabled = True
     config.minimal_injection = True
 
     launcher.realign_component_addons(config)
@@ -213,7 +211,7 @@ def test_initialize_ensure_all_also_realigns():
     """★★ **收口判据**：`initialize.ensure_all` 也必须归位（它自己就会展开资产）。
 
     2026-10-07 之前这里只处理 DLSS5（`if not dlss5_addon_enabled: …`）⇒ 走"初始化自检"
-    这条路时 MFG / 第一人称 / 面板都会被展开放回顶层。判据写在 AST 上：这一行删掉就红。
+    这条路时其它插件与面板都会被展开放回顶层。判据写在 AST 上：这一行删掉就红。
     """
     import ast as _ast
 
@@ -226,12 +224,11 @@ def test_initialize_ensure_all_also_realigns():
     }
     assert "realign_component_addons" in called, (
         "★ ensure_all 展开过随包资产，末尾却没有归位插件 ⇒ 关掉的插件会被放回底座目录"
-        "（「dlss4 还是能开」就是这个）"
     )
 
 
-def test_ensure_all_parks_the_mfg_addon_when_disabled(tmp_path, monkeypatch):
-    """★ 现场复现：`mfg_unlock_enabled=False` + 展开把 `renodx-mfgunlock.addon64` 放回顶层
+def test_ensure_all_parks_the_disabled_addon(tmp_path, monkeypatch):
+    """★ 现场复现：开关关着 + 展开把 addon 放回顶层（用第一人称那把当样本，机制与当年一样）
     ⇒ `ensure_all()` 结束时它必须回到 `_disabled\\`。"""
     from endfieldmodcontroller import initialize
 
@@ -239,8 +236,8 @@ def test_ensure_all_parks_the_mfg_addon_when_disabled(tmp_path, monkeypatch):
     dlss5.mkdir(parents=True)
     monkeypatch.setattr(AppConfig, "dlss5_path", property(lambda self: dlss5))
     config = AppConfig()
-    config.mfg_unlock_enabled = False
-    (dlss5 / launcher.MFG_ADDON_GLOBS[0]).write_bytes(b"addon")     # 模拟"展开放回顶层"
+    config.firstperson_addon_enabled = False          # 关着它，才该被搬进停用区
+    (dlss5 / launcher.FIRSTPERSON_ADDON_GLOBS[0]).write_bytes(b"addon")     # 模拟"展开放回顶层"
 
     for name in ("_check_bundled_assets", "_check_dlss5_dir", "_check_reshade_ini",
                  "_check_dlss5_shaders", "_check_dlss5_preset", "_check_dlss5_gpu_support",
@@ -251,13 +248,13 @@ def test_ensure_all_parks_the_mfg_addon_when_disabled(tmp_path, monkeypatch):
                  "_check_staging", "_check_mod_conflicts", "_check_poser",
                  "_check_secondary_motion", "_check_proxy_backups",
                  "_check_defer_nr_until_camera_hook", "_check_dlssnr_arch", "_check_vc_runtime",
-                 "_check_mfg_unlock", "_check_dlss5_nr_binding"):
+                 "_check_dlss5_nr_binding"):
         monkeypatch.setattr(initialize, name, lambda *a, **k: None)
 
     payload = initialize.ensure_all(config, log=None)
 
-    name = launcher.MFG_ADDON_GLOBS[0]
-    assert not (dlss5 / name).is_file(), "★ DLSS4 关着，addon 却留在根目录 ⇒ 游戏里还能开"
+    name = launcher.FIRSTPERSON_ADDON_GLOBS[0]
+    assert not (dlss5 / name).is_file(), "★ 开关关着，addon 却留在根目录 ⇒ 游戏里还能开"
     assert (dlss5 / launcher.ADDON_DISABLED_DIR / name).is_file(), "没停到位"
     checks = [c for c in payload["checks"] if c["key"] == "addons:realigned"]
     assert checks, payload["checks"]

@@ -1,14 +1,14 @@
 """依赖页的资产状态：**「已被开关停用」不能报成「待展开」**（2026-10-07 反馈定案）。
 
-**现场**：依赖页上 `renodx-mfgunlock.addon64` 每次进游戏后又变回「待展开」。
+**现场**：依赖页上某个被开关停用的 addon 每次进游戏后又变回「待展开」。
 
 **机制是个死循环**：
 一键启动的 `runtime_assets.ensure_*` 按清单把它展开到 `dlss5\\` 根目录，紧接着
-`launcher.set_component_addons("mfg", False)`（多帧生成已定案对该游戏禁用）又把它搬进
+`launcher.set_component_addons("<组件>", False)`（该开关关着）又把它搬进
 `_disabled\\`；而 `asset_report()` 的判据**只看根目录** ⇒ 每轮都报「待展开」、
 每轮都白展开一次、日志也跟着吵。
 
-**判据必须与自检一致**：`initialize._check_mfg_unlock` 本来就同时看 `present` 与 `parked`，
+**判据必须与自检一致**：自检那几项本来就同时看 `present` 与 `parked`，
 `asset_report` 却只看前者 —— 同一个事实两处结论不同，用户看到的就是「装了又没装」。
 """
 from __future__ import annotations
@@ -18,7 +18,7 @@ import pytest
 from endfieldmodcontroller import runtime_assets
 from endfieldmodcontroller.config import AppConfig
 
-ADDON = "renodx-mfgunlock.addon64"
+ADDON = "renodx-endfield-enhancer.addon64"
 
 
 @pytest.fixture

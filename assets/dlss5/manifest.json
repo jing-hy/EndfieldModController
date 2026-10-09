@@ -1,7 +1,7 @@
 {
   "version": 1,
   "group": "dlss5",
-  "notes": "DLSS5 底座里**已无公开下载源**的两个 addon：第一人称/相机插件（Endfield Enhancer）、ReShade 面板汉化（trans-zh）。上游仓库均未发布 release（已逐一核查），所以只能随包分发，首次启动自动展开到 dlss5_dir。**RenoDX-DLSS5 引擎自 2026-10-06 起改用官方 7.0.0-rc8**（来源 RankFTW/rhi-repo）：旧版 4.70 在驱动 616.64 及以上会 evaluate 崩在 nvngx_dlssnr.dll（DLSS5-Feeder issue #54，官方矩阵 0/300），而 6.1+/7.0.0-rc8 为 300/300；官方包自带多语言表，中文随系统区域生效，因此不再需要维护汉化版。其余组件（ReShade 底座、DLSS5-Feeder、iMMERSE shader、XXMI/EFMI）走在线自动安装，不在本资产内。 另含 **MFGAdaUnlock-RenoDx 1.4.1**（`renodx-mfgunlock.addon64`，MIT）：在 40 系上解锁多帧生成；**与 RenoDX-DLSS5 互斥**（两者都是 ReShade addon，上游记录了同载劣化案例），因此界面上是二选一的独立开关、默认关闭。",
+  "notes": "DLSS5 底座里**已无公开下载源**的两个 addon：第一人称/相机插件（Endfield Enhancer）、ReShade 面板汉化（trans-zh）。上游仓库均未发布 release（已逐一核查），所以只能随包分发，首次启动自动展开到 dlss5_dir。**RenoDX-DLSS5 引擎自 2026-10-06 起改用官方 7.0.0-rc8**（来源 RankFTW/rhi-repo）：旧版 4.70 在驱动 616.64 及以上会 evaluate 崩在 nvngx_dlssnr.dll（DLSS5-Feeder issue #54，官方矩阵 0/300），而 6.1+/7.0.0-rc8 为 300/300；官方包自带多语言表，中文随系统区域生效，因此不再需要维护汉化版。其余组件（ReShade 底座、DLSS5-Feeder、iMMERSE shader、XXMI/EFMI）走在线自动安装，不在本资产内。",
   "compression": "xz (BCJ x86 + LZMA2 preset 9e)",
   "files": {
     "renodx-dlss5.addon64": {
@@ -33,16 +33,6 @@
         "trans-zh.addon64.xz"
       ],
       "origin": "DLSS5 addon bundle (community build; no public upstream found)"
-    },
-    "renodx-mfgunlock.addon64": {
-      "size": 1191424,
-      "sha256": "080bcca4c5b6cd3531466458559a598996a271cd8592b3289186810f613e7eee",
-      "packed_bytes": 259100,
-      "packed_sha256": "c3e3f6022f06e5a8c1cc79efab12ad6d80cbb3a19efa63f79b6bd234fe9ac9ca",
-      "parts": [
-        "renodx-mfgunlock.addon64.xz"
-      ],
-      "origin": "MFGAdaUnlock-RenoDx 1.4.1 (github.com/mavismmg/MFGAdaUnlock-RenoDx, MIT) —— 在 Ada(40 系) 上解锁 3x/4x/6x 多帧生成并修正时间中点；**只改运行时内存**（In-memory only），不写游戏目录、不碰磁盘上的 NGX 库。"
     }
   }
 }

@@ -30,9 +30,10 @@ python scripts/build_release.py --modtest-both     # 最新版与伪旧版**都*
     2) 前端产物新鲜度校验（web/dist/index.html 不得比 frontend/src 旧）
 
 ⚠️ **单元测试已经拆出去**（2026-10-09 用户要求：「本机不做**并行**构建和测试，你要拆两个
-脚本出来」）—— 独立入口是 `scripts/run_tests.py`（**单线程**、不并行）。默认**不跑**：
-构建与测试各自独立、都能单独重跑；要在构建流程里带上就加 `--with-tests`（内部仍走那个
-脚本，本文件里不再另起一套 pytest 参数，也不再用 `-n 4` 并行）。
+脚本出来」）—— 独立入口是 `scripts/run_tests.py`。默认**不跑**：构建与测试各自独立、都能
+单独重跑；要在构建流程里带上就加 `--with-tests`（内部仍走那个脚本，本文件里不再另起一套
+pytest 参数）。那个脚本**自己**按开始前的 CPU 占用决定并发（<30% ⇒ `-n 4`，否则单线程 ——
+用户 2026-10-09 定的规则）。
 
 发布（上传）不在本脚本里 —— 见 `scripts/prepare_release.py`。
 """
@@ -219,16 +220,17 @@ def static_checks(*, with_tests: bool = False) -> None:
 
 
 def run_tests_script() -> None:
-    """跑 `scripts/run_tests.py`（**单线程**、偶发失败自动重试）—— 只在 `--with-tests` 时调用。
+    """跑 `scripts/run_tests.py`（偶发失败自动重试）—— 只在 `--with-tests` 时调用。
 
-    测试实现只有一份，就在那个脚本里（重试、失败行摘录也都在那边）；本脚本不再自带 pytest
-    参数、也不再并行 —— 用户 2026-10-09 要求「本机不做并行构建和测试，你要拆两个脚本出来」。
+    测试实现只有一份，就在那个脚本里（重试、失败行摘录、**按 CPU 占用决定并发**也都在那边）；
+    本脚本不再自带 pytest 参数 —— 用户 2026-10-09 要求「本机不做并行构建和测试，你要拆两个
+    脚本出来」，随后补充「如果开始前 cpu 占用小于 30 就用 4 并发」。
     失败即中止：不许产出半成品。
     """
     script = ROOT / "scripts" / "run_tests.py"
     if not script.is_file():
         raise SystemExit(f"!! 找不到 {script} —— 测试入口已拆出去，缺了它别带 --with-tests 构建")
-    print("      调 scripts/run_tests.py（单线程）…", flush=True)
+    print("      调 scripts/run_tests.py（并发由它按本机 CPU 占用决定）…", flush=True)
     result = subprocess.run([sys.executable, str(script)], cwd=str(ROOT))
     if result.returncode != 0:
         raise SystemExit("!! 测试未通过，已中止，未产出任何产物")

@@ -33,7 +33,7 @@ ROOT = Path(__file__).resolve().parents[1]
 LAUNCH_PAGE = ROOT / "frontend" / "src" / "pages" / "LaunchPage.vue"
 
 DEPENDENT = ("minimal_injection", "dlss5_addon_enabled",
-             "firstperson_addon_enabled", "mfg_unlock_enabled")
+             "firstperson_addon_enabled")
 
 #: 假的 ReShade 载荷（内容里有 `ReShade` 字样 ⇒ 判据会认它是第三方注入物）。
 RESHADE_PAYLOAD = b"MZ" + b"\x00" * 64 + b"ReShade\x00crosire"
@@ -71,8 +71,7 @@ def env(tmp_path, monkeypatch):
 def test_master_switch_beats_every_other_switch():
     """★ 总闸开着 ⇒ 一个底座都不注入，哪怕其它开关全开。"""
     config = AppConfig(reshade_disabled=True, minimal_injection=True,
-                       dlss5_addon_enabled=True, firstperson_addon_enabled=True,
-                       mfg_unlock_enabled=True)
+                       dlss5_addon_enabled=True, firstperson_addon_enabled=True)
 
     wanted, reason = reshade_integration.reshade_base_wanted(config)
 
@@ -87,7 +86,7 @@ def test_without_master_switch_nothing_changes():
         AppConfig(minimal_injection=False, dlss5_addon_enabled=True))[0] is True
     assert reshade_integration.reshade_base_wanted(
         AppConfig(minimal_injection=False, dlss5_addon_enabled=False,
-                  firstperson_addon_enabled=False, mfg_unlock_enabled=False))[0] is False
+                  firstperson_addon_enabled=False))[0] is False
 
 
 # ---------------------------------------------------------------------------
@@ -98,8 +97,7 @@ def test_dependent_switches_are_rejected_while_master_is_on(env):
 
     for call_it in (lambda: env.inst.set_minimal_injection(True),
                     lambda: env.inst.set_component_addon("dlss5", True),
-                    lambda: env.inst.set_component_addon("firstperson", True),
-                    lambda: env.inst.set_component_addon("mfg", True)):
+                    lambda: env.inst.set_component_addon("firstperson", True)):
         result = call_it()
         assert result["ok"] is False, result
         assert result.get("rejected") == "reshade_disabled", result
@@ -129,7 +127,7 @@ def test_enabling_master_switch_closes_the_dependents(env):
     assert env.config.reshade_disabled is True
     for key in DEPENDENT:
         assert getattr(env.config, key) is False, f"{key} 应该被关掉"
-    assert set(result["closed"]) == {"统一管理器", "DLSS5 神经渲染", "第一人称视角", "DLSS4 多帧生成"}
+    assert set(result["closed"]) == {"统一管理器", "DLSS5 神经渲染", "第一人称视角"}
 
 
 def test_disabling_master_switch_does_not_turn_anything_back_on(env):
@@ -213,6 +211,6 @@ def test_frontend_copy_names_every_affected_feature():
     text = LAUNCH_PAGE.read_text(encoding="utf-8")
 
     for probe in ("禁用所有 ReShade 注入", "阻止所有 ReShade 注入", "DLSS5 神经渲染",
-                  "第一人称视角", "DLSS4 多帧生成解锁", "统一管理器面板",
+                  "第一人称视角", "统一管理器面板",
                   "大幅提升账号安全性", "风险不为零"):
         assert probe in text, f"文案缺「{probe}」"

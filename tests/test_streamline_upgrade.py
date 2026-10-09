@@ -142,16 +142,6 @@ def test_streamline_is_in_the_dependency_steps():
     assert "ensure_streamline" in src, "Streamline 没接进依赖列表的 steps"
 
 
-def test_builtin_report_exposes_streamline(env):
-    """★ 依赖页要能看到它，并标出"会动游戏目录"。"""
-    config, _runtime, _game = env
-    report = runtime_deps.builtin_report(config)
-    assert "Streamline" in report
-    row = report["Streamline"]
-    assert row["touches_game_dir"] is True
-    assert row["needed"] is bool(getattr(config, "mfg_unlock_enabled", False)) or True
-
-
 def test_one_click_launch_never_downloads_the_sdk(tmp_path, monkeypatch):
     """★★ **一键启动绝不能自动下这 263 MB**（2026-10-07 用户现场：启动被拖到 129 秒）。
 

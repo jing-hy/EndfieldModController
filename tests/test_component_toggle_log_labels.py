@@ -4,7 +4,7 @@
 ```python
 f"{'DLSS5' if component == 'dlss5' else '第一人称'} 插件{'启用' if enabled else '停用'}"
 ```
-⇒ **`mfg`（DLSS4 多帧生成）被打印成「第一人称」**。
+⇒ **新加的组件被打印成「第一人称」**（三元表达式只认 dlss5 一种）。
 
 代价是实测过的：现场日志那一段的真实语义是
 ```
@@ -41,19 +41,19 @@ def test_no_hardcoded_else_branch_in_code():
     """★ 代码里不许再有"否则就是第一人称"的三元表达式（注释里引用旧写法不算）。"""
     code = "\n".join(_code_lines(SOURCE))
     assert "'DLSS5' if component == 'dlss5' else '第一人称'" not in code, \
-        "那个把 mfg 写成第一人称的三元表达式又回到代码里了"
+        "那个把非 dlss5 组件一律写成「第一人称」的三元表达式又回到代码里了"
 
 
-def test_label_table_covers_three_components():
-    """★★ 必须有一张把三个组件名分开的表，且 `mfg` 的名字看得出是 DLSS4。"""
+def test_label_table_covers_every_component():
+    """★★ 必须有一张把每个组件名分开的表（日志里分不清谁是谁 = 用自己的日志把自己带偏）。"""
     match = re.search(r"_component_label\s*=\s*\{(?P<body>[^}]*)\}", SOURCE, re.S)
     assert match, "找不到组件名映射表（_component_label）"
     pairs = dict(re.findall(r'"([^"]+)"\s*:\s*"([^"]+)"', match.group("body")))
-    assert set(pairs) >= {"dlss5", "firstperson", "mfg"}, f"表里缺组件：{pairs}"
+    assert set(pairs) >= {"dlss5", "firstperson"}, f"表里缺组件：{pairs}"
     labels = list(pairs.values())
     assert len(set(labels)) == len(labels), f"名字有重复，日志里仍分不清：{pairs}"
-    assert "第一人称" not in pairs["mfg"], f"mfg 又被写成第一人称：{pairs['mfg']}"
-    assert "DLSS4" in pairs["mfg"], f"mfg 的名字应当能看出是 DLSS4：{pairs['mfg']}"
+    for key, label in pairs.items():
+        assert label.strip(), f"{key} 的名字是空的"
 
 
 def test_toggle_log_uses_the_label_variable():
