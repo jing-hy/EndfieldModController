@@ -45,6 +45,13 @@ reshade-shaders/
 *token*
 credentials.json
 
+# ⚠️ 例外：前端设计令牌 `frontend/src/styles/tokens.css` —— 它只是 CSS 变量（颜色/阴影/字体），
+#   名字里带 "token" 被上面那条 `*token*` 误伤，于是**从未进过 git**；而 `frontend/src/main.js`
+#   第 3 行一直 `import "./styles/tokens.css"` ⇒ **任何 clone 都跑不了前端构建**
+#   （实测 2026-10-09：`Could not resolve "./styles/tokens.css" from "src/main.js"`，
+#    当时只能靠反推 `web/dist/index.html` 里的产物把它重建出来）。它不是凭据。
+!frontend/src/styles/tokens.css
+
 # ── Python ───────────────────────────────────────────────────
 __pycache__/
 *.py[cod]

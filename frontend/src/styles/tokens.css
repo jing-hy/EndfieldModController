@@ -1,0 +1,225 @@
+/* 设计令牌（tokens）—— 颜色 / 阴影 / 字体全部收敛到这里，
+ * 于是暗色主题只换变量、不动组件（`tailwind.config.js` 的颜色全走 `var(--…)`）。
+ *
+ * ⚠️⚠️ 2026-10-09 说明：这个文件**从来没有进过 git** —— `frontend/src/main.js` 第 3 行
+ *   `import "./styles/tokens.css";` 引用它，而仓库里（含全部 git 历史）从来没有这个文件，
+ *   于是**任何 clone 都构建不了前端**：
+ *       Could not resolve "./styles/tokens.css" from "src/main.js"
+ *   本文件是按 `web/dist/index.html` 里**已经内联好的构建产物**逐条反推出来的
+ *   （8 个主题块 + 字体变量 + 全局基础规则都取自产物，值一致）。若作者本机有原件，
+ *   请以原件为准并**提交入库**，别再让它只存在于本机。
+ *
+ * ⚠️ 顶部三条 `@tailwind` 指令**必须留在这里**：`main.js` 只 import 了本文件，
+ *    Tailwind 全靠它们生成工具类（实测：漏掉后产物 CSS 从 20 KB 掉到 3.8 KB、
+ *    工具类全没了 ⇒ 界面没有样式）。
+ */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-sans: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei UI", "PingFang SC", sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+
+/* 亮色（也是默认） */
+:root,
+[data-theme="light"] {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --surface-2: #f9fafb;
+  --border: #e5e7eb;
+  --border-strong: #d1d5db;
+  --text: #111827;
+  --text-muted: #6b7280;
+  --accent: #3f6fae;
+  --accent-hover: #345f98;
+  --accent-soft: #edf3f9;
+  --accent-contrast: #ffffff;
+  --danger: #dc2626;
+  --success: #059669;
+  --warn: #d97706;
+  --sh-sm: 0 1px 2px rgba(16, 24, 40, .06), 0 1px 3px rgba(16, 24, 40, .1);
+  --sh-md: 0 4px 8px -2px rgba(16, 24, 40, .1), 0 2px 4px -2px rgba(16, 24, 40, .06);
+  --sh-lg: 0 12px 24px -6px rgba(16, 24, 40, .12), 0 4px 8px -4px rgba(16, 24, 40, .08);
+}
+
+/* 暗色 */
+[data-theme="dark"] {
+  --bg: #0b0f14;
+  --surface: #121820;
+  --surface-2: #171f29;
+  --border: #232c38;
+  --border-strong: #33404f;
+  --text: #e7ecf2;
+  --text-muted: #93a1b0;
+  --accent: #5b9dff;
+  --accent-hover: #7db0ff;
+  --accent-soft: #16233a;
+  --accent-contrast: #08121f;
+  --danger: #ff7b7b;
+  --success: #4ade80;
+  --warn: #fbbf24;
+  --sh-sm: 0 1px 2px rgba(0, 0, 0, .4);
+  --sh-md: 0 4px 10px rgba(0, 0, 0, .45);
+  --sh-lg: 0 12px 28px rgba(0, 0, 0, .55);
+}
+
+/* 琥珀 */
+[data-theme="amber"] {
+  --bg: #14110c;
+  --surface: #1c1810;
+  --surface-2: #241f15;
+  --border: #322a1d;
+  --border-strong: #463a28;
+  --text: #f2ece1;
+  --text-muted: #a99a80;
+  --accent: #d9a441;
+  --accent-hover: #e8b95c;
+  --accent-soft: #2a2113;
+  --accent-contrast: #1a1206;
+  --danger: #ff8a70;
+  --success: #86c06a;
+  --warn: #e8b95c;
+  --sh-sm: 0 1px 2px rgba(0, 0, 0, .45);
+  --sh-md: 0 4px 10px rgba(0, 0, 0, .5);
+  --sh-lg: 0 12px 28px rgba(0, 0, 0, .6);
+}
+
+/* 青 */
+[data-theme="cyan"] {
+  --bg: #07161d;
+  --surface: #0d1f28;
+  --surface-2: #122832;
+  --border: #1c3844;
+  --border-strong: #2a4f5e;
+  --text: #e2f2f8;
+  --text-muted: #8fb0bd;
+  --accent: #38b6d8;
+  --accent-hover: #55cbe8;
+  --accent-soft: #0f2b36;
+  --accent-contrast: #04161f;
+  --danger: #ff8080;
+  --success: #4ecfa0;
+  --warn: #e5c05a;
+  --sh-sm: 0 1px 2px rgba(0, 20, 30, .5);
+  --sh-md: 0 4px 10px rgba(0, 20, 30, .55);
+  --sh-lg: 0 12px 28px rgba(0, 20, 30, .65);
+}
+
+/* 紫 */
+[data-theme="violet"] {
+  --bg: #100d1a;
+  --surface: #171322;
+  --surface-2: #1e192c;
+  --border: #2b2440;
+  --border-strong: #3d3358;
+  --text: #ece8f6;
+  --text-muted: #a49ac0;
+  --accent: #8b7bef;
+  --accent-hover: #a294f5;
+  --accent-soft: #211a38;
+  --accent-contrast: #0d0819;
+  --danger: #ff8296;
+  --success: #64d6a4;
+  --warn: #e9be63;
+  --sh-sm: 0 1px 2px rgba(10, 0, 25, .5);
+  --sh-md: 0 4px 10px rgba(10, 0, 25, .55);
+  --sh-lg: 0 12px 28px rgba(10, 0, 25, .65);
+}
+
+/* 翠绿 */
+[data-theme="emerald"] {
+  --bg: #08150f;
+  --surface: #0e1f17;
+  --surface-2: #13291f;
+  --border: #1e3a2c;
+  --border-strong: #2c5440;
+  --text: #e3f3ea;
+  --text-muted: #8fb3a1;
+  --accent: #35b97e;
+  --accent-hover: #4fd095;
+  --accent-soft: #102a1f;
+  --accent-contrast: #04140c;
+  --danger: #ff8674;
+  --success: #4fd095;
+  --warn: #e6c05c;
+  --sh-sm: 0 1px 2px rgba(0, 20, 10, .5);
+  --sh-md: 0 4px 10px rgba(0, 20, 10, .55);
+  --sh-lg: 0 12px 28px rgba(0, 20, 10, .65);
+}
+
+/* 全局基础（取自产物：`html,body,#app` 撑满 + body 用令牌上色） */
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── 组件基础样式 ───────────────────────────────────────────────────────────
+ * 以下 51 条与上面那批"全局基础"一样，取自 `web/dist/index.html` 里已内联的产物：
+ * 原版 `tokens.css` 除了令牌变量，还定义了整套组件类（按钮 / 卡片 / 开关行 / 徽标 /
+ * 对话框 / 日志框 / 页面骨架…）。**漏掉它们界面就没有样式**（实测：产物 CSS 从
+ * 20 KB 掉到 15.8 KB、`switch-row` 等全丢）。
+ */
+.log-box { background:#000;color:#d7e2ee;font-family:var(--font-mono);font-size:12px;line-height:1.6;border-radius:8px;padding:10px 12px;overflow:auto;white-space:pre-wrap;word-break:break-all;-webkit-user-select:text;-moz-user-select:text;user-select:text }
+.btn { display:inline-flex;align-items:center;gap:6px;border-radius:8px;padding:8px 12px;font-size:13px;line-height:20px;border:1px solid transparent;cursor:pointer;-webkit-user-select:none;-moz-user-select:none;user-select:none;transition:background .15s,border-color .15s,color .15s;white-space:nowrap }
+.btn:disabled { opacity:.5;cursor:not-allowed }
+.btn-primary { background:var(--accent);color:var(--accent-contrast) }
+.btn-primary:hover:not(:disabled) { background:var(--accent-hover) }
+.btn-secondary { background:var(--surface);border-color:var(--border);color:var(--text) }
+.btn-secondary:hover:not(:disabled) { border-color:var(--border-strong) }
+.btn-danger { background:var(--surface);border-color:var(--border);color:var(--danger) }
+.btn-danger:hover:not(:disabled) { border-color:var(--danger) }
+.btn-ghost { background:transparent;color:var(--text-muted) }
+.btn-ghost:hover:not(:disabled) { background:var(--surface-2);color:var(--text) }
+.btn-sm { padding:5px 10px;font-size:12px }
+.btn-mini { padding:3px 9px;font-size:12px;border-radius:6px }
+.card { background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:var(--sh-sm) }
+.card-head { padding:13px 18px;border-bottom:1px solid var(--border);font-weight:600;font-size:15px }
+.card-body { padding:18px }
+.page-title { font-size:20px;line-height:28px;font-weight:650;letter-spacing:-.01em }
+.page-sub { margin-top:2px;font-size:12px;color:var(--text-muted) }
+.page-inner { width:min(1180px,calc(100% - 48px)) }
+.log-card { border:1px solid var(--border);border-radius:10px;background:var(--surface);overflow:hidden }
+.log-card-head { min-height:42px;display:flex;align-items:center;justify-content:space-between;padding:0 14px;border-bottom:1px solid var(--border);font-weight:600;font-size:14px }
+.log-empty { min-height:96px;display:grid;place-items:center;color:var(--text-muted);font-size:13px;padding:12px }
+.empty-state { display:grid;place-items:center;text-align:center;gap:6px;padding:34px 20px;color:var(--text-muted) }
+.empty-state .empty-title { font-size:14px;font-weight:600;color:var(--text) }
+.switch-row { display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 4px;cursor:pointer;border-radius:8px }
+.switch-row:hover { background:var(--surface-2) }
+.switch-state { font-size:12px;color:var(--text-muted) }
+.badge { display:inline-flex;align-items:center;border-radius:6px;padding:2px 8px;font-size:12px;line-height:18px }
+.badge-accent { background:var(--accent-soft);color:var(--accent) }
+.badge-success { background:color-mix(in srgb,var(--success) 14%,transparent);color:var(--success) }
+.badge-warn { background:color-mix(in srgb,var(--warn) 16%,transparent);color:var(--warn) }
+.badge-danger { background:color-mix(in srgb,var(--danger) 14%,transparent);color:var(--danger) }
+.badge-muted { background:var(--surface-2);color:var(--text-muted) }
+.field { width:100%;box-sizing:border-box;padding:8px 11px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-family:inherit;font-size:13px;outline:none;transition:border-color .15s,box-shadow .15s }
+.field:focus { border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 20%,transparent) }
+.field::-moz-placeholder { color:var(--text-muted) }
+.field::placeholder { color:var(--text-muted) }
+.switch { width:40px;height:22px;border-radius:999px;border:none;position:relative;cursor:pointer;flex:none;transition:background .18s }
+.switch-knob { position:absolute;top:3px;width:16px;height:16px;border-radius:999px;background:#fff;box-shadow:var(--sh-sm);transition:left .18s }
+.stack-4>*+* { margin-top:20px }
+.stack-3>*+* { margin-top:14px }
+:focus-visible { outline:2px solid var(--accent);outline-offset:2px;border-radius:4px }
+.btn:focus-visible,.field:focus-visible,.switch-row:focus-visible { outline-offset:1px }
+.kbd { display:inline-block;padding:1px 6px;margin:0 1px;border-radius:5px;border:1px solid var(--border-strong);background:var(--surface-2);font-family:var(--font-mono);font-size:12px;line-height:18px;box-shadow:0 1px 0 var(--border-strong) }
+.empty-icon { color:var(--text-muted);opacity:.55 }
+.two-col { grid-template-columns:minmax(0,1fr) minmax(280px,360px) }
+.two-col { grid-template-columns:minmax(0,1fr) }
+.dlg-body { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace }
+.dlg-path { color:var(--accent);text-decoration:underline;text-underline-offset:2px;cursor:pointer;overflow-wrap:anywhere }
+.dlg-path:hover { color:var(--accent-hover) }
+.dlg-body b { color:var(--text);font-weight:600 }
