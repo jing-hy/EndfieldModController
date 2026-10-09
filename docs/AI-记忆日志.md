@@ -5808,3 +5808,13 @@ EMC 的 exe 是 PyInstaller 单文件版：每次启动先把 ~336 个文件解�
 用户（jing-hy）平时开发 EMC 的工作区是 D:\zmdmod\modecontroller，那里的 .dsh-meow/memory.db（约 2 MB）是他长期积累的记忆库（仓库里 3901 行的 docs/AI-记忆日志.md 就出自它）；D:\emc 是 2026-10-08 新 clone 的工作区，记忆库是空的 —— 在空工作区跑 push.py 曾把记忆日志覆盖掉。
 
 `关键词：["工作区","D:\\zmdmod\\modecontroller","记忆库","memory.db","D:\\emc","新 clone","AI-记忆日志","开发环境","jing-hy"]`
+
+<!-- 增量追加 2026-10-09 21:06 · 新增 1 条（历史条目一律保留）-->
+
+<!-- rules · 设计原则 / 行为准则 -->
+### 本机（用户的机器）上，**除了发 Release，一律不…
+*2026-10-09 21:05*
+
+本机（用户的机器）上，**除了发 Release，一律不要跑全量测试**（`python -m pytest tests`）—— 只跑与本次改动相关的针对性测试。发 Release 时由 `scripts/build_release.py` 自动跑全量。原因：全量套件要 11~15 分钟、吃满 CPU，在本机上代价过高。（用户 2026-10-09 明确要求）
+
+`关键词：["全量测试","pytest tests","不要全量","针对性测试","发 Release","build_release.py","本机规则","测试策略","耗时"]`
