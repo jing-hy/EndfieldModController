@@ -64,14 +64,22 @@ jobs:
         # 前端产物 `web/dist/index.html` 同样在仓库里 ⇒ 不需要 node。
         run: python scripts/build_exe.py --skip-addon
 
-      - name: 校验产物（大小 / sha256 / 版本）
+      - name: 写出 build-info.json（发版闸 `prepare_release.py` 要读它）
+        # 本机构建时这份文件由 `build_release.py` 写；CI 走的是 `build_exe.py`，所以这里补上，
+        # 内容与本地一致（version / artifact / sha256 / built_at），这样下载回来就能直接发版。
         run: |
-          python -c "import sys, hashlib, pathlib; sys.path.insert(0, '.'); from endfieldmodcontroller.version import __version__; p = pathlib.Path('dist/EndfieldModController.exe'); print('版本  ', __version__); print('大小  ', f'{p.stat().st_size:,} B'); print('sha256', hashlib.sha256(p.read_bytes()).hexdigest())"
+          python -c "import sys, hashlib, json, pathlib, datetime; sys.path.insert(0, '.'); from endfieldmodcontroller.version import __version__; p = pathlib.Path('dist/EndfieldModController.exe'); h = hashlib.sha256(p.read_bytes()).hexdigest(); pathlib.Path('dist/build-info.json').write_text(json.dumps({'version': __version__, 'artifact': p.name, 'sha256': h, 'built_at': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}, ensure_ascii=False, indent=2), encoding='utf-8'); print('版本  ', __version__); print('大小  ', f'{p.stat().st_size:,} B'); print('sha256', h)"
 
-      - name: 上传产物
+      - name: 生成随包资产包（Release 另一个附件）
+        run: python scripts/build_assets_bundle.py
+
+      - name: 上传 Release 附件（exe + build-info + assets-bundle）
         uses: actions/upload-artifact@v4
         with:
-          name: EndfieldModController-exe
-          path: dist/EndfieldModController.exe
+          name: release-artifacts
+          path: |
+            dist/EndfieldModController.exe
+            dist/build-info.json
+            dist/assets-bundle.zip
           if-no-files-found: error
           retention-days: 30
