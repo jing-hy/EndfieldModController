@@ -11,7 +11,7 @@
   <a href="LICENSE"><img alt="MIT 许可" src="https://img.shields.io/github/license/jing-hy/EndfieldModController?label=License&amp;color=3DA639"></a>
 </p>
 
-<p>Windows 桌面程序，单文件 exe。当前版本 <b>1.2.3-beta</b> —— <a href="https://github.com/jing-hy/EndfieldModController/releases">下载最新版</a></p>
+<p>Windows 桌面程序，单文件 exe。当前版本 <b>1.2.3</b> —— <a href="https://github.com/jing-hy/EndfieldModController/releases">下载最新版</a></p>
 
 <p>📖 安装步骤、目录结构、逐项排查 → <b><a href="docs/README.detailed.md">详细文档</a></b><br>
 🛠 想改代码 / 提 PR → <b><a href="CONTRIBUTING.md">维护者指南</a></b></p>

@@ -1,0 +1,77 @@
+name: 测试与构建
+
+# **为什么把全量测试放到这里**（用户 2026-10-10）：
+# 维护者的机器性能较差，本机跑一次全量测试要 15~25 分钟 —— 这套测试是**文件 IO 密集**型
+# （复制 / 解压 / 扫描真实目录），并行反而互相拖（实测 `-n 4` 跑全量 18 分钟仍未完成）。
+# 本仓库是公开仓库，Actions 免费且不限分钟数 ⇒ **全量测试一律交给 GitHub**，
+# 本机只跑 `python scripts/run_tests.py --changed`（按 git 改动挑相关测试，几十秒）。
+#
+# runner 必须用 **windows-latest**：这套测试大量依赖 Windows —— `robocopy`、注册表、
+# 拿 `System32` 里的模块做基准、长路径语义、`.exe` 路径等，ubuntu 上会大面积失败。
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:          # 手动触发（下面那个构建 job 只在这里跑）
+
+jobs:
+  test:
+    name: 全量测试
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"      # 与维护者本机一致（3.12）
+          cache: pip
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pytest pytest-xdist pyflakes
+
+      - name: 全量测试
+        # 这里**不加** `-n`：CI 的 runner 磁盘同样是瓶颈，单线程最稳；`-q` 保留失败明细。
+        run: python -m pytest tests -q -p no:cacheprovider
+
+  build:
+    name: 构建 exe
+    needs: test
+    # 构建只在手动触发时做：推 main 不该顺手产出构建产物（用户 2026-10-10 的要求是
+    # "全量测试交给 GitHub"，构建仍由维护者按需触发）。
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller
+
+      - name: 构建 exe（面板产物已在仓库里，跳过重编）
+        # `assets/addon/endfieldmodcontroller.addon64` 已随仓库分发（2026-10-10 起），
+        # 所以不需要 C++ 编译器：`--skip-addon` 直接用仓库里那份。
+        # 前端产物 `web/dist/index.html` 同样在仓库里 ⇒ 不需要 node。
+        run: python scripts/build_exe.py --skip-addon
+
+      - name: 校验产物（大小 / sha256 / 版本）
+        run: |
+          python -c "import sys, hashlib, pathlib; sys.path.insert(0, '.'); from endfieldmodcontroller.version import __version__; p = pathlib.Path('dist/EndfieldModController.exe'); print('版本  ', __version__); print('大小  ', f'{p.stat().st_size:,} B'); print('sha256', hashlib.sha256(p.read_bytes()).hexdigest())"
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: EndfieldModController-exe
+          path: dist/EndfieldModController.exe
+          if-no-files-found: error
+          retention-days: 30

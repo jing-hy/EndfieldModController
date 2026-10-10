@@ -120,3 +120,10 @@ _*.md
 
 # 排查素材（诊断包解压、对照日志）—— 不进仓库
 _diag/
+!assets/nvngx/manifest.json
+
+# ⚠️ 例外：**统一控制面板的编译产物**（`endfieldmodcontroller.addon64`，约 390 KB）。
+#   它是 `reshade_addon\` 编译出来的 addon，`build_exe.py` 要把它打进 exe。
+#   原来被上面的 `*.addon64` 一并挡着 ⇒ 别人 clone（以及 CI）**构建不了** exe：
+#   只能像 2026-10-09 那样从已发布的 exe 里把它抠出来。它不是第三方大二进制，入库更省事。
+!assets/addon/endfieldmodcontroller.addon64

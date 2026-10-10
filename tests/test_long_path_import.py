@@ -30,6 +30,29 @@ LONG_NAME = "庄方宜纹身肥美版（切换键 X ，ctrl+， 。？】 ；ctr
 PAD = "x" * 40
 
 
+def long_paths_enabled() -> bool:
+    """本机是否**已开启** Windows 长路径支持（注册表 `LongPathsEnabled`）。
+
+    为什么要问：不变式②的前提是"普通路径写不进 >260 的路径"。机器一旦开了长路径支持，
+    去掉扩展前缀也照样写得进去 ⇒ 前提不成立、用例必然红（2026-10-10 在维护者这台机器上
+    实测到）。这类"只对特定系统设置显形"的用例按条件跳过，而不是改判据去迁就。
+    """
+    try:
+        import winreg
+
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                            r"SYSTEM\\CurrentControlSet\\Control\\FileSystem") as key:
+            return int(winreg.QueryValueEx(key, "LongPathsEnabled")[0]) == 1
+    except (OSError, ValueError, ImportError):
+        return False
+
+
+_skip_if_long_paths_on = pytest.mark.skipif(
+    long_paths_enabled(),
+    reason="本机已开启 Windows 长路径支持 —— 去掉扩展前缀后照样能写，不变式②的前提不成立",
+)
+
+
 def _api(tmp_path: Path) -> A.EndfieldModControllerApi:
     (tmp_path / "runtime").mkdir(parents=True, exist_ok=True)
     (tmp_path / "library").mkdir(parents=True, exist_ok=True)
@@ -91,6 +114,7 @@ def test_long_path_zip_extracts(tmp_path: Path) -> None:
     assert all(os.path.getsize(p) == 8192 for p in found), "解出来的内容长度不对"
 
 
+@_skip_if_long_paths_on
 def test_falls_back_to_readable_chinese(tmp_path: Path, monkeypatch) -> None:
     """★ 没有长路径支持时**失败**，但给的是可照做的中文指引（不是英文 errno）。"""
     api = _api(tmp_path)
