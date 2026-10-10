@@ -5872,3 +5872,13 @@ EMC 在 `D:\emc` 工作区构建：命令 `python scripts/build_release.py --ski
 **坑（2026-10-09，已修）**：`.gitignore` 的凭据规则 `*token*` 按**子串**匹配，把 `frontend/src/styles/tokens.css` 误当成 token 文件 —— 于是它**从未进过 git**（含全部历史），而 `main.js` 一直 import 它 ⇒ 任何 clone 跑 `vite build` 必然失败（`Could not resolve "./styles/tokens.css"`）。修法：加路径式例外 `!frontend/src/styles/tokens.css`（否定规则必须排在被否定的规则之后），并把该文件入库。教训：写"防凭据"这类通配规则时要想到它可能吃掉正经源码文件；关键文件入库后应确认 `git ls-files` 真能看到它。
 
 `关键词：["gitignore","*token*","tokens.css","误伤","前端构建失败","Could not resolve","否定规则","凭据规则","git ls-files","clone 构建不了"]`
+
+<!-- 增量追加 2026-10-10 20:12 · 新增 1 条（历史条目一律保留）-->
+
+<!-- rules · 设计原则 / 行为准则 -->
+### 本机（用户机器，性能较差）的测试/构建规矩（2026-1…
+*2026-10-10 20:04*
+
+本机（用户机器，性能较差）的测试/构建规矩（2026-10-10 定稿）：① 构建与测试是两个独立脚本——`scripts/build_release.py`（默认不跑测试，加 `--with-tests` 才跑）、`scripts/run_tests.py`；不并行做这两件事。② **并发策略按"要跑多少"决定**：全量（测试文件数 > 12）**一律单线程** —— 这套测试是文件 IO 密集型，实测 `-n 4` 跑全量 18 分钟仍未完成、单线程约 15 分钟（并行 worker 互相拖）；只有**小范围**（≤12 个文件）才看 CPU 占用，< 30% 时用 `-n 4`。`--serial` 强制单线程、`-n N` 完全听用户的、没装 xdist 自动降级。③ **日常改动用 `run_tests.py --changed`**（按 git diff 挑相关测试，通常几十秒）；**发版构建必须跑全量**（`build_release.py --with-tests`）——用户 2026-10-10：「上次是没时间了，发版构建还是要跑一下全量测试的」。④ **长任务（构建、全量测试、上传附件）一律放后台 job**，别占着前台等；后台任务的命令**不要用管道缓冲输出**（`| Select-Object -Last N` 会看不到进度）。
+
+`关键词：["全量测试","run_tests.py","--changed","build_release.py","并发策略","单线程","IO 密集","30% 阈值","发版构建","长任务放后台","机器性能差"]`
