@@ -9,6 +9,7 @@ mod，就**打包 zip** 放进去」，随后改成「**改成不要打包，纯
 """
 from __future__ import annotations
 
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -37,7 +38,20 @@ class ModBackupTests(unittest.TestCase):
         self.api = EndfieldModControllerApi(self.config_path)
 
     def tearDown(self) -> None:
-        self.tmp.cleanup()
+        # ⚠️ **清理失败不该让用例变红**（2026-10-10 在 CI 上撞到）：Windows 上临时文件的句柄
+        #    释放有延迟（CI runner 上还有 Defender 在扫），而 `TemporaryDirectory.cleanup()`
+        #    内部是**不带容错的** `shutil.rmtree` ⇒ 偶发
+        #    `PermissionError [WinError 32] 另一个进程正在使用此文件`，于是一条**断言全过**的
+        #    用例把整条 CI 弄红（本地因为没杀软扫、句柄释放快，从没复现过）。
+        #    先自己用 `ignore_errors=True` 收一遍，再让 `TemporaryDirectory` 收尾（它再失败也无妨）。
+        try:
+            shutil.rmtree(self.tmp.name, ignore_errors=True)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            self.tmp.cleanup()
+        except Exception:  # noqa: BLE001 - 清理失败不影响用例结论
+            pass
 
     def _add_mod(self, name: str, extra_bytes: int = 64) -> Path:
         target = self.library / "佩丽卡" / name

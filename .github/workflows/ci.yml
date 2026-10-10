@@ -34,8 +34,13 @@ jobs:
           python -m pip install pytest pytest-xdist pyflakes
 
       - name: 全量测试
-        # 这里**不加** `-n`：CI 的 runner 磁盘同样是瓶颈，单线程最稳；`-q` 保留失败明细。
-        run: python -m pytest tests -q -p no:cacheprovider
+        # 走项目自己的测试入口 `scripts/run_tests.py`，而不是裸 pytest：
+        #   * **自带偶发失败重试**（项目既定约定：批量不 fail-fast、失败项自动重试、上限 3 次）
+        #     —— 这套测试大量碰真实文件与注册表，Windows 上偶发「文件被另一个进程占用」，
+        #     裸 pytest 会让整条 CI 白红（2026-10-10 撞到过一次）；
+        #   * `--serial` 固定单线程（runner 磁盘同样是瓶颈，并行更慢）；
+        #   * 失败时会把 FAILED 行摘出来，比裸 pytest 好读。
+        run: python scripts/run_tests.py tests --serial
 
   build:
     name: 构建 exe
