@@ -20,6 +20,24 @@ import subprocess
 import sys
 from pathlib import Path
 
+def _fix_console() -> None:
+    """把 stdout/stderr 切成 UTF-8 —— 否则**非中文 Windows** 上 print 中文会直接崩。
+
+    实测（2026-10-10，GitHub Actions 的 windows-latest）：那里 stdout 是 **cp1252**，
+    脚本最后那句 `print("
+[OK] 面板按键注入链路自测通过")` 抛 `UnicodeEncodeError`
+    —— 21 项断言**全过**，脚本却以退出码 1 收场，整条 CI 因此变红。
+    与 `build_release.py` / `run_tests.py` 里的同一做法（本文件原先漏了）。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+        except Exception:  # noqa: BLE001
+            pass
+
+
+_fix_console()
+
 ROOT = Path(__file__).resolve().parents[1]
 ADDON_DIR = ROOT / "reshade_addon"
 TESTS_DIR = ADDON_DIR / "tests"
