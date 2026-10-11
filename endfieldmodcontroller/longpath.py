@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 r"""Windows 长路径（>260）支持：能用就用，用不上就给出可照做的指引。
 
 背景（issue #12 实测）：一个 Mod 的目录名本身就 68 个字符，加上三层嵌套，

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // fake_efmi_d3d11.dll —— 自测用的"假 EFMI"。
 //
 // 它只做一件事：**通过导入表的 `GetAsyncKeyState` 轮询按键状态** ——

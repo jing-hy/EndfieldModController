@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """XXMI 的 `importer_folder` 被指到 Mod 库时**必须自动改回来**（2026-10-07，lzh18 现场）。
 
 **现场**（诊断包 `diagnostics-20261007-124733`，`C:\\Users\\lzh18`）：

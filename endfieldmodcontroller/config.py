@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Application configuration for EndfieldModController."""
 from __future__ import annotations
 

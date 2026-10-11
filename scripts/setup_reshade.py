@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Download the official ReShade Add-on build into runtime/reshade and update config.json."""
 from __future__ import annotations
 

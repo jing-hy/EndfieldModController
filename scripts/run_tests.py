@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# SPDX-License-Identifier: GPL-3.0-or-later
 """跑单元测试 —— 与构建脚本拆开的独立入口（**并发按本机开始前的 CPU 占用决定**）。
 
     python scripts/run_tests.py                    # 全量（tests/）

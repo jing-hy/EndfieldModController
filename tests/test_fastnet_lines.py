@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """下载线路的"失败记账"规则（2026-10-01）。
 
 背景（issue #6）：反馈者那边的 `https://ghproxy.net/` 返回的证书不含 ghproxy.net

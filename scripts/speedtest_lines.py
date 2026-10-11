@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# SPDX-License-Identifier: GPL-3.0-or-later
 """测每条 GitHub 加速线路的**单连接 / 4 连接 / 8 连接**下载速度，给出综合排序。
 
 **为什么必须测并发**（用户 2026-10-03 的实测结论，香蕉网那次）：

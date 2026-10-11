@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """热重载：给**正在运行**的终末地发一次 F10（3DMigoto / EFMI 的 `config_reload`）。
 
 ## 为什么要有这个模块（2026-10-04 用户要求「加一个热重载」）

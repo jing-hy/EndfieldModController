@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# SPDX-License-Identifier: GPL-3.0-or-later
 """结构树行号重定位：代码改完之后，把 normify 模块 `source` 里的行号按 git diff 平移。
 
 **为什么需要它**：结构树的每个叶子模块都用**精确行号**指向代码（`source: [{path, line,

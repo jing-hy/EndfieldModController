@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """文件守护（`filewatch`）的离线测试。
 
 覆盖用户 2026-10-01 要求的那条规则：「如果某一文件老是被删掉，要在启动的时候出个

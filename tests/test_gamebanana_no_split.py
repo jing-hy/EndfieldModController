@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """香蕉网（GameBanana）的下载 CDN **不许分块**（2026-10-06 实测）。
 
 **实测**（同一个 6.9 MB 文件，开了加速器的环境）：

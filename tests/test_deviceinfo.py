@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """设备信息（`deviceinfo`）的离线测试。
 
 用户 2026-10-01 要求：「下一版本要在日志包中包含用户设备型号，判断是不是显卡不支持」。

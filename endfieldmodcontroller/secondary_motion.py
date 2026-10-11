@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """SecondaryMotion（乳摇 / 次级运动管理器）集成。
 
 这个第三方工具靠替换游戏目录里的两个 proxy DLL 注入自己的 loader，再由 loader

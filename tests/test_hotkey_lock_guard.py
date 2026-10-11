@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """「Mod 快捷键锁定」必须先证明**面板这次真的会被加载**（2026-10-06 修）。
 
 真实反馈（数据根 `G:\\`、游戏 `G:\\Hypergryph Launcher\\games\\Arknights Endfield`）：

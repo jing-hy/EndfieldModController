@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """**下载"速度横线、进度条不动"的真因**（2026-10-04，用户实测报障）。
 
 现场日志（modtest 的 `runtime\\logs`）：

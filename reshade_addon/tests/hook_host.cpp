@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // hook_host.exe —— vkey_inject 的离线自测宿主。
 //
 // 它扮演的是"游戏进程"：加载假 EFMI（fake_efmi_d3d11.dll），装上 hook，

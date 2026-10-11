@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <script setup>
 import { settings, saveSetting } from "../../lib/settings.js";
 const props = defineProps({

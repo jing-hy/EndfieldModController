@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """随仓库分发的二进制资产（DLSS 运行库 + 无上游的 DLSS5 组件）——首次启动自动展开。
 
 两类资产都放在 `assets/` 下、**压缩 + 按需分卷**，由本模块在启动自检时自动

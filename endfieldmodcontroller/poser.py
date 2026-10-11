@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Endfield Poser（摆姿 / MMD 播放插件）集成。
 
 Poser 与乳摇（SecondaryMotion）走的是**同一套注入机制**：游戏目录里的 proxy DLL

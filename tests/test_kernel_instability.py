@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """机器侧稳定性取证（`kernel_instability`）—— 2026-10-07 新增判据。
 
 **为什么值得一批单测**：这段代码的价值全在「**如实**」两个字上 ——

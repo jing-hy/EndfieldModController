@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """版本号与仓库信息（窗口标题、右上角更新检测、自我更新共用一处）。
 
 改版本号只需要改这里 + 打对应 tag（如 `v0.4.0`）的 GitHub release。

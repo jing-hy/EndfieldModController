@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """依赖更新的**字节口径**回归（2026-10-07 用户报「88968.2 MB / 246303.5 MB 这下载又是啥 bug」）。
 
 **判据**：字节回调是**每 256 KB 一次**（见 `dependencies._download` 的读取循环），而它传进来的

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """第一人称默认项要写进 **ReShade 实际读的那份 ini**。
 
 2026-10-03 用户反馈「第一人称视角不会自动配置」：`core.py` 给游戏进程设了

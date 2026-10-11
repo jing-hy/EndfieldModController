@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Run the local self-check and print a concise result summary."""
 from __future__ import annotations
 

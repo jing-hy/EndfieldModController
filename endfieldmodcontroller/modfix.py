@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Mod 修复 / 回滚 / 删除 —— 用社区修复工具（**实验性**）。
 
 工具来源：**B站 up 主「可可HXL」的《终末地Mod修复工具包》v1.5** ——

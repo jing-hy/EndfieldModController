@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """`collect_diagnosis_files`（排查素材一次收齐）的测试（2026-10-05）。
 
 用户原话：「**你自己怎么查的，就把那些文件全收进日志包**」。

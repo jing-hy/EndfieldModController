@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <script setup>
 // 冲突处理弹窗（对应旧 web/app.js 的 showConflictResolveModal）。
 // 用户 2026-10-01 要求：「每组冲突单独下拉框」，选要保留的；

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // EndfieldModController ReShade add-on —— 统一 Mod 控制面板（"遥控器"）
 //
 // 用户 2026-10-01 的需求原话：「做统一面板，**需要注入到 reshade**，ui 尽量做好一点，

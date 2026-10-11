@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // 「缺 VC++ 运行库 → 问要不要现在装」的公共弹窗（依赖页 / 启动页共用这一份）。
 //
 // 为什么单拎出来：后端 `runtime_deps.ensure_all` 会在结果里补一条 `VC++ 运行库`

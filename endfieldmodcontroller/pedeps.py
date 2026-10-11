@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """PE 依赖预检：找出"某个 DLL/EXE 依赖、但在本机解析不到"的那些 DLL。
 
 **为什么要它**（2026-10-05）：issue #16 那台机器上游戏以 `0xC0000135 STATUS_DLL_NOT_FOUND`

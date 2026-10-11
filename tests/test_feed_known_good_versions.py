@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """★ feed（`dlss5-feed.addon64`）的"已知可用版本"白名单。
 
 **为什么要有这个白名单**：它是**在线组件**，「一键安装/更新全部组件」本来就会装上游最新版

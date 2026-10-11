@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """喂帧组件（dlss5-feed）启停。
 
 2026-10-02 反馈者 31002 的现场：`runtime\\dlss5\\` 与 `_disabled\\` 里**各有一份**

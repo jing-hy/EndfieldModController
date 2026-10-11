@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """把随包资产（assets/）打成 Release 附件 assets-bundle.zip。
 
 为什么需要它：单文件 exe 装不下约 125 MB 的运行时资产（`assets/nvngx` 是 xz 分卷，

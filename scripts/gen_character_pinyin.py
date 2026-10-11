@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """给角色表补**拼音别名**（固化脚本，用户 2026-10-01 要求「中文拼音也要自动识别」）。
 
 为什么要有它：国内 Mod 作者常用拼音命名目录（`zhuangfangyi_泳装`、`ChenQianyu_v2`、

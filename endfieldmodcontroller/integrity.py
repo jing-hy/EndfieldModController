@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Runtime integrity checks and repair for the launch flow."""
 from __future__ import annotations
 

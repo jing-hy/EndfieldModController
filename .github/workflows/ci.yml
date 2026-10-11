@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 name: 测试与构建
 
 # **为什么把全量测试放到这里**（用户 2026-10-10）：

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """杀毒线（`antivirus`）的离线测试（2026-10-04）。
 
 用户原话：「杀毒有没有办法处理，或者检测加弹窗」+「3 默认开，在设置留个开关」。

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Streamline/NGX 的 server manifest 损坏：判据 + 自动修复（2026-10-06）。
 
 **现场**（两位反馈者，形态完全相同）：游戏启动后 **13~15 毫秒**连打 10 条

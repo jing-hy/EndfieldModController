@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """验证「开关关着就不该留在根目录」这条（2026-10-06 用户现场）。
 
 现场：`config.firstperson_addon_enabled = False`，而 `runtime\\dlss5\\renodx-endfield-enhancer.addon64` 还在

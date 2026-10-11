@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """上传 Release 附件（**绕过 Steam++ / Watt Toolkit 之类 hosts 反代**，专治大文件上传被掐）。
 
 背景（2026-10-01 实测）：

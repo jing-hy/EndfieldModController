@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """PyInstaller 打包入口 —— 把桌面 UI 打成单个 exe。
 
 用法（见 scripts\\build_exe.py）：

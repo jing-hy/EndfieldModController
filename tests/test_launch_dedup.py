@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """「点一次启动却拉起多个 XXMI」的回归测试（2026-10-06）。
 
 **实测现场**（用户原话：「为什么点一下启动拉起了 4 个 efmi」）：

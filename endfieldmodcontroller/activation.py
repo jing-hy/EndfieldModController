@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Activation planning and staging for the PoC.
 
 The library is treated as read-only.  Selected mods are copied into a staging

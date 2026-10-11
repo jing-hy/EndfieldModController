@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """压缩包完整性预检的测试（2026-10-03）。
 
 背景：用户实测报 `解压失败：Bad CRC-32 for file 'Female Images + Dark Mode/

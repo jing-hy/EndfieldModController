@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """热重载与「皮肤 Mod 总开关」的语义（2026-10-06 用户「那做一下」）。
 
 **① 「皮肤 Mod」总开关改到就该立刻重铺 staging**

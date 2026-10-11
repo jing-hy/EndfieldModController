@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <script setup>
 // 设置项开关：**整行可点**（评审：只有右侧 40x22 能点到，容易点空）+ 显示状态文字。
 import { settings, saveSetting } from "../../lib/settings.js";

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // 公告条数据适配：后端 state.announcements 是一个列表，字段名以 alerts 模块为准，
 // 这里做容错（title/message/body、level/kind 都可能叫法不同），避免一处改名就整条不显示。
 export function normalizeAnnouncements(list) {

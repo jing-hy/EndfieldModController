@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Persistent diagnostics, process monitoring and crash log bundles."""
 from __future__ import annotations
 

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """GitHub 查询的公共入口：带 token、带缓存、把 403/限流翻译成人话。
 
 为什么要专门包一层（2026-09-27 踩到）：

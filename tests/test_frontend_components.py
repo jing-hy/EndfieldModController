@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """模板里用到的组件**必须 import**（2026-10-03 抓到的真因）。
 
 **事故**：`ModLibraryPage.vue` 的模板里一直写着

@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <script setup>
 // Mod 商城（2026-10-07 新增）。
 //

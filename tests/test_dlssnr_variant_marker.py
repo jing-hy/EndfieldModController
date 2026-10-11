@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """对照包定案：`_installed_matches()` 不能看 `marker["sm"]`（2026-10-06，两份 40 系包）。
 
 **现场**（用户给的两份包，都是 RTX 40 系 / sm_89）：

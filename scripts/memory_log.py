@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# SPDX-License-Identifier: GPL-3.0-or-later
 """把本工作区的「记忆」导出成一份可读的开发日志：`docs/AI-记忆日志.md`。
 
 **用户要求（2026-10-03）**：「每次传源码，记忆（或一份**类似记忆的日志**）都一起上传」

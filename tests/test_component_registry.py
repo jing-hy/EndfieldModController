@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """组件登记必须齐：`component_addon_status()` 与 `set_component_addons()` 不能脱节（2026-10-06）。
 
 **现场**：v1.0.25 发布后，用户点某个插件开关弹窗 `launch failed: 'xxx'`、

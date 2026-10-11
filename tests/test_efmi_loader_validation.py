@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """`active_efmi_loader()` 必须验"它到底是不是 EFMI loader"（2026-10-06，lzh18 现场）。
 
 **现场**（诊断包 `diagnostics-20261006-190132`，`C:\\Users\\lzh18`）：

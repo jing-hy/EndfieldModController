@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """自更新现场必须进诊断包（2026-10-06）。
 
 起因：反馈者（`F:\\EndfieldModController`）原话「**自更新下载完就没了，没提示重启，

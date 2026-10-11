@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """日志文案不许误导排查（2026-10-07 一天里踩到第三处）。
 
 用户被误导的两次原话：

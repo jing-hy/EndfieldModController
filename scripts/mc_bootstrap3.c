@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 /*
  * mc_bootstrap3.c — 进程内桥（变体 B+：3DMigoto 先、ReShade 后）
  *

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """前端「自由标识符」检查的**唯一实现**（供 `tests/test_frontend_freevars.py` 使用）。
 
 抓的是这一类事故（本项目已真实发生 6 次，与历史 `modDownloadFinished is not defined` 同型）：

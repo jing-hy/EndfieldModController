@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // 与后端的唯一桥接点（旧 app.js 里 pywebview 的出现只有这几处，迁移时全部收敛到这里）。
 //
 // ⚠️ 行为必须与旧版一致：

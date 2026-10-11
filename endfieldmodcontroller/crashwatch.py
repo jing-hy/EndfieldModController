@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """游戏崩溃取证：跟踪 Endfield.exe 的生命周期，崩了就自动收集现场并写进日志。
 
 日志写到 `runtime/logs/crash-<时间戳>.log`，同时把摘要投进控制器主日志。

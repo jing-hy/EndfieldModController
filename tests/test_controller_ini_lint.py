@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """生成的 `controller.ini` 必须通过 3DMigoto 语义体检（零"静默失败行"）。
 
 **为什么要有这条测试**（2026-10-01 真实事故，整轮排查的根因）：

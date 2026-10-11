@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """「API 不通 / 额度用尽 → 自动走网页路线」的回归测试（2026-09-30）。
 
 背景：用户指出「**github额度不影响，会自动路由**」—— 本程序查组件 release 早就

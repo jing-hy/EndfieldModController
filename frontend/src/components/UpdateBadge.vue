@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <script setup>
 // 自更新入口（旧版是顶栏那个 `v0.9.x` 徽标；Vue 换皮时漏掉了，2026-10-03 用户发现）。
 // 位置按用户要求：**左侧导航栏下面、主题色上面**。

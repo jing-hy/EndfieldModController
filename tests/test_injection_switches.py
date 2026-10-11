@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """启动页「拨动即装卸」的两个开关必须**落配置**（2026-10-03 用户实测的 "关不掉"）。
 
 **现象**（用户原话：「ShakingBreastManager 乳摇物理效果 已开启 / Endfield Poser 摆姿 / MMD

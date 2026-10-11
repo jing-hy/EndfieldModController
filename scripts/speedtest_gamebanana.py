@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """香蕉网（GameBanana）下载测速 —— 开/不开 VPN 都能跑，结果可直接对照。
 
 用法（在任意一台机器上，VPN 开着或关着都行）：

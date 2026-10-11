@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """游戏目录的系统模块被 loader proxy 顶替 —— 自检必须把它指出来（2026-10-07 事故）。
 
 **现场**：`<game>\\d3dcompiler_47.dll`（原版 4,524,496 B）与 `<game>\\vulkan-1.dll`

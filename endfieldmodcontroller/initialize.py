@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """启动前初始化自检：把所有**非 XXMI 负责**的准备工作逐项校验并补齐。
 
 XXMI 负责的部分（进程启动时把 d3d12.dll / d3d11.dll 注入进去、EFMI 加载 Mods）不在

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """照 PCL（ModNet.vb）补的两条判据（2026-10-03）。
 
 PCL 的 `TryBeginThread` 里对 github.com / bmclapi / pcl2-server 这类源**直接不分片**

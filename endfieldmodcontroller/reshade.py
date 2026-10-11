@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Download and extract the official ReShade Add-on build.
 
 ReShade's website distributes a setup executable whose embedded **standard ZIP**

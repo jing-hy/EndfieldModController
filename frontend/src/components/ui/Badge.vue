@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <script setup>
 defineProps({ tone: { type: String, default: "muted" } });
 </script>

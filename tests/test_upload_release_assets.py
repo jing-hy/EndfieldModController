@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """发版上传脚本：draft 阶段必须也能定位到 Release（2026-10-06 实测踩到）。
 
 **现场**：v1.0.24 发版时 `upload_release_assets.py --tag v1.0.24` 打印

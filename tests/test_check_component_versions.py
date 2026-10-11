@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """`scripts/check_component_versions.py` 的比对逻辑。
 
 用户 2026-10-04 要求：「**另外每次 release 要检查内置的依赖版本表是否最新**」——

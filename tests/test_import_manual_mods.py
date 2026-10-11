@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """手动放进 Mods 的 Mod 同步进库的测试。
 
 对应需求原话：「手动放进去的和库里的进行比对，如果库里已有，就在 UI 中显示那个开启，

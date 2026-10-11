@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // 拖放导入 Mod：**照抄旧 web/app.js 的实现**（分块上传是关键 —— 一次性把整包 base64
 // 丢给 pywebview 会先卡住再闪退，2026-10-01 实测过）。
 import { call } from "./bridge.js";

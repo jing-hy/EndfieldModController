@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """从 Mod 目录里扫出「开关变量名 → 中文含义」的候选，生成 `hotkey_hints.json`。
 
 用户 2026-10-01 原话：「**要自动识别那个变量的名称，推测含义**，可能存在的变量名称

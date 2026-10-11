@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """发布流程固化：备齐 Release 附件、打印上传指引（**绝不自动上传**）。
 
 用法：

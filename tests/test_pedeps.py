@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """`pedeps`（注入 DLL 依赖预检）与"净化后铺回清单"的测试（2026-10-05）。
 
 **为什么要有 `pedeps`**：那份 `diagnostics-20261005-223225` 的机器上，游戏以

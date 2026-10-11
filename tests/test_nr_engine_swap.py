@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """NR 引擎换版（4.70 → 官方 7.0.0-rc8）的回归测试（2026-10-06）。
 
 起因：反馈者「开 DLSS5 神经渲染就闪退」，包内现场是**两个 neural addon 同装**

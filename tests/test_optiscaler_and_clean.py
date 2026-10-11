@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """OptiScaler 共存的三件事（2026-10-01 用户拍板：「一键还原游戏本体要全部移走，1 和 2 可以做」）。
 
 背景（一份真实诊断包）：反馈者机器装着 **OptiScaler DLSS-NR**（以 `WINHTTP.dll` 形式注入、

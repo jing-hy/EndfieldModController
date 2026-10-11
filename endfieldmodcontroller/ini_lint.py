@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """按 3DMigoto 源码规则体检生成的 `controller.ini` —— 找出会被**静默跳过**的行。
 
 **为什么需要它**（2026-10-01）：面板"按键不生效"排了十几轮，最后靠读源码找到三处静默失败点，

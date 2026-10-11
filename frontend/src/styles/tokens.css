@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
 /* 设计令牌（tokens）—— 颜色 / 阴影 / 字体全部收敛到这里，
  * 于是暗色主题只换变量、不动组件（`tailwind.config.js` 的颜色全走 `var(--…)`）。
  *

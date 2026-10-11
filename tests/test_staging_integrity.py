@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """staging 完整性自检（2026-10-02）：旧版误删了 shader 汇编 `endif` 的 Mod，必须被发现并按库里的原件重建。
 
 **背景**：0.9.2 之前 `core.sanitize_ini_control_flow()` 会把 `[ShaderRegex*.Pattern.Replace]`

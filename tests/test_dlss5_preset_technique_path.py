@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """DLSS5 preset 的 **technique 全名必须带 effect 相对路径**（2026-10-07 用户实测定案）。
 
 **现场**：用户「注入进去了，但是 reshade 还是报错」「DLSS5 和第一人称没加载」。日志里

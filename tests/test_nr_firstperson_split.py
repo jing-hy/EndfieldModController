@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """NR 与第一人称相机 hook 的抢位：按 `CameraFirstPerson` 分流（2026-10-06）。
 
 **问题**：enhancer 的**相机 hook** 与 NR 抢同一个位置 —— **NR 先激活 ⇒ hook 装不上**

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Mod 备份仓：库里**每见到一个新 Mod**，就整份复制进数据根下的备份文件夹。
 
 用户 2026-10-01 原话（两次）：

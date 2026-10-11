@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <script setup>
 // 辅助 Mod 页（旧 #tab-assist）：只列辅助/工具类 Mod，不参与换装。
 import { computed, nextTick, onMounted, ref, watch } from "vue";

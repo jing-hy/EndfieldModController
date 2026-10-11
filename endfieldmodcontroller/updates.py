@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """组件版本检查与更新。
 
 覆盖两类组件：

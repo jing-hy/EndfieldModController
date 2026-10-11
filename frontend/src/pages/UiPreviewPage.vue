@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <script setup>
 // UI 预览页（`index.html#preview?d=alert|confirm|modal|conflict|menu|drop|toast`）
 // 用途：把**真实弹窗组件**按真实样式渲染出来，便于截图送评审 / 回归对比。

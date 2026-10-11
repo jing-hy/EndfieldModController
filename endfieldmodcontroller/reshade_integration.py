@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Integration helpers for a ReShade installation that already lives in the game folder.
 
 The game folder must stay untouched by the generic staging flow, but when ReShade is

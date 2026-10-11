@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """多线路**动态抢块**（2026-10-04 落地）。
 
 **为什么做**（用户要求「测一下混合动态并发」→ 实测后落地）：`scripts/speedtest_mixed.py` 在本机

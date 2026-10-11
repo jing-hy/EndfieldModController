@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Mod 修复 / 回滚 / 移出库的离线单测（不真的跑那个 exe）。
 
 覆盖的都是"错了会伤用户数据"的点：

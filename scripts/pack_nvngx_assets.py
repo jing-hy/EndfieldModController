@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """把**必须随包分发**的二进制打包成可上 GitHub 的压缩资产。
 
 为什么需要这么绕：GitHub 对单个文件有 100 MiB 硬上限（超了 push 直接被拒），

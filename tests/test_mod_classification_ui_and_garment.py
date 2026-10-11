@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """两个归错的类（2026-10-06 用户指名，两个 mod 本地都有）。
 
 **①「AI generated)Background Image Alteration」→ 界面功能类（UI）**

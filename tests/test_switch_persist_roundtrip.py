@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """开关"关掉之后过一会又自己打开"（2026-10-06 用户反馈）。
 
 **机制**：前端 `toggleSwitch()` 是「**乐观更新 + 后台刷新**」——

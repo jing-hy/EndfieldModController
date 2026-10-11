@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """统一控制面板（ReShade 内整合 Mod 快捷键）的测试。
 
 覆盖三块：

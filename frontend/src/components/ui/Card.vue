@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <script setup>
 // 卡片：标题栏右侧留一个插槽（放 badge / 小按钮），子内容进默认插槽。
 defineProps({

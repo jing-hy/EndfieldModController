@@ -8,7 +8,7 @@
   <a href="https://www.python.org/"><img alt="Python 3" src="https://img.shields.io/badge/Python-3-3776AB?logo=python&amp;logoColor=white"></a>
   <a href="https://learn.microsoft.com/windows/"><img alt="Windows 10 / 11" src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078D6?logo=windows&amp;logoColor=white"></a>
   <a href="https://github.com/jing-hy/EndfieldModController/releases"><img alt="最新版本" src="https://img.shields.io/github/v/release/jing-hy/EndfieldModController?label=Release&amp;color=f0b429&amp;logo=github"></a>
-  <a href="LICENSE"><img alt="GPL-3.0 许可" src="https://img.shields.io/github/license/jing-hy/EndfieldModController?label=License&amp;color=3DA639"></a>
+  <a href="LICENSE"><img alt="GPL-3.0-or-later 许可" src="https://img.shields.io/github/license/jing-hy/EndfieldModController?label=License&amp;color=3DA639"></a>
 </p>
 
 <p>Windows 桌面程序，单文件 exe。当前版本 <b>1.3.0</b> —— <a href="https://github.com/jing-hy/EndfieldModController/releases">下载最新版</a></p>
@@ -150,9 +150,9 @@ RTX 20 / 30 / 40 / 50 系都能用：程序会**按你的显卡架构自动准�
 
 **特别声明**：随包分发的第一人称**中文**补丁由 **B站 up 主 Hirahido** 制作，Mod 修复工具由 **B站 up 主 可可HXL** 制作，版权均归其所有。本程序只做分发与安装编排、不修改其内容 —— 两位作者若不希望被随包分发，请在 issue 里说明，我们会立即移除。
 
-本项目自身为 **GPL-3.0**（GNU General Public License v3.0）许可，完整条款见 [LICENSE](LICENSE)。Copyright (c) 2026 jing-hy。
+本项目自身为 **GPL-3.0-or-later**（GNU General Public License v3.0 或更高版本）许可，完整条款见 [LICENSE](LICENSE)；各源文件头部均标注了 `SPDX-License-Identifier: GPL-3.0-or-later`。Copyright (c) 2026 jing-hy。
 
-上表中的第三方组件**不适用**本项目的 GPL-3.0 许可，其版权与许可条款归各自作者所有。
+上表中的第三方组件**不适用**本项目的 GPL-3.0-or-later 许可，其版权与许可条款归各自作者所有。
 
 ## 六、免责声明
 

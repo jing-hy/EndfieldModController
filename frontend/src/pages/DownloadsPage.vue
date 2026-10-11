@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <script setup>
 // 下载中心（2026-10-07 新增，侧栏「下载」页）。
 //

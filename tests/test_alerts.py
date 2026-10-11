@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """公告 / 异常状态预警（alerts.json）的离线测试。
 
 覆盖：contents 响应解码、条目规范化、过期判定、强制停留秒数的优先级、

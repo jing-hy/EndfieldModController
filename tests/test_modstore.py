@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """`modstore`（Mod 商城数据层）—— **全离线**，网络一律打桩。
 
 为什么这些判据值得单独钉住（2026-10-07 加）：

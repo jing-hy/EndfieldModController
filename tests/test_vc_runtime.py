@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """「VC++ 运行库」自检项的回归测试（2026-10-05，方案 3）。
 
 为什么有这一项：issue #16 反馈者现场的游戏退出码是 `0xC0000135`

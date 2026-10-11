@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """乳摇插件本体「内容变了就换」的回归测试（2026-10-05 用户实测暴露）。
 
 ## 症状

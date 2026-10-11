@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """按**显卡支持范围**决定 DLSS5 的默认开关与闸门。
 
 **两次判据变更的历史（别把它们弄混）**：

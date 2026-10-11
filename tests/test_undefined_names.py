@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """抓「引用了不存在的名字」这类 bug —— 用 **pyflakes**（2026-10-03 实测抓到 3 个真 bug）。
 
 **事故回顾**：`fastnet.py` 里 `CHUNK_GAP_SECONDS` 被引用 4 处，而常量**从来不存在**

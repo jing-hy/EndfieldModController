@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """「NR 与第一人称相机 hook 共存」的回归测试（2026-10-05 定案 + 用户要求全自动）。
 
 ## 背景（三件事都必须钉住）

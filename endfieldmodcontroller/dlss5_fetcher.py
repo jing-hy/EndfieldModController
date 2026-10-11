@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """DLSS5 组件的**在线自动安装**（只覆盖有公开上游的那部分）。
 
 随包资产（`runtime_assets`）负责"没人发布过"的文件；这里负责"上游有 release

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Mod 商城（GameBanana / 香蕉网）：浏览、搜索、分类、更新判定。
 
 用户 2026-10-07 原话：「我希望加入 mod 商城功能，可以看看 jasm 是怎么做的，

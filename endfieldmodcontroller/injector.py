@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Minimal Windows DLL injector used as a ReShade fallback.
 
 This is intentionally small and only used when the user selects external

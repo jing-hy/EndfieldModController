@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Small filesystem helpers shared by the whole controller.
 
 2026-10-01：把两件被重复实现了 N 遍的东西收成一份 ——

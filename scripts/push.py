@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """推送 main 到 GitHub —— **每次推送前先做一次状态快照**。
 
 用户 2026-10-01 的要求：「**你在推送脚本改一下，每次推 github 都要做快照**」。

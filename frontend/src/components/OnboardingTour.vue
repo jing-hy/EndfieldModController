@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <script setup>
 // 新手引导（分步 tour）：挖孔聚光高亮目标控件 + **箭头指向它** + 气泡说明。
 //

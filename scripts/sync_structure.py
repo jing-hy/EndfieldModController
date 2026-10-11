@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# SPDX-License-Identifier: GPL-3.0-or-later
 """把 normify 结构树同步进仓库：`docs/structure/`。
 
 **用户要求（2026-10-03）**：「还有结构树也一起上传」。

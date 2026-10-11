@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """两处 2026-10-07 的补丁，都是"排查时缺判据/缺动作"引出来的。
 
 **① 手动诊断包的 `environment.txt` 必须带显卡驱动** —— 两个入口原本内容不一致：

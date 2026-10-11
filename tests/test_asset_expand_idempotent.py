@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """`ensure_all` 不许**每轮强制重解压 165 MB**（2026-10-07 真凶）。
 
 **现场**（用户报的是三件事，其实是同一件）：

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Streamline 运行库升级（2026-10-06 用户拍板全套替换）。
 
 **背景**：多帧生成解锁的 6x 依赖 `nvngx_dlssg.dll` 310.9.x + Streamline 2.14.1

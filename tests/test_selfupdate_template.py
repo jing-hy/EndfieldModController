@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """自更新脚本（VBS）模板的硬约束回归测试。
 
 为什么专门为它写测试 —— 同一个坑已经踩过两次：

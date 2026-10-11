@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <script setup>
 defineProps({ value: Number, max: { type: Number, default: 100 }, text: { type: String, default: "" } });
 </script>

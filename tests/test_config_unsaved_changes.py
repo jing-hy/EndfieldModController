@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """「改了内存、中途访问 config 会不会被磁盘冲掉」（2026-10-06）。
 
 **背景**：`api.EndfieldModControllerAPI.config` 这个 property 会在磁盘 mtime 变化时

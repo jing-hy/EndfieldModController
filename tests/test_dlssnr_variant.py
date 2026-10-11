@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """DLSS5 运行库"按显卡架构自动选"的测试（2026-10-05 换方案）。
 
 **要守住的性质**：

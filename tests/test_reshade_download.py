@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """ReShade 下载链路的回归测试（v1.0.11 修的那一串）。
 
 **为什么要单独一组**：2026-10-05 的 issue #14「ReShade底座无法下载」查出来是**两个

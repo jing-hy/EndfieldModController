@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """「就算是 beta 版也必须能正常更新」的根治测试（2026-10-06）。
 
 **现场**：发布出去的 exe 自称 `-beta`（打包流程问题）⇒ 用户装上后版本号没变 ⇒

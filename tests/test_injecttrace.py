@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """`injecttrace`（注入现场时间线）与「资产展开的并发保护」的测试（2026-10-05）。
 
 **为什么要有 `injecttrace`**：用户要求「在一键启动最开始和 xxmi 拉起后和终末地启动后和

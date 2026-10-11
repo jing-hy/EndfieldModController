@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Dependency inspection and update support.
 
 The dependency manifest is a JSON file with entries such as:

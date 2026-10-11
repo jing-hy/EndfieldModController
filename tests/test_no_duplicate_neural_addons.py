@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """★ **两个同名 neural addon 不能同装**（2026-10-07 本机实测抓到）。
 
 **现场**：`runtime\\dlss5\\` 里同时有

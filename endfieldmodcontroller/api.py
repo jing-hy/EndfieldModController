@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Backend API exposed to the PyWebview frontend."""
 from __future__ import annotations
 

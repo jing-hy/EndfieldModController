@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """`prepare_reshade_runtime` 反复调用时，`ReShade.ini` **绝不能变大**。
 
 2026-10-03 的真实事故（用户：「现在mod管理器未响应，关不掉」）：

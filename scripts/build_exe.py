@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """把 EndfieldModController 打包成单个 exe（PyInstaller）。
 
     python scripts/build_exe.py             # 单文件 exe（默认）

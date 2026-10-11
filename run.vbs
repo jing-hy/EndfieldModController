@@ -1,3 +1,4 @@
+' SPDX-License-Identifier: GPL-3.0-or-later
 Option Explicit
 Dim fso, sh, base, py
 Set fso = CreateObject("Scripting.FileSystemObject")

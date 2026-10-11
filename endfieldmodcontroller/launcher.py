@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Launch orchestration and ReShade runtime preparation."""
 from __future__ import annotations
 

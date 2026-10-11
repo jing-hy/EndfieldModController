@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """RabbitFX 随包分发与展开（2026-10-03 用户要求：「**那把他随包**」）。
 
 **RabbitFX 是什么**（作者 caverabbit，GameBanana 651557，CC BY-NC-ND 4.0）：

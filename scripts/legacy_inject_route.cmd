@@ -1,17 +1,18 @@
+@REM SPDX-License-Identifier: GPL-3.0-or-later
 @echo off
 rem ============================================================================
-rem  ModeController - LEGACY ÊÖ¶¯¹¤¾ß£¨²»ÊôÓÚµ±Ç°¹Ù·½ XXMI/EFMI Â·Ïß£©
-rem  [encoding: GBK/936, Windows cmd]   ±³¾°¼û docs\ÀúÊ·³É¹¦Â·Ïß-½ø³ÌÄÚ×¢Èë.md
+rem  ModeController - LEGACY ï¿½Ö¶ï¿½ï¿½ï¿½ï¿½ß£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Úµï¿½Ç°ï¿½Ù·ï¿½ XXMI/EFMI Â·ï¿½ß£ï¿½
+rem  [encoding: GBK/936, Windows cmd]   ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ docs\ï¿½ï¿½Ê·ï¿½É¹ï¿½Â·ï¿½ï¿½-ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½×¢ï¿½ï¿½.md
 rem
-rem  ×÷ÓÃ£º¸´ÏÖ 2026-09-27 09:31~11:28 ÄÇ´ÎÈ·ÈÏ¿ÉÓÃµÄ×¢ÈëÁ´Â·
-rem        migoto_loader2.exe ÂÖÑ¯ Endfield.exe
-rem          -> ×¢Èë mc_bootstrap.dll
-rem          -> ÇÅÔÚ½ø³ÌÄÚµÈ dxgi.dll ¾ÍÐ÷ºó LoadLibrary runtime\migoto\d3d11.dll
-rem          -> d3dx.ini ¼ÓÔØ Core\EFMI\main.ini + Mods\MC_*
+rem  ï¿½ï¿½ï¿½Ã£ï¿½ï¿½ï¿½ï¿½ï¿½ 2026-09-27 09:31~11:28 ï¿½Ç´ï¿½È·ï¿½Ï¿ï¿½ï¿½Ãµï¿½×¢ï¿½ï¿½ï¿½ï¿½Â·
+rem        migoto_loader2.exe ï¿½ï¿½Ñ¯ Endfield.exe
+rem          -> ×¢ï¿½ï¿½ mc_bootstrap.dll
+rem          -> ï¿½ï¿½ï¿½Ú½ï¿½ï¿½ï¿½ï¿½Úµï¿½ dxgi.dll ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ LoadLibrary runtime\migoto\d3d11.dll
+rem          -> d3dx.ini ï¿½ï¿½ï¿½ï¿½ Core\EFMI\main.ini + Mods\MC_*
 rem
-rem  Ç°Ìá£ºÓÎÏ·±ØÐëÓÉ¹Ù·½Æô¶¯Æ÷µã¡¸DirectX 11 Æô¶¯¡¹£¨D3D12 ÏÂ²»ÉúÐ§£©
-rem  ±¾½Å±¾Ö»×öÈý¼þÊÂ£º»Ö¸´±»Í£·ÅµÄ×¢ÈëÆ÷/ÇÅ¡¢¸´ÖÆ Mods¡¢Æô¶¯×¢ÈëÆ÷¡£
-rem  Ëü²»¸ÄÓÎÏ·Ä¿Â¼¡¢²»Åö¹Ù·½ XXMI °²×°£»»¹Ô­·½·¨¼û½Å±¾Ä©Î²ÌáÊ¾¡£
+rem  Ç°ï¿½á£ºï¿½ï¿½Ï·ï¿½ï¿½ï¿½ï¿½ï¿½É¹Ù·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ã¡¸DirectX 11 ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½D3D12 ï¿½Â²ï¿½ï¿½ï¿½Ð§ï¿½ï¿½
+rem  ï¿½ï¿½ï¿½Å±ï¿½Ö»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Â£ï¿½ï¿½Ö¸ï¿½ï¿½ï¿½Í£ï¿½Åµï¿½×¢ï¿½ï¿½ï¿½ï¿½/ï¿½Å¡ï¿½ï¿½ï¿½ï¿½ï¿½ Modsï¿½ï¿½ï¿½ï¿½ï¿½ï¿½×¢ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+rem  ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ï·Ä¿Â¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ù·ï¿½ XXMI ï¿½ï¿½×°ï¿½ï¿½ï¿½ï¿½Ô­ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Å±ï¿½Ä©Î²ï¿½ï¿½Ê¾ï¿½ï¿½
 rem ============================================================================
 setlocal enableextensions
 set "ROOT=%~dp0.."
@@ -19,65 +20,65 @@ set "MG=%ROOT%\runtime\migoto"
 set "STAGE=%ROOT%\runtime\builtin\XXMI\EFMI\Mods"
 
 if not exist "%MG%" (
-  echo [X] ÕÒ²»µ½ runtime\migoto£º%MG%
+  echo [X] ï¿½Ò²ï¿½ï¿½ï¿½ runtime\migotoï¿½ï¿½%MG%
   pause
   exit /b 1
 )
 
-echo [1/5] ¼ì²éÊÇ·ñÒÑÓÐ¹Ù·½ XXMI ÔÚÔËÐÐ ...
+echo [1/5] ï¿½ï¿½ï¿½ï¿½Ç·ï¿½ï¿½ï¿½ï¿½Ð¹Ù·ï¿½ XXMI ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ...
 set "PROBE=%TEMP%\mc_legacy_probe.txt"
 tasklist /FI "IMAGENAME eq XXMI Launcher.exe" > "%PROBE%" 2>nul
 findstr /I /C:"XXMI Launcher.exe" "%PROBE%" >nul
 if not errorlevel 1 (
-  echo     [!] XXMI Launcher ÕýÔÚÔËÐÐ¡£
-  echo         Á½Ìõ×¢ÈëÁ´Â·Í¬Ê±´æÔÚ»áÖØ¸´ Hook£¬¸´ÏÖÀúÊ·Â·ÏßÇ°ÇëÏÈ¹Øµô¹Ù·½ XXMI/EFMI¡£
+  echo     [!] XXMI Launcher ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð¡ï¿½
+  echo         ï¿½ï¿½ï¿½ï¿½×¢ï¿½ï¿½ï¿½ï¿½Â·Í¬Ê±ï¿½ï¿½ï¿½Ú»ï¿½ï¿½Ø¸ï¿½ Hookï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê·Â·ï¿½ï¿½Ç°ï¿½ï¿½ï¿½È¹Øµï¿½ï¿½Ù·ï¿½ XXMI/EFMIï¿½ï¿½
 )
 del "%PROBE%" >nul 2>&1
 
-echo [2/5] »Ö¸´±»Í£·ÅµÄ×¢ÈëÆ÷ÓëÇÅ ...
+echo [2/5] ï¿½Ö¸ï¿½ï¿½ï¿½Í£ï¿½Åµï¿½×¢ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ...
 call :restore "%MG%\migoto_loader2.exe"
 call :restore "%MG%\mc_bootstrap.dll"
 if not exist "%MG%\migoto_loader2.exe" goto :missing
 if not exist "%MG%\mc_bootstrap.dll"    goto :missing
 if not exist "%MG%\d3d11.dll" (
-  echo     [!] È±ÉÙ %MG%\d3d11.dll£¨EFMI Ö÷ DLL£¬v1.1.9£©
+  echo     [!] È±ï¿½ï¿½ %MG%\d3d11.dllï¿½ï¿½EFMI ï¿½ï¿½ DLLï¿½ï¿½v1.1.9ï¿½ï¿½
   goto :missing
 )
 
-echo [3/5] Ð´Èë×¢ÈëË³Ðò inject_order.txt = mc_bootstrap.dll ...
+echo [3/5] Ð´ï¿½ï¿½×¢ï¿½ï¿½Ë³ï¿½ï¿½ inject_order.txt = mc_bootstrap.dll ...
 > "%MG%\inject_order.txt" echo mc_bootstrap.dll
 
-echo [4/5] ×¼±¸ Mods Ä¿Â¼£¨´Ó EFMI staging ¸´ÖÆ£©...
+echo [4/5] ×¼ï¿½ï¿½ Mods Ä¿Â¼ï¿½ï¿½ï¿½ï¿½ EFMI staging ï¿½ï¿½ï¿½Æ£ï¿½...
 if not exist "%MG%\Mods" mkdir "%MG%\Mods"
 if exist "%STAGE%" (
   robocopy "%STAGE%" "%MG%\Mods" /E /NFL /NDL /NJH /NJS >nul
   if errorlevel 8 (
-    echo     [!] robocopy ·µ»Ø %errorlevel%£¬Çë¼ì²é Mods ÊÇ·ñ¸´ÖÆÍêÕû¡£
+    echo     [!] robocopy ï¿½ï¿½ï¿½ï¿½ %errorlevel%ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ Mods ï¿½Ç·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
   ) else (
-    echo     ÒÑÍ¬²½ Mods£º%STAGE%
+    echo     ï¿½ï¿½Í¬ï¿½ï¿½ Modsï¿½ï¿½%STAGE%
   )
 ) else (
-  echo     [!] ÕÒ²»µ½ staging Ä¿Â¼ %STAGE%£¬Mods ±£³ÖÔ­Ñù¡£
+  echo     [!] ï¿½Ò²ï¿½ï¿½ï¿½ staging Ä¿Â¼ %STAGE%ï¿½ï¿½Mods ï¿½ï¿½ï¿½ï¿½Ô­ï¿½ï¿½ï¿½ï¿½
 )
 
-echo [5/5] Æô¶¯×¢ÈëÆ÷£¨¶ÀÁ¢×îÐ¡»¯´°¿Ú£¬×î¶àÂÖÑ¯ 300 Ãë£©...
+echo [5/5] ï¿½ï¿½ï¿½ï¿½×¢ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð¡ï¿½ï¿½ï¿½ï¿½ï¿½Ú£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ñ¯ 300 ï¿½ë£©...
 start "ModeController legacy injector" /MIN "%MG%\migoto_loader2.exe"
 
 echo.
 echo ============================================================
-echo  ×¢ÈëÆ÷ÒÑÆô¶¯¡£ÏÖÔÚÇë£º
-echo    1) ´ò¿ª¹Ù·½Æô¶¯Æ÷
-echo    2) µã¡¸DirectX 11 Æô¶¯¡¹£¨²»ÒªµãÆÕÍ¨¿ªÊ¼°´Å¥£©
+echo  ×¢ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ë£º
+echo    1) ï¿½ò¿ª¹Ù·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+echo    2) ï¿½ã¡¸DirectX 11 ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Òªï¿½ï¿½ï¿½ï¿½Í¨ï¿½ï¿½Ê¼ï¿½ï¿½Å¥ï¿½ï¿½
 echo.
-echo  Ô¼ 30 ÃëºóÑéÖ¤£º
+echo  Ô¼ 30 ï¿½ï¿½ï¿½ï¿½ï¿½Ö¤ï¿½ï¿½
 echo    type "%MG%\mc_bootstrap.log"
-echo       ÆÚÍû£ºloading EFMI dll=...  È»ºó load result h=... err=0
+echo       ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½loading EFMI dll=...  È»ï¿½ï¿½ load result h=... err=0
 echo    findstr /C:"Processing" "%MG%\d3d11_log.txt"
-echo       ÆÚÍû£ºProcessing "...\Mods\MC_xxx\...ini"
+echo       ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Processing "...\Mods\MC_xxx\...ini"
 echo    findstr /C:"Loading custom resource" "%MG%\d3d11_log.txt"
-echo       ÆÚÍû£ºLoading custom resource ...\Mods\MC_xxx\...dds as DDS
+echo       ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Loading custom resource ...\Mods\MC_xxx\...dds as DDS
 echo.
-echo  »¹Ô­£¨²»ÏëÓÃÁË¾ÍÖ´ÐÐ£©£º
+echo  ï¿½ï¿½Ô­ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ë¾ï¿½Ö´ï¿½Ð£ï¿½ï¿½ï¿½
 echo    ren "%MG%\migoto_loader2.exe" migoto_loader2.exe.modecontroller.disabled
 echo    ren "%MG%\mc_bootstrap.dll"    mc_bootstrap.dll.modecontroller.disabled
 echo ============================================================
@@ -89,14 +90,14 @@ exit /b 0
 if exist "%~1" exit /b 0
 if exist "%~1.modecontroller.disabled" (
   ren "%~1.modecontroller.disabled" "%~nx1"
-  echo     [i] ÒÑ»Ö¸´ %~nx1
+  echo     [i] ï¿½Ñ»Ö¸ï¿½ %~nx1
   exit /b 0
 )
-echo     [!] ¼ÈÃ»ÓÐ %~nx1£¬Ò²Ã»ÓÐ %~nx1.modecontroller.disabled
+echo     [!] ï¿½ï¿½Ã»ï¿½ï¿½ %~nx1ï¿½ï¿½Ò²Ã»ï¿½ï¿½ %~nx1.modecontroller.disabled
 exit /b 0
 
 :missing
 echo.
-echo [X] È±ÉÙ±ØÒªÎÄ¼þ£¬ÒÑÖÐÖ¹£¨Î´×öÈÎºÎÆÆ»µÐÔ²Ù×÷£©¡£
+echo [X] È±ï¿½Ù±ï¿½Òªï¿½Ä¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö¹ï¿½ï¿½Î´ï¿½ï¿½ï¿½Îºï¿½ï¿½Æ»ï¿½ï¿½Ô²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 pause
 exit /b 1

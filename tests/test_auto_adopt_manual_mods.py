@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """「自动收编 XXMI 里的外来 Mod」开关（2026-10-06 用户要求）。
 
 用户原话：「**设置加个按钮，xxmi 自动清理非管理器插件，默认开，如果 xxmi 中有其他 mod，

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """把终末地本体恢复成「完全干净」，而且**先备份、随时可还原**。
 
 为什么需要：这套方案会在游戏目录留下第三方加载器的痕迹 —— `d3dcompiler_47.dll` /

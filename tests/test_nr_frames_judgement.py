@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """DLSS5「NR 建了特征却一帧不出」判据的回归测试（2026-10-06）。
 
 真实反馈（数据根 `P:\\TOOL`、游戏 `K:\\game\\…`、Windows 10 + RTX 5080）：面板「成功NR帧」

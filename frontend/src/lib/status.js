@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // "状态栏"文本：写进隐藏元素（兼容调试与旧行为）。
 //
 // ⚠️ 这里**不能顺带弹 toast**：导入 Mod 时它是**按分块（每 1MB）调一次**的，

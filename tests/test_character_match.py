@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """角色名自动匹配测试。
 
 对应需求原话：「你找一下现在终末地全角色名，新加的 mod 要能自动匹配角色名」。

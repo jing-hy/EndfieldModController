@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 pywebview>=5.0
 Pillow>=10.0
 cryptography>=42.0

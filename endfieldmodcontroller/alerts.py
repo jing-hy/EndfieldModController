@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """远程「公告 / 异常状态预警」——由仓库根目录的 `alerts.json` 下发。
 
 用户 2026-09-30 要求（原话）：「我想做一个功能，加一个动态，从github拉取，每次开管理器的时候

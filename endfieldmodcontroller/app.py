@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """EndfieldModController desktop entry point."""
 from __future__ import annotations
 

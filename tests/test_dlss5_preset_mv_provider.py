@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """DLSS5 preset 的「运动矢量来源」判据（2026-10-06 从两份 40 系对照包定案）。
 
 **事实链**：

@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <script setup>
 // 路径输入 + 「浏览」按钮（评审：Windows 桌面工具让用户手打路径不合理）。
 // 走后端 choose_path —— 它弹的是系统原生选择框。

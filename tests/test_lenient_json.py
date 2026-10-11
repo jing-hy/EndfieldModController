@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """宽松 JSON 解析（`fsutil.loads_tolerant`）的回归测试（2026-10-06）。
 
 现场：香蕉网 `https://gamebanana.com/apiv11/Mod/<id>/ProfilePage` 会在 JSON **前面**

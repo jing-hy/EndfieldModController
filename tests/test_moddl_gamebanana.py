@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """GameBanana 多文件页面：**必须按更新时间挑主包，并把配套小文件也带上**。
 
 2026-10-03 用户实测：「uimod 好像没生效」。

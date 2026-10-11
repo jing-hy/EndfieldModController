@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <script setup>
 // 「下载 Mod」卡片 —— **现在只在「下载」页**。
 //
