@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 ## 本版修好的问题
 
 ### 1. XXMI 界面里不出现"终末地"的启动按钮（我们自己的 bug）

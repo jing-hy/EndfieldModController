@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 # EndfieldModController —— 详细文档
 
 当前版本 **1.3.0** ｜ [下载最新版](https://github.com/jing-hy/EndfieldModController/releases)
@@ -424,7 +425,9 @@ shader 文件清单、运行时组件清单（每个文件的字节数 + sha256 
 - **第一人称中文补丁**（B站 up 主 **Hirahido**）与 **Mod 修复工具**（B站 up 主 **可可HXL**）
   随包分发，版权归原作者 —— 作者若不希望被随包分发，请在 issue 里说明，我们会立即移除。
 
-本项目自身为 **MIT** 许可。免责声明同样见简略版。
+本项目自身为 **GPL-3.0-or-later**（GNU General Public License v3.0 或更高版本）许可，完整条款见 [LICENSE](../LICENSE)；各源文件头部均标注了 `SPDX-License-Identifier: GPL-3.0-or-later`。
+
+上列第三方组件**不适用**本项目的许可，其版权与许可条款归各自作者所有。免责声明同样见简略版。
 
 ---
 

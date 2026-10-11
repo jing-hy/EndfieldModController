@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 # 调研报告：Endfield + EFMI/3DMigoto 注入后 45 秒 nvgpucomp64.dll 崩溃
 
 调研人：Anvil（技术调研员 subagent）　调研日期：2026-09-27

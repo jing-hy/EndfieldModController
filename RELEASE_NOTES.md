@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 # v1.3.0
 
 本次更新把随包组件版本表同步到上游最新。

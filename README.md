@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <div align="center">
 
 <h1>EndfieldModController</h1>

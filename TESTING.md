@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 # 全功能手测清单（EndfieldModController）
 
 > 用途：用户亲自过一遍全部功能。★ = 本次（0.3.0→0.3.2）改动相关，优先测；★★ = 本次修复重点。
