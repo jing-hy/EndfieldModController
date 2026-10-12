@@ -579,7 +579,20 @@ def ensure_streamline(
             STREAMLINE_KEY, "update_available",
             "本机还没有 Streamline 运行库（约 263 MB）—— 到依赖页点它才会下载",
             "", str(target))
-    url, version, asset_name, digest = _streamline_asset()
+    # ★ 离线优先（2026-10-12）：离线依赖包里放的是"只含 9 个 dll"的小包（≈11 MB，上游 SDK
+    #   本体 263 MB 进包会把离线包撑到 600 MB），所以这里既认本地路径、也认扁平结构（见下）。
+    from . import offline_deps
+
+    offline_entry = offline_deps.entry_for(config, "Streamline")
+    offline_source = offline_deps.find_asset(config, str((offline_entry or {}).get("asset") or ""))
+    if offline_source is not None:
+        url = str(offline_source)
+        asset_name = offline_source.name
+        version = str((offline_entry or {}).get("version") or "")
+        digest = ""
+        _note(config, f"Streamline：使用离线依赖包里的 {asset_name}（不联网）")
+    else:
+        url, version, asset_name, digest = _streamline_asset()
     if core.is_file() and marker.get("version") == version:
         if progress:
             progress(3, 3, STREAMLINE_KEY, "up_to_date")
@@ -587,13 +600,20 @@ def ensure_streamline(
 
     wanted = {name.lower() for name in STREAMLINE_WANTED}
     with tempfile.TemporaryDirectory(prefix="mc-streamline-") as tmp:
-        archive = dependencies._http_get(
-            url,
-            Path(tmp) / asset_name,
-            chunk_callback=(lambda received, expected: byte_progress(1, 3, "Streamline", received, expected)) if byte_progress else None,
-            expected_sha256=digest,
-            log=log,
-        )
+        local = Path(url)
+        if local.is_file():
+            # ★ 离线依赖包：一个请求都不发（包里那份是"只含 9 个 dll"的小包）
+            archive = local
+            if log:
+                log(f"使用离线依赖包：{asset_name}（{local.stat().st_size / 1048576:.1f} MB，跳过下载）")
+        else:
+            archive = dependencies._http_get(
+                url,
+                Path(tmp) / asset_name,
+                chunk_callback=(lambda received, expected: byte_progress(1, 3, "Streamline", received, expected)) if byte_progress else None,
+                expected_sha256=digest,
+                log=log,
+            )
         assert isinstance(archive, Path)
         staging = Path(tmp) / "unpacked"
         dependencies.extract_archive(archive, staging, strip_root=True)
@@ -603,6 +623,11 @@ def ensure_streamline(
             if (item.is_file() and item.name.lower() in wanted
                     and item.parent.name.lower() == "x64"):
                 picked.append(item)
+        if not picked:
+            # ★ 兜底：离线包那种**扁平结构**（只有 9 个 dll、没有 bin\x64 层级）。
+            #   判据没有放松 —— 仍然只认 `STREAMLINE_WANTED` 里那 9 个文件名。
+            picked = [item for item in staging.rglob("*")
+                      if item.is_file() and item.name.lower() in wanted]
         if not picked:
             raise RuntimeError(f"{asset_name}: 包里没找到 bin\\x64 下的运行库（结构可能变了）")
         from . import fsutil

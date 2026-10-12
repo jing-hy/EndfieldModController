@@ -145,7 +145,7 @@ RTX 20 / 30 / 40 / 50 系都能用：程序会**按你的显卡架构自动准�
 | [iMMERSE](https://github.com/martymcmodding/iMMERSE)（Marty's Mods） | ReShade 后处理链 | MIT |
 | DLSS 5 Feed | 给 DLSS5 喂颜色 / 运动矢量 / 深度 | 见其说明（无公开仓库） |
 | [SecondaryMotion](https://github.com/Sp1cHless/Arknights-Endfield-Plugin-Secondary-bodyphysics) | 物理效果 | 见上游仓库 |
-| [Endfield Poser](https://github.com/OedoSoldier/Endfield-Poser) | 摆姿 / MMD 播放（可选） | **AGPL-3.0** —— **不随包分发**，只从官方 Release 下载并调用它自己的安装向导 |
+| [Endfield Poser](https://github.com/OedoSoldier/Endfield-Poser) | 摆姿 / MMD 播放（可选） | **AGPL-3.0** —— **不随 Release 分发**：常规安装只从官方 Release 下载并调用它自己的安装向导；**无法访问 GitHub 时的应急离线包内会包含它**，并随附 AGPL-3.0 全文、版权声明与[源码地址](https://github.com/OedoSoldier/Endfield-Poser) |
 | **Endfield PS-T DrawSection Fix** | 修老 Mod | **B站 up 主 可可HXL**《终末地Mod修复工具包》v1.5；版权归原作者，**随包分发** |
 | NVIDIA NGX 运行库 | DLSS 与神经渲染 | NVIDIA 版权，随包仅为免去手动下载 |
 | **社区 DLSS NR 运行库变体**（`sf` / 优化版 `rtx40`） | 让 **RTX 20 / 30 / 40 系**也能跑 DLSS5 神经渲染（把内核重定向到对应架构） | 取自社区镜像 [RankFTW/rhi-repo](https://github.com/RankFTW/rhi-repo)；NVIDIA 运行库本身闭源，此处按其发布分发 |

@@ -126,3 +126,63 @@ def test_runtime_deps_prefers_offline_asset(env, monkeypatch):
 def test_resolve_offline_returns_none_without_index(env):
     assert offline_deps.resolve_offline(env.config, "XXMI") is None
     assert offline_deps.offline_summary(env.config).startswith("没有导入过")
+
+
+# ------------------------------------------------- ④ Poser / Streamline 也要走通（用户要求）
+def test_poser_prefers_offline_and_never_queries_upstream(env, monkeypatch):
+    """Poser 是**预发布**版（原先必须联网查列表接口）—— 离线包里带了就不许再联网。"""
+    payload = b"poser-installer"
+    bundle = _make_bundle(
+        env.root / "poser.zip", payload=payload, member="deps/Endfield-Poser-v0.5.58-win64.zip",
+        extra={})
+    # 把清单里的键换成 Poser（asset 名也换）
+    with zipfile.ZipFile(bundle) as source:
+        manifest = json.loads(source.read("manifest.json").decode("utf-8"))
+    manifest["deps"] = {"Poser": {
+        "asset": "Endfield-Poser-v0.5.58-win64.zip", "version": "0.5.58",
+        "size": len(payload), "sha256": hashlib.sha256(payload).hexdigest(),
+        "source": "https://github.com/OedoSoldier/Endfield-Poser", "license": "AGPL-3.0",
+    }}
+    with zipfile.ZipFile(bundle, "w") as target:
+        target.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False))
+        target.writestr("deps/Endfield-Poser-v0.5.58-win64.zip", payload)
+    offline_deps.import_deps_bundle(env.config, bundle)
+
+    def _must_not_be_called(*args, **kwargs):
+        raise AssertionError("离线包里已有 Poser，不该再查上游（预发布列表接口）")
+
+    monkeypatch.setattr(runtime_deps, "_latest_release_asset", _must_not_be_called)
+    source, version, asset_name, _digest = runtime_deps._resolve_builtin_asset(
+        env.config, "Poser", runtime_deps.POSER_REPO, runtime_deps.POSER_ASSET_PATTERN,
+        include_prerelease=True)
+    assert version == "0.5.58" and asset_name.endswith(".zip")
+    assert Path(source).read_bytes() == payload
+
+
+def test_streamline_installs_from_flat_offline_dlls(env, monkeypatch):
+    """Streamline 离线件是"只含 9 个 dll"的**扁平**包 —— 必须照样装到 `runtime\\streamline\\`。"""
+    wanted = list(runtime_deps.STREAMLINE_WANTED)
+    flat = env.root / "streamline-runtime-2.14.1.zip"
+    with zipfile.ZipFile(flat, "w") as archive:      # 扁平：没有 bin\x64 层级
+        for name in wanted:
+            archive.writestr(name, b"fake-dll:" + name.encode())
+    index = {"Streamline": {"asset": flat.name, "version": "v2.14.1", "size": flat.stat().st_size,
+                            "sha256": hashlib.sha256(flat.read_bytes()).hexdigest(),
+                            "source": "https://github.com/NVIDIA-RTX/Streamline",
+                            "license": "MIT", "kind": "streamline-dlls"}}
+    offline_deps.save_index(env.config, index)
+    (offline_deps.offline_dir(env.config) / flat.name).write_bytes(flat.read_bytes())
+
+    def _must_not_download(*args, **kwargs):
+        raise AssertionError("离线包里已有 Streamline，不该再下载 263 MB SDK")
+
+    monkeypatch.setattr(runtime_deps, "_streamline_asset", _must_not_download)
+    monkeypatch.setattr(runtime_deps, "crashwatch", None, raising=False)
+    result = runtime_deps.ensure_streamline(env.config, force=True)
+
+    target = Path(env.config.runtime_path) / "streamline"
+    landed = sorted(item.name for item in target.glob("*.dll"))
+    assert landed == sorted(wanted), result
+    assert result.status == "installed", result
+    for name in wanted:
+        assert (target / name).read_bytes() == b"fake-dll:" + name.encode()

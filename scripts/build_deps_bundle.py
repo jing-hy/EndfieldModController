@@ -50,6 +50,11 @@ MANIFEST_NAME = "manifest.json"
 README_NAME = "离线包说明.txt"
 
 #: (key, 说明, 许可) —— key 与 `offline_deps` 的索引键、以及各安装链路的查表键一致。
+#: ⚠️ **许可分两类**（2026-10-12 逐一查证，不再凭印象）：
+#:   * MIT / BSD 系（XXMI / Libs / EFMI / ReShade / Feeder / iMMERSE / **Streamline**）——
+#:     允许再分发，条件是**保留版权与许可声明**（所以包内 `licenses/` 放各自许可文本）；
+#:   * **AGPL-3.0（Endfield Poser）**——同样**允许再分发**，但除许可全文外还必须
+#:     **给出对应源码的获取途径**（用户 2026-10-12：「poser 指明源码地址」）。包内说明里写。
 LICENSES: dict[str, str] = {
     "XXMI": "MIT",
     "XXMI-Libs": "MIT",
@@ -57,7 +62,19 @@ LICENSES: dict[str, str] = {
     "ReShade": "BSD-3-Clause",
     "DLSS5-Feeder": "见上游仓库说明",
     "iMMERSE": "MIT",
+    "Streamline": "MIT（Copyright (c) 2023 NVIDIA CORPORATION）",
+    "Poser": "AGPL-3.0（源码见包内说明）",
 }
+
+#: AGPL-3.0 的 Poser：包内必须带上"源码在哪"（AGPL 的再分发义务）。
+POSER_SOURCE_NOTE = (
+    "Endfield Poser（AGPL-3.0）源码与许可：\n"
+    "  · 上游：https://github.com/OedoSoldier/Endfield-Poser （fork 自 honxi1/Endfield-Poser）\n"
+    "  · 本包内对应的安装包版本见 manifest.json 的 deps.Poser.version\n"
+    "  · AGPL-3.0 全文见本包 licenses/AGPL-3.0.txt\n"
+    "  按 AGPL-3.0 §4/§6：本包只做原样搬运（未修改任何文件），版权归原作者；\n"
+    "  需要对应源码请从上面的地址按同版本获取。\n"
+)
 
 
 def _log(message: str) -> None:
@@ -86,12 +103,27 @@ def _fetch(url: str, target: Path, *, digest: str = "", label: str = "") -> bool
     return target.is_file()
 
 
+def _license_text(repo: str) -> str:
+    """取仓库许可全文（走 GitHub API —— 网页被加速器劫持时 API 仍然通）。"""
+    import base64
+
+    try:
+        data = github.api_get(f"https://api.github.com/repos/{repo}/license")
+        content = str((data or {}).get("content") or "")
+        if content:
+            return base64.b64decode(content).decode("utf-8", "replace")
+    except Exception as exc:  # noqa: BLE001
+        return (f"（没能自动取到许可全文：{exc}）\n"
+                f"许可全文请见 https://github.com/{repo}\n")
+    return f"许可全文请见 https://github.com/{repo}\n"
+
+
 def collect(dest: Path, *, download: bool = True) -> dict[str, dict[str, Any]]:
     """把各组件原件收进 `dest/`，返回清单条目（key → 条目）。"""
     dest.mkdir(parents=True, exist_ok=True)
     entries: dict[str, dict[str, Any]] = {}
 
-    def record(key: str, path: Path, version: str, source: str) -> None:
+    def record(key: str, path: Path, version: str, source: str, *, extra: dict | None = None) -> None:
         entries[key] = {
             "asset": path.name,
             "version": version,
@@ -100,6 +132,8 @@ def collect(dest: Path, *, download: bool = True) -> dict[str, dict[str, Any]]:
             "source": source,
             "license": LICENSES.get(key, ""),
         }
+        if extra:
+            entries[key].update(extra)
         _log(f"  ✓ {key}: {path.name}（{path.stat().st_size / 1048576:.1f} MB，{version}）")
 
     # ---- GitHub 上的三个内置组件（XXMI / XXMI-Libs / EFMI）
@@ -167,6 +201,41 @@ def collect(dest: Path, *, download: bool = True) -> dict[str, dict[str, Any]]:
     except Exception as exc:  # noqa: BLE001
         _log(f"!! iMMERSE：{exc}")
 
+    # ---- Endfield Poser（AGPL-3.0）：**允许再分发**，条件是附许可全文 + 保留版权 + 给出源码途径
+    #      （用户 2026-10-12：「poser 指明源码地址」）。包内 `licenses/` 与说明里都写了。
+    try:
+        url, version, asset_name, digest = runtime_deps._latest_release_asset(
+            runtime_deps.POSER_REPO, runtime_deps.POSER_ASSET_PATTERN, include_prerelease=True)
+        target = dest / asset_name
+        if (not download or _fetch(url, target, digest=digest, label="Poser")) and target.is_file():
+            record("Poser", target, version, f"https://github.com/{runtime_deps.POSER_REPO}")
+    except Exception as exc:  # noqa: BLE001
+        _log(f"!! Poser：{exc}")
+
+    # ---- Streamline 运行库（**MIT**，2026-10-12 查证 license.txt 原文）：9 个 dll 可以随包。
+    #      ⚠️ 只打**本机已抽取的那 9 个 dll**（≈11 MB）—— 上游 SDK 本体 263 MB，进包会把包撑到
+    #      600 MB，群里根本发不出去。条目里标 `kind: streamline-dlls`，安装侧据此直接落位。
+    try:
+        installed = ROOT / "runtime" / "streamline"
+        marker_path = installed / ".endfieldmodcontroller_builtin.json"
+        version = ""
+        if marker_path.is_file():
+            version = str(json.loads(marker_path.read_text(encoding="utf-8")).get("version") or "")
+        missing_dlls = [name for name in runtime_deps.STREAMLINE_WANTED
+                        if not (installed / name).is_file()]
+        if missing_dlls:
+            _log(f"!! Streamline：本机 runtime\\streamline 里缺 {len(missing_dlls)} 个 dll，跳过"
+                 f"（先在依赖页把 Streamline 装好再打包）")
+        else:
+            target = dest / f"streamline-runtime-{version.lstrip('v') or 'unknown'}.zip"
+            with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED) as packed:
+                for name in runtime_deps.STREAMLINE_WANTED:
+                    packed.write(installed / name, name)
+            record("Streamline", target, version, "https://github.com/NVIDIA-RTX/Streamline",
+                   extra={"kind": "streamline-dlls"})
+    except Exception as exc:  # noqa: BLE001
+        _log(f"!! Streamline：{exc}")
+
     return entries
 
 
@@ -189,11 +258,16 @@ def _readme(entries: dict[str, dict[str, Any]]) -> str:
                      f"许可 {entry.get('license') or '见上游'}）")
     lines += [
         "",
-        "**不包含**（许可上不能随包，请自行联网安装）：",
-        "  · Endfield Poser（AGPL-3.0，本项目一直承诺不随包分发）",
-        "  · Streamline SDK（NVIDIA，条款限制再分发）",
-        "  · VC++ 运行库（微软，必须跑官方安装器）",
+        "**不包含**：",
+        "  · VC++ 运行库（微软条款：必须跑官方安装器；多数机器本来就有）——",
+        "    缺的话可在依赖页让程序检测并引导安装，或从微软官网下载 vc_redist.x64.exe。",
         "",
+        "许可与来源（本包只做**原样搬运**，未修改任何组件）：",
+        "  · 各组件版权归各自作者所有；许可证全文见本包 licenses\\ 目录；",
+        "  · 包内各文件的版本与 sha256 见 manifest.json；",
+        "  · 若任一作者不希望被这样分发，请联系我们，会立即停止分发并删除。",
+        "",
+        POSER_SOURCE_NOTE,
         f"构建时间：{time.strftime('%Y-%m-%d %H:%M:%S')}",
     ]
     return "\n".join(lines) + "\n"
@@ -218,12 +292,25 @@ def build(out: Path, *, download: bool = True) -> int:
                                           encoding="utf-8")
         (work / README_NAME).write_text(_readme(entries), encoding="utf-8")
 
+        # 许可全文（再分发的前提）：AGPL-3.0（Poser）与 MIT（Streamline）都从各自仓库取，
+        # 走 API（网页被加速器劫持时 API 仍然通）。取不到就退化成"指向仓库 URL"的说明，
+        # **不因此中断打包**（但不能悄悄漏掉 —— 说明里会写清）。
+        licenses = work / "licenses"
+        licenses.mkdir(parents=True, exist_ok=True)
+        (licenses / "AGPL-3.0.txt").write_text(
+            _license_text(runtime_deps.POSER_REPO), encoding="utf-8")
+        (licenses / "Streamline-MIT.txt").write_text(
+            _license_text("NVIDIA-RTX/Streamline"), encoding="utf-8")
+
         out.parent.mkdir(parents=True, exist_ok=True)
         count = 0
         total = 0
         with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_STORED) as archive:
             archive.write(work / MANIFEST_NAME, MANIFEST_NAME)
             archive.write(work / README_NAME, README_NAME)
+            for item in sorted(licenses.iterdir()):
+                if item.is_file():
+                    archive.write(item, f"licenses/{item.name}")
             for item in sorted((work / "deps").iterdir()):
                 if item.is_file():
                     archive.write(item, f"deps/{item.name}")
