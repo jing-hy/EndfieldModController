@@ -6100,3 +6100,72 @@ sbm-fork（D:\zmdmod\sbm-fork，2026-10-11 核实）：origin = 他自己的 for
 **下一个号**：再改代码 ⇒ 本地写 `1.3.1-beta`（v1.3.0 已于 2026-10-11 发布并设为 Latest）。
 
 `关键词：["项目待办","issue 16 等回报","0xC0000135 未定案","结构树四步","download-info.json 已安装不亮","sbm-fork 是否对齐上游","MMD 播放测试","提弗洛斯数值三选一","下一个号 1.2.2-beta"]`
+
+<!-- 增量追加 2026-10-12 23:13 · 新增 7 条（历史条目一律保留）-->
+
+<!-- rules · 设计原则 / 行为准则 -->
+### 【许可证红线更新（2026-10-12）：**modec…
+*2026-10-12 22:49*
+
+【许可证红线更新（2026-10-12）：**modecontroller 自己已从 MIT 改为 GPL-3.0-or-later**】
+原记录（2026-10-07）：Jorixon/JASM 与 Moonholder/JASM 都开源、都是 **GPL-3.0**，当时的约束是「GPL 代码不能复制进 modecontroller（MIT）」。
+**现在两边同族**：modecontroller 于 2026-10-12 由三个提交（`ba5e366` relicense、`b7d20ed` 补 SPDX、`55d9384` 文档补 SPDX）改为 **GPL-3.0-or-later** ⇒ 把 JASM 的 GPL-3.0 代码并入本仓库**在许可上兼容**（GPL-3.0 可升为 GPL-3.0-or-later）。
+**仍然要守的两条**：① 并入别人的代码**必须保留其版权与许可声明**（原作者 SPDX / LICENSE），不能抹掉出处；② 更稳的做法依旧是「读思路、自己重写」—— 归因清楚、也免掉风格与维护成本。
+**拉同类项目参考时的第一步不变**：先看它的 LICENSE；GPL/AGPL 只做思路对照，要粘贴就得连同声明一起按 GPL 兼容方式处理。
+
+`关键词：["许可证红线","GPL-3.0-or-later","MIT 改 GPL","relicense","JASM 许可","SPDX 声明","保留版权声明","读思路自己写","开源许可兼容","AGPL 上游"]`
+
+<!-- rules · 设计原则 / 行为准则 -->
+### 用户 2026-10-12 定的规则：「**以后构建测试…
+*2026-10-12 23:13*
+
+用户 2026-10-12 定的规则：「**以后构建测试都用串行**」。落地：`scripts/run_tests.py` 里原先那套「全量（>12 个测试文件）单线程 / 小范围才看 CPU 占用、<30% 上 `-n 4`」的判断**整套删除**，现在一律串行；只有用户自己显式传 `-n N` 才并发（脚本不拦、但会提示"不推荐"）。理由（两条都还在）：① 这套测试是文件 IO 密集型（复制/解压/扫真实目录），并行 worker 互相拖（实测 `-n 4` 跑全量 18 分钟未完、串行约 15 分钟）；② xdist 是多进程，跨进程共享状态（`runtime\_net\lines.json` 之类缓存）会带来随机失败。`requirements.txt` 里 pytest-xdist 保留但注明"不再自动使用"。
+
+`关键词：["构建测试一律串行","run_tests.py 串行","删除 CPU 占用并发判断","pytest-xdist 不再自动用","-n 4 弃用","IO 密集型互相拖","跨进程共享状态随机失败","用户 2026-10-12 定规矩"]`
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 【modecontroller 当前状态唯一真源】（20…
+*2026-10-12 22:49*
+
+【modecontroller 当前状态唯一真源】（2026-10-12 22:50 更新）
+**Latest Release = `v1.3.0`**（2026-10-11 发布并设为 Latest；tag → `9e2cd8e`）。**本机版本号 = `1.3.0`**。**main = `dd768d0`**（已推：含 10-12 的结构树镜像 + 记忆日志）。快照 `D:\zmdmod\_snapshot_1.3.0-20261012-224858`。
+**2026-10-12 上游变化（另一台电脑推的 3 个提交）**：**MIT → GPL-3.0-or-later**（`ba5e366`/`b7d20ed`/`55d9384`，细节见那条 relicense fact）。本机已同步（本机 20:55 自己 `pull --rebase --autostash` 过；fetch 后 0/0、API 直查远端 main 同为 `55d9384`），并顺带做了两件收尾：**modtest 全量重同步**（逐文件核验 643/643 一致）、**结构树行号平移**（147 模块 / 840 行号 → refresh 161 模块 → validate 0 error → build/render）→ 推 main `55d9384..dd768d0`。
+⚠️ **v1.3.0 的 exe 与 assets-bundle 是 relicense 之前构建的（MIT 时期）** —— 若要以 GPL 对外分发，需要重新构建再发一版（发 Release 必须用户明确说）。
+**本地已装组件**：XXMI v2.4.6 / Poser v0.5.58（2026-10-11 同步）。
+**下一步**：再改代码 ⇒ 本机写 `1.3.1-beta`；要按 GPL 重发 ⇒ 构建后用 `--draft` 流程发 `v1.3.1`。
+
+`关键词：["modecontroller 状态","最新 Release v1.2.2","1.2.3-beta","main f8e0368","机器侧稳定性","kernel_instability","System 日志","蓝屏 BugCheck","非正常关机","诊断包","快照","下一个版本号"]`
+
+<!-- lesson · 经验教训（被纠正过的、踩过的坑） -->
+### 【同步 / 核验 modtest 与仓库的正确做法（20…
+*2026-10-11 23:06*
+
+【同步 / 核验 modtest 与仓库的正确做法（2026-10-11 实测）】**别用 robocopy 整目录**：`/XD dist` 是按目录名匹配（任意层级），会把 `web\dist` 一起排除（前端产物缺失 ⇒ 源码版界面打不开）；还会把 `mod-backup`（8 GB 纯运行时产物）带进测试目录。
+**正确做法 = 按 `git -c core.quotepath=false ls-files` 的清单逐文件复制/比对**（只碰仓库跟踪的文件，本仓库 643 个；先比 size 再比 bytes）。核验口径：① 跟踪文件里「缺失 / 内容不同」必须为 0；② modtest 里「仓库没有的文件」只剩运行/构建产物才算正常（exe、config.json、*.obj、*.bak-*、frontend/src/demo-state.json、scripts/mc_bootstrap.dll）。
+参考实现：`_tmp\scratch\verify_modtest.py`（核验）+ `_tmp\scratch\sync_repo_to_modtest.py`（同步）。切记同步要在**改完源码/版本号之后**再跑，否则测试副本又落后（本次就是先同步后改版本号，出现 6 个不同 + 2 个缺失）。
+
+`关键词：["modtest 与仓库一致性","git ls-files 逐文件同步","robocopy 整目录的坑","web/dist 被误排除","quotepath=false 中文路径","核验测试副本","mod-backup 不要同步","同步要在改完源码之后","config.json 运行数据","643 个跟踪文件"]`
+
+<!-- lesson · 经验教训（被纠正过的、踩过的坑） -->
+### 脚本里调项目管理器代码时，`AppConfig()` 直…
+*2026-10-11 23:06*
+
+脚本里调项目管理器代码时，`AppConfig()` 直接构造是空壳，末尾的 `config.save()` 会抛 ValueError（"save() called without a path and without a loaded config file"）；必须用 `AppConfig.load()` 才会读数据根的 config.json。
+
+`关键词：["AppConfig.load","AppConfig 空壳","config.save ValueError","脚本调用 runtime_deps","数据根 config.json","ensure_xxmi","无头调用"]`
+
+<!-- fact · 事实（细碎的原子信息） -->
+### sbm-fork（D:\zmdmod\sbm-fork，…
+*2026-10-11 23:06*
+
+sbm-fork（D:\zmdmod\sbm-fork，2026-10-11 核实）：origin = 他自己的 fork `jing-hy/Arknights-Endfield-Plugin-Secondary-bodyphysics`，本次新加 upstream = `Sp1cHless/Arknights-Endfield-Plugin-Secondary-bodyphysics`。上游 main = `8f20b05`「Version 3.1.2」= 他 fork 的 origin/main（两边同号，无新提交）；**本地 main = `bed7468`，领先 6 个提交**，内容是上游 **PR #4**（作者 ABCwewe <zanjj@foxmail.com>，2026-09-07 开、`state=OPEN` 未合并，标题「每角色/步态的相位对齐(PLL)与自动频率对齐,以及拟合频率的跨角色/步态持久复用」）。上游最新 Release = 3.1.2「Jump update + import fix」（tag `Endfield-1.5-available`，2026-10-04）。
+
+`关键词：["sbm-fork","SecondaryMotion fork","Sp1cHless 上游","PR #4","ABCwewe","PLL 相位对齐","上游 main 3.1.2","8f20b05","Endfield-1.5-available","乳摇源码仓库"]`
+
+<!-- fact · 事实（细碎的原子信息） -->
+### modecontroller 2026-10-12 起从…
+*2026-10-12 22:49*
+
+modecontroller 2026-10-12 起从 MIT 改为 **GPL-3.0-or-later**（另一台电脑三个提交：`ba5e366` 换 LICENSE 为 GPL-3.0 全文 + README + frontend/package.json；`b7d20ed` 全部源文件补 `SPDX-License-Identifier: GPL-3.0-or-later`；`55d9384` 手写文档补 SPDX、详细版 README 许可声明与 shields 徽章同步）。本机核验（2026-10-12）：SPDX 覆盖 endfieldmodcontroller 52/54（缺的两个是 **0 字节空 `__init__.py`**，属正常）、scripts 26/26、tests 156/156、frontend/src 41/41；LICENSE 首行已是 GNU GPL v3。⚠️ **最新 Release v1.3.0 的产物是 relicense 之前构建的（MIT 时期）** —— 要按 GPL 重新对外分发得重新构建发版。
+
+`关键词：["relicense","GPL-3.0-or-later","MIT 改 GPL","SPDX-License-Identifier","LICENSE 全文","frontend package.json license","shields 徽章","0 字节 __init__.py","v1.3.0 产物早于 relicense","版权声明"]`
