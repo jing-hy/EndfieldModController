@@ -44,8 +44,21 @@ POSER_DATA_PATHS = (
     "plugin/poser-backups",
     "plugin/poses",
     "plugin/mmd",
+    # ⚠️ **`plugin/poser_layout.ini` 已从这里移除**（2026-10-12）：Poser 自带文档写明
+    #    「设置、快捷键 / 窗口布局 → `plugin/poser_config.txt` / `plugin/poser_layout.ini`」
+    #    —— 它是**用户配置**，不是注入物。原先净化把它搬走、重铺时写回默认，
+    #    用户那边就是「Poser 的快捷键被复写」。详见下面的 `USER_CONFIG_PATHS`。
+)
+#: **用户可改的设置/配置 —— 净化绝不搬走**（2026-10-12 修，来自"Poser 的快捷键被复写"）。
+#: 上游自带文档原文：`| 设置、快捷键 / 窗口布局 | plugin/poser_config.txt / plugin/poser_layout.ini |`。
+#: 原先这两份分别被 `plugin_log` 的 `.txt` 规则与 `POSER_DATA_PATHS` 扫走 ⇒ 每次"启动前净化"
+#: 都把用户的改键搬走，重新铺设时写回默认。判据仍是"原版有没有"，但**用户数据不得因净化而
+#: 丢失** —— 这与"Mod 库只读"是同一条红线。
+USER_CONFIG_PATHS = (
+    "plugin/poser_config.txt",
     "plugin/poser_layout.ini",
 )
+USER_CONFIG_PATHS_LOWER = frozenset(item.lower() for item in USER_CONFIG_PATHS)
 # ReShade 的痕迹（本方案承诺不写游戏目录，出现就是残留）。
 # ⚠️ **2026-10-05 补 `dxgi.dll`**（用户批准）：反馈者那台游戏目录里就躺着一份
 # `dxgi.dll`(1,294,864 B) + `d3d12.dll`(146,152 B)（同为 9-14 生成），而这份名单里**只有
@@ -226,6 +239,10 @@ def audit(config: AppConfig, *, log: Log = None) -> dict[str, Any]:
             if not item.is_file():
                 continue
             name = item.name.lower()
+            # ★ 用户配置（Poser 的设置与快捷键）**一律不动**（2026-10-12）：它们会被下面的
+            #   `.txt` 规则当成"插件日志"扫走，从而把用户改过的键位一起搬走。
+            if f"{plugin_dir.name}/{item.name}".lower() in USER_CONFIG_PATHS_LOWER:
+                continue
             disabled = (item.name.endswith(reshade_integration.PLUGIN_DISABLED_SUFFIX)
                         or "disabled" in name)
             if name.endswith(".dll") or disabled:

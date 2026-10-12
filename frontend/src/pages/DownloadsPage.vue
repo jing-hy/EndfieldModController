@@ -75,7 +75,32 @@ async function refresh() {
     totalSpeed.value = Number(result.speed_bps || 0);
     // 侧栏徽标读同一份真源（App.vue 每 2 秒也在刷；这里顺手对齐，切换更跟手）
     store.activeDownloads = activeCount.value;
+    maybeSuggestOffline(depTask.value);
   } catch (e) { /* 轮询失败保持上一次的显示，不打扰用户 */ }
+}
+
+// ★ **下载失败 ⇒ 建议改用离线依赖包**（用户 2026-10-12：「如果检测 github 下载失败，需要在
+//   日志中用红色提示，然后弹窗建议使用 q 群离线包」）。后端只在**真失败**时才给
+//   `offline_hint`（中途"换线路/重试"是正常自动切换，不算失败），同一条提示只弹一次。
+const hintShown = ref("");
+async function maybeSuggestOffline(task) {
+  const hint = task && task.offline_hint;
+  if (!hint || task.running || hintShown.value === String(hint)) return;
+  hintShown.value = String(hint);
+  const ok = await showModalDialog({
+    title: "组件没下载成功：可以改用离线依赖包",
+    message: String(hint) + "\n\n拿到包之后：依赖页 → 顶部「导入依赖包…」。",
+    okText: "知道了", cancelText: "去依赖页导入",
+  });
+  if (!ok) store.tab = "dependencies";
+}
+
+// 日志分级：行首 `!!` = 错误（红字）、`✓` = 成功（绿字），其余保持亮字。
+function lineStyle(line) {
+  const text = String(line || "");
+  if (text.startsWith("!!")) return { color: "#ff6b6b" };
+  if (text.startsWith("✓")) return { color: "#4ade80" };
+  return {};
 }
 
 // ── 任务控制（与后端 `downloads_*` 一一对应；不支持的类型后端会如实拒绝）─────────
@@ -287,7 +312,10 @@ useLogAutoScroll(logBox, () => logLines.value);
       <!-- ⚠️ 日志框**任何情况都是纯黑**（.log-box 在 tokens.css 里）—— 只为与深色主题
            区分边界；`text_select` / user-select 保证可复制（用户明确要过）。 -->
       <div v-if="logLines.length" ref="logBox" class="log-box mt-3"
-           style="max-height: 420px; border-radius: 0">{{ logLines.join("\n") }}</div>
+           style="max-height: 420px; border-radius: 0">
+        <!-- 逐行渲染以便分级着色（用户 2026-10-12：失败红字、成功绿字） -->
+        <div v-for="(line, i) in logLines" :key="i" :style="lineStyle(line)">{{ line }}</div>
+      </div>
     </Card>
 
     <!-- 空态：说清"这里会出现什么"，而不是一片空白 -->

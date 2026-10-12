@@ -2494,6 +2494,25 @@ class EndfieldModControllerApi:
                     self._dep_task.get("computed_bytes")
                     or self._dep_task.get("expected_bytes") or 0)
                 self._dep_task["message"] = "完成"
+                # ★ **日志分级 + 失败引导离线包**（用户 2026-10-12 原话：「如果检测 github
+                #   下载失败，需要在日志中用红色提示，然后弹窗建议使用 q 群离线包，然后下载成功
+                #   日志最后也要用绿色字说明」）。约定：行首 `!!` = 错误（前端红字），
+                #   `✓` = 成功（前端绿字）。**只有真的失败才提示离线包** ——
+                #   中途"换线路/重试"那些是正常自动切换，不许当失败报（老教训）。
+                failed_items = [item for item in results
+                                if str(getattr(item, "status", "")) in
+                                {"error", "missing", "missing_source"}]
+                if failed_items:
+                    names = "、".join(str(getattr(item, "key", "") or "?")
+                                      for item in failed_items[:4])
+                    self._dep_task["log"].append(f"!! 有 {len(failed_items)} 项没装上：{names}")
+                    hint = ("连不上 GitHub？可以加 QQ 群 1045239747（验证答案 jing_hy）拿"
+                            "「离线依赖包」，回到本页点「导入依赖包…」即可，全程不需要访问 GitHub。")
+                    self._dep_task["offline_hint"] = hint
+                    self._dep_task["log"].append("!! " + hint)
+                else:
+                    self._dep_task["log"].append(
+                        f"✓ 全部组件已就绪（本次处理 {done_items} 项，下载完成）")
                 estimated = int(self._dep_task.get("estimated_total") or 0)
                 if estimated and estimated != done_items:
                     self._dep_task["log"].append(
@@ -2514,7 +2533,12 @@ class EndfieldModControllerApi:
                     self._dep_task["log"].append(f"第一人称设置同步失败（忽略）: {exc}")
             except Exception as exc:  # noqa: BLE001
                 self._dep_task["message"] = f"失败: {exc}"
-                self._dep_task["log"].append(f"失败: {exc}")
+                # 红字 + 弹窗引导离线包（只有真失败才提示；中途换线路不算失败）
+                self._dep_task["log"].append(f"!! 下载失败：{exc}")
+                hint = ("连不上 GitHub？可以加 QQ 群 1045239747（验证答案 jing_hy）拿"
+                        "「离线依赖包」，回到本页点「导入依赖包…」即可，全程不需要访问 GitHub。")
+                self._dep_task["offline_hint"] = hint
+                self._dep_task["log"].append("!! " + hint)
             finally:
                 self._dep_task["running"] = False
 

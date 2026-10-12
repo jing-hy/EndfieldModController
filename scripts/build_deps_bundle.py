@@ -48,6 +48,9 @@ ASSETS = ROOT / "assets"
 BUNDLE_NAME = "deps-bundle.zip"
 MANIFEST_NAME = "manifest.json"
 README_NAME = "离线包说明.txt"
+#: 包体下限（MB）：用户 2026-10-12「325 可以发出去 …… 如果不足 325 补足」——
+#: QQ 群分发以 325 MB 这个尺寸实测可行，所以不足就追加 `_padding.bin`（导入时被忽略）。
+DEFAULT_MIN_SIZE_MB = 325
 
 #: (key, 说明, 许可) —— key 与 `offline_deps` 的索引键、以及各安装链路的查表键一致。
 #: ⚠️ **许可分两类**（2026-10-12 逐一查证，不再凭印象）：
@@ -262,6 +265,9 @@ def _readme(entries: dict[str, dict[str, Any]]) -> str:
         "  · VC++ 运行库（微软条款：必须跑官方安装器；多数机器本来就有）——",
         "    缺的话可在依赖页让程序检测并引导安装，或从微软官网下载 vc_redist.x64.exe。",
         "",
+        "说明：包内若有一个 `_padding.bin`，它只是把包体补到便于分发的体积（约 325 MB），",
+        "      导入时会被完全忽略，不参与任何校验。",
+        "",
         "许可与来源（本包只做**原样搬运**，未修改任何组件）：",
         "  · 各组件版权归各自作者所有；许可证全文见本包 licenses\\ 目录；",
         "  · 包内各文件的版本与 sha256 见 manifest.json；",
@@ -273,7 +279,35 @@ def _readme(entries: dict[str, dict[str, Any]]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def build(out: Path, *, download: bool = True) -> int:
+def _pad_to_min_size(path: Path, min_mb: int) -> int:
+    """包体不足 `min_mb` 时**补足**（用户 2026-10-12：「如果不足 325 补足」）。
+
+    实现在 zip 里追加一个 **`_padding.bin`**（零字节，ZIP_STORED 流式写入 —— 不会把几百 MB
+    读进内存）。为什么这样做是安全的：导入侧 `offline_deps.inspect_deps_bundle()` 只校验
+    `manifest.json` **声明的**那些文件、`import_deps_bundle()` 也只落 `deps/` 前缀的条目，
+    根目录这个填充文件两边都会被忽略（包里说明写明了它是干什么的）。
+
+    返回补进去的字节数（0 = 本来就不缺）。
+    """
+    size = path.stat().st_size
+    target = int(min_mb) * 1048576
+    if min_mb <= 0 or size >= target:
+        return 0
+    need = target - size
+    chunk = b"\0" * (1 << 20)
+    with zipfile.ZipFile(path, "a", compression=zipfile.ZIP_STORED) as archive:
+        with archive.open("_padding.bin", "w") as handle:
+            remaining = need
+            while remaining > 0:
+                piece = chunk if remaining >= len(chunk) else chunk[:remaining]
+                handle.write(piece)
+                remaining -= len(piece)
+    _log(f"包体不足 {min_mb} MB —— 已补足 {need / 1048576:.1f} MB（追加 _padding.bin，"
+         f"导入时会被忽略）")
+    return need
+
+
+def build(out: Path, *, download: bool = True, min_mb: int = 0) -> int:
     with tempfile.TemporaryDirectory(prefix="mc-deps-") as tmp:
         work = Path(tmp)
         entries = collect(work / "deps", download=download)
@@ -324,6 +358,7 @@ def build(out: Path, *, download: bool = True) -> int:
                         total += item.stat().st_size
             else:
                 _log("!! 本机没有 assets\\ 目录 —— 包里不含随包资产（DLSS 运行库等）")
+    _pad_to_min_size(out, min_mb)
     digest = sha256_of(out)
     (out.with_name(out.name + ".sha256")).write_text(f"{digest}  {out.name}\n", encoding="utf-8")
     _log(f"完成：{out}")
@@ -343,6 +378,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="构建离线依赖包（应急用，不进 Release）")
     parser.add_argument("--out", default=str(DIST / BUNDLE_NAME), help="输出路径")
     parser.add_argument("--skip-download", action="store_true", help="只用本机已有原件，不联网")
+    parser.add_argument("--min-size-mb", type=int, default=DEFAULT_MIN_SIZE_MB,
+                        help=f"包体下限（不足就补足，默认 {DEFAULT_MIN_SIZE_MB} MB；0 = 不补）")
     args = parser.parse_args(argv)
     for stream in (sys.stdout, sys.stderr):
         try:
@@ -351,7 +388,7 @@ def main(argv: list[str] | None = None) -> int:
             pass
     if shutil.which("git") is None:
         _log("提示：本脚本不需要 git，这里只是提醒你确认网络能访问 GitHub。")
-    return build(Path(args.out), download=not args.skip_download)
+    return build(Path(args.out), download=not args.skip_download, min_mb=int(args.min_size_mb))
 
 
 if __name__ == "__main__":
