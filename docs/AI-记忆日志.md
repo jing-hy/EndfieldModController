@@ -6194,3 +6194,13 @@ modecontroller 2026-10-12 起从 MIT 改为 **GPL-3.0-or-later**（另一台电�
 **措辞已改**：README/详细文档里 Poser 的「不随包分发」→「**不随 Release 分发**……应急离线包内包含时附许可全文与源码地址」。
 
 `关键词：["离线依赖包","deps-bundle.zip","不随 Release","QQ 群分发","应急方案","build_deps_bundle.py","导入依赖包按钮","offline_deps","离线源优先","不含 Poser AGPL","Streamline 排除","自动配置"]`
+
+<!-- 增量追加 2026-10-12 23:31 · 新增 1 条（历史条目一律保留）-->
+
+<!-- lesson · 经验教训（被纠正过的、踩过的坑） -->
+### 【许可证必须查原文，不许凭印象 —— 我又栽了一次（20…
+*2026-10-12 23:18*
+
+【许可证必须查原文，不许凭印象 —— 我又栽了一次（2026-10-12）】我先按"印象"判定 `NVIDIA-RTX/Streamline` 的 SDK "条款限制再分发"，据此把它排除在离线包外；用户追问"另外两个有没有进包方法"后我去读 `license.txt` 原文，发现它**就是标准 MIT**（`Permission is hereby granted … to use, copy, modify, merge, publish, distribute, sublicense, and/or sell`，唯一附加句只针对 **Nsight Perf SDK**，我们不用它）⇒ 9 个运行库 dll 完全可以随包。**教训**：许可结论只能来自**读原文**（`gh api repos/<owner>/<repo>/license` 取全文，网页被加速器劫持时 API 仍通）；"看起来是商业 SDK 所以不能分发"是最容易犯的想当然。同批查证：Poser = AGPL-3.0（**允许**再分发，条件是附全文 + 版权 + 源码途径 ⇒ "指明源码地址"就满足）、VC++ = 微软（必须官方安装器，不可随包）。
+
+`关键词：["许可证查原文","Streamline 是 MIT","不要凭印象判断许可","gh api license 取全文","AGPL 再分发条件","源码地址义务","Nsight Perf SDK 例外","VC++ 不可随包","离线包许可合规"]`
