@@ -6070,3 +6070,33 @@ il2cpp 符号从 `Endfield_Data\il2cpp_data\Metadata\global-metadata.dat`（57 M
 sbm-fork（D:\zmdmod\sbm-fork，2026-10-11 核实）：origin = 他自己的 fork `jing-hy/Arknights-Endfield-Plugin-Secondary-bodyphysics`，本次新加 upstream = `Sp1cHless/Arknights-Endfield-Plugin-Secondary-bodyphysics`。上游 main = `8f20b05`「Version 3.1.2」= 他 fork 的 origin/main（两边同号，无新提交）；**本地 main = `bed7468`，领先 6 个提交**，内容是上游 **PR #4**（作者 ABCwewe <zanjj@foxmail.com>，2026-09-07 开、`state=OPEN` 未合并，标题「每角色/步态的相位对齐(PLL)与自动频率对齐,以及拟合频率的跨角色/步态持久复用」）。上游最新 Release = 3.1.2「Jump update + import fix」（tag `Endfield-1.5-available`，2026-10-04）。
 
 `关键词：["sbm-fork","SecondaryMotion fork","Sp1cHless 上游","PR #4","ABCwewe","PLL 相位对齐","上游 main 3.1.2","8f20b05","Endfield-1.5-available","乳摇源码仓库"]`
+
+<!-- 增量追加 2026-10-12 22:48 · 新增 2 条（历史条目一律保留）-->
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 【modecontroller 当前状态唯一真源】（20…
+*2026-10-11 23:06*
+
+【modecontroller 当前状态唯一真源】（2026-10-11 23:07 更新）
+**Latest Release = `v1.3.0`**（2026-10-11 23:06 发布并设为 Latest；tag → `9e2cd8e`）。**本地 = `1.3.0`**（同号，不欠号）。**main = `9e2cd8e`**（已推）。快照 `D:\zmdmod\_snapshot_1.3.0-20261011-230445`。
+**v1.3.0 内容（只此一项）**：随包组件版本表同步上游最新 —— XXMI `v2.4.1→v2.4.6`、Poser `0.5.57→0.5.58`（另四项核对后本来就一致）。⚠️ **版本号是用户主动跳到 1.3.0**（不是"Release+1"的 1.2.4），所以 `scripts/release_version.py` 会 WARN —— 那是**软约束、不阻断**构建，属预期。
+**v1.3.0 构建与发布实测**：`build_release.py --with-tests` ⇒ **1289 passed / 220s**；产物 `dist\EndfieldModController.exe` = 35,070,190 B（sha256 `1bb13ccd…3593`）、`dist\assets-bundle.zip` = 262,029,848 B（sha256 `c1f05691…034e`）；附件**只推这两个、都不带版本号**；发布走 draft（id 409738154）→ `upload_release_assets.py --tag v1.3.0` → `gh release edit --draft=false --latest`；modtest 已同步新 exe。
+**上一个版本 v1.2.3**（另一台电脑发的）含「禁用所有 ReShade 注入」总开关、移除 DLSS4 MFG、净化残留修复、子目录注入审计等。
+**下一步**：再改代码 ⇒ 本地写 `1.3.1-beta`；发版时去掉 beta。
+
+`关键词：["modecontroller 状态","最新 Release v1.2.2","1.2.3-beta","main f8e0368","机器侧稳定性","kernel_instability","System 日志","蓝屏 BugCheck","非正常关机","诊断包","快照","下一个版本号"]`
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 【modecontroller 待办（2026-10-1…
+*2026-10-11 23:06*
+
+【modecontroller 待办（2026-10-11 23:07 更新）】
+① **等 issue #16（xingluo667）回报** —— 他与华硕那台 `0xC0000135` 的真因仍未定案（已排除：显卡驱动 / VC++ 运行库 / 注入未进进程 / 旧版 Streamline）。
+② 改了后端源码要补 normify 结构树四步（`normify_realign.py --apply` → `module_refresh(all=true,activate=true)` → `validate` 0 error → `build`+`render`）；`push.py` 只同步镜像、不重算。
+③ 商城的「已安装」标记依赖 `download-info.json`（只有本程序下载过的才有）—— 手工/整合包放进库的 Mod 不亮卡片是**正确行为**。
+④ sbm.dll / sbm-fork 那条线（2026-10-11 核实并处理完）：上游 main = 3.1.2（`8f20b05`）；本地 6 个提交 = 上游 **PR #4**（ABCwewe，OPEN 未合并），已推到他自己的 fork（`origin/main` = `bed7468`）。
+⑤ MMD 播放测试（Poser 侧）与提弗洛斯运动数值三选一（sbm 侧）仍未做。
+⑥ modtest 已含源码、且与仓库逐文件核验一致（643/643）；其 `mod-backup` 里混着工作区那份 ~8 GB 副本（待定是否清理）。
+**下一个号**：再改代码 ⇒ 本地写 `1.3.1-beta`（v1.3.0 已于 2026-10-11 发布并设为 Latest）。
+
+`关键词：["项目待办","issue 16 等回报","0xC0000135 未定案","结构树四步","download-info.json 已安装不亮","sbm-fork 是否对齐上游","MMD 播放测试","提弗洛斯数值三选一","下一个号 1.2.2-beta"]`
