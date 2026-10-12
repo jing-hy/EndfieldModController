@@ -11,19 +11,19 @@ description:
   en: >
       Version bookkeeping for the third-party pieces: read a file's version resource, compare installed versions against upstream, report which components have updates, and run the per-component updaters (ReShade base, jiggle physics, Poser).
       
-revision: 20521577d9cf0d2206617a54825953f305763895
-updated_at: "2026-10-07T14:32:31.353Z"
-fingerprint: 84aca681bcbc26d1fe285dcbb12495899f375a1bd86a3af49187b470ea30c80c
+revision: 55d938448b4178c517e948237ce04bb8fda54fbe
+updated_at: "2026-10-12T14:48:34.247Z"
+fingerprint: d0fe1df9af1b7f4c3a57ba1dc8eba0af5fc68da470e7d532cb32a554078ff431
 source:
   - path: "endfieldmodcontroller/updates.py"
-    line: 45
-    end_line: 135
+    line: 46
+    end_line: 137
   - path: "endfieldmodcontroller/updates.py"
-    line: 171
-    end_line: 413
+    line: 172
+    end_line: 415
   - path: "endfieldmodcontroller/updates.py"
-    line: 337
-    end_line: 776
+    line: 338
+    end_line: 778
 apis:
   - protocol: rpc
     path: "updates.file_version"

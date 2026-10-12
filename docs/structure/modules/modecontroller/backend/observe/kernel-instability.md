@@ -11,28 +11,32 @@ description:
   en: >
       Read the machine's own kernel-level events from the System log — bugchecks (1001), unexpected shutdowns (Kernel-Power 41 / EventLog 6008), WHEA hardware errors and who initiated a shutdown (User32 1074) — rendered as a diagnostic-report section with a timeline. Previously only the Application log was read, so nothing from the System side was ever captured.
       
-revision: 20521577d9cf0d2206617a54825953f305763895
-updated_at: "2026-10-07T14:33:00.728Z"
-fingerprint: 12d919810c46ff200a7cdaabe69117e74ffbba3b9dfbb7ff2e072cd038d44945
+revision: 55d938448b4178c517e948237ce04bb8fda54fbe
+updated_at: "2026-10-12T14:48:34.231Z"
+fingerprint: 04c43ba1943a230a638ef8e106777d211b782ae271f55500245202e94c5ad1af
 source:
   - path: "endfieldmodcontroller/kernel_instability.py"
-    line: 1
-    end_line: 390
+    line: 2
+    end_line: 392
 apis:
   - protocol: rpc
     path: "collect_kernel_events"
     description:
       zh: >
           采一次机器侧稳定性（System 日志，默认 30 天窗口）。采集失败时 ok=False 并如实给出原因 —— 绝不能被当成「机器是稳的」。
+          
       en: >
           Collect machine-side stability once (System log, 30-day window by default). On failure ok=False with an honest reason — never to be read as "the machine is fine".
+          
   - protocol: rpc
     path: "render_kernel_section"
     description:
       zh: >
           把结果渲染成诊断报告里的一段（自带标题）与时间轴；调用方给了本次启动时刻时，额外汇总「距本次启动最近的一条」供对照。
+          
       en: >
           Render the result as a diagnostic-report section (heading included) with a timeline; when the caller passes the launch time, also report the nearest preceding event for reference.
+          
 ---
 
 ## 为什么需要它

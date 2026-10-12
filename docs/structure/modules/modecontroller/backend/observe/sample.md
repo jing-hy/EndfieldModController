@@ -11,13 +11,13 @@ description:
   en: >
       Sample the running game cheaply: working set, thread count, loaded modules outside system paths — appended as a timeline so a later crash bundle shows what changed before it, not just the final state.
       
-revision: 20521577d9cf0d2206617a54825953f305763895
-updated_at: "2026-10-07T14:32:31.349Z"
-fingerprint: 3c8f427157a62a2866cbe66c004277c5e9efdd8a7ce91f0c90cfc3f2faa6f2fe
+revision: 55d938448b4178c517e948237ce04bb8fda54fbe
+updated_at: "2026-10-12T14:48:34.233Z"
+fingerprint: a628b0dc21b0eea3eef6dee66ac035eb7614a1e88c12b4fdaf8db892ce38c6ec
 source:
   - path: "endfieldmodcontroller/watchsample.py"
-    line: 97
-    end_line: 300
+    line: 98
+    end_line: 302
 apis:
   - protocol: rpc
     path: "sample"

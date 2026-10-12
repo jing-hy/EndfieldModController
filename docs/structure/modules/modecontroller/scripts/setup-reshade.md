@@ -11,13 +11,13 @@ description:
   en: >
       Set up ReShade in the development checkout for local debugging, so the developer machine mirrors what a user's machine looks like after the controller has deployed it.
       
-revision: 20521577d9cf0d2206617a54825953f305763895
-updated_at: "2026-10-07T14:32:31.356Z"
-fingerprint: fe716bc38e756db366398096302170441f8c852ea3fb7b258eb87bc5e4a2d268
+revision: 55d938448b4178c517e948237ce04bb8fda54fbe
+updated_at: "2026-10-12T14:48:34.249Z"
+fingerprint: ec8a8ecf7354e54a46aa97b35e927ff954a2d72b27aa40dbb208e13657f104ed
 source:
   - path: "scripts/setup_reshade.py"
-    line: 1
-    end_line: 20
+    line: 2
+    end_line: 22
 apis:
   - protocol: rpc
     path: "scripts.setup_reshade"

@@ -11,9 +11,9 @@ description:
   en: >
       Offline unit tests under tests/ (pytest, 45 files / 418 cases): every path is patched to tmp_path — no network, no touching the real game dir or runtime. Covers library-scan layout, activation and dependencies, library-safety guards, crash attribution and memory, diagnostic bundles, self-update, alert version gating and ini linting. Run: python -m pytest tests -q.
       
-revision: 20521577d9cf0d2206617a54825953f305763895
-updated_at: "2026-10-07T14:32:31.358Z"
-fingerprint: 37d304aa4b6f83cdfacdb5a591bdaed4e180c72954af4cb3081d6345dd34811a
+revision: 55d938448b4178c517e948237ce04bb8fda54fbe
+updated_at: "2026-10-12T14:48:34.253Z"
+fingerprint: 4cf4ae80cf0a41fd6249100104ac004e5d3b51c66dc789667675186a24294bb6
 source:
   - path: "tests/test_activation.py"
   - path: "tests/test_crash_cause.py"

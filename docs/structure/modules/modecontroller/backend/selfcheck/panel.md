@@ -11,13 +11,13 @@ description:
   en: >
       Health check for the panel's key path (rewritten 2026-10-02): (1) parse the PE import table of EFMI's `d3d11.dll` to confirm it imports `GetAsyncKeyState` — the panel presses mod keys by taking over exactly that call site, so without it every button would do nothing; (2) keep the legacy check — report any ReShade/add-on that occupies `F13..F24` (the old synthetic protocol keys).
       
-revision: 20521577d9cf0d2206617a54825953f305763895
-updated_at: "2026-10-07T14:32:31.351Z"
-fingerprint: 92e1ba767e4a78843f0e6b41af6090c4b897d224ae366014d5eb53aa5ef93d83
+revision: 55d938448b4178c517e948237ce04bb8fda54fbe
+updated_at: "2026-10-12T14:48:34.236Z"
+fingerprint: e98aca2583409aff83b683659e15209abe972d1976fff7d06b3ca6b47bfc9e2f
 source:
   - path: "endfieldmodcontroller/initialize.py"
-    line: 2774
-    end_line: 5370
+    line: 2812
+    end_line: 5454
 apis:
   - protocol: rpc
     path: "panel:hotkey_conflicts"

@@ -11,16 +11,16 @@ description:
   en: >
       A minimal Win32 DLL injector: find a process by executable name, open it, allocate and write the dll path, and create a remote thread — plus the wait-and-inject helper used when a process is still starting up.
       
-revision: 20521577d9cf0d2206617a54825953f305763895
-updated_at: "2026-10-07T14:32:31.338Z"
-fingerprint: d38e1d7dad5590a759ec00deb828081db2e3482abb4b2dfe52a30c2358451a43
+revision: 55d938448b4178c517e948237ce04bb8fda54fbe
+updated_at: "2026-10-12T14:48:34.214Z"
+fingerprint: 5aa1c40b733004f40d8af47c42a5b6a8ac29e93c6feb7953951a16137f15345e
 source:
   - path: "endfieldmodcontroller/injector.py"
-    line: 30
-    end_line: 94
+    line: 31
+    end_line: 96
   - path: "endfieldmodcontroller/injector.py"
-    line: 94
-    end_line: 190
+    line: 95
+    end_line: 192
 apis:
   - protocol: rpc
     path: "injector.inject_dll"

@@ -11,9 +11,9 @@ description:
   en: >
       Keeping things healthy over time: repair broken mod packages with an external tool (with backup and rollback), mirror the library into a backup repo, check for and apply program self-updates, and fetch the remote announcements/threat alerts that can gate a launch.
       
-revision: 20521577d9cf0d2206617a54825953f305763895
-updated_at: "2026-10-07T14:32:31.353Z"
-fingerprint: a0388b4d67925d2f4119b5be21af9afac3a05319572ce4c0f3475f9d551f6ed3
+revision: 55d938448b4178c517e948237ce04bb8fda54fbe
+updated_at: "2026-10-12T14:48:34.247Z"
+fingerprint: e472c02c5290b44df487d2c5400e208ede099a074151c0a3b9660c1a8a61680a
 source:
   - path: "endfieldmodcontroller/modfix.py"
   - path: "endfieldmodcontroller/modbackup.py"

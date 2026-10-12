@@ -11,13 +11,13 @@ description:
   en: >
       Dependencies page (Vue): component list from dependency_report.manifest with progress polling and one-click update.
       
-revision: 20521577d9cf0d2206617a54825953f305763895
-updated_at: "2026-10-07T14:32:31.361Z"
-fingerprint: 19a7e6fba50a03be6c521b0c57b2dd2215a94f540e72031631629e38446ed9eb
+revision: 55d938448b4178c517e948237ce04bb8fda54fbe
+updated_at: "2026-10-12T14:48:34.257Z"
+fingerprint: 4f5f5623ecf6bf9e0ba32561cde64f0482dbb1e28b7c41b5d7939ac794d264f1
 source:
   - path: "frontend/src/pages/DepsPage.vue"
-    line: 1
-    end_line: 1468
+    line: 2
+    end_line: 1470
 apis:
   - protocol: rpc
     path: "web.renderDependencies"

@@ -11,19 +11,19 @@ description:
   en: >
       Replace the running program with a newer one: check the release, rank and pick the right exe asset, download and sanity-check it, then apply by writing a helper batch script that waits for us to exit — the single most fragile operation in the program.
       
-revision: 20521577d9cf0d2206617a54825953f305763895
-updated_at: "2026-10-07T14:32:31.354Z"
-fingerprint: a87747dd2a2b82e9ca705562a9ccaae71da0815908411a774f5280b8dcf012ee
+revision: 55d938448b4178c517e948237ce04bb8fda54fbe
+updated_at: "2026-10-12T14:48:34.247Z"
+fingerprint: 203bfe608eef7eedd034523e216281262a29f3a8a78a638d644c59569d31a8f3
 source:
   - path: "endfieldmodcontroller/selfupdate.py"
-    line: 44
-    end_line: 123
+    line: 45
+    end_line: 125
   - path: "endfieldmodcontroller/selfupdate.py"
-    line: 119
-    end_line: 653
+    line: 120
+    end_line: 655
   - path: "endfieldmodcontroller/selfupdate.py"
-    line: 507
-    end_line: 914
+    line: 508
+    end_line: 916
 apis:
   - protocol: rpc
     path: "selfupdate.check_update"

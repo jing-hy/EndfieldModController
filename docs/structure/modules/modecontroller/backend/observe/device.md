@@ -11,16 +11,16 @@ description:
   en: >
       Read the machine's own facts from the registry: CPU and memory, every display adapter with driver version and VRAM, OS build, and the verdict on whether this GPU generation can run DLSS5 — used both by the UI and by self-checks.
       
-revision: 20521577d9cf0d2206617a54825953f305763895
-updated_at: "2026-10-07T14:32:31.347Z"
-fingerprint: 66c820d16ae0b0fd2fe3ee89f72bb6c857f4c05ec6121fea3f571cb1faae6567
+revision: 55d938448b4178c517e948237ce04bb8fda54fbe
+updated_at: "2026-10-12T14:48:34.228Z"
+fingerprint: 779a12f604470d7fe915732e3960b6a19964d074f2ab938b8284bb91f98f3632
 source:
   - path: "endfieldmodcontroller/deviceinfo.py"
-    line: 115
-    end_line: 754
+    line: 116
+    end_line: 624
   - path: "endfieldmodcontroller/deviceinfo.py"
-    line: 497
-    end_line: 821
+    line: 432
+    end_line: 691
 apis:
   - protocol: rpc
     path: "collect"

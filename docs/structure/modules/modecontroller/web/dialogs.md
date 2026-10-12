@@ -11,13 +11,13 @@ description:
   en: >
       Imperative dialogs and toasts (Vue) keeping the legacy API so business code could move over unchanged.
       
-revision: 20521577d9cf0d2206617a54825953f305763895
-updated_at: "2026-10-07T14:32:31.361Z"
-fingerprint: 61b9d7804902f7d0ea95a9100ebd800d0ef5c1bcabb98c837c3fa84eb795bdf0
+revision: 55d938448b4178c517e948237ce04bb8fda54fbe
+updated_at: "2026-10-12T14:48:34.257Z"
+fingerprint: 6958184c8ad693f2a9ea8d9b6d2142a2f70a36efe391c2e60eb26956c69cc80e
 source:
   - path: "frontend/src/lib/dialog.js"
-    line: 1
-    end_line: 198
+    line: 2
+    end_line: 200
 apis:
   - protocol: rpc
     path: "web.showModalDialog"

@@ -11,13 +11,13 @@ description:
   en: >
       Generate pinyin aliases for every character so a folder named in pinyin still matches the Chinese character name — the difference between "recognised" and "unknown character" for a lot of mods.
       
-revision: 20521577d9cf0d2206617a54825953f305763895
-updated_at: "2026-10-07T14:32:31.354Z"
-fingerprint: b8485b15954c0f05db07bbdd755fb7ef9b3964cda8daebbb28e1174543a44966
+revision: 55d938448b4178c517e948237ce04bb8fda54fbe
+updated_at: "2026-10-12T14:48:34.248Z"
+fingerprint: 2a19bbf620a09f5ba0149d20b469700bce55628c795a2888c48a79c851a4f043
 source:
   - path: "scripts/gen_character_pinyin.py"
-    line: 1
-    end_line: 145
+    line: 2
+    end_line: 147
 apis:
   - protocol: rpc
     path: "scripts.gen_character_pinyin"

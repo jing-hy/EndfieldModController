@@ -11,16 +11,16 @@ description:
   en: >
       Put a downloaded archive where it belongs: sanity-check the install directory name, install from the extracted tree, verify the result, and drive the whole thing in batches with retry and a progress callback the UI can poll.
       
-revision: 20521577d9cf0d2206617a54825953f305763895
-updated_at: "2026-10-07T14:32:31.335Z"
-fingerprint: 34750760c764a67386e74fba7177cb0ee04c5662766453fd8e4b5c58b2b45ae1
+revision: 55d938448b4178c517e948237ce04bb8fda54fbe
+updated_at: "2026-10-12T14:48:34.210Z"
+fingerprint: 3d110ab16f214d7c1a524fb4b298482cc28922d0a3935749069261d570ba0d03
 source:
   - path: "endfieldmodcontroller/dependencies.py"
-    line: 520
-    end_line: 654
+    line: 521
+    end_line: 656
   - path: "endfieldmodcontroller/dependencies.py"
-    line: 570
-    end_line: 800
+    line: 571
+    end_line: 802
 apis:
   - protocol: rpc
     path: "install_from_archive"

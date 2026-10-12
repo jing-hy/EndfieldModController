@@ -11,12 +11,12 @@ description:
   en: >
       The one-command release build: verify the version rule against the latest Release, run the full test suite, rebuild the exe, build a fake-old-version copy for update testing, tidy artefacts into _old, and sync the test directory.
       
-revision: 20521577d9cf0d2206617a54825953f305763895
-updated_at: "2026-10-07T14:32:31.354Z"
-fingerprint: bc7bc5318026378e1e43c8aa2372dc78ed355057984442627ee1d779b95810e4
+revision: 55d938448b4178c517e948237ce04bb8fda54fbe
+updated_at: "2026-10-12T14:48:34.248Z"
+fingerprint: 717f17da705e1293b777899cd8ddfb1f4a75c8cc5b6f0cc9068252a0dd09eb80
 source:
   - path: "scripts/build_release.py"
-    line: 1
+    line: 2
 apis:
   - protocol: rpc
     path: "scripts.build_release"

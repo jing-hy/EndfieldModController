@@ -11,21 +11,21 @@ description:
   en: >
       Tests for the library layer: folder layout scanning, ini parsing, character matching and aliases, assist-mod detection, the "looks like a dependency" rule, pruning entries whose files vanished, and the guard that refuses to touch the library itself.
       
-revision: 20521577d9cf0d2206617a54825953f305763895
-updated_at: "2026-10-07T14:32:31.360Z"
-fingerprint: 1179f9de737e63f4de54cd9eb815296462c67a715489290b9cd4e383106b4aaf
+revision: 55d938448b4178c517e948237ce04bb8fda54fbe
+updated_at: "2026-10-12T14:48:34.254Z"
+fingerprint: 0fc73844ed4a4ad02a0e7a41da647cd54102435da98d1e7fb920379aff1ef61a
 source:
   - path: "tests/test_core.py"
-    line: 1
-    end_line: 121
+    line: 2
+    end_line: 123
   - path: "tests/test_scan_library_layout.py"
-    line: 1
-    end_line: 91
+    line: 2
+    end_line: 93
   - path: "tests/test_character_match.py"
-    line: 1
-    end_line: 133
+    line: 2
+    end_line: 135
   - path: "tests/test_library_safeguard.py"
-    line: 1
-    end_line: 131
+    line: 2
+    end_line: 133
 apis: []
 ---

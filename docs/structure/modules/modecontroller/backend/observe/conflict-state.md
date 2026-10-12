@@ -11,13 +11,13 @@ description:
   en: >
       Persist the last static-conflict verdict so the crash watcher (running on another thread, often in a later session) can still tell whether this crash had a known conflict behind it — and keep the answer tied to the exact staged mod set it was computed for.
       
-revision: 20521577d9cf0d2206617a54825953f305763895
-updated_at: "2026-10-07T14:32:31.347Z"
-fingerprint: f1d18d8ea615542c25a81e2399fd65acfa3a9f44da7ef9a1d362549c5453fbea
+revision: 55d938448b4178c517e948237ce04bb8fda54fbe
+updated_at: "2026-10-12T14:48:34.227Z"
+fingerprint: d41eb977e6b1721a1ce2ce0f74472bd4189d2a90d23c9eccec32cf5d76ffbdfd
 source:
   - path: "endfieldmodcontroller/diagnostics.py"
-    line: 4203
-    end_line: 8684
+    line: 4244
+    end_line: 8766
 apis:
   - protocol: rpc
     path: "record_mod_conflicts"

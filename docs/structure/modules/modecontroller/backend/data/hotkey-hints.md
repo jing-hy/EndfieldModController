@@ -11,16 +11,16 @@ description:
   en: >
       Turn a mod's variable names into words a player understands: tokenise names and mesh hints, filter noise words, assemble a phrase, and fall back to a readable key name when nothing meaningful is found — this is what makes the panel say "开大后" instead of a variable dump.
       
-revision: 20521577d9cf0d2206617a54825953f305763895
-updated_at: "2026-10-07T14:32:31.337Z"
-fingerprint: 89d1d341ce51e9164f29244b59ba07b8a80dd0b3bee34c55bf77cf7a3c307904
+revision: 55d938448b4178c517e948237ce04bb8fda54fbe
+updated_at: "2026-10-12T14:48:34.212Z"
+fingerprint: c6685abd40f693261e08bed42c061ce699aceda7d0baaf6da0e7b5d379228646
 source:
   - path: "endfieldmodcontroller/hotkey_hints.py"
-    line: 184
-    end_line: 296
+    line: 185
+    end_line: 298
   - path: "endfieldmodcontroller/hotkey_hints.py"
-    line: 296
-    end_line: 480
+    line: 297
+    end_line: 482
 apis:
   - protocol: rpc
     path: "hotkey_hints.hint_for"

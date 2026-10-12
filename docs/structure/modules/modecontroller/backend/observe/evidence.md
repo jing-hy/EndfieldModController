@@ -11,19 +11,19 @@ description:
   en: >
       Gather the evidence a crash verdict rests on: the injection snapshot (which dlls sit where), CrashSight markers split into reportException vs uploadCrash, the Player.log tail, the normal-exit marker, and the game's own error lines.
       
-revision: 20521577d9cf0d2206617a54825953f305763895
-updated_at: "2026-10-07T14:32:31.347Z"
-fingerprint: 4bf7bb265341b41be4a347c6da397babeb121ac7387d84bd27164badca610ff7
+revision: 55d938448b4178c517e948237ce04bb8fda54fbe
+updated_at: "2026-10-12T14:48:34.229Z"
+fingerprint: a3d49496215fd1247a9d881d6b4fc2fedb96f07190e79dfb73b75f9f53517f65
 source:
   - path: "endfieldmodcontroller/crashwatch.py"
-    line: 98
-    end_line: 158
+    line: 99
+    end_line: 160
   - path: "endfieldmodcontroller/crashwatch.py"
-    line: 1893
-    end_line: 4705
+    line: 1894
+    end_line: 4707
   - path: "endfieldmodcontroller/crashwatch.py"
-    line: 2582
-    end_line: 4936
+    line: 2583
+    end_line: 4938
 apis:
   - protocol: rpc
     path: "collect_evidence"

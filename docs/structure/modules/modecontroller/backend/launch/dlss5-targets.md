@@ -11,19 +11,19 @@ description:
   en: >
       What goes into the injection library (extra_libraries) and who it must agree with: the ReShade base d3d12.dll plus EFMI's d3d11.dll, in that order. The loader listed must be the same file XXMI itself injects (same path, so it dedupes); when importer_folder points elsewhere XXMI injects a second same-named loader, so no second entry is added and that setting is repaired back to this installation's own directory.
       
-revision: 20521577d9cf0d2206617a54825953f305763895
-updated_at: "2026-10-07T14:32:31.340Z"
-fingerprint: 8718718362711068ee40c93f0650126fe52710c41d308509eb0d6def46d22254
+revision: 55d938448b4178c517e948237ce04bb8fda54fbe
+updated_at: "2026-10-12T14:48:34.217Z"
+fingerprint: 43a32b5be69efb4163acdf02f09c5677cabca0dcf913909a7a1c7457430de4c0
 source:
   - path: "endfieldmodcontroller/launcher.py"
-    line: 249
-    end_line: 400
+    line: 250
+    end_line: 402
   - path: "endfieldmodcontroller/launcher.py"
-    line: 1092
-    end_line: 4130
+    line: 1089
+    end_line: 4116
   - path: "endfieldmodcontroller/launcher.py"
-    line: 2411
-    end_line: 5018
+    line: 2405
+    end_line: 5004
 apis:
   - protocol: rpc
     path: "dlss5_injection_targets"

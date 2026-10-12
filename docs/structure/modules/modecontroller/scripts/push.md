@@ -11,13 +11,13 @@ description:
   en: >
       Push main safely: snapshot the environment first (git state, test data root, game folder inventory), then push with the token — and refuse to push if the snapshot failed.
       
-revision: 20521577d9cf0d2206617a54825953f305763895
-updated_at: "2026-10-07T14:32:31.355Z"
-fingerprint: 734967744630527dcef353d235ee88dd487a18377126115dcb34ad549108eba5
+revision: 55d938448b4178c517e948237ce04bb8fda54fbe
+updated_at: "2026-10-12T14:48:34.249Z"
+fingerprint: de9093bb2645710b7390a269addcd43bd949db767349b4615e100b6100760e0b
 source:
   - path: "scripts/push.py"
-    line: 1
-    end_line: 791
+    line: 2
+    end_line: 793
 apis:
   - protocol: rpc
     path: "scripts.push"

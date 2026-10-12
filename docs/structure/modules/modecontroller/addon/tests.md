@@ -11,16 +11,16 @@ description:
   en: >
       Offline verification of the injection link: a "fake EFMI" (**polling `GetAsyncKeyState` through its import table**, the way the real one reads keys) plus a host exe asserting 21 points: module found, import table patched, injection observed, held across frames, "just pressed" only once, modifier+key combo, automatic release, only the target module affected, untouched keys passed through, table restored on unload.
       
-revision: 20521577d9cf0d2206617a54825953f305763895
-updated_at: "2026-10-07T14:32:31.326Z"
-fingerprint: 2f31190229b81a272bb444aa4b47bbb00880b9d4c41a2948ed0d6387754ecbd2
+revision: 55d938448b4178c517e948237ce04bb8fda54fbe
+updated_at: "2026-10-12T14:48:34.201Z"
+fingerprint: f133c15071d01a863a59335df01e290e9573314aeee562b6c85d0626dbdf3bb5
 source:
   - path: "reshade_addon/tests/hook_host.cpp"
-    line: 116
-    end_line: 345
+    line: 117
+    end_line: 347
   - path: "reshade_addon/tests/fake_efmi_d3d11.cpp"
-    line: 24
-    end_line: 69
+    line: 25
+    end_line: 71
 apis:
   - protocol: rpc
     path: "FakeFrameRead"
