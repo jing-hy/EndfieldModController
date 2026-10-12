@@ -11,16 +11,16 @@ description:
   en: >
       Get a required file into place on demand: decompress multi-part payloads, fetch the assets bundle from the release, extract it, and verify — the path that repairs a runtime whose files were deleted or corrupted.
       
-revision: 55d938448b4178c517e948237ce04bb8fda54fbe
-updated_at: "2026-10-12T14:48:34.209Z"
-fingerprint: 215cbbfeed34155511d0e88efffef08206ad45fb0b040342f1ed4aff5a0ede8a
+revision: 5d0b7afdfa484162eedc2a76fff664d094efa131
+updated_at: "2026-10-12T15:24:16.859Z"
+fingerprint: 571093f5dd765a9c43ebca8256cc4413b66b99b2ad64b613c995869b8254deb3
 source:
   - path: "endfieldmodcontroller/runtime_assets.py"
-    line: 854
-    end_line: 2177
+    line: 872
+    end_line: 2241
   - path: "endfieldmodcontroller/runtime_assets.py"
-    line: 1207
-    end_line: 2634
+    line: 1238
+    end_line: 2698
 apis:
   - protocol: rpc
     path: "ensure_file"

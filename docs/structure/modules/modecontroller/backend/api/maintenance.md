@@ -11,19 +11,19 @@ description:
   en: >
       Repairing things: the integrity check / repair pair, per-mod fix and rollback with bulk progress, the whole-config rollback entry, and the jiggle-physics data sync status.
       
-revision: 55d938448b4178c517e948237ce04bb8fda54fbe
-updated_at: "2026-10-12T14:48:34.206Z"
-fingerprint: 705c7e12036d0ceb48484e9d5fb2cc0e640bfbc6e5249338ae43cf69292c1003
+revision: 5d0b7afdfa484162eedc2a76fff664d094efa131
+updated_at: "2026-10-12T15:24:16.856Z"
+fingerprint: 15f1c261021826e1b383b4ccedebcd7c6567db066f19ef386e0e0ddbb70bc548
 source:
   - path: "endfieldmodcontroller/api.py"
-    line: 2994
-    end_line: 7672
+    line: 3062
+    end_line: 7808
   - path: "endfieldmodcontroller/api.py"
-    line: 3770
-    end_line: 8796
+    line: 3838
+    end_line: 8932
   - path: "endfieldmodcontroller/api.py"
-    line: 7625
-    end_line: 12441
+    line: 7693
+    end_line: 12577
 apis:
   - protocol: rpc
     path: "check_integrity"

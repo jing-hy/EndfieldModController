@@ -11,8 +11,8 @@ description:
   en: >
       Process entry points and the pywebview shell: one-instance guard, stale _MEI temp-dir cleanup, window creation with an early static loading screen, bind js_api, run the webview loop; plus the --cli entry for headless smoke tests.
       
-revision: 55d938448b4178c517e948237ce04bb8fda54fbe
-updated_at: "2026-10-12T14:48:34.238Z"
+revision: 5d0b7afdfa484162eedc2a76fff664d094efa131
+updated_at: "2026-10-12T15:24:16.896Z"
 fingerprint: 1d799ceae0d33c55c5bb676959b76e269bd71d3e837dda3166e7502c2421c29e
 source:
   - path: "endfieldmodcontroller/app.py"

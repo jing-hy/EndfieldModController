@@ -11,13 +11,13 @@ description:
   en: >
       Checks for the two optional sub-plugins: whether Poser is actually deployed (and not re-running its wizard on every repair because an install record looks missing) and whether jiggle physics is installed and injected.
       
-revision: 55d938448b4178c517e948237ce04bb8fda54fbe
-updated_at: "2026-10-12T14:48:34.236Z"
-fingerprint: e98aca2583409aff83b683659e15209abe972d1976fff7d06b3ca6b47bfc9e2f
+revision: 5d0b7afdfa484162eedc2a76fff664d094efa131
+updated_at: "2026-10-12T15:24:16.894Z"
+fingerprint: aa6a6336e40b9a258eec7320f5e7fdae39a4c5c39a09676777bf73e476d3bebd
 source:
   - path: "endfieldmodcontroller/initialize.py"
-    line: 3963
-    end_line: 6424
+    line: 3961
+    end_line: 6420
 apis:
   - protocol: rpc
     path: "poser"

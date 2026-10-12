@@ -11,9 +11,9 @@ description:
   en: >
       Getting and keeping the runtime's third-party pieces: read the editable dependencies.json manifest, download (with retry and line switching), verify sha256, extract zip/7z/rar via 7-Zip or Windows bsdtar, install into _deps, and keep the built-in XXMI / Libraries / EFMI / Poser / DLSS5-feeder components in place.
       
-revision: 55d938448b4178c517e948237ce04bb8fda54fbe
-updated_at: "2026-10-12T14:48:34.210Z"
-fingerprint: 64c0d2ce2857fe82fa470df997f06e773b37e757fbda27847c020fa485d58cb0
+revision: 5d0b7afdfa484162eedc2a76fff664d094efa131
+updated_at: "2026-10-12T15:24:16.860Z"
+fingerprint: 7c77754c7e90b409f7d1c934100b488fc804fd9f7d673c1cebc7825b33fc570f
 source:
   - path: "endfieldmodcontroller/dependencies.py"
   - path: "endfieldmodcontroller/runtime_deps.py"

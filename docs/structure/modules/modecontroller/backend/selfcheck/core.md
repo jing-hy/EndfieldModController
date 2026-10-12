@@ -11,16 +11,16 @@ description:
   en: >
       The spine of the self-check: the Report model (ok / fixed / manual per item plus an action list), the ordered ensure_all entry that every check hangs off, and the rule that repair re-runs exactly the same chain so the two buttons never drift apart.
       
-revision: 55d938448b4178c517e948237ce04bb8fda54fbe
-updated_at: "2026-10-12T14:48:34.234Z"
-fingerprint: e98aca2583409aff83b683659e15209abe972d1976fff7d06b3ca6b47bfc9e2f
+revision: 5d0b7afdfa484162eedc2a76fff664d094efa131
+updated_at: "2026-10-12T15:24:16.888Z"
+fingerprint: aa6a6336e40b9a258eec7320f5e7fdae39a4c5c39a09676777bf73e476d3bebd
 source:
   - path: "endfieldmodcontroller/initialize.py"
-    line: 314
-    end_line: 949
+    line: 312
+    end_line: 945
   - path: "endfieldmodcontroller/initialize.py"
-    line: 4171
-    end_line: 6581
+    line: 4169
+    end_line: 6577
 apis:
   - protocol: rpc
     path: "initialize.ensure_all"

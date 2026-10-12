@@ -11,13 +11,13 @@ description:
   en: >
       The guard rails the UI must show before or after a run: pre-launch risk payload, conflict groups and the resolve-conflicts action, announcements and threat alerts (including the safe-mode restore / undo), crash-bundle status and the crash watcher state.
       
-revision: 55d938448b4178c517e948237ce04bb8fda54fbe
-updated_at: "2026-10-12T14:48:34.207Z"
-fingerprint: 705c7e12036d0ceb48484e9d5fb2cc0e640bfbc6e5249338ae43cf69292c1003
+revision: 5d0b7afdfa484162eedc2a76fff664d094efa131
+updated_at: "2026-10-12T15:24:16.857Z"
+fingerprint: 15f1c261021826e1b383b4ccedebcd7c6567db066f19ef386e0e0ddbb70bc548
 source:
   - path: "endfieldmodcontroller/api.py"
-    line: 1208
-    end_line: 2742
+    line: 1252
+    end_line: 2878
 apis:
   - protocol: rpc
     path: "prelaunch_risks"
