@@ -334,10 +334,18 @@ def install_reshade_base(
     force: bool = False,
 ) -> dict[str, Any]:
     target = config.dlss5_dll_path
-    try:
-        latest = version or reshade_latest_version(log)
-    except (urllib.error.URLError, OSError, RuntimeError) as exc:
-        return {"ok": False, "changed": False, "message": f"查询 ReShade 版本失败: {exc}"}
+    # ★ 离线优先（2026-10-12）：连不上 reshade.me / GitHub 的机器用离线依赖包里的安装器，
+    #   版本号也从离线索引取 —— 否则下面第一句"查最新版本"就会失败。
+    from . import offline_deps
+
+    offline = offline_deps.resolve_offline(config, "ReShade")
+    if offline is not None:
+        latest = offline[1] or version
+    else:
+        try:
+            latest = version or reshade_latest_version(log)
+        except (urllib.error.URLError, OSError, RuntimeError) as exc:
+            return {"ok": False, "changed": False, "message": f"查询 ReShade 版本失败: {exc}"}
 
     current = updates.file_version(target) if target.is_file() else ""
     if target.is_file() and current and _version_tuple(current) >= _version_tuple(latest) and not force:
@@ -347,7 +355,11 @@ def install_reshade_base(
     url = RESHADE_ASSET_URL.format(version=latest)
     try:
         with tempfile.TemporaryDirectory(prefix="mc-reshade-") as tmp:
-            setup = updates.download_file(url, Path(tmp) / f"ReShade_Setup_{latest}_Addon.exe", log=log, timeout=900)
+            if offline is not None:
+                setup = Path(offline[0])
+                _log(log, f"ReShade 底座：跳过下载，直接用离线依赖包里的 {offline[2]}")
+            else:
+                setup = updates.download_file(url, Path(tmp) / f"ReShade_Setup_{latest}_Addon.exe", log=log, timeout=900)
             try:
                 with zipfile.ZipFile(setup) as zf:
                     candidates = _members_by_basename(zf, "ReShade64.dll")
@@ -374,17 +386,25 @@ def install_dlss5_feed(
     log: Callable[[str], None] | None = None,
     force: bool = False,
 ) -> dict[str, Any]:
-    from . import github
+    from . import github, offline_deps
 
-    try:
-        release = github.releases_latest(FEEDER_REPO)
-    except Exception as exc:  # noqa: BLE001
-        return {"ok": False, "changed": False, "message": f"查询 DLSS5-Feeder release 失败: {exc}"}
-    tag = str(release.get("tag_name") or "")
-    asset = _pick_asset(release, "DLSS5-Feeder", ".zip")
-    if not asset:
-        return {"ok": False, "changed": False, "message": "release 里没有 DLSS5-Feeder 的 zip"}
-    url = str(asset.get("browser_download_url") or "")
+    # ★ 离线优先（2026-10-12）：离线包里有 Feeder 的 zip 就不查 release（连不上 GitHub 时
+    #   连"查 tag"这一步都会超时），tag 用离线索引里记的版本。
+    offline = offline_deps.resolve_offline(config, "DLSS5-Feeder")
+    if offline is not None:
+        tag = offline[1]
+        asset = {"name": offline[2]}
+        url = offline[0]
+    else:
+        try:
+            release = github.releases_latest(FEEDER_REPO)
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "changed": False, "message": f"查询 DLSS5-Feeder release 失败: {exc}"}
+        tag = str(release.get("tag_name") or "")
+        asset = _pick_asset(release, "DLSS5-Feeder", ".zip")
+        if not asset:
+            return {"ok": False, "changed": False, "message": "release 里没有 DLSS5-Feeder 的 zip"}
+        url = str(asset.get("browser_download_url") or "")
 
     component = _BY_KEY["dlss5_feed"]
     state = _component_state(config, component)
@@ -394,7 +414,11 @@ def install_dlss5_feed(
 
     try:
         with tempfile.TemporaryDirectory(prefix="mc-feeder-") as tmp:
-            archive = updates.download_file(url, Path(tmp) / str(asset.get("name") or "feeder.zip"), log=log, timeout=900)
+            if offline is not None:
+                archive = Path(offline[0])
+                _log(log, f"DLSS5-Feeder：跳过下载，直接用离线依赖包里的 {offline[2]}")
+            else:
+                archive = updates.download_file(url, Path(tmp) / str(asset.get("name") or "feeder.zip"), log=log, timeout=900)
             with zipfile.ZipFile(archive) as zf:
                 written: list[str] = []
                 for basename, relative in (
@@ -420,12 +444,18 @@ def install_immersse(
     log: Callable[[str], None] | None = None,
     force: bool = False,
 ) -> dict[str, Any]:
-    from . import github
+    from . import github, offline_deps
 
-    try:
-        revision = github.latest_commit(IMMERSE_REPO, IMMERSE_BRANCH)[:12]
-    except Exception as exc:  # noqa: BLE001
-        return {"ok": False, "changed": False, "message": f"查询 iMMERSE 仓库失败: {exc}"}
+    # ★ 离线优先（2026-10-12）：iMMERSE 的版本号本来是"最新提交 sha"，离线时拿不到 ⇒
+    #   用离线索引里记的 revision（打包时就写好了）。
+    offline = offline_deps.resolve_offline(config, "iMMERSE")
+    if offline is not None:
+        revision = offline[1]
+    else:
+        try:
+            revision = github.latest_commit(IMMERSE_REPO, IMMERSE_BRANCH)[:12]
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "changed": False, "message": f"查询 iMMERSE 仓库失败: {exc}"}
     if not revision:
         return {"ok": False, "changed": False, "message": "查不到 iMMERSE 的最新提交"}
 
@@ -441,7 +471,11 @@ def install_immersse(
     written: list[str] = []
     try:
         with tempfile.TemporaryDirectory(prefix="mc-immersse-") as tmp:
-            archive = updates.download_file(url, Path(tmp) / f"iMMERSE-{IMMERSE_BRANCH}.zip", log=log, timeout=900)
+            if offline is not None:
+                archive = Path(offline[0])
+                _log(log, f"iMMERSE：跳过下载，直接用离线依赖包里的 {offline[2]}")
+            else:
+                archive = updates.download_file(url, Path(tmp) / f"iMMERSE-{IMMERSE_BRANCH}.zip", log=log, timeout=900)
             with zipfile.ZipFile(archive) as zf:
                 for name in zf.namelist():
                     if name.endswith("/"):

@@ -147,6 +147,24 @@ def group_root(config: AppConfig, group: str) -> Path | None:
     return roots[0] if roots else None
 
 
+def missing_asset_groups(config: AppConfig) -> list[str]:
+    """哪些资产组**一个可用来源都没有**（数据根 / exe 所在目录 / exe 内嵌 / 仓库，全都没命中）。
+
+    **为什么要这个判据**（2026-10-12，来自一份真实诊断包 `diagnostics-20261012-001019`）：
+    只下了单文件 exe 的机器上，`assets\\dlss5\\`（三个 addon + manifest）是**打进 exe 的**，
+    而 `assets\\nvngx\\`（约 125 MB 分卷）与 `assets\\dlss5\\shaders|textures` **只在
+    `assets-bundle.zip` 里**。于是 `manifest_entries()` 非空 ⇒ 原来那句
+    「`if not found` 才去拉资产包」**永远不触发**，缺的那部分谁也补不上。那台机器的表现是：
+
+    * 面板「未安装 NR 运行时」—— `nvngx_dlssnr.dll` 落不下来（自检：`随包/本地都没有含该架构的运行库（已找到的候选：无）`）；
+    * ReShade 报 `Failed to compile … DLSS5_Feed.fx: could not open included file 'ReShade.fxh'`
+      —— 6 个 ReShade 标准头与 `Textures\\` 同样只在资产包里。
+
+    ⇒ 判据必须是"**每一组都得有来源**"，缺哪一组就说明资产不完整，要拉一次 `assets-bundle.zip`。
+    """
+    return [group for group in ASSET_GROUPS if not asset_roots(config, group)]
+
+
 def load_manifest(root: Path) -> dict[str, Any]:
     try:
         return json.loads((root / MANIFEST_NAME).read_text(encoding="utf-8"))
@@ -1110,7 +1128,16 @@ def _ensure_all_locked(
     if len(found) != len(_found_before_filter):
         _log(log, "随包清单里剔除了已退役的旧 NR 引擎（两个同名 neural addon 会导致两个都不工作）："
                   + "、".join(sorted(n for _g, _r, n, _e in _found_before_filter if _is_retired(n))))
-    if not found and allow_fetch:
+    # ⚠️ **判据不能只看 `found` 非空**（2026-10-12 修，反馈者现场 `diagnostics-20261012-001019`）：
+    #    单文件 exe 里内嵌了 `assets\dlss5\`（三个 addon），`found` 因此非空 —— 而
+    #    `assets\nvngx\` 与 `shaders` / `textures` 只在 `assets-bundle.zip` 里 ⇒
+    #    缺的组永远补不上，用户那边就是「未安装 NR 运行时」+ `DLSS5_Feed.fx` 编译失败。
+    #    现在只要**有任一组没有可用来源**就去拉一次资产包。
+    missing_before = missing_asset_groups(config)
+    if (not found or missing_before) and allow_fetch:
+        if missing_before:
+            _log(log, "本地缺少资产组：" + "、".join(missing_before)
+                      + "（这些文件只随 assets-bundle.zip 分发）—— 尝试从 Release 拉取")
         # 拉资产包是**网络下载**，失败要重试（用户 2026-10-01 要求「全部下载完之后如果
         # 有失败项，就重试，3 次截止」）。以前一次失败就直接报"找不到随包资产"，
         # 界面上看起来就是"完成，但有 1 项失败"。
@@ -1118,8 +1145,12 @@ def _ensure_all_locked(
             if attempt:
                 _log(log, f"资产包获取失败，重试第 {attempt}/{dependencies.MAX_BATCH_RETRIES} 次 …")
             fetched = fetch_bundle(config, log=log, force=bool(attempt))
+            done = False
             if fetched.get("changed"):
                 found = manifest_entries(config)
+                # 展开成功**且不再缺组**才算补齐（只补上一组、另一组仍缺时继续重试）
+                done = bool(found) and not missing_asset_groups(config)
+            if done:
                 break
             if attempt >= dependencies.MAX_BATCH_RETRIES:
                 if fetched.get("message"):
@@ -1231,9 +1262,10 @@ def fetch_bundle(
     force: bool = False,
 ) -> dict[str, Any]:
     """从本仓库 Release 下载 `assets-bundle.zip` 并解到工作区（得到 assets\\）。"""
-    if not force and any(
-        (PROJECT_ROOT / "assets" / group / MANIFEST_NAME).is_file() for group in ASSET_GROUPS
-    ):
+    # ⚠️ 判据是「**每一组**都有来源」而不是「**任一组**有 manifest」（2026-10-12 修）：
+    #    单文件 exe 里内嵌了 `assets\dlss5\`，用 `any(...)` 会让这台机器被判成
+    #    「本地已有 assets」而**永远不去拉** —— 缺的 nvngx / shaders / textures 补不上。
+    if not force and not missing_asset_groups(config):
         return {"ok": True, "changed": False, "message": "本地已有 assets"}
 
     import urllib.error

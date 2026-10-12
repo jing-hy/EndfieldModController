@@ -1,13 +1,11 @@
 #!/usr/bin/env python
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""跑单元测试 —— 与构建脚本拆开的独立入口（**并发按本机开始前的 CPU 占用决定**）。
+"""跑单元测试 —— 与构建脚本拆开的独立入口（**一律串行**）。
 
     python scripts/run_tests.py                    # 全量（tests/）
     python scripts/run_tests.py tests/test_x.py    # 只跑指定文件/目录
     python scripts/run_tests.py -k 关键字          # 其余参数原样透传给 pytest
     python scripts/run_tests.py --attempts 1       # 不重试
-    python scripts/run_tests.py --serial           # 强制单线程（忽略 CPU 占用）
-    python scripts/run_tests.py -n 4               # 自己指定并发（透传给 pytest）
     python scripts/run_tests.py --changed          # 只跑与本次改动相关的测试（日常用）
 
 **为什么单独一个脚本**（2026-10-09 用户要求：「本机不做并行构建和测试，你要拆两个脚本出来」）：
@@ -15,15 +13,15 @@
 * 构建（`build_release.py`）与测试不再挤在同一次调用里 —— 谁都不替谁做主：
   构建不会顺手跑全量测试，本脚本也绝不会去动 `dist\\`。
 
-**并发规则**（2026-10-10 改：**按"要跑多少"决定，CPU 只在小范围时才参与判断**）：
+**并发规则（2026-10-12 用户拍板：「以后构建测试都用串行」）**：
 
-* **全量（测试文件数 > `PARALLEL_MAX_FILES`）⇒ 一律单线程。** 这套测试是**文件 IO 密集**型
-  （复制 / 解压 / 扫描真实目录），并行 worker 之间会互相拖 —— 实测（2026-10-10，本机）：
-  `-n 4` 跑全量 **18 分钟仍未完成**，单线程约 15 分钟；并行度越高越容易互相干扰导致偶发失败。
-  （这条推翻了 2026-10-09 定的"CPU < 30% 就用 4 并发"：当时只看 CPU 占用，而瓶颈其实是磁盘。）
-* **小范围**（只跑几个文件）⇒ 这时看 CPU：开始前占用 **< 30%** 才 `-n 4`，否则单线程。
-* 读不到占用（非 Windows / API 不可用）⇒ 保守走单线程；没装 `pytest-xdist` ⇒ 自动退回单线程。
-* 想固定行为：`--serial` 强制单线程；直接传 `-n <N>` 则**完全听你的**。
+* **一律单线程**，不采 CPU 占用、也不看"要跑多少" —— 之前那套「全量单线程 / 小范围 CPU < 30%
+  才上 `-n 4`」的判断**整段删除**。两个理由都还在，只是结论改成"永远别并发"：
+  ① 这套测试是**文件 IO 密集型**（复制 / 解压 / 扫描真实目录），并行 worker 互相拖
+  （实测 2026-10-10：`-n 4` 跑全量 18 分钟仍未完成，串行约 15 分钟）；
+  ② xdist 是**多进程**，跨进程共享状态会带来随机失败（`runtime\\_net\\lines.json` 这类缓存被
+  多个 worker 交叉读写，表现为"随机翻、每次挂的方法还不一样"）。
+* 真想强行并发（不推荐）：自己传 `-n N`（脚本原样透传给 pytest，不做拦截）。
 
 **只跑与改动相关的测试**：`python scripts/run_tests.py --changed` —— 按 `git diff` 找出改过的
 模块，挑出对应/引用它的测试文件来跑（日常改动用它，几秒到几十秒；全量只在发版时跑）。
@@ -42,14 +40,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_TARGETS = ("tests",)
 
-#: 开始前 CPU 占用**低于**这个百分比 ⇒ 小范围时才上并发（用户 2026-10-09 定的阈值）。
-CPU_IDLE_BELOW_PERCENT = 30.0
-#: 要跑的测试文件**多于**这个数（≈ 全量）⇒ 一律单线程：这套测试是文件 IO 密集型，
-#: 实测（2026-10-10 本机）`-n 4` 跑全量 18 分钟仍未完成，单线程约 15 分钟。
-PARALLEL_MAX_FILES = 12
-#: 并发 worker 数（与旧构建脚本一致：`-n auto` 会按逻辑核开满，磁盘 IO 反而互相拖）。
-PARALLEL_WORKERS = 4
-
 
 def _fix_console() -> None:
     """中文 Windows 控制台默认 GBK —— 直接 print 项目里的中文/特殊字符会崩。"""
@@ -60,97 +50,13 @@ def _fix_console() -> None:
             pass
 
 
-def cpu_load_percent(sample_seconds: float = 0.35) -> float | None:
-    """本机**当前** CPU 占用百分比（Windows 用 `GetSystemTimes` 两次采样；读不到返回 None）。
-
-    * 不用 `os.getloadavg()`：Windows 上没有它。
-    * 不用 psutil：那要额外依赖，而这个脚本要能在"别人 clone 下来"时也跑得起来。
-    * 必须采两次：`GetSystemTimes` 给的是**开机以来的累计值**，求差才知道瞬时占用
-      （`(kernel + user)` 里已经含 idle，所以占用率 = 1 − Δidle/Δtotal）。
-    """
-    if sys.platform != "win32":
-        return None
-    try:
-        import ctypes
-        import time as _time
-        from ctypes import wintypes
-
-        class _FileTime(ctypes.Structure):
-            _fields_ = [("dwLowDateTime", wintypes.DWORD),
-                        ("dwHighDateTime", wintypes.DWORD)]
-
-        def _snapshot() -> tuple[int, int]:
-            idle, kernel, user = _FileTime(), _FileTime(), _FileTime()
-            ok = ctypes.windll.kernel32.GetSystemTimes(  # type: ignore[attr-defined]
-                ctypes.byref(idle), ctypes.byref(kernel), ctypes.byref(user))
-            if not ok:
-                raise OSError("GetSystemTimes 调用失败")
-
-            def _ticks(ft: "_FileTime") -> int:
-                return (ft.dwHighDateTime << 32) | ft.dwLowDateTime
-
-            return _ticks(idle), _ticks(kernel) + _ticks(user)
-
-        idle0, total0 = _snapshot()
-        _time.sleep(max(0.05, float(sample_seconds)))
-        idle1, total1 = _snapshot()
-        delta_idle, delta_total = idle1 - idle0, total1 - total0
-        if delta_total <= 0:
-            return None
-        return max(0.0, min(100.0, (1.0 - delta_idle / delta_total) * 100.0))
-    except Exception:  # noqa: BLE001 —— 探测失败一律当"读不到"，绝不因此中断测试
-        return None
-
-
-def count_target_files(targets: list[str]) -> int:
-    """这些目标下有多少个测试文件（用来判断"是不是全量"）。"""
-    total = 0
-    for item in targets:
-        path = Path(item)
-        if not path.is_absolute():
-            path = ROOT / path
-        try:
-            if path.is_dir():
-                total += sum(1 for _ in path.rglob("test_*.py"))
-            elif path.is_file():
-                total += 1
-        except OSError:
-            continue
-    return total
-
-
-def choose_parallel_args(*, serial: bool = False, extra: list[str] | None = None,
-                         targets: list[str] | None = None) -> list[str]:
-    """决定要不要并发：**范围大就单线程**，范围小才看 CPU（用户显式给了 `-n` 就听用户的）。"""
-    for item in (extra or []):
+def wants_parallel(extra: list[str]) -> bool:
+    """用户是不是显式要求并发（`-n` / `--numprocesses`）—— 一律串行的唯一例外。"""
+    for item in extra:
         text = str(item)
         if text == "-n" or text.startswith("--numprocesses"):
-            print("      并发：你已显式指定 -n → 沿用你的参数", flush=True)
-            return []
-    if serial:
-        print("      并发：--serial → 单线程", flush=True)
-        return []
-    try:
-        import xdist  # noqa: F401
-    except ImportError:
-        print("      并发：没装 pytest-xdist → 单线程", flush=True)
-        return []
-    files = count_target_files(list(targets or DEFAULT_TARGETS))
-    if files > PARALLEL_MAX_FILES:
-        print(f"      并发：这轮要跑 {files} 个测试文件（> {PARALLEL_MAX_FILES}，算全量）"
-              f"→ 单线程（实测并行跑全量更慢：IO 密集、worker 互相拖）", flush=True)
-        return []
-    load = cpu_load_percent()
-    if load is None:
-        print("      并发：读不到本机 CPU 占用 → 保守走单线程", flush=True)
-        return []
-    if load < CPU_IDLE_BELOW_PERCENT:
-        print(f"      并发：{files} 个文件 + 开始前 CPU 占用 {load:.0f}% "
-              f"< {CPU_IDLE_BELOW_PERCENT:.0f}% → 用 -n {PARALLEL_WORKERS}", flush=True)
-        return ["-n", str(PARALLEL_WORKERS)]
-    print(f"      并发：开始前 CPU 占用 {load:.0f}% ≥ {CPU_IDLE_BELOW_PERCENT:.0f}% "
-          f"→ 单线程（不跟本机正在用的东西抢资源）", flush=True)
-    return []
+            return True
+    return False
 
 
 def changed_test_targets() -> list[str]:
@@ -158,7 +64,7 @@ def changed_test_targets() -> list[str]:
 
     两条判据并集：
       ① **文件名对应**：`endfieldmodcontroller/launcher.py` ⇒ `tests/test_launcher*.py`；
-      ② **内容引用**：测试文件里出现过该模块名（`\blauncher\b`）—— 抓那些名字对不上、
+      ② **内容引用**：测试文件里出现过该模块名（`\\blauncher\\b`）—— 抓那些名字对不上、
          但确实依赖它的测试（比如 `test_crash_forensics` 会 import `launcher`）。
     前端改动（`frontend/`、`web/dist/`）一律带上 `test_frontend*.py`。
     """
@@ -203,10 +109,9 @@ def changed_test_targets() -> list[str]:
     return sorted(picked)
 
 
-def run(targets: list[str], *, attempts: int = 3, extra: list[str] | None = None,
-        parallel: list[str] | None = None) -> int:
-    """跑 pytest；偶发失败自动重试，返回进程退出码。"""
-    cmd = [sys.executable, "-m", "pytest", *targets, "-q", *(parallel or []), *(extra or [])]
+def run(targets: list[str], *, attempts: int = 3, extra: list[str] | None = None) -> int:
+    """跑 pytest（**串行**，除非用户自己传了 `-n`）；偶发失败自动重试，返回进程退出码。"""
+    cmd = [sys.executable, "-m", "pytest", *targets, "-q", *(extra or [])]
     last_output = ""
     for attempt in range(1, attempts + 1):
         result = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True,
@@ -229,13 +134,12 @@ def run(targets: list[str], *, attempts: int = 3, extra: list[str] | None = None
 
 def main(argv: list[str] | None = None) -> int:
     _fix_console()
-    parser = argparse.ArgumentParser(
-        description="跑单元测试（并发按开始前的 CPU 占用决定：<30% 用 4 并发，否则单线程）")
+    parser = argparse.ArgumentParser(description="跑单元测试（一律串行，不并发）")
     parser.add_argument("targets", nargs="*", help="要跑的路径（默认 tests/）")
     parser.add_argument("--attempts", type=int, default=3,
                         help="偶发失败的重试上限（默认 3；给 1 表示不重试）")
     parser.add_argument("--serial", action="store_true",
-                        help="强制单线程（忽略 CPU 占用检测）")
+                        help="（现在默认就是串行；此开关为兼容旧命令保留）")
     parser.add_argument("--changed", action="store_true",
                         help="只跑与 git 改动相关的测试（日常用；发版请跑全量）")
     args, extra = parser.parse_known_args(argv)
@@ -250,10 +154,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"      {item}", flush=True)
     else:
         targets = list(args.targets) or list(DEFAULT_TARGETS)
-    parallel = choose_parallel_args(serial=bool(args.serial), extra=extra, targets=targets)
-    shown = " ".join([*targets, *parallel, *extra])
-    print(f"== 跑测试：{shown} ==", flush=True)
-    return run(targets, attempts=max(1, int(args.attempts)), extra=extra, parallel=parallel)
+
+    if wants_parallel(extra):
+        print("      并发：⚠️ 你显式传了 -n/--numprocesses —— 按你的参数跑（**不推荐**："
+              "这套测试是 IO 密集型，多进程还会因共享缓存出现随机失败）", flush=True)
+    else:
+        print("      并发：串行（用户 2026-10-12：「以后构建测试都用串行」）", flush=True)
+    print(f"== 跑测试：{' '.join([*targets, *extra])} ==", flush=True)
+    return run(targets, attempts=max(1, int(args.attempts)), extra=extra)
 
 
 if __name__ == "__main__":

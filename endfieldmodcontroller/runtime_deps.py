@@ -153,6 +153,26 @@ def _latest_release_asset(repo: str, pattern: str, *, include_prerelease: bool =
             str(asset.get("digest") or ""))
 
 
+def _resolve_builtin_asset(config: AppConfig, key: str, repo: str, pattern: str, *,
+                           include_prerelease: bool = False) -> tuple[str, str, str, str]:
+    """**离线优先**地解析某个内置组件的安装包（2026-10-12 加）。
+
+    用户 2026-10-12：「导入依赖包……这个适用于**连不上 github** 的」。离线包导入后
+    `runtime\\_offline\\` 里就有原始安装包，这里先用它 —— 连 Release 查询都不用发
+    （连不上 GitHub 的机器连网页查询都会超时）。返回值与 `_latest_release_asset` 同构：
+    `(来源, 版本, 资产名, sha256)`，其中来源可能是**本地文件路径**（`_download_extract`
+    认得这种形式，会跳过下载直接解压）。
+    """
+    from . import offline_deps
+
+    offline = offline_deps.resolve_offline(config, key)
+    if offline is not None:
+        source, version, asset_name, digest = offline
+        _note(config, f"{key}：使用离线依赖包里的 {asset_name}（不联网）")
+        return (source, version, asset_name, digest)
+    return _latest_release_asset(repo, pattern, include_prerelease=include_prerelease)
+
+
 def _release_info(repo: str) -> dict:
     from . import github
 
@@ -181,16 +201,32 @@ def _download_extract(
 ) -> None:
     target.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="mc-builtin-") as tmp:
-        archive = dependencies._http_get(
-            url,
-            Path(tmp) / asset_name,
-            chunk_callback=(lambda received, expected: byte_progress(index, total, key, received, expected)) if byte_progress else None,
-            expected_sha256=expected_sha256,
-            # ⚠️ 把日志接到 fastnet 上：直连被掐时它会**自动换镜像线路**，
-            # 那些"尝试直连 / 换线路 X"的行如果不写出来，用户看到的就是**界面一动不动**。
-            #（2026-10-03 实测：XXMI 下载卡了十几分钟、日志停在"checking"，看不出任何原因。）
-            log=log,
-        )
+        local = Path(url)
+        if local.is_file():
+            # ★ 离线依赖包（2026-10-12）：`url` 是本地文件路径 ⇒ 一个请求都不发。
+            #   仍然照走 sha256 校验（离线包也可能被第三方网盘换过）。
+            if expected_sha256:
+                from . import fsutil
+
+                got = fsutil.sha256_file(local)
+                if got and got.lower() != expected_sha256.lower():
+                    raise RuntimeError(f"{asset_name}: 离线包里的文件 sha256 不符（期望 "
+                                       f"{expected_sha256[:16]}…，实际 {got[:16]}…）")
+            if log:
+                log(f"使用离线依赖包：{asset_name}"
+                    f"（{local.stat().st_size / 1048576:.1f} MB，跳过下载）")
+            archive = local
+        else:
+            archive = dependencies._http_get(
+                url,
+                Path(tmp) / asset_name,
+                chunk_callback=(lambda received, expected: byte_progress(index, total, key, received, expected)) if byte_progress else None,
+                expected_sha256=expected_sha256,
+                # ⚠️ 把日志接到 fastnet 上：直连被掐时它会**自动换镜像线路**，
+                # 那些"尝试直连 / 换线路 X"的行如果不写出来，用户看到的就是**界面一动不动**。
+                #（2026-10-03 实测：XXMI 下载卡了十几分钟、日志停在"checking"，看不出任何原因。）
+                log=log,
+            )
         assert isinstance(archive, Path)
         # 2026-10-01 修（⑧）：原先直接解压进 target（copytree 合并语义）—— 更新时
         # 旧版本文件不会被清掉，`_find_xxmi_exe` 的 rglob 兜底可能命中旧版 Launcher
@@ -301,7 +337,8 @@ def ensure_xxmi(config: AppConfig, progress: Progress = None, byte_progress: Byt
                                      marker.get("version") or "", progress, 0, force=force)
         if skipped is not None:
             return skipped
-    url, version, asset_name, digest = _latest_release_asset(XXMI_REPO, XXMI_ASSET_PATTERN)
+    url, version, asset_name, digest = _resolve_builtin_asset(
+        config, "XXMI", XXMI_REPO, XXMI_ASSET_PATTERN)
     if existing and marker.get("version") == version:
         if progress:
             progress(1, 3, "XXMI", "up_to_date")
@@ -343,28 +380,45 @@ def ensure_xxmi_libs(config: AppConfig, progress: Progress = None, byte_progress
                                      marker.get("version") or "", progress, 1, force=force)
         if skipped is not None:
             return skipped
-    release = _release_info(XXMI_LIBS_REPO)
-    version = str(release.get("tag_name") or "")
-    assets = {str(asset.get("name") or ""): asset for asset in (release.get("assets") or [])}
-    zip_name = next((name for name in assets if XXMI_LIBS_ASSET_PATTERN.lower() in name.lower()), "")
-    if not zip_name:
-        raise RuntimeError(f"{XXMI_LIBS_REPO}: no asset matched {XXMI_LIBS_ASSET_PATTERN!r}")
+    # ★ 离线优先（2026-10-12）：这条链路原先**整个都要联网**（查 release 拿 zip 名与版本、
+    #   再单独下一个 `Manifest.json`），连不上 GitHub 的机器根本走不通。离线包里
+    #   同时带着那个 `Manifest.json`，所以两条路都保留。
+    from . import offline_deps
+
+    offline = offline_deps.resolve_offline(config, "XXMI-Libs")
+    manifest_local: Path | None = None
+    if offline is not None:
+        archive_url, version, zip_name, zip_digest = offline
+        manifest_local = offline_deps.find_asset(config, "Manifest.json")
+        if manifest_local is None:
+            raise RuntimeError("离线依赖包里缺 Manifest.json（XXMI Libraries 需要它）")
+        _note(config, f"XXMI-Libs：使用离线依赖包里的 {zip_name}（不联网）")
+    else:
+        release = _release_info(XXMI_LIBS_REPO)
+        version = str(release.get("tag_name") or "")
+        assets = {str(asset.get("name") or ""): asset for asset in (release.get("assets") or [])}
+        zip_name = next((name for name in assets if XXMI_LIBS_ASSET_PATTERN.lower() in name.lower()), "")
+        if not zip_name:
+            raise RuntimeError(f"{XXMI_LIBS_REPO}: no asset matched {XXMI_LIBS_ASSET_PATTERN!r}")
+        archive_url = _asset_url(release, zip_name)
+        zip_digest = str((assets.get(zip_name) or {}).get("digest") or "")
     if d3d11.is_file() and marker.get("version") == version:
         if progress:
             progress(2, 3, "XXMI-Libs", "up_to_date")
         return BuiltinResult("XXMI-Libs", "up_to_date", "already current", version, str(target))
-    archive_url = _asset_url(release, zip_name)
     target.mkdir(parents=True, exist_ok=True)
     _download_extract(archive_url, zip_name, target, byte_progress, 2, 3, "XXMI-Libs",
-                      expected_sha256=str((assets.get(zip_name) or {}).get("digest") or ""),
-                      log=log)
-    manifest_url = _asset_url(release, "Manifest.json")
-    manifest_data = dependencies._http_get(
-        manifest_url,
-        expected_sha256=str((assets.get("Manifest.json") or {}).get("digest") or ""),
-    )
-    assert isinstance(manifest_data, bytes)
-    (target / "Manifest.json").write_bytes(manifest_data)
+                      expected_sha256=zip_digest, log=log)
+    if manifest_local is not None:
+        (target / "Manifest.json").write_bytes(manifest_local.read_bytes())
+    else:
+        manifest_url = _asset_url(release, "Manifest.json")
+        manifest_data = dependencies._http_get(
+            manifest_url,
+            expected_sha256=str((assets.get("Manifest.json") or {}).get("digest") or ""),
+        )
+        assert isinstance(manifest_data, bytes)
+        (target / "Manifest.json").write_bytes(manifest_data)
     _write_marker(target, {"version": version, "asset": zip_name, "source": XXMI_LIBS_REPO})
     if progress:
         progress(2, 3, "XXMI-Libs", "installed")
@@ -388,7 +442,8 @@ def ensure_efmi(config: AppConfig, progress: Progress = None, byte_progress: Byt
                                      marker.get("version") or "", progress, 2, force=force)
         if skipped is not None:
             return skipped
-    url, version, asset_name, digest = _latest_release_asset(EFMI_REPO, EFMI_ASSET_PATTERN)
+    url, version, asset_name, digest = _resolve_builtin_asset(
+        config, "EFMI", EFMI_REPO, EFMI_ASSET_PATTERN)
     if core_ini.is_file() and marker.get("version") == version:
         if progress:
             progress(3, 3, "EFMI", "up_to_date")
@@ -703,8 +758,8 @@ def ensure_poser(
                                      marker.get("version") or "", progress, 2, force=force)
         if skipped is not None:
             return skipped
-    url, version, asset_name, digest = _latest_release_asset(
-        POSER_REPO, POSER_ASSET_PATTERN, include_prerelease=True
+    url, version, asset_name, digest = _resolve_builtin_asset(
+        config, "Poser", POSER_REPO, POSER_ASSET_PATTERN, include_prerelease=True
     )
     if not force and present and marker.get("version") == version:
         return BuiltinResult("Poser", "up_to_date", "already current", version, str(root))

@@ -159,6 +159,15 @@ def test_one_click_launch_never_downloads_the_sdk(tmp_path, monkeypatch):
     def _must_not_be_called():
         raise AssertionError("★ 一键启动仍然去查/下 Streamline 了（263 MB 不能静默下）")
 
+    # ⚠️ **判据要显式关掉**（2026-10-12 修）：`ensure_streamline` 会让"游戏自带 Streamline
+    #    太旧"这条判据把 force 置真（`crashwatch.streamline_manifest_broken` 读的是
+    #    `%LOCALAPPDATA%Low\\Hypergryph\\Endfield\\Player.log`，**与 config 无关**）——
+    #    开发机上留着 09-27 那次游戏跑出来的日志（10 条 `parseServerManifest`），于是判据
+    #    恒定命中 ⇒ 测的就不再是"判据没命中时不该下载"，而是稳定变红。
+    #    这里把它打成"无故障"，测试就与机器无关了（判据本身另有用例覆盖）。
+    from endfieldmodcontroller import crashwatch
+
+    monkeypatch.setattr(crashwatch, "streamline_manifest_broken", lambda _cfg: "")
     monkeypatch.setattr(runtime_deps, "_streamline_asset", _must_not_be_called)
 
     result = runtime_deps.ensure_streamline(config)          # force 默认为 False

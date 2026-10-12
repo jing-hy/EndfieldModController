@@ -3,7 +3,9 @@ pywebview>=5.0
 Pillow>=10.0
 cryptography>=42.0
 
-pytest-xdist>=3.0   # 静态检查并行（构建脚本自动用 -n auto；没装则降级单线程）
+# 曾用于测试并行（`-n`）。**2026-10-12 起构建/测试一律串行**，脚本不再自动并发；
+# 保留这一行只是为了"用户自己传 `-n N`"时仍能跑（不装则会直接报 unknown option）。
+pytest-xdist>=3.0
 
 # 静态体检：抓「引用了不存在的名字」这类运行时必炸的 bug（tests/test_undefined_names.py）
 pyflakes>=3.2

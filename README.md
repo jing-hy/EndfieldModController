@@ -12,7 +12,7 @@
   <a href="LICENSE"><img alt="GPL-3.0-or-later 许可" src="https://img.shields.io/github/license/jing-hy/EndfieldModController?label=License&amp;color=3DA639"></a>
 </p>
 
-<p>Windows 桌面程序，单文件 exe。当前版本 <b>1.3.0</b> —— <a href="https://github.com/jing-hy/EndfieldModController/releases">下载最新版</a></p>
+<p>Windows 桌面程序，单文件 exe。当前版本 <b>1.3.1-beta</b> —— <a href="https://github.com/jing-hy/EndfieldModController/releases">下载最新版</a></p>
 
 <p>📖 安装步骤、目录结构、逐项排查 → <b><a href="docs/README.detailed.md">详细文档</a></b><br>
 🛠 想改代码 / 提 PR → <b><a href="CONTRIBUTING.md">维护者指南</a></b></p>
@@ -81,6 +81,7 @@
 
 - **Mod 库页**：把压缩包拖进来即导入；用卡片上的开关勾选（同角色自动互斥）后点「生成控制器」。
 - **依赖页**：看组件是否齐备（绿=已就位 / 红=缺失）、下载速度与实时日志；缺什么点「安装缺失依赖」。
+  **连不上 GitHub 的机器**：用页面上的「导入依赖包…」导入应急离线包即可（获取方式见 [详细文档](docs/README.detailed.md)）。
 - **启动页**：大号「一键启动」+ 各插件开关 + 运行日志。
 - **设置页**：注入开关、自检、组件更新、诊断包、游戏目录还原、路径与外观、维护操作等都在这里。
 - **摆姿 / MMD（可选）**：游戏运行时用它自带的页面摆姿势、放 MMD。

@@ -941,6 +941,50 @@ class EndfieldModControllerApi:
         }
         return result
 
+    def import_deps_bundle(self) -> dict[str, Any]:
+        """依赖页顶部「导入依赖包…」：**离线依赖包**（`deps-bundle.zip`）的导入入口。
+
+        用户 2026-10-12 的要求：「依赖页本来有一个导入随包 zip 的按钮，现在去掉，换成导入依赖包，
+        放到最上边自动下载依赖旁边，这个适用于**连不上 github** 的，要包含**所有需要下载的**，
+        然后导入了**自动配置**」。
+
+        与 `import_assets_bundle()` 的分工：
+        * **离线依赖包**（含 `deps/` 原始安装包 + `assets/`）→ 走 `offline_deps.import_deps_bundle`，
+          落盘后由各安装链路的"离线源优先"自动装好（再点一次一键启动即完成配置）；
+        * **旧的 `assets-bundle.zip` / 单份组件 zip**（用户手里可能还留着）→ 自动分派回
+          `runtime_assets.import_bundle`，不让老包作废。
+
+        包**不进 Release**、只作应急分发（QQ 群）—— 这一点写在包内说明与文档里。
+        """
+        from . import offline_deps, runtime_assets
+
+        picked = self.choose_path(
+            directory=False,
+            title="选择离线依赖包（deps-bundle.zip；不是 Mod 压缩包）",
+            file_types=("Zip 压缩包 (*.zip)",),
+        )
+        if not picked.get("ok"):
+            if picked.get("cancelled"):
+                return {"ok": False, "cancelled": True, "message": "cancelled"}
+            return {"ok": False, "message": picked.get("message") or "没有选到文件"}
+        archive = str(picked.get("path") or "")
+        try:
+            if offline_deps.is_deps_bundle(archive):
+                result = offline_deps.import_deps_bundle(
+                    self.config, archive,
+                    log=lambda message: launcher._append_log(self.config, f"[离线包] {message}"))
+            else:
+                # 老的随包资产包 / 单份组件 zip：走原来那条（同样逐条校验）
+                result = runtime_assets.import_bundle(self.config, archive)
+        except Exception as exc:  # noqa: BLE001
+            launcher._append_log(self.config, f"导入依赖包失败：{archive} —— {exc}")
+            return {"ok": False, "message": f"导入失败：{exc}\n文件：{archive}"}
+        launcher._append_log(
+            self.config,
+            f"导入依赖包：{archive} → {result.get('message') or result.get('kind') or ''}",
+        )
+        return result
+
     def import_assets_bundle(self) -> dict[str, Any]:
         """依赖页「导入随包 zip…」：导入**依赖的随包 zip**（不是 Mod 压缩包）。
 

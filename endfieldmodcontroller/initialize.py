@@ -272,14 +272,12 @@ def _check_bundled_assets(config: AppConfig, report: Report, log: Callable[[str]
     展开是一次性慢操作（合计约 6 秒），所以只补缺失的，并且必须给进度。
     """
     found = runtime_assets.manifest_entries(config)
+    # ⚠️ **这里不许提前 return**（2026-10-12 修）：`found` 为空恰恰说明本地一份资产都没有，
+    #    而**唯一能补上它的路**就是 `ensure_all` → `fetch_bundle`（从 Release 拉 assets-bundle.zip）。
+    #    原来这里直接报一句「请确认源码/便携包完整」就返回了 ⇒ 明明有网也永远补不上，
+    #    用户看到的就是「缺失 …、无法修复」。缺资产交给 `ensure_all` 去拉，它失败才如实报。
     if not found:
-        report.add(
-            "bundled_assets", False,
-            "找不到随包资产（assets\\nvngx\\manifest.json / assets\\dlss5\\manifest.json）"
-            "—— 请确认源码/便携包完整",
-            manual=True,
-        )
-        return
+        _log(log, "本地没有任何随包资产清单 —— 尝试从 Release 拉取 assets-bundle.zip …")
 
     state: dict[str, int] = {}
 

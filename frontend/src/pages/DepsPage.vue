@@ -60,18 +60,18 @@ function rowColor(d) {
   return d && d.present ? "var(--success, #2e7d32)" : "var(--danger, #c0392b)";
 }
 
-// ---- 「导入依赖的随包 zip」（用户 2026-10-05 要求）------------------------------
-// 场景：单文件 exe 用户本地没有 assets\、从别的机器/网盘拿到了 assets-bundle.zip、
-// 或从社区镜像下了单份组件 zip（如 nvngx_dlssnr_310.8.SF-v2.zip）—— 都不必再走网络。
-// ⚠️ 这是**依赖组件**的入口，不是 Mod 压缩包（Mod 走 Mod 库）。后端会弹系统文件框，
-// 并且在导入**前**逐条校验：manifest 能解析、它列出的每个文件的全部分卷都在包里，
-// 缺一卷就拒绝并列出缺什么（"导入看着成功、之后解压到处报错"是最难查的状态）。
-async function importLocalZip() {
+// ---- 「导入依赖包」（2026-10-12 用户要求：把原「导入随包 zip」按钮换成它，挪到顶部）----------
+// 场景：**连不上 GitHub** 的机器 —— 从 QQ 群拿到 `deps-bundle.zip`（含各组件原始安装包 +
+// 随包资产），导入后由 `runtime_deps` / `dlss5_fetcher` 的"离线源优先"自动装好。
+// ⚠️ 这仍是**依赖组件**的入口，不是 Mod 压缩包（Mod 走 Mod 库）。后端会弹系统文件框，
+// 导入**前**逐条校验（清单能解析、每个声明的文件都在包里、sha256 对得上、无目录穿越），
+// 校验不过就**一个文件都不落盘**。旧的 `assets-bundle.zip` / 单份组件 zip 也认（自动分派）。
+async function importDepsBundle() {
   try {
-    const r = await call("import_assets_bundle");
+    const r = await call("import_deps_bundle");
     if (r && r.cancelled) return;
     if (r && r.ok === false) {
-      await showAlert("没能导入依赖的随包 zip", String((r && r.message) || "未知原因"));
+      await showAlert("没能导入依赖包", String((r && r.message) || "未知原因"));
       return;
     }
     showToast(String((r && r.message) || "导入完成"), "success");
@@ -610,6 +610,11 @@ onUnmounted(() => { if (timer) clearInterval(timer); });
       <!-- 下载统一交给「下载」页去跑、去看（2026-10-07 用户：「依赖页只留状态+开关+
            更新入口……把下载从依赖里面抽出来，依赖也跳转下载」）。 -->
       <Btn id="dep-update-all-btn" variant="primary" @click="start">下载并补齐组件</Btn>
+      <!-- ★ 离线依赖包（用户 2026-10-12）：给**连不上 GitHub** 的机器用 —— 从 QQ 群拿到
+           `deps-bundle.zip` 后在这里导入；包里的组件会被各安装链路按"离线源优先"自动装上，
+           之后点一次「下载并补齐组件」（或一键启动）即完成配置。 -->
+      <Btn @click="importDepsBundle"
+           title="导入离线依赖包（deps-bundle.zip，连不上 GitHub 时的应急包）；导入前会逐条校验清单与哈希">导入依赖包…</Btn>
       <Btn size="sm" @click="goDownloads">去「下载」页</Btn>
     </div>
 
@@ -651,15 +656,10 @@ onUnmounted(() => { if (timer) clearInterval(timer); });
             <div class="text-xs mt-0.5" style="color: var(--text-muted)">{{ d.version || "" }}</div>
           </div>
           <div class="flex items-center gap-2 shrink-0">
-            <!-- 随包资产包 / 可选运行库变体：各给自己的动作（2026-10-05 加） -->
-            <!-- ⚠️ 文案必须写明是**依赖的随包 zip**（用户 2026-10-05：「那个导入本地 zip
-                 需要写明是依赖的随包 zip，而且也要检查」）—— 依赖页不是 Mod 压缩包的入口，
-                 别让用户把皮肤包拖到这里（Mod 走 Mod 库导入）。 -->
-            <template v-if="d.key === 'bundle'">
-              <Btn size="sm" variant="primary" @click="importLocalZip"
-                   title="导入依赖的随包 zip（assets-bundle.zip）；会逐条校验分卷是否齐全">导入随包 zip…</Btn>
-            </template>
-            <template v-else-if="d.key && d.key.startsWith('dlssnr_')">
+            <!-- ⚠️ 2026-10-12：原先这里那颗「导入随包 zip…」**已按用户要求移除** ——
+                 离线依赖包统一走页面顶部的「导入依赖包…」（一个入口，自动识别包类型），
+                 不再在组件行里再放一个同类按钮。 -->
+            <template v-if="d.key && d.key.startsWith('dlssnr_')">
               <Btn size="sm" variant="primary" @click="installVariant(d)">
                 {{ d.present ? "重新安装" : "下载并启用" }}
               </Btn>
