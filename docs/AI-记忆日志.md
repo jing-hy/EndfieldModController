@@ -6169,3 +6169,28 @@ sbm-fork（D:\zmdmod\sbm-fork，2026-10-11 核实）：origin = 他自己的 for
 modecontroller 2026-10-12 起从 MIT 改为 **GPL-3.0-or-later**（另一台电脑三个提交：`ba5e366` 换 LICENSE 为 GPL-3.0 全文 + README + frontend/package.json；`b7d20ed` 全部源文件补 `SPDX-License-Identifier: GPL-3.0-or-later`；`55d9384` 手写文档补 SPDX、详细版 README 许可声明与 shields 徽章同步）。本机核验（2026-10-12）：SPDX 覆盖 endfieldmodcontroller 52/54（缺的两个是 **0 字节空 `__init__.py`**，属正常）、scripts 26/26、tests 156/156、frontend/src 41/41；LICENSE 首行已是 GNU GPL v3。⚠️ **最新 Release v1.3.0 的产物是 relicense 之前构建的（MIT 时期）** —— 要按 GPL 重新对外分发得重新构建发版。
 
 `关键词：["relicense","GPL-3.0-or-later","MIT 改 GPL","SPDX-License-Identifier","LICENSE 全文","frontend package.json license","shields 徽章","0 字节 __init__.py","v1.3.0 产物早于 relicense","版权声明"]`
+
+<!-- 增量追加 2026-10-12 23:18 · 新增 2 条（历史条目一律保留）-->
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 【1.3.1-beta 修的 bug（反馈者 diagn…
+*2026-10-12 23:13*
+
+【1.3.1-beta 修的 bug（反馈者 diagnostics-20261012-001019）：部分资产缺失时永远不拉资产包】
+现场：面板「未安装 NR 运行时」+ `Failed to compile DLSS5_Feed.fx: could not open included file 'ReShade.fxh'`；日志里三条 WARN 每次自检都报却谁也补不上。
+根因：他只下了单文件 exe —— exe **内嵌**了 `assets\dlss5\`（三个 addon），于是 `manifest_entries()` 非空 ⇒ 两条旧判据都被满足：① `fetch_bundle` 的 `any((PROJECT_ROOT/"assets"/组/"manifest.json").is_file())` ⇒ 「本地已有 assets」直接返回；② `_ensure_all_locked` 的 `if not found and allow_fetch` ⇒ 永不触发。而 `assets\nvngx\` 与 `shaders|textures` 只在 `assets-bundle.zip` 里 ⇒ 永远补不上。
+修法：新增 `runtime_assets.missing_asset_groups()`（**每一组都得有来源**才算齐），上面两处 + `initialize._check_bundled_assets` 里"没清单就早退"那段一起改。测试 `tests/test_asset_group_fallback.py`（6 条，反向验证两处各退回都变红）。
+
+`关键词：["未安装 NR 运行时","ReShade.fxh 编译失败","nvngx_dlssnr 缺失","missing_asset_groups","fetch_bundle 判据","ensure_all 触发条件","仅下 exe 的机器","内嵌 assets dlss5","assets-bundle 没拉","反馈者诊断包"]`
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 【离线依赖包（2026-10-12 定稿形态）】用户原话…
+*2026-10-12 23:18*
+
+【离线依赖包（2026-10-12 定稿形态）】用户原话：「那不随release，这个离线包只构建，写明通过Q群分发，只做对于无法使用github的应急方案，不承担风险」＋「另外两个有没有进包方法，比如 poser 指明源码地址」＋「导入的时候要确保这几个也能正常处理」。
+**形态**：`scripts/build_deps_bundle.py` 本地按需构建 → `dist\deps-bundle.zip`（实测 325.3 MB / 94 文件）。**不进 Release、不进 CI**；分发 = QQ 群 1045239747（验证答案 `jing_hy`），定位"无法访问 GitHub 时的应急搬运"。
+**包内容（8 个组件 + 随包资产 + licenses/）**：XXMI v2.4.6 / XXMI-Libs v1.2.2 / EFMI v1.4.8 / ReShade 6.8.0 / DLSS5-Feeder v1.19.0 / iMMERSE / **Poser v0.5.71**（AGPL-3.0：附 `licenses/AGPL-3.0.txt` 全文 + 版权 + 源码地址 https://github.com/OedoSoldier/Endfield-Poser）/ **Streamline v2.14.1**（MIT：**只打本机已抽取的 9 个 dll** ≈5.3 MB —— 上游 SDK 263 MB 进包会撑到 600 MB）。**不含 VC++**（微软条款；包内给官方链接）。
+**导入与安装**：依赖页顶部「导入依赖包…」→ `api.import_deps_bundle()`（按 `kind=deps-bundle` 自动分派）；落 `runtime\_offline\` + 索引；安装侧 `_resolve_builtin_asset()`（XXMI/Libs/EFMI/Poser）与 dlss5_fetcher 三处 + `ensure_streamline`（**含扁平结构兜底**）都"离线优先"，导入后再点一键启动即自动配置。
+**措辞已改**：README/详细文档里 Poser 的「不随包分发」→「**不随 Release 分发**……应急离线包内包含时附许可全文与源码地址」。
+
+`关键词：["离线依赖包","deps-bundle.zip","不随 Release","QQ 群分发","应急方案","build_deps_bundle.py","导入依赖包按钮","offline_deps","离线源优先","不含 Poser AGPL","Streamline 排除","自动配置"]`
