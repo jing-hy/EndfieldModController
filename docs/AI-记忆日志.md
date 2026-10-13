@@ -6204,3 +6204,18 @@ modecontroller 2026-10-12 起从 MIT 改为 **GPL-3.0-or-later**（另一台电�
 【许可证必须查原文，不许凭印象 —— 我又栽了一次（2026-10-12）】我先按"印象"判定 `NVIDIA-RTX/Streamline` 的 SDK "条款限制再分发"，据此把它排除在离线包外；用户追问"另外两个有没有进包方法"后我去读 `license.txt` 原文，发现它**就是标准 MIT**（`Permission is hereby granted … to use, copy, modify, merge, publish, distribute, sublicense, and/or sell`，唯一附加句只针对 **Nsight Perf SDK**，我们不用它）⇒ 9 个运行库 dll 完全可以随包。**教训**：许可结论只能来自**读原文**（`gh api repos/<owner>/<repo>/license` 取全文，网页被加速器劫持时 API 仍通）；"看起来是商业 SDK 所以不能分发"是最容易犯的想当然。同批查证：Poser = AGPL-3.0（**允许**再分发，条件是附全文 + 版权 + 源码途径 ⇒ "指明源码地址"就满足）、VC++ = 微软（必须官方安装器，不可随包）。
 
 `关键词：["许可证查原文","Streamline 是 MIT","不要凭印象判断许可","gh api license 取全文","AGPL 再分发条件","源码地址义务","Nsight Perf SDK 例外","VC++ 不可随包","离线包许可合规"]`
+
+<!-- 增量追加 2026-10-14 00:13 · 新增 1 条（历史条目一律保留）-->
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 【modecontroller 当前状态唯一真源】（20…
+*2026-10-12 23:41*
+
+【modecontroller 当前状态唯一真源】（2026-10-12 23:42 更新）
+**Latest Release = `v1.4.0`**（2026-10-12 发布并设为 Latest；tag → `d6153bf`）。**本地 = `1.4.0`**（同号，不欠号）。**main = `d6153bf`**。快照 `D:\zmdmod\_snapshot_1.4.0-20261012-234000`。
+**v1.4.0 内容**：① **离线依赖包**（不随 Release：只本地构建 `dist\deps-bundle.zip` + QQ 群应急分发；含 Poser/Streamline，附 AGPL 全文与源码地址）② 修「部分随包资产缺失时永不拉资产包」（`missing_asset_groups`）③ **净化不再搬 Poser 的设置与快捷键**（`USER_CONFIG_PATHS`，修"Poser 快捷键被复写"）④ 测试与构建一律串行 ⑤ 组件版本表同步（XXMI v2.4.6 / Poser 0.5.71）⑥ 日志分级（失败红字 + 弹窗引导离线包，成功绿字收尾）。
+**发布实测**：`build_release.py --with-tests` ⇒ **1308 passed**；附件 `EndfieldModController.exe` 35,087,483 B（sha256 `61c875094e9a…7fc31`）、`assets-bundle.zip` 262,029,848 B（sha256 `df4dba1aad94…b3847`），按 release 核对 digest 一致；**离线包未上传**（分发走 QQ 群）。
+⚠️ **`build_release.py` 会清理 `dist\` 非构建产物** ⇒ 构建前把 `deps-bundle.zip` 挪到 `_tmp\dist-keep\`、构建后挪回。
+**下一步**：再改代码 ⇒ 本机写 `1.4.1-beta`。
+
+`关键词：["modecontroller 状态","最新 Release v1.2.2","1.2.3-beta","main f8e0368","机器侧稳定性","kernel_instability","System 日志","蓝屏 BugCheck","非正常关机","诊断包","快照","下一个版本号"]`
