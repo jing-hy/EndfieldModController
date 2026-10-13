@@ -212,6 +212,7 @@ gh api repos/jing-hy/EndfieldModController/releases --jq '[.[] | select(.draft==
 | `docs/AI-记忆日志.md` | `scripts/memory_log.py`（`push.py` 自动调用） | 记忆库导出的开发日志 |
 | `web/dist/index.html` | `frontend/` 里 `npm run build` | 前端单文件产物；**必须构建后再打包 exe**，否则改动不会进 exe |
 | `dist/*.exe`、`assets-bundle.zip` | `scripts/build_release.py` / `prepare_release.py` | 发布产物，不进 git |
+| `dist/deps-bundle.zip` | `scripts/build_deps_bundle.py` | **离线依赖包**（应急分发，**不进 Release**）；构建完会**自动放一份进 `modtest`**（用户 2026-10-14：「以后离线包也放 modtest」），`--skip-modtest` 可关 |
 
 > 改了 `frontend/` 下的任何东西之后：`cd frontend && npm run build`，再 `python scripts/build_exe.py`
 > （或直接 `build_release.py`），否则 exe 里还是旧界面。

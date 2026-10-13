@@ -73,6 +73,10 @@ python scripts\build_release.py --no-push     # 静态检查 + 构建 + 同步 m
 ```
 - **默认会推 main**；用户没让推就加 `--no-push`。
 - 它**只把 exe 同步进 `..\modtest\`**（其余文件一概不动），并核对 sha256。
+- **离线包也要放进 modtest**（用户 2026-10-14：「以后离线包也放 modtest」）：
+  跑 `python scripts\build_deps_bundle.py` 时**默认就同步一份** `deps-bundle.zip` + `.sha256`
+  过去（`--skip-modtest` 可关）—— 在 modtest 里测"离线导入"时手边就有包。
+  另注：该脚本产的包**不进 Release**，只在连不上 GitHub 时应急分发。
 - 默认不跑测试（测试是独立入口 `scripts\run_tests.py`），要带着跑加 `--with-tests`。
 
 ### ⑤ 给用户的点验条目

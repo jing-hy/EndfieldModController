@@ -6,24 +6,29 @@
 
 * **不进 Release**（不随附件发布，也不进 CI）—— 只在需要时本地构建一次；
 * 分发渠道 = **QQ 群**（群号见 README / AGENTS.md），定位是"**无法使用 GitHub 时的应急方案**"；
-* 包里**不含** AGPL / 受限组件（见下面"不打包的东西"），所以不存在"我们替别人再分发"的问题。
+* **含 AGPL / GPL 组件时按各自的再分发条件处理**（2026-10-12 用户要求"poser 指明源码地址"
+  之后就是这么做事的）：包内 `licenses/` 放许可全文，说明里写清源码从哪取 —— 见 `LICENSES`
+  与 `POSER_SOURCE_NOTE` / `JIGGLE_SOURCE_NOTE`。
 
 用法：
 
-    python scripts/build_deps_bundle.py                 # 下载/收集 + 打包
+    python scripts/build_deps_bundle.py                 # 下载/收集 + 打包（完了**会自动放一份进 modtest**）
     python scripts/build_deps_bundle.py --skip-download # 只用本地已有的原件（离线打包）
     python scripts/build_deps_bundle.py --out D:\\xx.zip
+    python scripts/build_deps_bundle.py --skip-modtest  # 不同步进测试目录
 
-产出：`dist\\deps-bundle.zip`（+ `.sha256`）。包内结构见 `endfieldmodcontroller/offline_deps.py`
-的模块说明；导入入口在依赖页「导入依赖包…」。
+产出：`dist\\deps-bundle.zip`（+ `.sha256`），另外**默认复制一份进 `modtest`** —— 用户 2026-10-14：
+「**以后离线包也放 modtest**」（在 modtest 里测"离线导入"时手边就有）。包内结构见
+`endfieldmodcontroller/offline_deps.py` 的模块说明；导入入口在依赖页「导入依赖包…」。
 
-**不打包的东西（不是漏了，是许可上不能）**：
+**许可与再分发**（逐项记在 manifest 的 `license` 字段 + 包内 `licenses/`）：
 
-* `Endfield Poser` —— **AGPL-3.0**，README 与界面都明写"不随包分发，只从官方 Release 下载"；
-* `Streamline SDK` —— NVIDIA SDK，条款限制再分发；
-* `VC++ 运行库` —— 微软条款，必须跑官方安装器。
+* `Endfield Poser` —— **AGPL-3.0**：允许再分发（附许可全文 + 源码途径，包内已做）；
+* `EndfieldJiggle` —— **GPL-3.0-only**：同上（包内已做）；
+* `Streamline 运行库` —— NVIDIA SDK 条款：**只放运行所需的 9 个 dll**，不整包；
+* `VC++ 运行库` —— 微软条款，必须跑官方安装器，**不入包**。
 
-这三项在离线机器上仍需联网安装（界面会如实标出缺哪一项）。
+VC++ 运行库在离线机器上仍需联网安装（界面会如实标出缺哪一项）。
 """
 from __future__ import annotations
 
@@ -142,7 +147,11 @@ def collect(dest: Path, *, download: bool = True) -> dict[str, dict[str, Any]]:
     def record(key: str, path: Path, version: str, source: str, *, extra: dict | None = None) -> None:
         entries[key] = {
             "asset": path.name,
-            "version": version,
+            # ⚠️ 版本号**统一不带 `v` 前缀**（2026-10-14 修）：上游 tag 有的带 v（`v2.4.6`）、
+            #    有的是从资产文件名解析出来的（`0.2.2`），不统一会让 manifest 里一半带 v
+            #    一半不带（用户在离线包清单里看到 `vv2.4.6` 就是这么来的）。
+            #    比较一律交给 `version.parse_version`（它本来就兼容 `v` 前缀）。
+            "version": str(version).strip().lstrip("vV"),
             "size": path.stat().st_size,
             "sha256": sha256_of(path),
             "source": source,
@@ -341,7 +350,8 @@ def _pad_to_min_size(path: Path, min_mb: int) -> int:
     return need
 
 
-def build(out: Path, *, download: bool = True, min_mb: int = 0) -> int:
+def build(out: Path, *, download: bool = True, min_mb: int = 0,
+          sync_modtest: bool = True) -> int:
     with tempfile.TemporaryDirectory(prefix="mc-deps-") as tmp:
         work = Path(tmp)
         entries = collect(work / "deps", download=download)
@@ -403,7 +413,53 @@ def build(out: Path, *, download: bool = True, min_mb: int = 0) -> int:
     _log(f"      {count} 个文件 / 原始 {total / 1048576:.1f} MB / 包体 {out.stat().st_size / 1048576:.1f} MB")
     _log(f"      sha256 {digest}")
     _log("分发：**不进 Release**，只作无法访问 GitHub 时的应急搬运（QQ 群）。")
+    if sync_modtest:
+        # 用户 2026-10-14：「**以后离线包也放 modtest**」—— 在 modtest 里测"离线导入"时
+        # 手边就有这一份，不必再从 dist 手动拷。加 `--skip-modtest` 可关掉。
+        sync_to_modtest(out)
     return 0
+
+
+def _resolve_modtest_dir() -> Path:
+    """测试目录：默认 `<父目录>\\modtest`；也认 `<工作区名>-modtest`。
+
+    ⚠️ 与 `scripts/build_release.py` 的 `_resolve_modtest_dir()` **同一套约定**
+    （用户 2026-10-09：「以后 D:\\emc-modtest 等效于那边的 modtest」）。
+    两处各写一份是**刻意**的：这两个脚本互相独立，谁都不该 import 另一个。
+    """
+    sibling = ROOT.parent / f"{ROOT.name}-modtest"
+    if sibling.is_dir():
+        return sibling
+    return ROOT.parent / "modtest"
+
+
+def sync_to_modtest(bundle: Path) -> dict:
+    """把离线包复制一份进测试目录（用户 2026-10-14：「**以后离线包也放 modtest**」）。
+
+    与 `build_release.py` 同步 exe 是同一套做法：**只动这一份包**（先删同名旧包，再逐字节
+    核对 sha256）；测试目录里的其它东西一概不碰；目录不存在就跳过并说明（不新建）。
+    """
+    dest_dir = _resolve_modtest_dir()
+    if not dest_dir.is_dir():
+        _log(f"测试目录不存在，跳过同步：{dest_dir}")
+        return {"ok": False, "reason": "no-modtest", "dest": str(dest_dir)}
+    dest = dest_dir / bundle.name
+    try:
+        if dest.is_file():
+            dest.unlink()
+        shutil.copy2(bundle, dest)
+        # 校验和文件也一起带过去（离线和群里分发的第一步就是核对它）
+        sums = bundle.with_name(bundle.name + ".sha256")
+        if sums.is_file():
+            shutil.copy2(sums, dest_dir / sums.name)
+    except OSError as exc:  # noqa: BLE001
+        _log(f"!! 同步进测试目录失败：{exc}")
+        return {"ok": False, "reason": str(exc), "dest": str(dest)}
+    match = sha256_of(dest) == sha256_of(bundle)
+    _log(f"已放入测试目录：{dest}")
+    _log(f"      {dest.stat().st_size / 1048576:.1f} MB，与 dist 核对"
+         f"{'一致' if match else '**不一致**'}")
+    return {"ok": match, "dest": str(dest), "match": match}
 
 
 def offline_deps_format() -> int:
@@ -418,6 +474,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--skip-download", action="store_true", help="只用本机已有原件，不联网")
     parser.add_argument("--min-size-mb", type=int, default=DEFAULT_MIN_SIZE_MB,
                         help=f"包体下限（不足就补足，默认 {DEFAULT_MIN_SIZE_MB} MB；0 = 不补）")
+    parser.add_argument("--skip-modtest", action="store_true",
+                        help="不同步进测试目录（默认会放一份到 modtest）")
     args = parser.parse_args(argv)
     for stream in (sys.stdout, sys.stderr):
         try:
@@ -426,7 +484,8 @@ def main(argv: list[str] | None = None) -> int:
             pass
     if shutil.which("git") is None:
         _log("提示：本脚本不需要 git，这里只是提醒你确认网络能访问 GitHub。")
-    return build(Path(args.out), download=not args.skip_download, min_mb=int(args.min_size_mb))
+    return build(Path(args.out), download=not args.skip_download, min_mb=int(args.min_size_mb),
+                 sync_modtest=not args.skip_modtest)
 
 
 if __name__ == "__main__":
