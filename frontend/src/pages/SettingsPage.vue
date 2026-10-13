@@ -339,6 +339,7 @@ const probeBusy = ref(false);
 const PROBES = [
   { m: "dlss5_status", label: "DLSS5 状态" },
   { m: "poser_status", label: "Poser 状态" },
+  { m: "jiggle_efmi_status", label: "EndfieldJiggle 状态" },
   { m: "component_versions", label: "组件版本" },
   { m: "check_integrity", label: "完整性检查" },
   { m: "first_run_state", label: "初始化自检" },
@@ -797,6 +798,7 @@ useLogAutoScroll(probeBox, () => probeText);
         <Btn @click="showResult('read_launch_log', '启动日志')">查看启动日志</Btn>
         <Btn @click="exportDiagnostics">导出诊断包</Btn>
         <Btn @click="showResult('poser_log_tail', 'Poser 日志')">打开 Poser 日志</Btn>
+        <Btn @click="run('open_jiggle_efmi_upstream')">EndfieldJiggle 上游仓库</Btn>
         <Btn @click="showResult('force_close_game', '强制结束残留游戏')">强制结束残留游戏</Btn>
       </div>
       <div class="flex flex-wrap gap-2 mt-2">

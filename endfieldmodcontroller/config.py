@@ -161,6 +161,7 @@ _DATA_ROOT_RELATIVE_FIELDS = (
     "dlss5_dir",
     "reshade_dll",
     "poser_dir",
+    "jiggle_efmi_dir",
     "dlss5_source_dir",
     "nvngx_assets_dir",
     "dependency_manifest",
@@ -354,7 +355,10 @@ class AppConfig:
     #   换来的是账号安全性大幅提升（风险不为零，只是把这一整档注入面去掉）。
     #   ⚠️ **与那些功能双向互斥**：开任一 ReShade 功能会自动关掉本闸
     #   （与 `api.set_component_addon` 同一套做法）。
-    reshade_disabled: bool = False
+    #   ★ **默认开**（2026-10-13 用户定：「默认状态是开关 reshade 防护开，reshade 管的关，
+    #     其他都开」）。这是**安全默认**：新配置先不给游戏注入任何 ReShade，要用 DLSS5 /
+    #     第一人称 / 统一管理器时，由用户自己把这道总闸关掉。
+    reshade_disabled: bool = True
     dlss5_injection: bool = True
     # 底座下两个插件可独立启停（同一 ReShade 底座，靠移动 addon 文件实现）
     dlss5_addon_enabled: bool = True          # RenoDX-DLSS5 神经渲染
@@ -388,7 +392,10 @@ class AppConfig:
     #   它**不动其它插件**（DLSS5 / 第一人称 / 汉化 / 喂帧各按自己的开关）。
     #   实现在 `launcher.apply_minimal_injection()`（字段名沿用 `minimal_injection`，
     #   老配置零迁移；界面上叫「统一管理器」）。
-    minimal_injection: bool = True
+    #   ★ **默认关**（2026-10-13 用户定：「…reshade 管的关，其他都开」）—— 它正是
+    #     「ReShade 管的」那一档：默认打开的总闸（`reshade_disabled=True`）与它互斥，
+    #     再默认开就会出现"开关显示开着、其实点不开、总闸一动就被强制关掉"的自相矛盾。
+    minimal_injection: bool = False
     # 是否把 EFMI 的 d3d11.dll（服装 Mod 引擎）也写进 XXMI 注入库
     # ⚠️ **语义已改（2026-10-02 用户实测后的要求）**：这个开关**不再**控制"要不要注入
     #    EFMI 的 `d3d11.dll`"，而是**"要不要加载皮肤 Mod"**。
@@ -440,6 +447,16 @@ class AppConfig:
     # 启动前自动补齐 Poser 的注入（d3dcompiler_47 proxy + plugin\poser.dll）。
     # 默认 True —— 与 DLSS5 / EFMI / 乳摇三个组件一致：装不上就报可读原因，不静默。
     poser_injection: bool = True
+    # EndfieldJiggle（触摸形变 Mod）组件目录：默认 <主路径>/runtime/jiggle_efmi，
+    # 里面放上游安装包原文（_pack）、本地载荷（_payload）、停用副本（_parked）与 version.txt。
+    jiggle_efmi_dir: str = ""
+    # 启动前把这个 EFMI Mod 铺进 EFMI 的 Mods（关掉 = 把目录**移出** Mods，游戏内不再加载）。
+    # ★ **默认开**（2026-10-13 用户定：「EndfieldJiggle 也默认开」）—— 与乳摇 / Poser 一致：
+    #   首次一键启动会从上游拉约 120 KB 的**纯 Mod 包**并铺进 `Mods`。
+    #   ⚠️ 它的"能不能生效"由上游抓的游戏 shader 决定（`Passes.ini` 是 12 组 ShaderRegex），
+    #   上游自述游戏内视觉 / 同进程热重载 / 全干员覆盖尚未全部验证 ⇒ 自检与依赖页只**如实报
+    #   事实**（版本、在不在、内容有没有坏），不承诺"装了就一定有效果"。
+    jiggle_efmi_injection: bool = True
 
     theme: str = "light"
     last_tab: str = "library"
@@ -1057,6 +1074,20 @@ class AppConfig:
         """
         value = self.poser_dir.strip()
         return self.resolve_path(value) if value else self.runtime_path / "poser"
+
+    # ---------------------------------------------------------------
+    # EndfieldJiggle（触摸形变 Mod，EFMI 框架下的一个 Mod 包）
+    # ---------------------------------------------------------------
+    @property
+    def jiggle_efmi_path(self) -> Path:
+        """组件目录：默认 `<主路径>/runtime/jiggle_efmi`。
+
+        它与乳摇/Poser 不同 —— **不装进游戏目录**，只在 EFMI 的 `Mods` 里铺一个目录；
+        上游安装包（约 120 KB）也从官方 Release 下到这里，本程序不随包分发它
+        （上游 GPL-3.0-only，且声明不转授其中的游戏衍生兼容材料）。
+        """
+        value = self.jiggle_efmi_dir.strip()
+        return self.resolve_path(value) if value else self.runtime_path / "jiggle_efmi"
 
     @property
     def reshade_runtime_path(self) -> Path:

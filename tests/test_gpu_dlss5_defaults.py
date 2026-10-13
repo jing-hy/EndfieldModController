@@ -146,7 +146,7 @@ class Dlss5GpuGateTests(_GpuCase):
         path = self.root / "config.json"
         with mock.patch.object(deviceinfo, "collect", _fake_adapter(gpu)):
             deviceinfo.collect(refresh=True)
-            cfg = AppConfig(
+            cfg = AppConfig(reshade_disabled=False,
                 library_dir=str(self.root / "library"),
                 runtime_dir=str(self.root / "runtime"),
                 staging_mods_dir=str(self.root / "runtime" / "EFMI" / "Mods"),
@@ -198,7 +198,7 @@ class Dlss5GpuSelfCheckTests(_GpuCase):
         """不支持的机器（GTX 1660）：自检顺手关掉，且**不报成待处理故障**。"""
         from endfieldmodcontroller import initialize, launcher
 
-        config = AppConfig(
+        config = AppConfig(reshade_disabled=False,
             runtime_dir=str(self.root / "runtime"),
             staging_mods_dir=str(self.root / "runtime" / "EFMI" / "Mods"),
             dlss5_addon_enabled=True,
@@ -217,7 +217,7 @@ class Dlss5GpuSelfCheckTests(_GpuCase):
         """⭐ 40 系：自检**不再**关开关，并且报出该用哪个运行库变体。"""
         from endfieldmodcontroller import initialize
 
-        config = AppConfig(
+        config = AppConfig(reshade_disabled=False,
             runtime_dir=str(self.root / "runtime"),
             dlss5_addon_enabled=True,
         )
@@ -232,7 +232,7 @@ class Dlss5GpuSelfCheckTests(_GpuCase):
     def test_self_check_passes_on_50_series(self) -> None:
         from endfieldmodcontroller import initialize
 
-        config = AppConfig(runtime_dir=str(self.root / "runtime"))
+        config = AppConfig(reshade_disabled=False, runtime_dir=str(self.root / "runtime"))
         with mock.patch.object(deviceinfo, "collect", _fake_adapter("NVIDIA GeForce RTX 5080")):
             report = initialize.Report()
             initialize._check_dlss5_gpu_support(config, report, None)
@@ -297,7 +297,7 @@ class DualGpuTests(_GpuCase):
                                _fake_adapter("NVIDIA GeForce RTX 4060 Laptop GPU",
                                              "NVIDIA GeForce RTX 5080")):
             deviceinfo.collect(refresh=True)
-            cfg = AppConfig(
+            cfg = AppConfig(reshade_disabled=False,
                 library_dir=str(self.root / "library"),
                 runtime_dir=str(self.root / "runtime"),
                 staging_mods_dir=str(self.root / "runtime" / "EFMI" / "Mods"),

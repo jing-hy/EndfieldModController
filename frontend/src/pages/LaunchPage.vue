@@ -108,8 +108,12 @@ async function hotReload() {
 //    它开着时，下面三个依赖 ReShade 的开关**灰掉、点不开**（用户定的是「禁用，直接不能点开
 //    开关那种」，不是互斥自动关）—— 后端在 `set_component_addon` / `set_minimal_injection`
 //    里也会再拒一次，前端这道只是别让用户白点。
+// ★ 2026-10-13 把 `hotkey_takeover` 也加进来（用户：「**mod 快捷键锁定在 reshade 注入
+//   防护开的时候一起锁**」）：面板就装在 ReShade 里，总闸的世界里根本没有面板 ⇒
+//   锁掉 Mod 原键却没有替代入口 = 把用户的换装入口直接拿走。
+//   前端这道只是"别让他白点"，后端 `set_hotkey_takeover` 会**再拒一次**。
 const RESHADE_DEPENDENT = ["minimal_injection", "dlss5_addon_enabled",
-                           "firstperson_addon_enabled"];
+                           "firstperson_addon_enabled", "hotkey_takeover"];
 const reshadeLocked = (k) => !!settings.reshade_disabled && RESHADE_DEPENDENT.includes(k);
 const RESHADE_LOCK_REASON = "「禁用所有 ReShade 注入」开着 —— 先关掉它才能开这个";
 
@@ -126,6 +130,13 @@ const SWITCHES = [
   { k: "minimal_injection", name: "统一管理器", desc: "注入 ReShade 与统一管理器面板",
     apply: (v) => call("set_minimal_injection", v),
     locked: () => reshadeLocked("minimal_injection"),
+    lockReason: () => RESHADE_LOCK_REASON },
+  // ★ **紧跟统一管理器**（2026-10-13 用户要求：「mod 快捷键锁定放到聚合面板开关下面」）——
+  //   这两个本来就是一体的：面板是锁键的前提（面板不开 ⇒ 锁键会被强制关）。
+  { k: "hotkey_takeover", name: "Mod 快捷键锁定", desc: "把 Mod 自带快捷键锁成内部键，避免 Mod 之间抢键",
+    apply: (v) => call("set_hotkey_takeover", v),
+    // 总闸开着时锁键没有意义（没有面板可点）⇒ 与上面几个一样灰掉、点不动。
+    locked: () => reshadeLocked("hotkey_takeover"),
     lockReason: () => RESHADE_LOCK_REASON },
   { k: "dlss5_addon_enabled", name: "DLSS5 神经渲染", desc: "把游戏自身的 DLSS 输出替换成 DLSS5 神经渲染",
     apply: (v) => call("set_component_addon", "dlss5", v),
@@ -150,8 +161,11 @@ const SWITCHES = [
       }
       return call("set_poser_enabled", v);
     } },
-  { k: "hotkey_takeover", name: "Mod 快捷键锁定", desc: "把 Mod 自带快捷键锁成内部键，避免 Mod 之间抢键",
-    apply: (v) => call("set_hotkey_takeover", v) },
+  { k: "jiggle_efmi_injection", name: "EndfieldJiggle", desc: "触摸形变（按住 Shift + 左键拖动角色，松手回弹）",
+    // 它**不是注入型插件**：只是一个 EFMI Mod 包，所以开关 = 铺进 / 移出 EFMI 的 Mods。
+    // 开启走 `jiggle_efmi_install`（本地没有安装包才联网，约 120 KB），
+    // 关闭走 `jiggle_efmi_uninstall`（把目录**真的**移出 Mods —— EFMI 递归加载，改名挡不住）。
+    apply: (v) => call(v ? "jiggle_efmi_install" : "jiggle_efmi_uninstall") },
 ];
 
 // 切换一个开关：有专用接口的走专用接口（它们还要动文件/注入库），其余只写配置。

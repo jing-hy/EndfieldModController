@@ -32,8 +32,15 @@ SUBDIR = "AntiCheatExpert"
 
 @pytest.fixture()
 def env(tmp_path, monkeypatch):
-    """假数据根 + 假游戏目录（净化 / 还原全都对着它跑）。"""
-    config = AppConfig()
+    """假数据根 + 假游戏目录（净化 / 还原全都对着它跑）。
+
+    ⚠️ **必须显式关掉总闸**（2026-10-13）：`reshade_disabled` 的默认值已改成 True
+    （用户定的"防护默认开"），而总闸开着时净化会走"保险"那条更彻底的分支
+    （顺手把该铺的按开关铺回去，含乳摇数据）⇒ 还原后游戏目录里会多出
+    `SecondaryMotion/presets/Default.json`，`_relative_files` 的前后比对当场变红。
+    本文件测的是"子目录注入看得见 / 清得掉 / 可还原"，与总闸无关，显式关掉即可。
+    """
+    config = AppConfig(reshade_disabled=False)
     game = tmp_path / "game"
     game.mkdir(parents=True, exist_ok=True)
     (game / "Endfield.exe").write_bytes(b"MZ")

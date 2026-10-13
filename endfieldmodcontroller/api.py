@@ -885,6 +885,11 @@ class EndfieldModControllerApi:
         warnings: list[str] = []
         if enabled:
             # ② 三个依赖 ReShade 的开关一律关掉（在"真正执行动作的这一层"做，不只改配置）
+            # ⚠️ 锁键要**先记下"进来时是不是开着"**：`launcher.apply_minimal_injection()`
+            #    在关统一管理器时会**顺手**把锁键也关掉（那句写在它内部），等循环跑完再判
+            #    `hotkey_takeover` 就已经是 False 了 ⇒ 明明刚被关掉、`closed` 里却不记一笔，
+            #    前端与日志都会显示"什么都没发生"（2026-10-13 测试当场抓到）。
+            hotkey_was_on = bool(getattr(self.config, "hotkey_takeover", False))
             for key, label, closer in (
                 ("dlss5_addon_enabled", "DLSS5 神经渲染",
                  lambda: launcher.set_component_addons(self.config, "dlss5", False)),
@@ -902,6 +907,20 @@ class EndfieldModControllerApi:
                 except Exception as exc:  # noqa: BLE001
                     warnings.append(f"关闭「{label}」时出错: {exc}")
                 closed.append(label)
+            # ★ 「Mod 快捷键锁定」也要一起关掉（2026-10-13 用户要求：「**mod 快捷键锁定在
+            #   reshade 注入防护开的时候一起锁**」）。
+            #   ⚠️ **不能只靠上面那个循环**：`minimal_injection` 本来就是 False 时循环会
+            #   `continue`，`apply_minimal_injection()` 就不会被调到，而"关锁键"那句正写在
+            #   它里面 ⇒ 锁键会残留成"开着、却没有面板"。这里无条件补一次。
+            if bool(getattr(self.config, "hotkey_takeover", False)):
+                self.config.hotkey_takeover = False
+                try:
+                    launcher.apply_minimal_injection(
+                        self.config, log=lambda m: launcher._append_log(self.config, m))
+                except Exception as exc:  # noqa: BLE001
+                    warnings.append(f"关闭「Mod 快捷键锁定」时出错: {exc}")
+            if hotkey_was_on and "Mod 快捷键锁定" not in closed:
+                closed.append("Mod 快捷键锁定")
         self.config.reshade_disabled = enabled
         try:
             self.config.save()
@@ -1550,6 +1569,39 @@ class EndfieldModControllerApi:
             }
         except Exception:  # noqa: BLE001
             pass
+        # EndfieldJiggle（触摸形变 Mod）也作为依赖项并列显示 —— 与乳摇同构，
+        # 但状态文案不同：它不注入游戏目录，"启用"= 目录在 EFMI\Mods 里。
+        try:
+            from . import efmi_jiggle as jiggle_mod
+            from . import updates as updates_mod
+
+            state = jiggle_mod.status(self.config)
+            local = updates_mod._jiggle_local_version(self.config)   # noqa: SLF001 - 同一口径
+            # ⚠️ 依赖页是**纯文本**渲染（不解析 markdown），所以这里不要用 `**` 之类的标记。
+            if state.get("enabled") and not state.get("verified", True):
+                verify = state.get("verify") or {}
+                names = [str(n) for n in (list(verify.get("corrupt") or [])
+                                          + list(verify.get("missing") or []))]
+                head = "、".join(names[:2]) or "与安装基线不符"
+                status = (f"v{local} 已启用，但文件损坏（{head}）"
+                          "—— 点上方「自动安装/更新」重铺" if local
+                          else f"已启用，但文件损坏（{head}）—— 点上方「自动安装/更新」重铺")
+            elif state.get("enabled"):
+                status = f"v{local} 已启用" if local else "已启用"
+            elif state.get("present"):
+                status = "已安装未启用（启动页开关关着）"
+            else:
+                status = "未安装（点上方「自动安装/更新」会从官方仓库拉取，约 120 KB）"
+            report["manifest"]["jiggle_efmi"] = {
+                "display": "EndfieldJiggle（触摸形变 Mod）",
+                "status": status,
+                "present": bool(state.get("present")),
+                "required": False,
+                "source": f"GitHub {jiggle_mod.REPO}（GPL-3.0-only）",
+                "install_dir": state.get("mod_dir") or "",
+            }
+        except Exception:  # noqa: BLE001
+            pass
         # 「本管理器」也作为一项依赖并列显示，而且**排在最上面**（用户要求）
         try:
             manifest = {"endfieldmodcontroller": self._app_dependency_entry()}
@@ -1628,11 +1680,54 @@ class EndfieldModControllerApi:
         except Exception as exc:  # noqa: BLE001
             return {"pending": False, "error": str(exc)}
 
+    #: 受「禁用所有 ReShade 注入」总闸管制的开关 —— 总闸开着时它们**必须都是"关"**。
+    #  ⚠️ 与 `frontend/src/pages/LaunchPage.vue` 的 `RESHADE_DEPENDENT` **一一对应**：
+    #     往任一边加开关，另一边要一起改（那条清单还兼管"界面灰掉"）。
+    MASTER_SWITCH_DEPENDENTS = ("minimal_injection", "dlss5_addon_enabled",
+                               "firstperson_addon_enabled", "hotkey_takeover")
+
+    def _enforce_master_switch_consistency(self) -> list[str]:
+        """总闸开着 ⇒ 依赖它的那几个开关必须落成"关"（**纠正配置里的不一致**）。
+
+        用户 2026-10-13 实测反馈：「现在还是聚合面板和禁用 reshade 都开，**只要禁用 reshade
+        开了，那几个都被关**」。
+
+        为什么配置会不一致：老版本里总闸默认关、统一管理器默认开 ⇒ 用户在老版本里攒下的
+        `config.json` 升级后就是"两个都为真"；而 `set_reshade_disabled()` 只在用户**点它的
+        那一刻**收敛那几个开关，配置自己不会回头纠正 ⇒ 界面就一直显示成两个都开着
+        （底座实际不注入，但看着自相矛盾，也让人以为开关是假的）。
+
+        幂等：一致时什么都不做、**不写盘**；返回这次被纠正的键（顺便记一条日志）。
+        """
+        if not bool(getattr(self.config, "reshade_disabled", False)):
+            return []
+        changed: list[str] = []
+        for key in self.MASTER_SWITCH_DEPENDENTS:
+            if bool(getattr(self.config, key, False)):
+                setattr(self.config, key, False)
+                changed.append(key)
+        if not changed:
+            return []
+        try:
+            self.config.save()
+        except Exception as exc:  # noqa: BLE001 —— 收敛失败不该让界面打不开
+            launcher._append_log(self.config, f"总闸一致性收敛写配置失败: {exc}")
+            return changed
+        launcher._append_log(
+            self.config,
+            "「禁用所有 ReShade 注入」开着 → 已把依赖它的开关收敛为关：" + "、".join(changed),
+        )
+        return changed
+
     def get_state(self) -> dict[str, Any]:
         # 双保险：前端**必然**会调 get_state()，所以它一到就等于"界面活着"。
         # `_warm_up` 靠这个信号决定什么时候开始拉公告 / 角色表；只靠显式 ui_ready() 的话，
         # 哪天前端漏调一次，所有人就要白等满 15 秒（2026-10-03 实际就是这个情况）。
         self._ui_ready.set()
+        # ★★ 总闸一致性收敛（2026-10-13 用户实测：「现在还是聚合面板和禁用 reshade 都开，
+        #    只要禁用 reshade 开了，那几个都被关」）。放在这里是因为前端**必然会调
+        #    get_state()**（界面一活就会调），所以升级上来的老配置也能被自动纠正一次。
+        self._enforce_master_switch_consistency()
         from . import diagnostics, poser, secondary_motion
 
         # 留痕：用来判断前端是否真的完成了初始化（界面空白时先看这几行有没有）
@@ -1816,11 +1911,27 @@ class EndfieldModControllerApi:
         这条链路直接失效（见 `core.HOTKEY_LOCK_ENABLED` 的说明）。所以这个开关现在
         只做一件事：**把面板部署进 ReShade 会读的目录**；锁键动作已停用。
         """
+        # ★★ 总闸开着 ⇒ 这个也"点不开"（2026-10-13 用户实测报的 bug，原话：
+        #    「现在如果开锁快捷键，就算开了防 reshade 注入，统一面板的开关也会开」）。
+        #    根因：下面那句**无条件**把 `minimal_injection` 置 True，**绕过了**
+        #    `set_minimal_injection` 里那道总闸闸门；而总闸的世界里根本没有 ReShade 底座，
+        #    面板不可能存在 ⇒ 结果就是"锁了 Mod 原键、却没有替代入口"（正是 2026-10-06
+        #    那条链要防的事）。这里先拒，且**一个字都不改**。
+        if enabled and bool(getattr(self.config, "reshade_disabled", False)):
+            return {
+                "ok": False,
+                "rejected": "reshade_disabled",
+                "message": ("「禁用所有 ReShade 注入」正开着 —— 统一管理器的面板就装在 ReShade 里，"
+                            "没有注入就没有面板。\n\n"
+                            "这时锁掉 Mod 自带快捷键会没有替代入口，所以这里直接拦住。"
+                            "要开它，先到启动页最上面把那个总闸关掉。"),
+            }
         self.config.hotkey_takeover = bool(enabled)
         if enabled:
             # ★ 用户 2026-10-06：「**如果开锁快捷键，这个强制开**」—— 面板是锁键的前提：
             #   锁了 Mod 原键、又没有面板可点，等于把用户的换装入口直接拿走
             #   （2026-10-06 反馈者"皮肤打不进去"就是这条链）。
+            #   ⚠️ 上面那道总闸闸门必须排在这句**之前**：否则被禁用的面板照样会被"带开"。
             self.config.minimal_injection = True
         self.config.save()
         deploy: dict[str, Any] = {"warnings": [], "deployed": []}
@@ -2230,6 +2341,7 @@ class EndfieldModControllerApi:
             pass
         est += 1                                      # 乳摇（第三方工具）
         est += 1                                      # Endfield Poser（第三方插件）
+        est += 1                                      # EndfieldJiggle（触摸形变 Mod，EFMI Mod 包）
         return max(est, 1)
 
     def start_full_update(self, dry_run: bool = False) -> dict[str, Any]:
@@ -2464,6 +2576,40 @@ class EndfieldModControllerApi:
                                                            message=latest_p or current_p or "?"))
                     except Exception as exc:  # noqa: BLE001
                         results.append(SimpleNamespace(key="poser", status="跳过", message=str(exc)))
+                    # EndfieldJiggle（触摸形变 Mod）：它只是一个 EFMI Mod 包（约 120 KB），
+                    # 复用上面那次 check_updates 的结果，不重复联网；游戏目录侧零动作。
+                    try:
+                        from . import efmi_jiggle as jiggle_mod
+
+                        jj = ureport.get("jiggle_efmi") or {}
+                        current_j = str(jj.get("current") or "")
+                        latest_j = str(jj.get("latest") or "")
+                        need_install_j = not current_j
+                        need_update_j = bool(current_j and latest_j and jj.get("update_available"))
+                        if need_install_j or need_update_j:
+                            if dry_run:
+                                results.append(SimpleNamespace(
+                                    key="jiggle_efmi",
+                                    status="待安装" if need_install_j else "可更新",
+                                    message=(f"未安装 → {latest_j}" if need_install_j
+                                             else f"{current_j} → {latest_j}")))
+                            elif not getattr(self.config, "jiggle_efmi_injection", False):
+                                # 与 Poser 同一条规矩：开关关着就跳过，不偷偷装回去。
+                                results.append(SimpleNamespace(key="jiggle_efmi", status="跳过",
+                                                               message="启动页已关闭该组件"))
+                            else:
+                                outcome = jiggle_mod.install(self.config)
+                                results.append(SimpleNamespace(
+                                    key="jiggle_efmi",
+                                    status=(("已安装" if need_install_j else "已更新")
+                                            if outcome.get("ok") else "失败"),
+                                    message=str(outcome.get("message")
+                                                or outcome.get("version") or "")))
+                        else:
+                            results.append(SimpleNamespace(key="jiggle_efmi", status="已是最新",
+                                                           message=latest_j or current_j or "?"))
+                    except Exception as exc:  # noqa: BLE001
+                        results.append(SimpleNamespace(key="jiggle_efmi", status="跳过", message=str(exc)))
                 except Exception as exc:  # noqa: BLE001
                     from types import SimpleNamespace as _NS
 
@@ -2596,7 +2742,10 @@ class EndfieldModControllerApi:
             from . import updates
 
             versions = updates.component_versions(self.config)
-            for key in ("reshade", "secondary_motion"):
+            # ⚠️ 这里列的是"版本表里**外部**那些键"，与 `component_versions.json` 的
+            # `external` 段一一对应 —— 加了新组件要同步加进来，否则它**永远不参与
+            # 一键启动前的"有新版本"提示**（表里写了也白写）。
+            for key in ("reshade", "secondary_motion", "jiggle_efmi"):
                 row = versions.get(key) or {}
                 installed[key] = str(row.get("version") or "")
         except Exception as exc:         # noqa: BLE001
@@ -3024,6 +3173,44 @@ class EndfieldModControllerApi:
 
         launcher._append_log(self.config, "启动乳摇管理器 requested from UI")
         return secondary_motion.launch_manager(self.config)
+
+    # ------------------------------------------------------------------
+    # EndfieldJiggle（触摸形变 Mod，第三方 EFMI Mod 包，本程序只做集成）
+    #   与乳摇 / Poser **不是一类**：它不装游戏目录、不用 loader，只是往 EFMI 的
+    #   `Mods` 里铺一个目录 ⇒ 「开关」= 铺进 / **真移出** `Mods`（EFMI 是
+    #   `include_recursive = Mods`，改名挡不住加载）。上游 GPL-3.0-only 且声明不转授
+    #   其中的游戏衍生兼容材料 ⇒ 只从官方 Release 下纯 Mod 包，不随包分发。
+    # ------------------------------------------------------------------
+    def jiggle_efmi_status(self) -> dict[str, Any]:
+        from . import efmi_jiggle
+
+        return efmi_jiggle.status(self.config)
+
+    def jiggle_efmi_install(self) -> dict[str, Any]:
+        """装/修：本地载荷已在位就一个字节都不下，直接铺进 Mods（同 Poser 的语义）。"""
+        from . import efmi_jiggle
+
+        launcher._append_log(self.config, "安装/修复 EndfieldJiggle requested from UI")
+        result = efmi_jiggle.install(
+            self.config, log=lambda message: launcher._append_log(self.config, message)
+        )
+        return self._persist_injection_switch("jiggle_efmi_injection", True, result)
+
+    def jiggle_efmi_uninstall(self) -> dict[str, Any]:
+        from . import efmi_jiggle
+
+        launcher._append_log(self.config, "移出 EndfieldJiggle requested from UI")
+        result = efmi_jiggle.set_enabled(
+            self.config, False,
+            log=lambda message: launcher._append_log(self.config, message),
+        )
+        return self._persist_injection_switch("jiggle_efmi_injection", False, result)
+
+    def open_jiggle_efmi_upstream(self) -> dict[str, Any]:
+        """设置页入口：打开上游仓库（安装说明 / 兼容范围 / 诊断提示词都在那边）。"""
+        from . import efmi_jiggle
+
+        return efmi_jiggle.open_upstream()
 
     # ------------------------------------------------------------------
     # Endfield Poser（摆姿 / MMD 播放插件，第三方工具，本程序只做集成）
@@ -6083,6 +6270,11 @@ class EndfieldModControllerApi:
                 }
             if name == "secondary_motion":
                 return updates.update_secondary_motion(
+                    self.config, url=url, log=lambda message: launcher._append_log(self.config, message)
+                )
+            if name == "jiggle_efmi":
+                # EndfieldJiggle：只下纯 Mod 包并铺进 EFMI 的 Mods（不碰游戏目录）
+                return updates.update_jiggle_efmi(
                     self.config, url=url, log=lambda message: launcher._append_log(self.config, message)
                 )
         except Exception as exc:  # noqa: BLE001

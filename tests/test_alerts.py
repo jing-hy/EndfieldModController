@@ -124,10 +124,12 @@ class AlertsTests(unittest.TestCase):
 
     # ------------------------------------------------------------ 还原配置（可逆）
     def test_safe_mode_closes_injections_and_is_undoable(self) -> None:
-        self.config.dlss5_injection = True
-        self.config.efmi_injection = True
-        self.config.secondary_motion_injection = True
-        self.config.poser_injection = True
+        # ⚠️ 用 `INJECTION_FIELDS` **自己遍历**来置位，不要手写那几个键
+        # （2026-10-13 接入 EndfieldJiggle 时踩到）：原来这里写死四个开关，白名单加了第五个
+        # 之后，下面"undo 要把它们恢复成原状"的断言必然失败 —— 因为新键从来没被打开过。
+        # 遍历白名单本身，以后再加组件就自动覆盖，不必回来改这个测试。
+        for name in alerts.INJECTION_FIELDS:
+            setattr(self.config, name, True)
         with mock.patch("endfieldmodcontroller.launcher.ensure_injections", return_value={"ok": True}), \
                 mock.patch("endfieldmodcontroller.game_clean.backup_and_clean",
                            return_value={"ok": True, "moved": ["d3d12.dll"], "backup_dir": "x"}):

@@ -7,12 +7,16 @@
 排查手法（可复用）：跑一次 `start_full_update(dry_run=True)` 拿到**真实的项清单**，
 再与 `_estimate_update_total()` 逐项对齐。当时两条链是：
 
-    实际 14 项 = 随包资产 5（nvngx×2 + dlss5 addon×3）
-               + 内置运行时 4（XXMI / XXMI-Libs / EFMI / Poser）
-               + dlss5 组件 3（reshade_base / dlss5_feed / immersse）
-               + 乳摇 1 + Poser 1
-    公式 15 项 = 上面全部正确，**多出来的是 `len(依赖清单) or 1`**
-                 —— 依赖清单为空时 `0 or 1` 凭空加了 1 项。
+    实际项 = 随包资产（nvngx×2 + dlss5 addon×3）
+           + 内置运行时 4（XXMI / XXMI-Libs / EFMI / Poser）
+           + dlss5 组件 3（reshade_base / dlss5_feed / immersse）
+           + 外部第三方组件 3（乳摇 / Poser / EndfieldJiggle）
+    公式 = 上面全部正确，**多出来的是 `len(依赖清单) or 1`**
+           —— 依赖清单为空时 `0 or 1` 凭空加了 1 项（2026-10-03 已修）。
+
+⚠️ **往批量流程里加一项时，这个文件必须一起改**（2026-10-13 接入 EndfieldJiggle 时
+就是如此：`start_full_update` 多 append 了一条结果 ⇒ 分母必须跟着 +1，否则分母又变小、
+进度又虚高）。第三方那几项统一走下面的 `EXTERNAL_COMPONENTS`，加组件只改这一处。
 
 ⚠️ 不要用 `EndfieldModControllerApi.__new__` 绕过构造：`config` 是 property，
 绕过 `__init__` 后拿到的是函数对象。这里用真实实例 + mock 模块级读函数。
@@ -26,8 +30,10 @@ from unittest import mock
 from endfieldmodcontroller import api as api_mod
 from endfieldmodcontroller import dlss5_fetcher
 
-# ⚠️ 不要依赖外部数据根（`modtest\config.json` 会被"依赖清空并重新下载"删掉，
-# 也会在没跑过测试的机器上不存在）。这里自己造一份最小配置，任何环境都能跑。
+# `start_full_update` 里"总是 append 一条结果"的第三方组件：乳摇 / Poser / EndfieldJiggle。
+# ⚠️ 它与 `api.start_full_update` 里那三个 `results.append(SimpleNamespace(key=...))` 一一对应。
+EXTERNAL_COMPONENTS = 3
+
 CONFIG = None
 
 
@@ -64,11 +70,11 @@ class EstimateUpdateTotalTests(unittest.TestCase):
              mock.patch.object(api_mod.dependencies, "load_manifest", return_value={}):
             got = self.inst._estimate_update_total()
         builtin = 4 if getattr(self.inst.config, "use_builtin_runtime", True) else 0
-        expect = builtin + len(dlss5_fetcher.COMPONENTS) + 1 + 1
+        expect = builtin + len(dlss5_fetcher.COMPONENTS) + EXTERNAL_COMPONENTS
         self.assertEqual(got, expect, f"空输入被虚增：{got} != {expect}")
 
     def test_counts_match_each_part(self):
-        """各项齐全时，公式 = 资产 + 内置 + dlss5 组件 + 依赖 + 乳摇 + Poser。"""
+        """各项齐全时，公式 = 资产 + 内置 + dlss5 组件 + 依赖 + 第三方组件。"""
         _builtin_on(self.inst)
         with mock.patch.object(api_mod.runtime_assets, "manifest_entries",
                                return_value=[1, 2, 3, 4, 5]), \
@@ -76,7 +82,7 @@ class EstimateUpdateTotalTests(unittest.TestCase):
                                return_value={"a": {}, "b": {}}):
             got = self.inst._estimate_update_total()
         builtin = 4 if getattr(self.inst.config, "use_builtin_runtime", True) else 0
-        expect = 5 + builtin + len(dlss5_fetcher.COMPONENTS) + 2 + 1 + 1
+        expect = 5 + builtin + len(dlss5_fetcher.COMPONENTS) + 2 + EXTERNAL_COMPONENTS
         self.assertEqual(got, expect)
 
     def test_reader_exceptions_count_as_zero(self):
@@ -88,7 +94,7 @@ class EstimateUpdateTotalTests(unittest.TestCase):
                                side_effect=OSError("boom")):
             got = self.inst._estimate_update_total()
         builtin = 4 if getattr(self.inst.config, "use_builtin_runtime", True) else 0
-        self.assertEqual(got, builtin + len(dlss5_fetcher.COMPONENTS) + 1 + 1)
+        self.assertEqual(got, builtin + len(dlss5_fetcher.COMPONENTS) + EXTERNAL_COMPONENTS)
 
     def test_no_builtin_runtime_drops_the_four(self):
         """不用内置运行时时，那 4 项不该算进去。"""
@@ -97,7 +103,7 @@ class EstimateUpdateTotalTests(unittest.TestCase):
              mock.patch.object(type(self.inst.config), "use_builtin_runtime",
                                new_callable=mock.PropertyMock, return_value=False):
             got = self.inst._estimate_update_total()
-        self.assertEqual(got, len(dlss5_fetcher.COMPONENTS) + 1 + 1)
+        self.assertEqual(got, len(dlss5_fetcher.COMPONENTS) + EXTERNAL_COMPONENTS)
 
     def test_never_below_one(self):
         """极端情况下分母至少是 1（进度条不能除以 0）。"""
@@ -112,7 +118,8 @@ class EstimateUpdateTotalTests(unittest.TestCase):
         real_deps = len(api_mod.dependencies.load_manifest(
             self.inst.config.dependency_manifest_path))
         builtin = 4 if getattr(self.inst.config, "use_builtin_runtime", True) else 0
-        expect = real_assets + builtin + len(dlss5_fetcher.COMPONENTS) + real_deps + 1 + 1
+        expect = (real_assets + builtin + len(dlss5_fetcher.COMPONENTS) + real_deps
+                  + EXTERNAL_COMPONENTS)
         self.assertEqual(self.inst._estimate_update_total(), expect)
 
 

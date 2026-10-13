@@ -11,16 +11,16 @@ description:
   en: >
       Decide the final set that will actually load: filter to non-dependency candidates, apply same-character exclusivity (or keep all when the switch is off), activate dependencies only on demand, and produce a report of selected / dropped / missing / blocked.
       
-revision: 5d0b7afdfa484162eedc2a76fff664d094efa131
-updated_at: "2026-10-12T15:24:16.852Z"
-fingerprint: e49e4e6c40e7137f37c6ce3e450aa17063d4356fd2c991a74a336fcc62b186d9
+revision: d6153bf31b870c1ccd2e00dac49af51793b5267a
+updated_at: "2026-10-13T16:02:57.632Z"
+fingerprint: 0941030711c371eeb8676753e085b97460037e315cb1aa918669e97450882c58
 source:
   - path: "endfieldmodcontroller/activation.py"
     line: 99
     end_line: 174
   - path: "endfieldmodcontroller/activation.py"
     line: 278
-    end_line: 474
+    end_line: 510
 apis:
   - protocol: rpc
     path: "resolve_active_set"

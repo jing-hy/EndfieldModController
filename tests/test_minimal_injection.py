@@ -41,7 +41,7 @@ def env(tmp_path, monkeypatch):
     for name in (PANEL_ADDON, *OTHER_ADDONS):
         (dlss5 / name).write_bytes(b"MZ")
     (dlss5 / "d3d12.dll").write_bytes(b"MZ")
-    config = AppConfig(
+    config = AppConfig(reshade_disabled=False,
         runtime_dir=str(runtime),
         library_dir=str(root / "library"),
         dlss5_dir=str(dlss5),
@@ -51,9 +51,12 @@ def env(tmp_path, monkeypatch):
     return config, dlss5
 
 
-def test_default_is_on():
-    """默认开 —— 零配置用户默认就有 ReShade 与统一管理器面板。"""
-    assert AppConfig().minimal_injection is True
+def test_default_is_off_while_the_master_switch_is_on():
+    """★ 2026-10-13 默认值变更（用户：「默认状态是开关 reshade 防护开，**reshade 管的关**，
+    其他都开」）—— 统一管理器正是「ReShade 管的」那一档：默认**关**，而总闸默认**开**。
+    """
+    assert AppConfig().minimal_injection is False
+    assert AppConfig().reshade_disabled is True
 
 
 def test_turning_it_off_parks_the_panel_and_forces_the_lock_off(env):

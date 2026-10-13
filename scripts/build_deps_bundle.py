@@ -67,6 +67,9 @@ LICENSES: dict[str, str] = {
     "iMMERSE": "MIT",
     "Streamline": "MIT（Copyright (c) 2023 NVIDIA CORPORATION）",
     "Poser": "AGPL-3.0（源码见包内说明）",
+    # EndfieldJiggle（触摸形变 Mod，2026-10-13 接入）：GPL-3.0-only，**允许再分发**
+    # （条件同样是附许可全文 + 保留版权 + 给出源码途径）。
+    "EndfieldJiggle": "GPL-3.0-only（源码见包内说明）",
 }
 
 #: AGPL-3.0 的 Poser：包内必须带上"源码在哪"（AGPL 的再分发义务）。
@@ -77,6 +80,16 @@ POSER_SOURCE_NOTE = (
     "  · AGPL-3.0 全文见本包 licenses/AGPL-3.0.txt\n"
     "  按 AGPL-3.0 §4/§6：本包只做原样搬运（未修改任何文件），版权归原作者；\n"
     "  需要对应源码请从上面的地址按同版本获取。\n"
+)
+
+#: GPL-3.0-only 的 EndfieldJiggle：同样要写清"源码在哪"（GPL 的再分发义务）。
+JIGGLE_SOURCE_NOTE = (
+    "EndfieldJiggle（GPL-3.0-only）源码与许可：\n"
+    "  · 上游：https://github.com/woakato/EndfieldJiggle-EFMI\n"
+    "  · 本包内对应的安装包版本见 manifest.json 的 deps.EndfieldJiggle.version\n"
+    "  · GPL-3.0-only 全文见本包 licenses/GPL-3.0-only.txt\n"
+    "  按 GPL-3.0：本包只做原样搬运（未修改任何文件），版权归原作者；\n"
+    "  需要对应源码请从上面的地址获取（上游未单独发布与本包逐字节对应的源码归档）。\n"
 )
 
 
@@ -215,6 +228,26 @@ def collect(dest: Path, *, download: bool = True) -> dict[str, dict[str, Any]]:
     except Exception as exc:  # noqa: BLE001
         _log(f"!! Poser：{exc}")
 
+    # ---- EndfieldJiggle（GPL-3.0-only，2026-10-13 接入）：只要上游那个**纯 Mod 包**
+    #      （`*win64.zip`，约 120 KB；同一个 Release 里的 72 MB 拖放包与 149 MB 独立包
+    #      对本程序没有意义）。它的默认开关是**开**的 ⇒ 离线机器必须能拿到它，
+    #      否则首次一键启动会去 GitHub 拉、拉不到。
+    try:
+        from endfieldmodcontroller import efmi_jiggle
+
+        release = github.releases_latest(efmi_jiggle.REPO)
+        picked = efmi_jiggle.pick_asset(release)
+        if not picked:
+            raise RuntimeError("release 里没有纯 Mod 包（*win64.zip）")
+        version, asset = picked
+        target = dest / str(asset.get("name") or "EndfieldJiggleEFMI-win64.zip")
+        url = str(asset.get("browser_download_url") or "")
+        if (not download or _fetch(url, target, digest=str(asset.get("digest") or ""),
+                                   label="EndfieldJiggle")) and target.is_file():
+            record("EndfieldJiggle", target, version, f"https://github.com/{efmi_jiggle.REPO}")
+    except Exception as exc:  # noqa: BLE001
+        _log(f"!! EndfieldJiggle：{exc}")
+
     # ---- Streamline 运行库（**MIT**，2026-10-12 查证 license.txt 原文）：9 个 dll 可以随包。
     #      ⚠️ 只打**本机已抽取的那 9 个 dll**（≈11 MB）—— 上游 SDK 本体 263 MB，进包会把包撑到
     #      600 MB，群里根本发不出去。条目里标 `kind: streamline-dlls`，安装侧据此直接落位。
@@ -274,6 +307,7 @@ def _readme(entries: dict[str, dict[str, Any]]) -> str:
         "  · 若任一作者不希望被这样分发，请联系我们，会立即停止分发并删除。",
         "",
         POSER_SOURCE_NOTE,
+        JIGGLE_SOURCE_NOTE,
         f"构建时间：{time.strftime('%Y-%m-%d %H:%M:%S')}",
     ]
     return "\n".join(lines) + "\n"
@@ -326,13 +360,17 @@ def build(out: Path, *, download: bool = True, min_mb: int = 0) -> int:
                                           encoding="utf-8")
         (work / README_NAME).write_text(_readme(entries), encoding="utf-8")
 
-        # 许可全文（再分发的前提）：AGPL-3.0（Poser）与 MIT（Streamline）都从各自仓库取，
-        # 走 API（网页被加速器劫持时 API 仍然通）。取不到就退化成"指向仓库 URL"的说明，
-        # **不因此中断打包**（但不能悄悄漏掉 —— 说明里会写清）。
+        # 许可全文（再分发的前提）：AGPL-3.0（Poser）、GPL-3.0-only（EndfieldJiggle）与
+        # MIT（Streamline）都从各自仓库取，走 API（网页被加速器劫持时 API 仍然通）。
+        # 取不到就退化成"指向仓库 URL"的说明，**不因此中断打包**
+        # （但不能悄悄漏掉 —— 说明里会写清）。
         licenses = work / "licenses"
         licenses.mkdir(parents=True, exist_ok=True)
+        from endfieldmodcontroller import efmi_jiggle as _jiggle_repo
         (licenses / "AGPL-3.0.txt").write_text(
             _license_text(runtime_deps.POSER_REPO), encoding="utf-8")
+        (licenses / "GPL-3.0-only.txt").write_text(
+            _license_text(_jiggle_repo.REPO), encoding="utf-8")
         (licenses / "Streamline-MIT.txt").write_text(
             _license_text("NVIDIA-RTX/Streamline"), encoding="utf-8")
 

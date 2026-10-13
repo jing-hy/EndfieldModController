@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "id": "modecontroller.backend.game",
-  "updated_at": "2026-10-02T07:47:47.297Z",
+  "updated_at": "2026-10-13T15:23:42.871Z",
   "mode": "groups",
   "reading": {
-    "zh": "这一层全都碰游戏目录，所以按风险顺序读：先探测与审计（只读），再是可逆的安全操作，然后是 ReShade 本体，最后是顺带搭车的几个可选子插件。",
-    "en": "Everything here touches the game folder, so read it in risk order: detect and audit first (read-only), then the reversible safety operations, then ReShade itself, and finally the optional sub-plugins that ride along."
+    "zh": "这一层全都碰游戏目录，所以按风险顺序读：先探测与审计（只读），再是可逆的安全操作，然后是 ReShade 本体，最后是顺带搭车的几个可选子插件。两个 jiggle 是一对：插件（换游戏目录 proxy 注入）与触摸形变 Mod（只铺 EFMI\\Mods，完全不碰游戏目录）。",
+    "en": "Everything here touches the game folder, so read it in risk order: detect and audit first (read-only), then the reversible safety operations, then ReShade itself, and finally the optional sub-plugins that ride along. The two jiggle entries are a pair: the plugin (game-folder proxy injection) and the touch-deformation Mod (EFMI\\Mods only, no game folder at all)."
   },
   "order": [
     "modecontroller.backend.game.detect",
@@ -17,6 +17,7 @@
     "modecontroller.backend.game.panel",
     "modecontroller.backend.game.poser",
     "modecontroller.backend.game.jiggle",
+    "modecontroller.backend.game.jiggle-efmi",
     "modecontroller.backend.game.dll-injector"
   ],
   "groups": [
@@ -63,6 +64,7 @@
       "children": [
         "modecontroller.backend.game.poser",
         "modecontroller.backend.game.jiggle",
+        "modecontroller.backend.game.jiggle-efmi",
         "modecontroller.backend.game.dll-injector"
       ]
     }

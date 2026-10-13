@@ -500,12 +500,32 @@ def _check_dlss5_shaders(config: AppConfig, report: Report, log: Callable[[str],
 
     missing: list[str] = []
     installed: list[str] = []
+    import time as _time
+
     for relative in DLSS5_SHADER_FILES:
         target = root.joinpath(*relative)
-        if target.is_file():
-            continue
         source = next((base.joinpath(*relative[1:]) for base in sources
                        if base.joinpath(*relative[1:]).is_file()), None)
+        if target.is_file():
+            # ★★ **"文件存在"不等于"内容正确"**（2026-10-13 修，用户现场就是这个）：
+            #    本机实测 `runtime\dlss5\reshade-shaders\Shaders\DLSS5_Feed.fx` 是 **5,342 B**
+            #    的旧版，而随包 `assets\dlss5\shaders\DLSS5_Feed.fx` 是 **52,600 B**。
+            #    旧逻辑 `if target.is_file(): continue` 只看"在不在" ⇒ 永远不修、
+            #    界面一路"shader 依赖就绪"，用户看到的却是 shader 行为异常/编译报错。
+            #    现在按**随包基准的大小**比对，不一致就备份后重铺（留 `.mc.bak-<时间戳>` 可回滚）。
+            if source is None:
+                continue
+            try:
+                if target.stat().st_size == source.stat().st_size:
+                    continue
+                stamp = _time.strftime("%Y%m%d-%H%M%S")
+                target.replace(target.with_name(f"{target.name}.mc.bak-{stamp}"))
+                shutil.copy2(source, target)
+                installed.append("/".join(relative) + "（内容与随包不一致，已重铺）")
+                report.action(f"重铺 DLSS5 shader 依赖 {relative[-1]}（与随包资产不一致）")
+            except OSError as exc:
+                missing.append(f"{'/'.join(relative)}（重铺失败: {exc}）")
+            continue
         if source is None:
             missing.append("/".join(relative))
             continue
@@ -517,30 +537,57 @@ def _check_dlss5_shaders(config: AppConfig, report: Report, log: Callable[[str],
         except OSError as exc:
             missing.append(f"{'/'.join(relative)}（写入失败: {exc}）")
 
-    # Textures 目录：不存在时 ReShade 会刷 "Failed to resolve search path ... error code 2"
-    # ⚠️ 判据必须是"目录存在**且里面有文件**" —— 只看目录在不在的话，**空目录会被跳过**，
-    # 而空目录同样会让 ReShade 报错、也会让 iMMERSE / DLSS5_Feed 找不到 AreaLUT.png 之类的
-    # 纹理（2026-09-29 实测：从零安装后目录已存在但 0 个文件，于是永远补不上）。
+    # Textures：**逐个贴图核对**（2026-10-13 修）。
+    # 现场（用户反馈的机器，ReShade 日志原文）：
+    #     ERROR | Source 'AreaLUT.png' for texture 'v_areaLUT' was not found in any of the
+    #             texture search paths!
+    # 而那台机器 `Textures\` 目录**在、里面也有别的贴图** —— 旧判据只问"目录存在且有文件"
+    # ⇒ 一路显示"纹理就绪"，谁都查不出来（用户的原话：「文件夹有问题，但在这个软件上却
+    # 显示完整，导致一直排查不出来，应该有个 bug」）。
+    # 现在以**随包 `assets\dlss5\textures` 为基准**逐个核对：缺的补、大小不符的备份后重铺。
     textures = root / "Textures"
     try:
-        has_textures = textures.is_dir() and any(textures.iterdir())
-    except OSError:
-        has_textures = False
-    if not has_textures:
-        texture_sources = [project_assets / "textures", root / "Textures"]
-        source_dir = next((p for p in texture_sources
-                           if p.is_dir() and any(p.iterdir())), None)
+        textures.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        missing.append(f"Textures 目录（创建失败: {exc}）")
+    texture_sources = [project_assets / "textures", root / "Textures"]
+    texture_base = next((p for p in texture_sources
+                         if p.is_dir() and any(p.iterdir())), None)
+    missing_textures: list[str] = []
+    added_textures: list[str] = []
+    patched_textures: list[str] = []
+    if texture_base is None:
+        # 连基准都没有（随包 assets 不全、别处也没有）⇒ 如实报出，别假装"就绪"。
         try:
-            textures.mkdir(parents=True, exist_ok=True)
-            copied = 0
-            if source_dir is not None:
-                for item in source_dir.iterdir():
-                    if item.is_file():
-                        shutil.copy2(item, textures / item.name)
-                        copied += 1
-                report.action(f"补齐 DLSS5 纹理（{copied} 个文件 → reshade-shaders\\Textures）")
-        except OSError as exc:
-            missing.append(f"Textures 目录（创建失败: {exc}）")
+            if not any(textures.iterdir()):
+                missing_textures.append("Textures（没有任何可用的贴图来源）")
+        except OSError:
+            missing_textures.append("Textures（目录不可读）")
+    else:
+        for item in sorted(texture_base.iterdir()):
+            if not item.is_file():
+                continue
+            target = textures / item.name
+            try:
+                if target.is_file() and target.stat().st_size == item.stat().st_size:
+                    continue
+                if target.is_file():
+                    stamp = _time.strftime("%Y%m%d-%H%M%S")
+                    target.replace(target.with_name(f"{target.name}.mc.bak-{stamp}"))
+                    patched_textures.append(item.name)
+                else:
+                    added_textures.append(item.name)
+                shutil.copy2(item, target)
+            except OSError as exc:
+                missing_textures.append(f"{item.name}（写入失败: {exc}）")
+    if added_textures or patched_textures:
+        report.action(
+            f"补齐 DLSS5 纹理（新增 {len(added_textures)} 个、内容不符重铺 "
+            f"{len(patched_textures)} 个 → reshade-shaders\\Textures）")
+        if log:
+            _log(log, "DLSS5 纹理补齐: 新增 " + ("、".join(added_textures) or "无")
+                      + "；重铺 " + ("、".join(patched_textures) or "无"))
+    missing.extend(missing_textures)
 
     if missing:
         report.add("dlss5:shader_deps", False,
@@ -2298,6 +2345,17 @@ def _check_bundled_versions(config: AppConfig, report: Report, log: Callable[[st
         )
 
 
+# `Mods` 里"控制器自己的东西" —— 冲突自检不把它们当"用户手动放的 Mod"。
+# ⚠️ 它与 `activation.CONTROLLER_OWNED_NAMES`、`crashwatch._CONTROLLER_DIRS` 是
+#    **三份平行白名单**（历史原因各写一份）：往 staging 里加一个"控制器自有目录"时，
+#    三处**都要同步**，否则会出现"一边认它、另一边把它报成手工 Mod / 收编进库"。
+#    EndfieldJiggle（2026-10-13 接入）就是按这个清单加进去的。
+MOD_CONFLICT_IGNORE_NAMES = frozenset({
+    "EndfieldModControllerManaged", "ModeControllerManaged", "DISABLED",
+    "EndfieldJiggleEFMI",
+})
+
+
 def _check_mod_conflicts(config: AppConfig, report: Report, log: Callable[[str], None] | None) -> None:
     """检测 EFMI\\Mods 里的 Mod 冲突。
 
@@ -2313,7 +2371,7 @@ def _check_mod_conflicts(config: AppConfig, report: Report, log: Callable[[str],
         report.add("mod_conflicts", True, "Mods 目录不存在（跳过）")
         return
     ignore_prefix = ("MC_Controller", "MC_Probe", "MC__deps")
-    ignore_names = {"EndfieldModControllerManaged", "ModeControllerManaged", "DISABLED"}
+    ignore_names = MOD_CONFLICT_IGNORE_NAMES
     try:
         children = sorted(mods_dir.iterdir())
     except OSError as exc:
@@ -2414,6 +2472,69 @@ def _check_mod_conflicts(config: AppConfig, report: Report, log: Callable[[str],
         report.add("mod_conflicts", True, f"{len(staged)} 个 staging Mod，按资源 hash 比对无冲突{note}")
 
 
+def _check_game_path(config: AppConfig, report: Report, log: Callable[[str], None] | None) -> None:
+    """游戏本体路径自愈（用户 2026-10-13 要求：「机器问题需要管理器能自己修，
+    比如 exe 不存在自动寻找」）。
+
+    现场（本机 2026-10-13 实测）：鹰角启动器更新后把安装目录从
+    `...\\games\\Endfield Game` 变成了 `...\\games\\Arknights Endfield`，而 `config.game_exe`
+    还指着旧路径 —— 之后所有"写游戏目录"的动作（proxy 注入 / 运行库部署 / 游戏目录净化与还原）
+    都打在**一个不存在的目录**上，界面照样全绿，用户只会看到"设置了但没效果"。
+
+    做法：**只在当前路径失效时**才去找（有效时一个动作都不做），顺序从便宜到贵：
+      ① 官方启动器推断 `<启动器根>\\games\\<子目录>\\Endfield.exe`（`detect_game_dir` 的第 ② 步）；
+      ② 全盘扫描（`config.auto_detect_game_dir(refresh=True)`）。
+    找到就**写回配置并落盘**（`fixed=True`），旧值写进日志留痕。
+    """
+    from . import config as config_mod
+    from . import reshade_integration
+
+    game_exe_name = "Endfield.exe"
+    current = config.game_exe_path
+    if current is not None and current.is_file():
+        return                                   # 路径有效：绝大多数用户走这条，零动作
+
+    previous = str(getattr(config, "game_exe", "") or "").strip()
+    found: Path | None = None
+    try:
+        candidate = reshade_integration.detect_game_dir(config)
+    except Exception:  # noqa: BLE001 - 探测失败不该让整轮自检炸掉
+        candidate = None
+    if candidate is not None and (candidate / game_exe_name).is_file():
+        found = candidate / game_exe_name
+    if found is None:
+        try:
+            guess = config_mod.auto_detect_game_dir(refresh=True)
+        except Exception:  # noqa: BLE001
+            guess = ""
+        if guess:
+            candidate = Path(guess) / game_exe_name
+            if candidate.is_file():
+                found = candidate
+
+    if found is None:
+        report.add(
+            "game_path", False,
+            ("没找到游戏本体 Endfield.exe"
+             + (f"（配置里记的还是 {previous}）" if previous else "")
+             + " —— 去设置页把「游戏本体」指到 Endfield.exe，或先跑一次鹰角官方启动器"),
+            manual=True,
+        )
+        return
+
+    config.game_exe = str(found)
+    try:
+        config.save()
+    except Exception as exc:  # noqa: BLE001 - 找到了但存不下也要说清楚
+        report.add("game_path", False, f"已找到游戏本体但写配置失败: {exc}", manual=True)
+        return
+    detail = (f"配置里的游戏路径已失效（{previous}）→ 已自动改到 {found}"
+              if previous else f"已自动定位游戏本体：{found}")
+    _log(log, f"游戏路径自愈: {detail}")
+    report.add("game_path", True, detail, fixed=True)
+    report.action("自动修正游戏本体路径（旧路径已不存在）")
+
+
 def _check_poser(config: AppConfig, report: Report, log: Callable[[str], None] | None) -> None:
     """Endfield Poser（摆姿 / MMD 播放插件）自检。
 
@@ -2510,6 +2631,126 @@ def _check_secondary_motion(config: AppConfig, report: Report, log: Callable[[st
         fixed=bool(result.get("actions")),
         manual=not ok,
     )
+
+
+def _check_jiggle_efmi(config: AppConfig, report: Report, log: Callable[[str], None] | None) -> None:
+    """EndfieldJiggle（触摸形变 Mod）自检（2026-10-13 接入）。
+
+    它是**EFMI 框架下的一个 Mod 目录**，不碰游戏目录、不需要 loader ⇒ 自检只有三件事：
+    开关真正落地（关 = 把目录**移出** Mods）、本地载荷缺失时报可读原因、就位后核对关键文件。
+    """
+    from . import efmi_jiggle
+
+    if not getattr(config, "jiggle_efmi_injection", False):
+        # 开关关着 = 「进游戏不加载它」。**已经铺进去的要真移出 Mods**：EFMI 的 d3dx.ini 是
+        # `include_recursive = Mods`，改名或挪进子目录都挡不住加载（"界面关了、游戏里还在"）。
+        try:
+            state = efmi_jiggle.status(config)
+            if state.get("in_mods"):
+                result = efmi_jiggle.set_enabled(config, False, log=log)
+                if result.get("changed"):
+                    report.add("jiggle_efmi", True,
+                               "已按开关把 EndfieldJiggle 移出 EFMI\\Mods（可逆，未删除任何文件）",
+                               fixed=True)
+                    report.action("移出 EndfieldJiggle（启动页开关已关闭）")
+                    return
+                report.add("jiggle_efmi", False,
+                           str(result.get("message") or "移出 EndfieldJiggle 失败"), manual=True)
+                return
+        except Exception as exc:  # noqa: BLE001
+            report.add("jiggle_efmi", False, f"按开关移出 EndfieldJiggle 失败: {exc}", manual=True)
+            return
+        report.add("jiggle_efmi", True, "已在启动页关闭 EndfieldJiggle")
+        return
+
+    state = efmi_jiggle.status(config)
+    if state.get("enabled") and state.get("verified", True):
+        report.add("jiggle_efmi", True, _jiggle_detail(state))
+        return
+
+    if not state.get("payload_ready"):
+        report.add(
+            "jiggle_efmi", False,
+            "EndfieldJiggle 安装包未就位 —— 依赖页点「自动安装/更新」会从上游 Release 拉取"
+            "纯 Mod 包（约 120 KB；本程序不随包分发它）",
+            manual=True,
+        )
+        return
+
+    # ★ **内容级损坏 / 还没铺进 Mods：先用本地原始安装包重铺一次（不联网）**。
+    #   用户 2026-10-13：「下载后的文件损坏检测按钮和启动检查不出来」—— 只判"文件在不在"
+    #   查不出半截下载、被安全软件破坏、复制中断的文件（大小对、内容不对）。所以这里按
+    #   sha256 基线判，判不过就用 `_pack` 里留存的原始包重解重铺（能自动做掉的别让用户手动）。
+    damaged = bool(state.get("enabled")) and not state.get("verified", True)
+    if damaged:
+        # 先用本地原始包重解出载荷（重写载荷与 sha256 基线），**不联网**。
+        repack = efmi_jiggle.repack_from_local(config, log=log)
+        for action in repack.get("actions") or []:
+            report.action(f"EndfieldJiggle：{action}")
+        if not repack.get("ok"):
+            _log(log, f"EndfieldJiggle：本地原始安装包不可用（{repack.get('message')}）")
+    # ⚠️ 重解完**必须再部署一次**（2026-10-13 测试抓到）：`repack_from_local` 只重建
+    #    「载荷 + 基线」，Mods 里那份旧内容不会被它动到；而 `deploy` 的短路判据包含
+    #    `_content_ok`（内容对不对），所以这一步才会把坏的那份真正覆盖掉。
+    result = efmi_jiggle.deploy(config, log=log)
+    for action in result.get("actions") or []:
+        report.action(f"EndfieldJiggle：{action}")
+    state = result.get("state") or efmi_jiggle.status(config)
+
+    if not (result.get("ok") and state.get("enabled")):
+        report.add("jiggle_efmi", False, str(result.get("message") or "EndfieldJiggle 部署失败"),
+                   manual=True)
+        return
+
+    if not state.get("verified", True):
+        report.add(
+            "jiggle_efmi", False,
+            f"EndfieldJiggle 已铺进 Mods，但**文件内容与安装基线不符**"
+            f"（{_jiggle_corrupt_detail(state)}）—— 本地原始安装包重铺过一遍仍不一致，"
+            "依赖页点「自动安装/更新」重新下载",
+            manual=True,
+        )
+        return
+
+    ok = bool(state.get("efmi_ok", True))
+    detail = _jiggle_detail(state)
+    if damaged:
+        detail = "检测到文件损坏，已用本地原始安装包重新铺好；" + detail
+    report.add("jiggle_efmi", ok, detail, fixed=True, manual=not ok)
+
+
+def _jiggle_corrupt_detail(state: dict[str, Any]) -> str:
+    """把"损坏在哪"说成人话（只列前几个，别把一屏都刷满）。"""
+    verify = state.get("verify") or {}
+    parts: list[str] = []
+
+    def _names(items: Any) -> str:
+        names = [str(name) for name in (items or [])]
+        head = "、".join(names[:3])
+        return head + (f" 等 {len(names)} 个" if len(names) > 3 else "")
+
+    if verify.get("corrupt"):
+        parts.append("内容不符：" + _names(verify["corrupt"]))
+    if verify.get("missing"):
+        parts.append("缺文件：" + _names(verify["missing"]))
+    return "；".join(parts) or "与安装时记下的 sha256 不一致"
+
+
+def _jiggle_detail(state: dict[str, Any]) -> str:
+    """EndfieldJiggle 就位后的自检说明（含 EFMI 版本门槛核对）。
+
+    ⚠️ 只报"版本够不够"，**不承诺"装了就一定有效果"**：它的 `Passes.ini` 是 12 组
+    ShaderRegex（按游戏着色器反汇编文本匹配），游戏更新重编译着色器就可能失配，
+    真实判据在游戏内：按 `Ctrl+Shift+F9` 看是否出现 `EJ: NO COMPATIBLE NATIVE PROGRAM`。
+    """
+    detail = (f"已铺进 EFMI\\Mods（{state.get('file_count', 0)} 个文件"
+              + (f"，v{state['version']}" if state.get("version") else "") + "）")
+    if state.get("efmi_unknown"):
+        detail += "；EFMI 版本读不到，未做版本核对"
+    elif not state.get("efmi_ok"):
+        detail += (f"；⚠ 本地 EFMI {state.get('efmi_version') or '?'} 低于它要求的 "
+                   f"{state.get('efmi_required')} —— 框架会拒载（游戏内显示 EFMI VERSION REJECTED）")
+    return detail
 
 
 def _check_proxy_backups(config: AppConfig, report: Report, log: Callable[[str], None] | None) -> None:
@@ -2858,6 +3099,10 @@ def ensure_all(config: AppConfig, log: Callable[[str], None] | None = None) -> d
     report = Report()
     # 先把随包资产展开（DLSS5 底座与游戏目录补齐都要用到它们）
     _check_bundled_assets(config, report, log)
+    # ★ 游戏本体路径自愈（2026-10-13）：必须排在**任何会写游戏目录的动作之前** ——
+    #   否则下面那些"补 proxy / 部署运行库 / 净化还原"全打在一个已不存在的旧目录上，
+    #   界面还全绿（用户原话：「机器问题需要管理器能自己修，比如 exe 不存在自动寻找」）。
+    _check_game_path(config, report, log)
     _check_dlss5_dir(config, report, log)
     _check_reshade_ini(config, report, log)
     # NR 必须等「第一人称插件的相机 hook」装好之后再开（2026-10-05 定案）——
@@ -2901,6 +3146,9 @@ def ensure_all(config: AppConfig, log: Callable[[str], None] | None = None) -> d
     # 用 Poser 那份更省事，它还带身份标记可自证）。
     _check_poser(config, report, log)
     _check_secondary_motion(config, report, log)
+    # EndfieldJiggle（触摸形变 Mod）：与上面两个**没有 loader 归属纠缠**（它不写游戏目录、
+    # 不用 proxy），放在最后只是让"游戏目录侧"的三项连在一起。
+    _check_jiggle_efmi(config, report, log)
     # 两个 loader 都在位之后再查"原版备份在不在"（proxy 是它们铺的）：
     # 缺 .bak 时**自动从 System32 补**，补不到就明确告诉用户"先别点还原"。
     _check_proxy_backups(config, report, log)

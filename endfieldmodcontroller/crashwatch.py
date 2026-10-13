@@ -1100,6 +1100,9 @@ CRASH_MEMORY_LIMIT = 20
 _CONTROLLER_DIRS = frozenset({
     "MC_Controller", "MC_Probe.ini", "DISABLED",
     "EndfieldModControllerManaged", "ModeControllerManaged",
+    # EndfieldJiggle（触摸形变 Mod，2026-10-13 接入）：它是控制器自己铺的 EFMI Mod。
+    # 不排掉它 ⇒ 崩一次就会被写进"崩溃组合记忆"，之后每次启动前都拿它参与比对。
+    "EndfieldJiggleEFMI",
 })
 
 

@@ -256,7 +256,7 @@ class PanelDeployTests(unittest.TestCase):
         (self.controller / "actions.tsv").write_text("id\tlabel\n1\tx\n2\ty\n", encoding="utf-8")
         self.addon = self.root / "endfieldmodcontroller.addon64"
         self.addon.write_bytes(b"MZ" + b"panel" * 100)
-        self.config = AppConfig(
+        self.config = AppConfig(reshade_disabled=False,
             library_dir=str(self.root / "library"),
             runtime_dir=str(self.runtime),
             staging_mods_dir=str(self.runtime / "EFMI" / "Mods"),
@@ -350,7 +350,7 @@ class InitializePanelCheckTests(unittest.TestCase):
         (self.controller / "actions.tsv").write_text("id\tlabel\n1\tx\n", encoding="utf-8")
         self.addon = self.root / "endfieldmodcontroller.addon64"
         self.addon.write_bytes(b"MZ")
-        self.config = AppConfig(
+        self.config = AppConfig(reshade_disabled=False,
             library_dir=str(self.root / "library"),
             runtime_dir=str(self.runtime),
             staging_mods_dir=str(self.runtime / "EFMI" / "Mods"),
@@ -423,7 +423,7 @@ class HotkeySwitchTests(unittest.TestCase):
                 encoding="utf-8",
             )
         self.config_path = self.root / "config.json"
-        self.config = AppConfig(
+        self.config = AppConfig(reshade_disabled=False,
             library_dir=str(self.library),
             runtime_dir=str(self.runtime),
             staging_mods_dir=str(self.staging),
@@ -578,7 +578,7 @@ class PanelKeyLinkTests(unittest.TestCase):
         self.staging.mkdir(parents=True)
         from endfieldmodcontroller.config import AppConfig
 
-        self.config = AppConfig(
+        self.config = AppConfig(reshade_disabled=False,
             runtime_dir=str(self.root / "runtime"),
             dlss5_dir=str(self.dlss5),
             staging_mods_dir=str(self.staging),

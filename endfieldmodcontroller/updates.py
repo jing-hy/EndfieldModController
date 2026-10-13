@@ -31,6 +31,9 @@ USER_AGENT = "EndfieldModController/0.1"
 RESHADE_SETUP_URL = "https://reshade.me/downloads/ReShade_Setup_{version}_Addon.exe"
 RESHADE_HOMEPAGE = "https://reshade.me/"
 SBM_REPO = "Sp1cHless/Arknights-Endfield-Plugin-Secondary-bodyphysics"
+# EndfieldJiggle（触摸形变 Mod）：**不是**注入型插件，而是一个 EFMI Mod 包。
+# 仓库地址在这里留一份常量，供图标/版本表/检查更新共用（实现见 `efmi_jiggle` 模块）。
+JIGGLE_REPO = "woakato/EndfieldJiggle-EFMI"
 GITHUB_API = "https://api.github.com"
 
 
@@ -223,6 +226,15 @@ def component_versions(config: AppConfig) -> dict[str, Any]:
             "repository": "https://github.com/OedoSoldier/Endfield-Poser",
             "license": "AGPL-3.0",
         },
+        "jiggle_efmi": {
+            "name": "EndfieldJiggle (触摸形变)",
+            "version": _jiggle_local_version(config),
+            # ⚠️ 它**不装游戏目录**，落点是 EFMI 的 Mods 目录 ⇒ "在不在"看的就是那个目录。
+            "path": str(_jiggle_mod_dir(config)),
+            "exists": _jiggle_mod_dir(config).is_dir(),
+            "repository": f"https://github.com/{JIGGLE_REPO}",
+            "license": "GPL-3.0-only",
+        },
     }
     return versions
 
@@ -257,6 +269,23 @@ def _poser_local_version(config: AppConfig) -> str:
         if isinstance(data, dict):
             return str(data.get("version") or "")
     return ""
+
+
+def _jiggle_mod_dir(config: AppConfig) -> Path:
+    """EndfieldJiggle 的落点目录（EFMI 的 `Mods\\EndfieldJiggleEFMI`）。"""
+    from . import efmi_jiggle
+
+    return efmi_jiggle.mod_dir(config)
+
+
+def _jiggle_local_version(config: AppConfig) -> str:
+    """EndfieldJiggle 本地版本：读组件目录里的 `version.txt`（由 `import_pack` 写入）。"""
+    from . import efmi_jiggle
+
+    try:
+        return efmi_jiggle.installed_version(config)
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def _version_from_filename(directory: Path, prefix: str) -> str:
@@ -335,6 +364,9 @@ def _builtin_local_version(config: AppConfig, key: str) -> str:
 def check_updates(config: AppConfig, log: Callable[[str], None] | None = None) -> dict[str, Any]:
     """查询各组件的最新可用版本（联网）。"""
     report: dict[str, Any] = {"reshade": {}, "secondary_motion": {}, "poser": {},
+                              # EndfieldJiggle（触摸形变 Mod，2026-10-13 接入）单独一段：
+                              # 它只下"纯 Mod 包"，与上面两个注入型插件的判据不同。
+                              "jiggle_efmi": {},
                               # ⚠️ 内置组件（XXMI / XXMI-Libs / EFMI）单独一段：
                               # 用户要更新的往往就是它们（2026-10-03 补）。
                               "builtin": {}, "errors": []}
@@ -435,6 +467,35 @@ def check_updates(config: AppConfig, log: Callable[[str], None] | None = None) -
     except Exception as exc:  # noqa: BLE001
         report["errors"].append(f"Poser 检查失败: {exc}")
 
+    # EndfieldJiggle（触摸形变 Mod）：与乳摇同一条"下上游 release"的路线，差别是
+    # **只要纯 Mod 包** —— 同一个 Release 里还挂着 72 MB 的拖放包与 149 MB 的独立包，
+    # 用 `"win64.zip" in name` 那种模糊判据会把三个包全匹配上（见 `efmi_jiggle.ASSET_RE`）。
+    try:
+        from . import efmi_jiggle, github
+
+        release = github.releases_latest(efmi_jiggle.REPO)
+        picked = efmi_jiggle.pick_asset(release)
+        version, asset = picked if picked else ("", {})
+        local = _jiggle_local_version(config)
+        report["jiggle_efmi"] = {
+            "current": local,
+            "latest": version,
+            "update_available": bool(version and local
+                                     and _version_tuple(version) > _version_tuple(local)),
+            # 没有本地版本号 = 未安装（不是"有更新"），首次安装由依赖页那个入口负责。
+            "installed": not local,
+            "download_url": str(asset.get("browser_download_url") or ""),
+            "asset": str(asset.get("name") or ""),
+            "size": int(asset.get("size") or 0),
+            "tag": str(release.get("tag_name") or ""),
+            "published": str(release.get("published_at") or ""),
+            "notes": str(release.get("name") or "").strip(),
+            "license": "GPL-3.0-only",
+            "repository": f"https://github.com/{efmi_jiggle.REPO}",
+        }
+    except Exception as exc:  # noqa: BLE001
+        report["errors"].append(f"EndfieldJiggle 检查失败: {exc}")
+
     # ── 内置组件（XXMI / XXMI-Libs / EFMI）──────────────────────────────────
     # ⚠️ 2026-10-03 补：这三项以前**完全不在检查范围内**，而用户最常要更新的就是 XXMI。
     # 判定复用 `runtime_deps` 的"远端最新版"查询与本地 marker，不另造通道。
@@ -469,6 +530,7 @@ def check_updates(config: AppConfig, log: Callable[[str], None] | None = None) -
         "reshade": report["reshade"].get("latest"),
         "secondary_motion": report["secondary_motion"].get("latest"),
         "poser": report["poser"].get("latest"),
+        "jiggle_efmi": report["jiggle_efmi"].get("latest"),
     }, ensure_ascii=False))
     return report
 
@@ -589,6 +651,34 @@ def update_poser(config: AppConfig, url: str = "", log: Callable[[str], None] | 
         if not injection.get("ok"):
             result["note"] = injection.get("message") or "安装包已更新，但游戏目录里的文件没装好"
     return result
+
+
+def update_jiggle_efmi(config: AppConfig, url: str = "", log: Callable[[str], None] | None = None) -> dict[str, Any]:
+    """下载 EndfieldJiggle 的**纯 Mod 包**并铺进 EFMI 的 `Mods`（不碰游戏目录）。
+
+    与 `update_poser` 的差别：它没有"安装包 → 游戏目录"的第二段，铺完就生效（重启游戏后）。
+    """
+    from . import efmi_jiggle
+
+    if not url:
+        # 不给 URL 就交给组件自己：本地载荷在位不联网，否则查上游拿纯 Mod 包。
+        return efmi_jiggle.install(config, log=log, force=True)
+    # ⚠️ 文件名要保留资产原名：`import_pack` 是从**文件名**解析版本号的，
+    #    写死成 `EndfieldJiggleEFMI.zip` 会让版本号永远读不到（"更新完还说有新版"那类事故）。
+    name = url.rsplit("/", 1)[-1].split("?")[0] or "EndfieldJiggleEFMI.zip"
+    try:
+        with tempfile.TemporaryDirectory(prefix="mc-jiggle-") as tmp:
+            archive = download_file(url, Path(tmp) / name, log=log, timeout=600)
+            result = efmi_jiggle.import_pack(config, archive, log=log)
+    except (urllib.error.URLError, OSError) as exc:
+        return {"ok": False, "message": f"下载失败: {exc}"}
+    if not result.get("ok"):
+        return result
+    deployed = efmi_jiggle.deploy(config, log=log)
+    deployed["pack"] = result
+    if deployed.get("ok"):
+        deployed.setdefault("note", "安装包已铺进 EFMI\\Mods；进游戏后重启一次再按 Ctrl+Shift+F8 开触摸。")
+    return deployed
 
 
 def _stamp() -> str:

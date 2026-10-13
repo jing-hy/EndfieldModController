@@ -1317,3 +1317,19 @@ VCRUNTIME140 / VCRUNTIME140_1），他那台是 **14.42.34438**、开发机是 *
 | 532 ★ | 切几套主题（浅色 / 深色 / 琥珀 / 青蓝 / 紫罗兰 / 翡翠）看商城与下载页 | 配色跟随主题，没有看不清的控件或白底黑字 |
 | 533 ★★ | 断网状态下点某个已下载过的依赖组件「更新到 vX」 | 跳到「下载」页并开始；失败时下载页的日志里有原因，组件状态不变（不会假装成功） |
 
+## 541– 2026-10-13：EndfieldJiggle（触摸形变 Mod）接入 + "文件坏了却显示完整"修复
+
+> 起因：用户反馈「下载后的文件损坏，**检测按钮和启动检查都查不出来**」，以及「注入的（贴图）文件夹有问题，但在这个软件上却显示完整，导致一直排查不出来」。根因是两处判据只问"文件在不在"，不问"内容对不对"。
+
+| 编号 | 操作 | 预期结果 |
+| --- | --- | --- |
+| 541 ★★★ | 启动页打开「EndfieldJiggle」开关 | 依赖页出现「EndfieldJiggle（触摸形变 Mod）」条目并变成「v0.2.2 已启用」；`runtime\builtin\XXMI\EFMI\Mods\EndfieldJiggleEFMI\` 下出现 13 个文件（含 `EndfieldJiggle.ini` / `Passes.ini` / `shaders\`）。首次开启**只下约 120 KB 的纯 Mod 包**（不是 72 MB 拖放包、也不是 149 MB 独立包） |
+| 542 ★★★ | 关掉「EndfieldJiggle」开关 | 该目录**真的从 `Mods` 里消失**（移到 `runtime\jiggle_efmi\_parked\`），不是只改个名 —— EFMI 是 `include_recursive`，改名挡不住加载。游戏里不再加载它 |
+| 543 ★★★ | 开关开着，手工把 `Mods\EndfieldJiggleEFMI\Passes.ini` 改几个字节 → 点设置页「初始化自检」或再点一次「一键启动」 | 自检里出现「检测到文件损坏，已用本地原始安装包重新铺好」；文件内容被恢复成随包那份（**不联网**） |
+| 544 ★★★ | 手工删掉 `Mods\EndfieldJiggleEFMI\shaders\motion_model.hlsl` → 点「完整性检查」 | 列出「EndfieldJiggle 文件不完整或已损坏（缺文件：shaders/motion_model.hlsl…）」；点「修复」后文件回来 |
+| 545 ★★★ | 手工删掉 `runtime\dlss5\reshade-shaders\Textures\AreaLUT.png` → 点「初始化自检」 | 日志出现「补齐 DLSS5 纹理（新增 1 个…）」；文件被补回。ReShade 日志里不再有 `Source 'AreaLUT.png' … was not found in any of the texture search paths` |
+| 546 ★★ | 把 `runtime\dlss5\reshade-shaders\Shaders\DLSS5_Feed.fx` 换成一个大小不同的文件 → 点「初始化自检」 | 日志出现「重铺 DLSS5 shader 依赖 DLSS5_Feed.fx（与随包资产不一致）」；同目录多一份 `DLSS5_Feed.fx.mc.bak-<时间戳>` 备份，文件恢复成随包那份 |
+| 547 ★★★ | 设置页点「完整性检查」 | 多出一项「**DLSS5 shader / 贴图资产**」；把上面任一文件删掉/改坏时它会**报红并写清缺哪个文件**（以前这里恒显示"完整"）。它**不会**因此拦死启动 |
+| 548 ★★ | 打开 EndfieldJiggle 开关后进游戏，进干员总览按 `Ctrl+Shift+F9` | 出现 `EJ: …` 状态行；若显示 `EJ: NO COMPATIBLE NATIVE PROGRAM`，说明当前游戏版本的着色器没被这套上游抓取匹配上（属上游适配范围，**不是安装问题**，依赖页/自检都不会报错） |
+| 549 ★★ | 把游戏目录改名或搬到别处（模拟路径失效）→ 点「一键启动」 | 日志出现「**游戏路径自愈**：配置里的游戏路径已失效（旧路径）→ 已自动改到 <新路径>」；`config.json` 的 `game_exe` 被写回正确路径，后面的 proxy / 运行库 / 净化都不再打在旧目录上 |
+

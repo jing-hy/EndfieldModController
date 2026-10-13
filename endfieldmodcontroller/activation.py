@@ -343,6 +343,12 @@ CONTROLLER_OWNED_NAMES = frozenset({
     MANAGED_DIR_NAME,
     "_endfieldmodcontroller_managed",
     "DISABLED",
+    # EndfieldJiggle（触摸形变 Mod，2026-10-13 接入）：它是**控制器自己铺的 EFMI Mod**，
+    # 不是用户拖进来的服装 Mod。⚠️ 不写进这里就会出事：`find_manual_mods` 会把它当
+    # "用户手工放的 Mod"收编进库、勾选，**再从 staging 搬走**（`import_manual_mods`），
+    # 而 `api.prepare_launch`（点「生成控制器」）**无条件**调用收编、不受
+    # `auto_adopt_manual_mods` 开关保护 ⇒ 用户点一次按钮它就没了。
+    "EndfieldJiggleEFMI",
 })
 
 

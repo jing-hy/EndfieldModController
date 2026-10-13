@@ -25,7 +25,7 @@ from endfieldmodcontroller.config import AppConfig
 def _config(tmp_path: Path, game: Path) -> AppConfig:
     runtime = tmp_path / "runtime"
     runtime.mkdir(parents=True, exist_ok=True)
-    return AppConfig(
+    return AppConfig(reshade_disabled=False,
         runtime_dir=str(runtime),
         library_dir=str(tmp_path / "library"),
         game_exe=str(game / "Endfield.exe"),

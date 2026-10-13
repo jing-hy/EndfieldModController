@@ -11,8 +11,8 @@ description:
   en: >
       Page skeleton and styling (Vue): the sidebar layout, the header, and the design tokens / theme variables shared by all pages.
       
-revision: 5d0b7afdfa484162eedc2a76fff664d094efa131
-updated_at: "2026-10-12T15:24:16.907Z"
+revision: d6153bf31b870c1ccd2e00dac49af51793b5267a
+updated_at: "2026-10-13T16:02:57.676Z"
 fingerprint: 908796136a83e3cf9b286179bebe41f4ba4b3ff01dd0d42761db09326e3ed46b
 source:
   - path: "frontend/src/App.vue"

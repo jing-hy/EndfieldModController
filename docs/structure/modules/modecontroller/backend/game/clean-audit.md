@@ -11,16 +11,16 @@ description:
   en: >
       Read the game folder and say what does not belong there: recognise ReShade payloads and third-party proxies by content, hash each finding, and report what would be moved where — the read-only half of the cleaning flow.
       
-revision: 5d0b7afdfa484162eedc2a76fff664d094efa131
-updated_at: "2026-10-12T15:24:16.865Z"
-fingerprint: 5f82be7a94fbae832a2c017ca93dcb5ac0f076a8a355edec9833f06aa9e76bb8
+revision: d6153bf31b870c1ccd2e00dac49af51793b5267a
+updated_at: "2026-10-13T16:02:57.645Z"
+fingerprint: 09f5e157c76c13bca84f645084de4c284fad4d0bc6f33fc352a257f9e49930dc
 source:
   - path: "endfieldmodcontroller/game_clean.py"
-    line: 89
-    end_line: 246
+    line: 102
+    end_line: 280
   - path: "endfieldmodcontroller/game_clean.py"
-    line: 192
-    end_line: 826
+    line: 205
+    end_line: 860
 apis:
   - protocol: rpc
     path: "game_clean.audit"

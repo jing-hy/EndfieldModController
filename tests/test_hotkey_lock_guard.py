@@ -46,7 +46,7 @@ def env(tmp_path, monkeypatch):
     panel.write_bytes(b"MZ")
     # `built_addon_path()` 会去找随包资产 —— 测试里换成临时文件，保持全离线
     monkeypatch.setattr(reshade_integration, "built_addon_path", lambda: panel, raising=False)
-    config = AppConfig(
+    config = AppConfig(reshade_disabled=False,
         runtime_dir=str(runtime),
         library_dir=str(root / "library"),
         dlss5_dir=str(dlss5),
@@ -58,13 +58,18 @@ def env(tmp_path, monkeypatch):
     return config
 
 
-def test_default_config_is_safe(env):
-    """**默认**（统一管理器开）⇒ 底座必注入 ⇒ 允许锁键。"""
+def test_panel_on_allows_locking_hotkeys(env):
+    """统一管理器开着 ⇒ 底座必注入 ⇒ 允许锁键。
+
+    ⚠️ 2026-10-13：`minimal_injection` 的**默认值已改成 False**（用户定的「reshade 管的关」），
+    所以这条用例不能再依赖默认值 —— 它测的是「面板开着就允许锁键」这个语义，
+    显式把面板打开即可（顺便把旧名字 `test_default_config_is_safe` 改成切题的名字）。
+    """
+    env.minimal_injection = True
     env.dlss5_addon_enabled = False
     env.firstperson_addon_enabled = False
-    assert env.minimal_injection is True      # 默认开
     possible, reason = reshade_integration.takeover_possible(env)
-    assert possible is True, f"默认配置下不该拒绝锁键（理由: {reason}）"
+    assert possible is True, f"面板开着时不该拒绝锁键（理由: {reason}）"
 
 
 def test_lock_is_refused_when_nothing_injects_the_base(env):

@@ -63,6 +63,43 @@ def xxmi_root(config: AppConfig) -> Path | None:
     return None
 
 
+def _dlss5_shader_asset_gaps(config: AppConfig) -> list[str]:
+    """DLSS5 的 **shader / 贴图**资产缺什么（内容级判据）。
+
+    ★ 2026-10-13 加，起因就是用户反馈的那条："文件夹有问题，但在这个软件上却显示完整，
+    导致一直排查不出来"。现场（ReShade 日志）：
+        `could not open included file 'ReShade.fxh'`
+        `Source 'AreaLUT.png' for texture 'v_areaLUT' was not found ...`
+    —— 生效目录里 `Shaders\\` / `Textures\\` **目录都在**，只是**少了具体文件**，
+    而旧判据只问"目录在不在 / 有没有文件"。
+
+    判据与 `initialize._check_dlss5_shaders`（负责补）保持一致：这里只报，不写盘。
+    """
+    from . import initialize
+
+    gaps: list[str] = []
+    shader_root = config.dlss5_path / "reshade-shaders"
+    for relative in initialize.DLSS5_SHADER_FILES:
+        if not shader_root.joinpath(*relative).is_file():
+            gaps.append("/".join(relative))
+    base_dir = getattr(config, "base_dir", None)
+    textures_base = (Path(base_dir) / "assets" / "dlss5" / "textures") if base_dir else None
+    if textures_base is not None and textures_base.is_dir():
+        textures = shader_root / "Textures"
+        for item in sorted(textures_base.iterdir()):
+            if not item.is_file():
+                continue
+            target = textures / item.name
+            try:
+                if not target.is_file():
+                    gaps.append(f"Textures/{item.name}（缺失）")
+                elif target.stat().st_size != item.stat().st_size:
+                    gaps.append(f"Textures/{item.name}（与随包内容不一致）")
+            except OSError:
+                gaps.append(f"Textures/{item.name}（读不到）")
+    return gaps
+
+
 def check_integrity(config: AppConfig) -> dict:
     checks: list[Check] = []
     downloadable_names = _downloadable_names()
@@ -130,6 +167,22 @@ def check_integrity(config: AppConfig) -> dict:
         efmi_dll = config.efmi_dll_path
         add("efmi_dll", efmi_dll or Path("<unset>"), efmi_dll is not None and efmi_dll.is_file(), "EFMI d3d11.dll（注入用）")
 
+        # ★ DLSS5 的 **shader / 贴图资产**：**内容级**检查（2026-10-13 加）。
+        #   用户反馈的正是这一类："文件夹有问题，但软件上显示完整" ——
+        #   缺 `ReShade.fxh`（DLSS5_Feed.fx 编译失败）、缺 `AreaLUT.png`（贴图找不到），
+        #   而旧判据只看"目录在不在"。这里报出来，「修复」会按同一套判据补齐。
+        #   `critical=False`：缺贴图会让效果不对，但不该拦死启动。
+        try:
+            gaps = _dlss5_shader_asset_gaps(config)
+            add("dlss5_shader_assets", config.dlss5_path / "reshade-shaders", not gaps,
+                ("DLSS5 shader / 贴图资产" if not gaps else
+                 "DLSS5 shader / 贴图资产不完整（会造成 ReShade 编译出错或贴图缺失）："
+                 + "、".join(gaps[:5]) + ("…" if len(gaps) > 5 else "")),
+                critical=False)
+        except Exception as exc:  # noqa: BLE001
+            add("dlss5_shader_assets", config.dlss5_path / "reshade-shaders", False,
+                f"DLSS5 shader / 贴图资产检查失败: {exc}", critical=False)
+
     add("controller_ini", config.controller_dir / "controller.ini", (config.controller_dir / "controller.ini").is_file(), "controller.ini")
     add("controller_actions", config.controller_dir / "actions.tsv", (config.controller_dir / "actions.tsv").is_file(), "controller actions.tsv")
 
@@ -154,6 +207,31 @@ def check_integrity(config: AppConfig) -> dict:
         else:
             add("hotkey_panel", Path(status["addon"]), True,
                 "统一 Mod 控制面板 —— 当前注入方式用不上面板，已保持 Mod 自带快捷键不被锁")
+
+    # EndfieldJiggle（触摸形变 Mod）：**只在这个开关打开时才算检项**（默认关，与上面同规矩），
+    # 而且 **`critical=False`** —— 它只是个可选 Mod，内容不对也**不该拦死启动**；但
+    # 「完整性检查」这个按钮必须**看得见**它（用户 2026-10-13：「下载后的文件损坏检测按钮
+    # 和启动检查不出来」）：这里查的不只是"文件在不在"，还有**内容对不对**（sha256 基线）。
+    if getattr(config, "jiggle_efmi_injection", False):
+        try:
+            from . import efmi_jiggle
+
+            state = efmi_jiggle.status(config)
+            jiggle_dir = Path(str(state.get("mod_dir") or "<unset>"))
+            if not state.get("enabled"):
+                add("jiggle_efmi", jiggle_dir, False,
+                    "EndfieldJiggle 未铺进 EFMI\\Mods（启动页开关开着）—— "
+                    "依赖页点「自动安装/更新」可补齐", critical=False)
+            elif state.get("verified", True):
+                add("jiggle_efmi", jiggle_dir, True, "EndfieldJiggle（触摸形变 Mod）",
+                    critical=False)
+            else:
+                add("jiggle_efmi", jiggle_dir, False,
+                    "EndfieldJiggle 文件不完整或已损坏（与安装时记下的 sha256 不符）—— "
+                    "依赖页点「自动安装/更新」重新铺一遍", critical=False)
+        except Exception as exc:  # noqa: BLE001
+            add("jiggle_efmi", Path("<error>"), False,
+                f"EndfieldJiggle 检查失败: {exc}", critical=False)
 
     critical_failures = [check for check in checks if check.critical and not check.ok]
     # 「要联网下载才能补齐」的那些项（缺内置组件 / 缺有公开上游的 DLSS5 组件）——

@@ -11,9 +11,9 @@ description:
   en: >
       Startup self-check and self-healing: ~28 checks that each verify a fact, fix what can be fixed safely (restage broken staging, restore bundled files from baseline, rewrite the XXMI config) and report what cannot; the repair entry point reuses exactly the same chain so both buttons behave alike.
       
-revision: 5d0b7afdfa484162eedc2a76fff664d094efa131
-updated_at: "2026-10-12T15:24:16.889Z"
-fingerprint: 070434e3c629766c22b656f4f8fa6b7ed681e465fc35e7c0333de23787f8659b
+revision: d6153bf31b870c1ccd2e00dac49af51793b5267a
+updated_at: "2026-10-13T16:02:57.660Z"
+fingerprint: 49aba293395d3cf353b98dcf7fd8982c1ed337ac85c4b2f379f1486b39b699fd
 source:
   - path: "endfieldmodcontroller/initialize.py"
   - path: "endfieldmodcontroller/integrity.py"
