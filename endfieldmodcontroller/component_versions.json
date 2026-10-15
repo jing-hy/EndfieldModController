@@ -15,7 +15,7 @@
   ],
   "builtin": {
     "XXMI": {
-      "latest": "v2.4.6",
+      "latest": "v2.4.7",
       "repo": "SpectrumQT/XXMI-Launcher"
     },
     "XXMI-Libs": {
@@ -27,7 +27,7 @@
       "repo": "SpectrumQT/EFMI-Package"
     },
     "Poser": {
-      "latest": "0.5.71",
+      "latest": "0.5.82",
       "repo": "OedoSoldier/Endfield-Poser"
     }
   },
