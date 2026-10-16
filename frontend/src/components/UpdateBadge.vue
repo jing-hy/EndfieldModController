@@ -44,16 +44,32 @@ async function pollDownload() {
     dlPercent.value = Math.max(0, Math.min(100, pct));
     dlSpeed.value = spd;
     const running = !!(p && p.running);
+    // ⚠️⚠️ **只认"自更新任务"**（2026-10-16 修，反馈者报「更新不了」）：
+    //    这个轮询原来不区分任务类型，看到**任何**下载任务结束、消息里含"完成"
+    //    就按「更新包已下载」收尾 —— 而组件更新任务正常结束的消息正是"完成"
+    //    ⇒ 用户看到"更新包已下载，等待你选择何时安装"，实际什么都没下、
+    //    程序还是旧版、还提示有新版。现在：不是自更新任务就不再往下判定。
+    const isAppUpdate = !!(p && p.app_update);
     if (running) {
-      note.value = `正在下载 v${latest.value || ""}：${dlPercent.value}%`
-        + (spd > 0 ? `　${humanSize(spd)}/s` : "");
+      note.value = isAppUpdate
+        ? `正在下载 v${latest.value || ""}：${dlPercent.value}%`
+          + (spd > 0 ? `　${humanSize(spd)}/s` : "")
+        : "正在等待其它下载任务结束…";
     } else {
       // 不跑了：按后端给的结果收尾
       stopPolling();
+      if (!isAppUpdate) {
+        // 别把别的任务的结束冒充成"更新包已下载"
+        note.value = "";
+        await load();
+        return;
+      }
       const msg = String((p && p.message) || "");
-      const ok = /已下载|完成/.test(msg);
+      // 判据收紧：**只有后端明确说"包已就绪、等你决定"**（pending_apply）才算下好了。
+      // 原来用 `/已下载|完成/` 匹配消息文本，任何以"完成"结尾的任务都会被误判。
+      const ready = !!(p && p.pending_apply);
       const failed = /失败/.test(msg);
-      if (ok) {
+      if (ready) {
         note.value = "更新包已下载，等待你选择何时安装";
       } else if (failed) {
         note.value = "更新失败";
@@ -67,7 +83,7 @@ async function pollDownload() {
       // **只有轮询能发现**；原来的代码到这就把 `note` 一改就结束了，
       // 用户看到的是"下完了然后没了" —— 既不提示、也不安装。
       // 后端 `pending_apply=True` 时表示"包已就绪，等你决定"。
-      if (ok && (p.pending_apply || p.pending)) {
+      if (ready) {
         await askApply();
       } else if (failed) {
         await showAlert("更新失败", msg || "下载更新包没有成功，可以稍后再试。");
@@ -187,7 +203,17 @@ async function startUpdate() {
     if (pending.value) {
       await call("apply_app_update");
     } else {
-      await call("start_app_update");
+      const r = await call("start_app_update");
+      // ⚠️ **后端在"已有下载任务在跑"时会明确拒绝**（返回 `busy: true`）——
+      //    2026-10-16 修：以前后端是**静默返回那个任务的进度**，界面于是拿着别人的
+      //    进度当自更新进度、结束后还报"更新包已下载"，而程序其实一点没变
+      //    （反馈者原话就是「更新不了」）。现在如实告诉用户，别装作在下。
+      if (r && r.busy && !r.ok) {
+        note.value = "";
+        await showAlert("暂时不能更新程序",
+          String(r.message || "当前有下载任务正在进行，等它结束后再试。"));
+        return;
+      }
       // ⚠️ **跳到「下载」页**（2026-10-07 改：以前跳「依赖」页，而依赖页现在只留组件
       //    状态与开关，进度/速度/日志统一在下载页）。**不锁页**：不做任何拦截，
       //    用户随时可以自己切走，下载与下面的轮询都在后台继续（徽章上也一直显示进度）。

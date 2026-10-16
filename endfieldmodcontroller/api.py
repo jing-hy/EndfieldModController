@@ -2166,6 +2166,12 @@ class EndfieldModControllerApi:
         return {"dry_run": dry_run, "results": [r.__dict__ for r in results]}
 
     def start_dependency_update(self, dry_run: bool = False, only_missing: bool = False, include_builtin: bool = False) -> dict[str, Any]:
+        # 正在跑的是**自更新**时不接手（它马上要退出程序换 exe，这时开组件下载没有意义）——
+        # 明确拒绝并落日志，别让用户以为"点了更新组件"（2026-10-16）。
+        if (self._dep_task or {}).get("app_update"):
+            busy = self._dep_busy_result("更新组件")
+            if busy is not None:
+                return busy
         if self._dep_task and self._dep_task.get("running"):
             return self.get_dependency_progress()
         self._dep_task = {
@@ -2345,6 +2351,11 @@ class EndfieldModControllerApi:
         return max(est, 1)
 
     def start_full_update(self, dry_run: bool = False) -> dict[str, Any]:
+        # 同 `start_dependency_update`：正在跑自更新时明确拒绝而不是静默返回它的进度。
+        if (self._dep_task or {}).get("app_update"):
+            busy = self._dep_busy_result("一键更新组件")
+            if busy is not None:
+                return busy
         if self._dep_task and self._dep_task.get("running"):
             return self.get_dependency_progress()
         self._dep_task = {
@@ -6059,13 +6070,51 @@ class EndfieldModControllerApi:
             threading.Timer(1.8, lambda: os._exit(0)).start()
         return result
 
+    def _dep_busy_result(self, wanted: str) -> dict[str, Any] | None:
+        """有别的下载任务在跑时，给"想开始新任务"的入口一个**明确的拒绝**（没有就返回 None）。
+
+        ⚠️ 2026-10-16 修（反馈者报「更新不了」，诊断包 20261015-233155）：
+        这些入口原来一律写成
+        `if self._dep_task and self._dep_task.get("running"): return self.get_dependency_progress()`
+        —— **静默返回另一个任务的进度**。对用户来说那等于"点了没反应"，而且更坏：
+        点「程序更新」时若组件更新正在跑，徽章会拿**组件任务**的进度当自更新的进度，
+        结束后又按「已下载」收尾（前端判据是消息里含"完成"，而组件任务正常结束的消息
+        正是"完成"），于是出现「提示更新包已下载 → 其实什么都没下 → 程序还是旧版、
+        还提示有新版」，而**日志里一个字都没有**（该反馈者的 `_update` 目录里也确实只有
+        `last_check.json`，没有载荷、没有 `applied.json`）。
+        现在改成：如实拒绝 + 落日志，让前端能明确告诉用户"先把正在跑的下载等完"。
+        """
+        task = self._dep_task or {}
+        if not task.get("running"):
+            return None
+        if task.get("app_update"):
+            what = "在更新程序自身"
+        elif task.get("full"):
+            what = "在一键更新全部组件"
+        else:
+            what = "在下载组件 / 依赖"
+        message = f"程序当前{what}，等它结束后再{wanted}。"
+        launcher._append_log(self.config, f"下载任务：{wanted}被拒绝 —— {message}")
+        return {
+            "ok": False,
+            "busy": True,
+            "running": True,
+            "app_update": bool(task.get("app_update")),
+            "percent": float(task.get("percent") or 0.0),
+            "message": message,
+        }
+
     def start_app_update(self) -> dict[str, Any]:
         """在依赖页里跑自更新：复用依赖任务的进度条与轮询接口（用户要求）。
 
         前端调它之后切到依赖页并轮询 get_dependency_progress，就能看到进度条与日志。
         """
-        if self._dep_task and self._dep_task.get("running"):
+        # 重复点自己（自更新已经在跑）⇒ 看进度就好，不算"被别的任务挡住"
+        if (self._dep_task or {}).get("running") and (self._dep_task or {}).get("app_update"):
             return self.get_dependency_progress()
+        busy = self._dep_busy_result("更新程序")
+        if busy is not None:
+            return busy
         self._dep_task = {
             "running": True,
             "current": 0,
