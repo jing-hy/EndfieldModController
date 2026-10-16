@@ -2,7 +2,7 @@
   "schema_version": 1,
   "ok": true,
   "project": "normify-modecontroller",
-  "compiled_at": "2026-10-16T14:02:27.135Z",
+  "compiled_at": "2026-10-16T14:11:24.755Z",
   "stats": {
     "tree_count": 1,
     "module_count": 172,
@@ -28,8 +28,8 @@
   },
   "artifacts": {
     "tree.json": {
-      "sha256": "6c49100d97b375cc191963ee7b14e2e95c6b87fc0457e280c2cd417788748533",
-      "bytes": 528794
+      "sha256": "abe030e70bd95f877e28fecc4bbb5c686fe90dabbebbb6c2e681513fbc4b3697",
+      "bytes": 528795
     },
     "outline.md": {
       "sha256": "b5339a4b941787e366b02fb29cf722a40c6c3a9ebeb4489a9b3534e414b6fe64",
@@ -40,7 +40,7 @@
       "bytes": 27531
     },
     "receipt.json": {
-      "sha256": "06c95066b1181f43d1c2a2e4be8950af344ca62a33c2d9d96fa78f10fb43b593",
+      "sha256": "74a8e72e0e58d9b21971c84e1556c2a2f41f23788320033f5023a53f27e39a45",
       "bytes": 1096
     }
   }

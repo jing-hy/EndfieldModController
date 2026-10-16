@@ -16,11 +16,11 @@ updated_at: "2026-10-16T14:01:30.019Z"
 fingerprint: b2881ce249e82814abe8607ae5be5a7376721939697f4e283edd0f5894f9fc6a
 source:
   - path: "endfieldmodcontroller/api.py"
-    line: 3857
-    end_line: 9646
+    line: 3868
+    end_line: 9744
   - path: "endfieldmodcontroller/api.py"
-    line: 8307
-    end_line: 13979
+    line: 8356
+    end_line: 14077
 apis:
   - protocol: rpc
     path: "enable_anti_cheat_safe_mode"

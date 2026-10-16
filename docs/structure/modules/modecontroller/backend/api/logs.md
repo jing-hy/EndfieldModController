@@ -17,13 +17,13 @@ fingerprint: b2881ce249e82814abe8607ae5be5a7376721939697f4e283edd0f5894f9fc6a
 source:
   - path: "endfieldmodcontroller/api.py"
     line: 811
-    end_line: 3093
+    end_line: 3115
   - path: "endfieldmodcontroller/api.py"
-    line: 3514
-    end_line: 9080
+    line: 3525
+    end_line: 9178
   - path: "endfieldmodcontroller/api.py"
-    line: 8488
-    end_line: 14074
+    line: 8537
+    end_line: 14172
 apis:
   - protocol: rpc
     path: "read_launch_log"

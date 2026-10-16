@@ -20,7 +20,7 @@ source:
     end_line: 759
   - path: "endfieldmodcontroller/api.py"
     line: 2155
-    end_line: 4759
+    end_line: 4781
 apis:
   - protocol: rpc
     path: "ui_ready"

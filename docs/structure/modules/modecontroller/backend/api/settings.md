@@ -17,13 +17,13 @@ fingerprint: b2881ce249e82814abe8607ae5be5a7376721939697f4e283edd0f5894f9fc6a
 source:
   - path: "endfieldmodcontroller/api.py"
     line: 407
-    end_line: 2377
+    end_line: 2399
   - path: "endfieldmodcontroller/api.py"
-    line: 2337
-    end_line: 4777
+    line: 2343
+    end_line: 4799
   - path: "endfieldmodcontroller/api.py"
-    line: 3831
-    end_line: 9485
+    line: 3842
+    end_line: 9583
 apis:
   - protocol: rpc
     path: "set_hotkey_takeover"

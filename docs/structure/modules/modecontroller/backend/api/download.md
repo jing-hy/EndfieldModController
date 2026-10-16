@@ -16,8 +16,8 @@ updated_at: "2026-10-16T14:01:30.017Z"
 fingerprint: d63ace7d6fb2af1f6a22b34e4daea10a55f9c2b317ec2c8141b8e8df76551c94
 source:
   - path: "endfieldmodcontroller/api.py"
-    line: 6773
-    end_line: 12821
+    line: 6822
+    end_line: 12919
   - path: "endfieldmodcontroller/moddl.py"
     line: 1040
     end_line: 2322

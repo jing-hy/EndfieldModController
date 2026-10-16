@@ -17,7 +17,7 @@ fingerprint: b2881ce249e82814abe8607ae5be5a7376721939697f4e283edd0f5894f9fc6a
 source:
   - path: "endfieldmodcontroller/api.py"
     line: 1309
-    end_line: 4126
+    end_line: 4148
 apis:
   - protocol: rpc
     path: "prelaunch_risks"
