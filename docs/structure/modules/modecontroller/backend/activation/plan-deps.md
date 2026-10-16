@@ -11,8 +11,8 @@ description:
   en: >
       Pick exactly one copy of each needed dependency: internal (_deps) vs external preference, only-one-instance rule from the author's warning, keep the last installed within a side, skip known-bad dependencies, and record both the choices and what was blocked with a reason.
       
-revision: d6153bf31b870c1ccd2e00dac49af51793b5267a
-updated_at: "2026-10-13T16:02:57.631Z"
+revision: aa44cfc4d4acf8d739688300e2e94583b312f729
+updated_at: "2026-10-16T14:01:30.016Z"
 fingerprint: 0941030711c371eeb8676753e085b97460037e315cb1aa918669e97450882c58
 source:
   - path: "endfieldmodcontroller/activation.py"
@@ -20,7 +20,7 @@ source:
     end_line: 195
   - path: "endfieldmodcontroller/activation.py"
     line: 138
-    end_line: 391
+    end_line: 403
 apis:
   - protocol: rpc
     path: "plan_dependencies"

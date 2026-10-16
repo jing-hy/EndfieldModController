@@ -11,8 +11,8 @@ description:
   en: >
       Compile the ReShade add-on from source and drop it where the panel deploy step expects it — the panel is native code, so it cannot ship as a Python script.
       
-revision: d6153bf31b870c1ccd2e00dac49af51793b5267a
-updated_at: "2026-10-13T16:02:57.664Z"
+revision: aa44cfc4d4acf8d739688300e2e94583b312f729
+updated_at: "2026-10-16T14:01:30.053Z"
 fingerprint: 2ea681bd331a1f54e2c738aff5461e38721e4c9d86d0fa3a2959ebd20aa8d663
 source:
   - path: "scripts/build_addon.py"

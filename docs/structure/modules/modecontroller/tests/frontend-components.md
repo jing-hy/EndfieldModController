@@ -11,8 +11,8 @@ description:
   en: >
       Static check that every component tag used in a template is actually imported. Vue silently treats an unresolved tag as a custom element: nothing renders, and a template ref hands back a DOM element instead of the component instance (calling its methods throws `openFor is not a function`) — which is exactly the "change character assignment does nothing" bug.
       
-revision: d6153bf31b870c1ccd2e00dac49af51793b5267a
-updated_at: "2026-10-13T16:02:57.671Z"
+revision: aa44cfc4d4acf8d739688300e2e94583b312f729
+updated_at: "2026-10-16T14:01:30.064Z"
 fingerprint: af758654b734734c384ad167937082b353df6140563c2ee45c7fc3adb27a321b
 source:
   - path: "tests/test_frontend_components.py"

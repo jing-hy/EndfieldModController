@@ -331,6 +331,7 @@
   "rpc:stable_id": "modecontroller.backend.library.util",
   "rpc:stage_and_prepare": "modecontroller.backend.activation.stage",
   "rpc:staging": "modecontroller.backend.selfcheck.mods",
+  "rpc:start_app_update": "modecontroller.backend.api.update",
   "rpc:start_full_update": "modecontroller.backend.api.deps",
   "rpc:start_mod_download": "modecontroller.backend.api.download",
   "rpc:start_process_monitor": "modecontroller.backend.observe.proc-monitor",
