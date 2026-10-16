@@ -338,25 +338,34 @@ def _sbm_local_version(config: AppConfig) -> str:
 # 检查更新
 # ---------------------------------------------------------------------------
 def _builtin_local_version(config: AppConfig, key: str) -> str:
-    """读内置组件**本地已装版本**（读 marker 文件；没有就返回空串 = 未安装）。"""
+    """读内置组件**本地已装版本**（读 marker 文件；没有就返回空串 = 未安装）。
+
+    ⚠️⚠️ **2026-10-16 修（两处真实缺陷）**：
+
+    ① 路径：以前三个键**一律指向 XXMI 根**，而 `XXMI-Libs` 与 `EFMI` 的 marker 其实写在
+       各自的安装目录里（`<XXMI>\\Resources\\Packages\\XXMI` 与 EFMI 目录）⇒ 这里读不到。
+    ② 键名：以前读 `marker["XXMI-Libs_version"]` / `marker["EFMI_version"]`，而
+       `runtime_deps` 写进去的键一直是 `version` ⇒ **永远空串** ⇒ `current` 为空 ⇒
+       `installed=False`、`update_available` 恒为 False ⇒ 依赖页对这两项**永远不说有新版**。
+       现在改为读它们自己的 marker、取 `version` 键。
+
+    另外，三者现在都跟随**用户指向的那份 XXMI**（`xxmi_target_root`）—— 他指定了外部 XXMI 时，
+    "本地版本"必须是那一份的，否则又会显示成"已是最新"而他实际用的还是旧版。
+    """
     try:
         from . import runtime_deps
 
+        xxmi_root, external = runtime_deps.xxmi_target_root(config)
         roots = {
-            "XXMI": config.builtin_runtime_path / "XXMI",
-            "XXMI-Libs": config.builtin_runtime_path / "XXMI",
-            "EFMI": config.builtin_runtime_path / "XXMI",
+            "XXMI": xxmi_root,
+            "XXMI-Libs": xxmi_root / "Resources" / "Packages" / "XXMI",
+            "EFMI": runtime_deps.efmi_target_root(config, xxmi_root, external=external),
         }
         root = roots.get(key)
         if root is None:
             return ""
         marker = runtime_deps._read_marker(root) or {}
-        if key == "XXMI":
-            return str(marker.get("version") or "")
-        # ⚠️ **不要退回 XXMI 的 `version`**（2026-10-03 实测踩到）：三者在同一个 marker 文件里，
-        # 图省事一律读 `version` 会让 Libs/EFMI 显示成 XXMI 的版本号（实测显示 v2.2.1），
-        # "有没有更新"的判断随之整个错掉。找不到自己的键就**如实留空**。
-        return str(marker.get(f"{key}_version") or "")
+        return str(marker.get("version") or "")
     except Exception:  # noqa: BLE001
         return ""
 

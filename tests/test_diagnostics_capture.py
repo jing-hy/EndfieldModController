@@ -439,3 +439,59 @@ def test_postmortem_records_game_exited_and_crash_phases(tmp_path: Path, monkeyp
     assert "crash" in phases, f"退出时没记「崩溃后」：{phases}"
     # pid 要一路传下去：进程虽已退出，只要句柄还在就仍能读到模块清单
     assert all(item[1] == 4242 for item in recorded), recorded
+
+
+# ---------------------------------------------------------------------------
+# ⑦ 「更新不了」类反馈：包里必须**直接看得到**更新现场（2026-10-16）
+# ---------------------------------------------------------------------------
+
+
+def test_bundle_carries_component_update_forensics(tmp_path: Path, monkeypatch):
+    """★ 回归（2026-10-16）：更新目标 / 各组件已装版本 / 自更新缓存都要进包。
+
+    **反馈者（诊断包 `diagnostics-20261015-233155`）只报「更新不了」**，而那份包里
+    既没有各组件已装的版本（marker），也没有"他实际在用的那份 XXMI 是哪一版"
+    （他填的是外部那份），更看不到 `last_check.json` 的内容 ⇒ 第一轮只能靠
+    「日志里没有自更新记录」反推 —— 这就是「判据不够」。
+    """
+    import json as _json
+
+    from endfieldmodcontroller import runtime_deps
+
+    config, game, runtime = _make_config(tmp_path)
+    _quiet_collectors(monkeypatch)
+    monkeypatch.setenv("SystemRoot", str(_fake_system32(tmp_path, "nothing-here.dll")))
+
+    # 用户自己那份 XXMI（外部）——它自己的配置里记着真实版本
+    ext = tmp_path / "myxxmi"
+    (ext / "Resources" / "Bin").mkdir(parents=True)
+    (ext / "Resources" / "Bin" / "XXMI Launcher.exe").write_bytes(b"MZ")
+    (ext / "XXMI Launcher Config.json").write_text(_json.dumps({
+        "Packages": {"packages": {"Launcher": {"deployed_version": "2.4.1"}}},
+    }), encoding="utf-8")
+    config.xxmi_launcher = str(ext / "Resources" / "Bin" / "XXMI Launcher.exe")
+    libs = ext / "Resources" / "Packages" / "XXMI"
+    libs.mkdir(parents=True)
+    (libs / runtime_deps.MARKER_NAME).write_text(
+        _json.dumps({"version": "v1.2.2"}), encoding="utf-8")
+
+    # 自更新缓存：**只有一个 last_check.json** —— 正是"从没真正开始下过"的形状
+    update_dir = runtime / "_update"
+    update_dir.mkdir(parents=True, exist_ok=True)
+    (update_dir / "last_check.json").write_text(_json.dumps({
+        "current": "1.4.0", "latest": "1.4.2", "update_available": True,
+        "asset_size": 35122060, "digest": "sha256:deadbeef",
+    }), encoding="utf-8")
+
+    bundle = diagnostics.create_diagnostic_bundle(config, game_dir=game)
+
+    with zipfile.ZipFile(bundle) as archive:
+        names = set(archive.namelist())
+        text = archive.read("diagnosis/update-forensics.txt").decode("utf-8")
+
+    assert "diagnosis/update-forensics.txt" in names, sorted(names)
+    assert "更新目标" in text
+    assert str(ext) in text, "必须写明更新打的是哪一份 XXMI"
+    assert "2.4.1" in text, "他实际在用的那份的真实版本"
+    assert "v1.2.2" in text, "各组件 marker 里的已装版本"
+    assert "update_available" in text and "1.4.2" in text, "自更新缓存的关键字段"

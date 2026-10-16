@@ -2460,6 +2460,96 @@ def collect_diagnosis_files(config: AppConfig, dest: Path, *,
     except Exception as exc:  # noqa: BLE001
         emit(f"排查素材: 自更新现场失败（忽略）: {exc}")
 
+    # ⑫ **组件更新现场**（2026-10-16 加）。起因：反馈者只报「更新不了」，而包里既看不到
+    #     各组件**已装的版本**（那几个 marker 文件），也看不到他**实际在用的那份 XXMI**
+    #     是哪一版 —— 而这两者可以完全不是同一份（`xxmi_launcher` 指向外部时，我们更新的
+    #     是他指定的那份，之前甚至是只更新内置副本）。第一轮只能靠"日志里没有自更新记录"
+    #     推断 ⇒ 正是「判据不够」。这里一次收齐，下一轮这类反馈不必再猜。
+    try:
+        from . import component_versions, runtime_deps, selfupdate, updates
+
+        lines: list[str] = []
+        xxmi_root, external = runtime_deps.xxmi_target_root(config)
+        efmi_root = runtime_deps.efmi_target_root(config, xxmi_root, external=external)
+        lines.append("① 更新目标（用户指向哪份就更新哪份）")
+        lines.append(f"   config.xxmi_launcher = {getattr(config, 'xxmi_launcher', '')!r}")
+        lines.append(f"   XXMI 根  = {xxmi_root}（{'用户自己那份' if external else '内置副本'}）")
+        lines.append(f"   EFMI 落点 = {efmi_root}")
+        lines.append(f"   use_builtin_runtime = {bool(getattr(config, 'use_builtin_runtime', True))}"
+                     f" · auto_update_dependencies = "
+                     f"{bool(getattr(config, 'auto_update_dependencies', False))}")
+        lines.append("")
+        lines.append("② 本机已装版本（各组件自己的 marker；依赖页显示的就是这些数）")
+        marker_roots = {
+            "XXMI": xxmi_root,
+            "XXMI-Libs": xxmi_root / "Resources" / "Packages" / "XXMI",
+            "EFMI": efmi_root,
+        }
+        for key, root in marker_roots.items():
+            marker = runtime_deps._read_marker(root) or {}
+            lines.append(f"   {key:<10} {str(marker.get('version') or '(无记录)'):<12}"
+                         f" 存在={root.is_dir()}  已装目录={root}")
+        try:
+            from . import poser
+
+            lines.append(f"   {'Poser':<10} {str(poser.installed_version(config) or '(无记录)'):<12}"
+                         f" 存在={(config.poser_path / 'plugin' / 'poser.dll').is_file()}"
+                         f"  已装目录={config.poser_path}")
+        except Exception as exc:  # noqa: BLE001
+            lines.append(f"   Poser 读不到: {exc}")
+        lines.append("")
+        lines.append("③ 你实际在用的那份 XXMI（读它自己的 `XXMI Launcher Config.json`）")
+        launcher_path = config.xxmi_launcher_path
+        lines.append(f"   launcher = {launcher_path}")
+        try:
+            packs = ((updates.component_versions(config).get("xxmi") or {}).get("packages") or {})
+            if packs:
+                for name, ver in packs.items():
+                    if str(ver or "").strip():
+                        lines.append(f"   Packages.{name}.deployed_version = {ver}")
+            else:
+                lines.append("   （读不到 Packages —— 配置缺失或字段为空）")
+        except Exception as exc:  # noqa: BLE001
+            lines.append(f"   Packages 读不到: {exc}")
+        try:
+            from . import launcher as _launcher
+
+            state = _launcher.xxmi_importer_folder(config)
+            lines.append(f"   active_importer = {state.get('active')!r}"
+                         f" · importer_folder = {state.get('raw')!r}"
+                         f" → {state.get('path')}（在 XXMI 树内={state.get('in_xxmi_tree')}）")
+        except Exception as exc:  # noqa: BLE001
+            lines.append(f"   importer_folder 读不到: {exc}")
+        lines.append("")
+        lines.append("④ 随包版本表（该更新到什么版本；表不存在则为旧版 exe）")
+        table = component_versions.load()
+        if not table:
+            lines.append("   （没有 component_versions.json）")
+        else:
+            for section in ("builtin", "external"):
+                rows = table.get(section) or {}
+                for key, info in rows.items():
+                    if isinstance(info, dict):
+                        lines.append(f"   [{section}] {key}: latest={info.get('latest') or '?'}")
+        lines.append("")
+        lines.append("⑤ 程序自更新缓存（点了没有 = 没有记录；载荷/残留见 self-update-forensics.txt）")
+        cache = selfupdate._read_cache(config)
+        if not cache:
+            lines.append("   （没有 last_check.json —— 从没检查过程序更新）")
+        else:
+            for key in ("current", "latest", "update_available", "checked_at", "asset",
+                        "asset_size", "digest", "error", "cached"):
+                if key in cache:
+                    lines.append(f"   {key} = {cache.get(key)}")
+        applied = selfupdate._read_applied(config)
+        lines.append(f"   applied.json = {applied or '（没有 —— 从没执行过替换）'}")
+        (dest / "update-forensics.txt").write_text(
+            "组件更新现场（更新目标 / 已装版本 / 实际在用的 XXMI / 版本表 / 自更新缓存）\n\n"
+            + "\n".join(lines) + "\n", encoding="utf-8")
+        taken.append("update-forensics.txt")
+    except Exception as exc:  # noqa: BLE001
+        emit(f"排查素材: 组件更新现场失败（忽略）: {exc}")
+
     # ⑩ **staging（EFMI Mods）的清单与 `key =` 行**（2026-10-06 加）。
     #    起因：反馈者报「**皮肤打不进去**」，而当时包里能回答这个问题的东西**一个都没收** ——
     #    `staged inventory` 只是控制器日志里的一行

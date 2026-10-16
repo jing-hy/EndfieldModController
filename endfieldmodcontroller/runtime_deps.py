@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -125,6 +126,91 @@ def _write_marker(root: Path, data: dict) -> None:
         json.dumps(data, ensure_ascii=False, indent=2),
         newline="\n",
     )
+
+
+def xxmi_target_root(config: AppConfig) -> tuple[Path, bool]:
+    """**更新要打进哪个 XXMI 根目录**，第二个值是"这是用户自己那份（外部）吗"。
+
+    用户 2026-10-16 原话：「**只要指向的 xxmi 就也包含更新**」。
+
+    ⚠️ 为什么非改不可（反馈者诊断包 `diagnostics-20261015-233155`）：`xxmi_launcher`
+    指向外部那份时，我们**一直只更新内置副本** `runtime\\builtin\\XXMI`（那是 issue #4
+    的约定：不许劫持他指定的路径）。于是依赖页显示「XXMI 已安装 v2.4.7」，而他启动游戏
+    用的是 `D:\\XXMI`（里面记着 `deployed_version = 2.4.1`）—— 更新了 58 MB，
+    **他实际在跑的那份一点没变**，用户看到的结论就是「更新不了 / 更新了没用」。
+
+    判据：`xxmi_launcher` 留空或落在内置 runtime 下 ⇒ 内置那份；否则用**他指定的 exe
+    所在的那棵 XXMI 树**（便携布局是 `<根>\\Resources\\Bin\\XXMI Launcher.exe`）。
+    """
+    builtin = config.builtin_runtime_path / "XXMI"
+    if _points_at_builtin(config, config.xxmi_launcher):
+        return builtin, False
+    launcher = config.xxmi_launcher_path
+    if launcher is None:
+        return builtin, False
+    launcher = Path(launcher)
+    # 逐级上溯找那棵"像 XXMI 根"的目录（`Resources\\` 或根部的 `XXMI Launcher Config.json`）
+    for parent in (launcher.parent.parent.parent, launcher.parent.parent, launcher.parent):
+        try:
+            if (parent / "Resources").is_dir() or (parent / "XXMI Launcher Config.json").is_file():
+                return parent, True
+        except OSError:
+            continue
+    return launcher.parent, True
+
+
+def efmi_target_root(config: AppConfig, xxmi_root: Path, *, external: bool) -> Path:
+    """EFMI 包要装进哪个目录 —— **他实际在用的那个**（XXMI 配置里的 `importer_folder`）。
+
+    EFMI 的落点**不一定是** `<XXMI 根>\\EFMI`：反馈者把 EFMI 装在了 `D:\\EFMI`
+    （XXMI 配置 `EFMI.importer_folder = 'D:/EFMI'`，staging 也指向 `D:\\EFMI\\Mods`）。
+    所谓"更新 EFMI"只有打进那个目录才算数。
+
+    保守判据（拿不准就退回 `<XXMI 根>\\EFMI`）：目录存在、不在 Mod 库里、且**像 EFMI**
+    （有 `d3d11.dll` 或 `Core\\EFMI\\main.ini`）—— 配置被指到 Mod 库那类现场不会把
+    安装包铺进用户库（`library/` 只读是红线）。
+    """
+    fallback = xxmi_root / "EFMI"
+    if not external:
+        return fallback
+    try:
+        from . import launcher as _launcher
+
+        state = _launcher.xxmi_importer_folder(config)
+        folder = state.get("path")
+        if folder is None:
+            return fallback
+        folder = Path(folder)
+        if not folder.is_dir():
+            return fallback
+        if not ((folder / "d3d11.dll").is_file() or (folder / "Core" / "EFMI" / "main.ini").is_file()):
+            return fallback
+        from . import fsutil
+
+        if fsutil.library_conflict(config.library_path, folder):
+            return fallback
+        return folder
+    except Exception:  # noqa: BLE001 - 读不到配置就按默认布局装
+        return fallback
+
+
+def xxmi_launcher_running() -> bool:
+    """XXMI Launcher 现在是不是开着。
+
+    覆盖它自己的文件（尤其 `Resources\\Bin\\*`）会失败或被系统锁住，所以更新前先问一句 ——
+    宁可让用户关掉它再更新，也不要留一个"半新半旧的 XXMI"。
+    """
+    if os.name != "nt":
+        return False
+    try:
+        result = subprocess.run(
+            ["tasklist", "/FI", "IMAGENAME eq XXMI Launcher.exe", "/FO", "CSV", "/NH"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return "XXMI Launcher.exe" in (result.stdout or "")
 
 
 def _latest_release_asset(repo: str, pattern: str, *, include_prerelease: bool = False) -> tuple[str, str, str, str]:
@@ -323,10 +409,48 @@ def _auto_update_enabled(config: AppConfig) -> bool:
     return bool(getattr(config, "auto_update_dependencies", False))
 
 
+def _snapshot_user_files(root: Path, names: tuple[str, ...]) -> dict[str, bytes]:
+    """把 XXMI 根目录下的**用户配置**读进内存（更新前后原样写回）。
+
+    便携包带的是出厂默认配置（空的 `game_folder`、旧签名），一旦覆盖上去，用户配好的
+    游戏路径与注入设置就没了 —— 那比"更新不了"更难受。所以更新外部那份时把它读出来、
+    解压完再写回（内容没变就不写，避免无谓改动文件时间）。
+    """
+    saved: dict[str, bytes] = {}
+    for name in names:
+        path = root / name
+        try:
+            if path.is_file():
+                saved[name] = path.read_bytes()
+        except OSError:
+            continue
+    return saved
+
+
+def _restore_user_files(root: Path, saved: dict[str, bytes]) -> list[str]:
+    from . import fsutil
+
+    restored: list[str] = []
+    for name, data in saved.items():
+        target = root / name
+        try:
+            if not target.is_file() or target.read_bytes() != data:
+                fsutil.write_bytes_atomic(target, data)
+                restored.append(name)
+        except OSError:
+            continue
+    return restored
+
+
+# 更新 XXMI 时**必须原样保留**的用户文件（都在 XXMI 根目录下）
+XXMI_USER_FILES = ("XXMI Launcher Config.json",)
+
+
 def ensure_xxmi(config: AppConfig, progress: Progress = None, byte_progress: ByteProgress = None,
                 log: Callable[[str], None] | None = None, *,
                 force: bool = False) -> BuiltinResult:
-    root = config.builtin_runtime_path / "XXMI"
+    # ★ 更新目标 = **用户指向的那份**（`xxmi_launcher` 指到哪就更新哪；留空/内置才用副本）
+    root, external = xxmi_target_root(config)
     existing = _find_xxmi_exe(root)
     marker = _read_marker(root)
     if progress:
@@ -346,10 +470,23 @@ def ensure_xxmi(config: AppConfig, progress: Progress = None, byte_progress: Byt
     # 走到这里只有两种情形：**本地根本没有**（必须下载，否则没法用），或者用户显式点了
     # 「一键更新全部组件」（`force=True`）/ 开着「自动更新依赖」—— 都要真的下。
     # 「关着开关、本地旧版」那条路已经在 `_skip_online_check` 里提前返回了。
+    if external:
+        _note(config, f"XXMI：更新目标是**你正在用的那份** —— {root}")
+        if xxmi_launcher_running():
+            raise RuntimeError(
+                "XXMI Launcher 正在运行 —— 先把它关掉再更新"
+                "（它的文件被系统占用，硬覆盖会留下半新半旧的 XXMI）")
     _note(config, f"XXMI：最新版 {version}，准备下载 {asset_name}")
+    # 用户自己的 `XXMI Launcher Config.json` 先读进内存，解压完原样写回
+    saved_user_files = _snapshot_user_files(root, XXMI_USER_FILES) if external else {}
     _download_extract(url, asset_name, root, byte_progress, 1, 3, "XXMI",
                               expected_sha256=digest,
                               log=lambda m: _note(config, m))
+    if saved_user_files:
+        kept = _restore_user_files(root, saved_user_files)
+        if kept:
+            _note(config, "已保留你自己的 " + "、".join(kept)
+                        + "（更新包里的出厂默认配置没有覆盖它）")
     exe = _find_xxmi_exe(root)
     if exe is None:
         raise RuntimeError("XXMI Launcher.exe was not found after extraction")
@@ -369,7 +506,8 @@ def ensure_xxmi(config: AppConfig, progress: Progress = None, byte_progress: Byt
 def ensure_xxmi_libs(config: AppConfig, progress: Progress = None, byte_progress: ByteProgress = None,
                      log: Callable[[str], None] | None = None, *,
                      force: bool = False) -> BuiltinResult:
-    root = config.builtin_runtime_path / "XXMI"
+    # 跟随用户指向的那份 XXMI（与 `ensure_xxmi` 同一判据）
+    root, _external = xxmi_target_root(config)
     target = root / "Resources" / "Packages" / "XXMI"
     d3d11 = target / "d3d11.dll"
     marker = _read_marker(target)
@@ -428,11 +566,14 @@ def ensure_xxmi_libs(config: AppConfig, progress: Progress = None, byte_progress
 def ensure_efmi(config: AppConfig, progress: Progress = None, byte_progress: ByteProgress = None,
                 log: Callable[[str], None] | None = None, *,
                 force: bool = False) -> BuiltinResult:
-    xxmi_root = config.builtin_runtime_path / "XXMI"
+    xxmi_root, external = xxmi_target_root(config)
     xxmi_exe = _find_xxmi_exe(xxmi_root)
     if xxmi_exe is None:
         ensure_xxmi(config, progress, byte_progress)
-    target = xxmi_root / "EFMI"
+        xxmi_root, external = xxmi_target_root(config)
+    # EFMI 的落点 = **他实际在用的那个目录**（XXMI 配置里的 `importer_folder`）；
+    # 拿不准就退回 `<XXMI 根>\\EFMI`（见 `efmi_target_root`）。
+    target = efmi_target_root(config, xxmi_root, external=external)
     core_ini = target / "Core" / "EFMI" / "main.ini"
     marker = _read_marker(target)
     if progress:
@@ -918,9 +1059,12 @@ def vc_runtime_result() -> BuiltinResult:
 
 
 def builtin_report(config: AppConfig) -> dict[str, dict]:
-    xxmi_root = config.builtin_runtime_path / "XXMI"
+    # ★ 报的是**用户指向的那份**（`xxmi_target_root`）：他指定了外部 XXMI 时，
+    #   依赖页必须显示那一份的路径与版本 —— 否则又会变成"更新完了还是旧版"
+    #   （反馈者现场：内置副本 v2.4.7 已装好，而他用的 `D:\XXMI` 还是 2.4.1）。
+    xxmi_root, external = xxmi_target_root(config)
     vc_missing, vc_summary = _vc_runtime_state()
-    efmi_root = xxmi_root / "EFMI"
+    efmi_root = efmi_target_root(config, xxmi_root, external=external)
     xxmi_exe = _find_xxmi_exe(xxmi_root)
     xxmi_marker = _read_marker(xxmi_root)
     efmi_marker = _read_marker(efmi_root)
@@ -949,6 +1093,9 @@ def builtin_report(config: AppConfig) -> dict[str, dict]:
             "status": "已安装" if xxmi_exe is not None else ("缺失" if config.use_builtin_runtime else "无需"),
             "version": xxmi_marker.get("version", ""),
             "enabled": config.use_builtin_runtime,
+            # 你指定了外部那份时，把"更新会打到哪里"写在行上（2026-10-16）
+            "external": external,
+            "note": (f"更新会打到你正在用的那份：{xxmi_root}" if external else ""),
         },
         "XXMI-Libs": {
             "display": "XXMI Libraries (d3d11.dll)",

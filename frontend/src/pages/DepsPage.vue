@@ -654,6 +654,11 @@ onUnmounted(() => { if (timer) clearInterval(timer); });
           <div class="min-w-0">
             <div class="font-medium truncate">{{ d.display || d.key }}</div>
             <div class="text-xs mt-0.5" style="color: var(--text-muted)">{{ d.version || "" }}</div>
+            <!-- ⚠️ 2026-10-16：你指定了外部 XXMI 时，**更新会打到你正在用的那份**
+                 （用户原话：「只要指向的 xxmi 就也包含更新」）—— 把目标写在行上，
+                 省得再出现"更新完了还是旧版、也不知道更新到哪去了"。 -->
+            <div v-if="d.note" class="text-xs mt-0.5 truncate" style="color: var(--text-muted)"
+                 :title="d.note">{{ d.note }}</div>
           </div>
           <div class="flex items-center gap-2 shrink-0">
             <!-- ⚠️ 2026-10-12：原先这里那颗「导入随包 zip…」**已按用户要求移除** ——
