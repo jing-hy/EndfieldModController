@@ -11,8 +11,8 @@ description:
   en: >
       Package the scene for a human or an issue: copy controller logs, game logs, crash dumps, event-log slice, config excerpts and the mods tree into one zip plus a rendered report — because the user gets one shot at reporting.
       
-revision: 8665ab0f899233347bb25a1f29f1a8e010befe64
-updated_at: "2026-10-18T12:50:41.425Z"
+revision: 83a004bf635eab9ddbc7e3aa0e1545b11a005bff
+updated_at: "2026-10-18T14:16:51.074Z"
 fingerprint: 9a4616442ca5219303056cf8f17ca406fc6d04688508e08dc170c69ca2597894
 source:
   - path: "endfieldmodcontroller/crashwatch.py"

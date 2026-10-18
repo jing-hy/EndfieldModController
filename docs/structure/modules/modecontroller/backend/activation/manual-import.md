@@ -11,8 +11,8 @@ description:
   en: >
       Adopt mods the user dropped straight into the game's Mods folder: find directories the controller did not generate, recognise them by namespace signature even if renamed, move them into the library, and delete the original only when it is provably safe.
       
-revision: 8665ab0f899233347bb25a1f29f1a8e010befe64
-updated_at: "2026-10-18T12:50:41.402Z"
+revision: 83a004bf635eab9ddbc7e3aa0e1545b11a005bff
+updated_at: "2026-10-18T14:16:51.047Z"
 fingerprint: 0941030711c371eeb8676753e085b97460037e315cb1aa918669e97450882c58
 source:
   - path: "endfieldmodcontroller/activation.py"

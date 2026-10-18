@@ -11,8 +11,8 @@ description:
   en: >
       The only door the UI has into the backend: one class carrying dozens of js_api methods — mod-library read/import, dependency manifest and install progress, one-click launch and preview, settings and theme, self-check and repair, crash/diagnostic bundles, announcements and alerts. Construction must stay fast; heavy work goes to background threads with progress polling.
       
-revision: 8665ab0f899233347bb25a1f29f1a8e010befe64
-updated_at: "2026-10-18T12:50:41.405Z"
+revision: 83a004bf635eab9ddbc7e3aa0e1545b11a005bff
+updated_at: "2026-10-18T14:16:51.049Z"
 fingerprint: 79911475934b5a1ab573e2f236e7e16357592e6457e80e3322deb2ef4d9984a2
 source:
   - path: "endfieldmodcontroller/api.py"

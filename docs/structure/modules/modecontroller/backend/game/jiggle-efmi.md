@@ -11,8 +11,8 @@ description:
   en: >
       EndfieldJiggle (touch-deformation mod) integration: it never touches the game folder — it is just a Mod directory under the EFMI framework, so toggling means deploying into or moving out of EFMI\Mods. Also carries content-level integrity checks (per-file sha256 baseline, zip CRC, upstream SHA256SUMS) and local re-pack repair.
       
-revision: 8665ab0f899233347bb25a1f29f1a8e010befe64
-updated_at: "2026-10-18T12:50:41.416Z"
+revision: 83a004bf635eab9ddbc7e3aa0e1545b11a005bff
+updated_at: "2026-10-18T14:16:51.063Z"
 fingerprint: de6dbef501c53a6dc3d0d79d7e55a725cc0eee1a81b51b8067c40b8e3a1d1a0d
 source:
   - path: "endfieldmodcontroller/efmi_jiggle.py"

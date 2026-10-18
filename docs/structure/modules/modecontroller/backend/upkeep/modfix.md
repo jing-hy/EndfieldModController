@@ -11,8 +11,8 @@ description:
   en: >
       Repair a mod package that will not load: carry an external unpacking tool, back the mod up (to a backup dir and a trash dir with an index), fix in place, roll back, or delete — always reversible, never destructive.
       
-revision: 8665ab0f899233347bb25a1f29f1a8e010befe64
-updated_at: "2026-10-18T12:50:41.433Z"
+revision: 83a004bf635eab9ddbc7e3aa0e1545b11a005bff
+updated_at: "2026-10-18T14:16:51.084Z"
 fingerprint: a6c1c086c6ed2fce62f061a035927988b3624ed73a39770ef51be24c19c93cca
 source:
   - path: "endfieldmodcontroller/modfix.py"

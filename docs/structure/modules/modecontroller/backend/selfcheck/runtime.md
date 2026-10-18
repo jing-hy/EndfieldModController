@@ -11,19 +11,19 @@ description:
   en: >
       Verify the runtime's own files: unpack bundled assets, restore bundled components that drifted from the baseline, make sure the game folder has the dlls the launch chain expects, and keep ReShade.ini coherent with what the program assumes.
       
-revision: 8665ab0f899233347bb25a1f29f1a8e010befe64
-updated_at: "2026-10-18T12:50:41.431Z"
+revision: 83a004bf635eab9ddbc7e3aa0e1545b11a005bff
+updated_at: "2026-10-18T14:16:51.081Z"
 fingerprint: 334016859c4b0b377474eb3c4dfa8e8207cba1c9329986788d8f207687218859
 source:
   - path: "endfieldmodcontroller/initialize.py"
-    line: 442
-    end_line: 1859
+    line: 458
+    end_line: 1891
   - path: "endfieldmodcontroller/initialize.py"
-    line: 4221
-    end_line: 8150
+    line: 4237
+    end_line: 8182
   - path: "endfieldmodcontroller/initialize.py"
-    line: 4818
-    end_line: 8244
+    line: 4834
+    end_line: 8276
 apis:
   - protocol: rpc
     path: "bundled_assets"

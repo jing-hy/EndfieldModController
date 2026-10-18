@@ -36,9 +36,11 @@ assets/…                          ← 与 `assets-bundle.zip` 完全同构的�
 
 ## 许可边界（不许进包的东西）
 
-`Endfield Poser` 是 **AGPL-3.0**，README 与前端都明写「不随包分发，只从官方 Release 下载」；
-`Streamline` 是 NVIDIA SDK；VC++ 运行库必须跑微软官方安装器。**这三项一律不进包**，
-导入后它们仍需联网安装（界面会如实标出来）。
+⚠️ **2026-10-18 更正**：这里原写「Poser / Streamline / VC++ 三项一律不进包」，而 2026-10-12
+逐一读许可证原文后事实是：`Endfield Poser` = **AGPL-3.0**、`Streamline` = **MIT** ——
+**都允许再分发**（条件：附许可全文 + 保留版权 + 给出源码途径，包内 `licenses/` 与说明已做），
+所以包里一直带着它们。真正进不了包的只有 **VC++ 运行库**（微软条款：必须跑官方安装器，
+导入后仍需联网安装，界面会如实标出）。
 """
 from __future__ import annotations
 

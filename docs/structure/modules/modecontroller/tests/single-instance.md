@@ -11,8 +11,8 @@ description:
   en: >
       Regression for the single-instance lock: a recycled PID (or a stale lock, or a broken lock file) must be taken over instead of causing a silent exit; a genuinely live instance (fingerprint match, or a window on screen) must still be refused; releasing only removes our own lock.
       
-revision: 8665ab0f899233347bb25a1f29f1a8e010befe64
-updated_at: "2026-10-18T12:50:41.442Z"
+revision: 83a004bf635eab9ddbc7e3aa0e1545b11a005bff
+updated_at: "2026-10-18T14:16:51.094Z"
 fingerprint: 9b8753d802d0407deca6a3bc9f3f91521675382857971ff31de6542eb6138073
 source:
   - path: "tests/test_single_instance.py"

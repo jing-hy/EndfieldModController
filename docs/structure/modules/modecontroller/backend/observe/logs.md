@@ -11,8 +11,8 @@ description:
   en: >
       The program's own log files and how they are written: session / daily / launch logs, structured log_event lines, exception capture, system and runtime snapshots, and the EFMI state dump that says whether the game actually loaded our staged files.
       
-revision: 8665ab0f899233347bb25a1f29f1a8e010befe64
-updated_at: "2026-10-18T12:50:41.428Z"
+revision: 83a004bf635eab9ddbc7e3aa0e1545b11a005bff
+updated_at: "2026-10-18T14:16:51.078Z"
 fingerprint: d41eb977e6b1721a1ce2ce0f74472bd4189d2a90d23c9eccec32cf5d76ffbdfd
 source:
   - path: "endfieldmodcontroller/diagnostics.py"

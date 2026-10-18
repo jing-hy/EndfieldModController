@@ -303,6 +303,10 @@ def _readme(entries: dict[str, dict[str, Any]]) -> str:
                      f"许可 {entry.get('license') or '见上游'}）")
     lines += [
         "",
+        "另外，包内的随包资产段（`assets\\`）会一并落地到程序目录，其中有：",
+        "  · DLSS 运行库分卷（nvngx）、DLSS5 组件与 shader（dlss5）、随包 ReShade 面板 addon、",
+        "  · **EFMI RabbitFX（前置，随包 v2.8）** —— 展开到 <Mod 库>\\_deps\\RabbitFX。",
+        "",
         "**不包含**：",
         "  · VC++ 运行库（微软条款：必须跑官方安装器；多数机器本来就有）——",
         "    缺的话可在依赖页让程序检测并引导安装，或从微软官网下载 vc_redist.x64.exe。",
@@ -362,8 +366,14 @@ def build(out: Path, *, download: bool = True, min_mb: int = 0,
             "format": offline_deps_format(),
             "kind": "deps-bundle",
             "built_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-            "note": "离线依赖包（应急用，不随 Release 发布）。Endfield Poser / Streamline / VC++ "
-                    "不在包内（许可原因）。",
+            # ⚠️ 2026-10-18 更正：这段文案原来写「Poser / Streamline / VC++ 不在包内（许可原因）」，
+            # 而 2026-10-12 逐一查许可证原文后 Poser（AGPL-3.0）与 Streamline（MIT）**本来就允许
+            # 再分发**，包里一直带着它们 ⇒ 说明与实际自相矛盾（用户看说明会以为没带）。
+            # 现在只写真正进不了包的：VC++（微软条款，必须跑官方安装器）。
+            "note": "离线依赖包（应急用，不随 Release 发布）。包含可再分发的全部组件原件"
+                    "（XXMI / XXMI-Libs / EFMI / ReShade / DLSS5-Feeder / iMMERSE / "
+                    "Endfield Poser / EndfieldJiggle / Streamline）与随包资产段（assets/，含 EFMI "
+                    "RabbitFX）；VC++ 运行库不在包内（微软条款：必须跑官方安装器）。",
             "deps": entries,
         }
         (work / MANIFEST_NAME).write_text(json.dumps(manifest, ensure_ascii=False, indent=2),

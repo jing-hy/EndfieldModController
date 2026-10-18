@@ -11,8 +11,8 @@ description:
   en: >
       Tests for staging: same-character exclusivity, dependency planning and the internal/external priority rules, archive and manual import, the mods master switch, staging integrity repair, and the conflict-resolve action.
       
-revision: 8665ab0f899233347bb25a1f29f1a8e010befe64
-updated_at: "2026-10-18T12:50:41.438Z"
+revision: 83a004bf635eab9ddbc7e3aa0e1545b11a005bff
+updated_at: "2026-10-18T14:16:51.090Z"
 fingerprint: 00d5e332557daa9eddc18868619070ca97782726f8c41a65f2e0a42827fc8f0b
 source:
   - path: "tests/test_activation.py"

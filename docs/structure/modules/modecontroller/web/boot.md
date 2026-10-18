@@ -11,8 +11,8 @@ description:
   en: >
       Frontend entry: main.js mount plus the inline theme script in index.html (prevents a flash of the default colour).
       
-revision: 8665ab0f899233347bb25a1f29f1a8e010befe64
-updated_at: "2026-10-18T12:50:41.443Z"
+revision: 83a004bf635eab9ddbc7e3aa0e1545b11a005bff
+updated_at: "2026-10-18T14:16:51.095Z"
 fingerprint: 7d11c7b0919fe2a10671ccfa333f10f49384b66da4585a1ec91fa2c4150885f3
 source:
   - path: "frontend/index.html"

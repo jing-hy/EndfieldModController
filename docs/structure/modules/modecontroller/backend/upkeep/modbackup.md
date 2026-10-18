@@ -11,8 +11,8 @@ description:
   en: >
       Mirror the mod library into a backup folder: decide what still needs backing up, zip each mod, keep an index, and refuse to point the backup at the library itself (overlap guard).
       
-revision: 8665ab0f899233347bb25a1f29f1a8e010befe64
-updated_at: "2026-10-18T12:50:41.433Z"
+revision: 83a004bf635eab9ddbc7e3aa0e1545b11a005bff
+updated_at: "2026-10-18T14:16:51.084Z"
 fingerprint: ee81adcaf975623a7297a94a1fa389ae2e70cfe8d3291a414781217a3639b1d9
 source:
   - path: "endfieldmodcontroller/modbackup.py"
