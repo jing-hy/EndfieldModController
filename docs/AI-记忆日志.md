@@ -6486,3 +6486,42 @@ modecontroller 2026-10-12 起从 MIT 改为 **GPL-3.0-or-later**（另一台电�
 **定式**：托管副本与用户自己的安装是**两份东西** —— 显示、判定、更新三处必须指向同一份"实际在用的"；一旦决定"不改用户填的路径"，就必须同时解决"那更新到他那份"的问题，否则就是在更新的另一份上做表面功夫。
 
 `关键词：["更新打到实际使用那份","xxmi_target_root","efmi_target_root","importer_folder","内置副本 vs 外部安装","XXMI Launcher Config.json 保留","运行中拒绝更新","表面功夫","依赖页显示哪份版本","不整目录替换"]`
+
+<!-- 增量追加 2026-10-18 20:54 · 新增 4 条（历史条目一律保留）-->
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 【modecontroller 当前状态唯一真源】（20…
+*2026-10-18 17:23*
+
+【modecontroller 当前状态唯一真源】（2026-10-18 更新）
+**Latest Release = v1.4.5**（2026-10-18 17:22 设为 Latest；非 draft / 非预发布）。**本地 = 1.4.5**（同号，不欠号）。**main = 8665ab0**。快照 `D:\zmdmod\_snapshot_1.4.5-20261018-172057`。
+**v1.4.5 内容**：只把随包组件版本表跟上游对齐 —— XXMI v2.4.9 / Poser 0.5.108 / SecondaryMotion 3.2.0 / EndfieldJiggle 0.2.4；XXMI-Libs v1.2.2、EFMI v1.4.8、ReShade 6.8.0 核对后未变。**程序行为与 v1.4.4 完全一致**（无代码逻辑改动）；四个新版本的发布资产名都实测被现有判据命中。
+**发布实测**：`build_release --with-tests` 通过（首轮 `test_game_dir_subdir_injections` 偶发失败、重试通过，单跑 5 passed）；附件 `EndfieldModController.exe` 35,131,950 B（sha256 `251512c7…`）、`assets-bundle.zip` 262,029,848 B（`9bf9c69c…`），与 release digest 一致；draft 数 0；tag 指向 8665ab0。
+⚠️ `build_release.py` 会清理 `dist\` 非构建产物 ⇒ 构建前把 `deps-bundle.zip` 挪到 `_tmp\dist-keep\`、构建后挪回。
+**下一步**：再改代码 ⇒ 本机写 `1.4.6-beta`。
+
+`关键词：["当前状态唯一真源","v1.4.4 已发布","Latest Release","main 67a0732","自更新入口被静默吞掉","更新跟随指向的 XXMI","诊断包 update-forensics","下一个号 1.4.5-beta","exe sha256 f17fa294","deps-bundle 挪出 dist"]`
+
+<!-- lesson · 经验教训（被纠正过的、踩过的坑） -->
+### 全量测试里 tests\test_game_dir_su…
+*2026-10-18 17:23*
+
+全量测试里 tests\test_game_dir_subdir_injections.py 会偶发首轮失败（文件占用），run_tests.py 重试即过；判据是单跑该文件 5 passed，别当回归。
+
+`关键词：["偶发失败","test_game_dir_subdir_injections","文件占用","run_tests 重试","误判回归","全量测试"]`
+
+<!-- fact · 事实（细碎的原子信息） -->
+### 本机（开发机）组件实际版本 2026-10-18：XXM…
+*2026-10-18 17:23*
+
+本机（开发机）组件实际版本 2026-10-18：XXMI v2.4.6（在 runtime\builtin\XXMI）、Poser v0.5.58、SecondaryMotion 3.1.2、EndfieldJiggle 未安装；上游已到 XXMI v2.4.9 / Poser 0.5.108 / 3.2.0 / 0.2.4。
+
+`关键词：["本机组件版本","XXMI v2.4.6","Poser 0.5.58","乳摇 3.1.2","EndfieldJiggle","runtime builtin","组件落后","开发机环境"]`
+
+<!-- fact · 事实（细碎的原子信息） -->
+### 上游次级运动插件 3.2.0 的 release tag…
+*2026-10-18 17:23*
+
+上游次级运动插件 3.2.0 的 release tag 是 Endfield-1.6-available ⇒ 游戏已进入 1.6 时代；1.5 时代的 3.1.2 属旧版本，新游戏下建议更新。XXMI v2.4.9 起 EFMI 直启新增「官方启动器目录」选项（GRYPHLINK/Epic 需要）。
+
+`关键词：["游戏 1.6","Endfield-1.6-available","SecondaryMotion 3.2.0","XXMI v2.4.9","官方启动器目录","GRYPHLINK","EFMI 直启"]`
