@@ -11,8 +11,8 @@ description:
   en: >
       The hard rule that the user's mod library is never touched: raise a guard error and refuse to stage whenever the staging directory is the library, inside it, or its parent — because that is exactly how one user's whole library got wiped.
       
-revision: aa44cfc4d4acf8d739688300e2e94583b312f729
-updated_at: "2026-10-16T14:01:30.015Z"
+revision: 67a073215c2dce317e8190d381e16868baade880
+updated_at: "2026-10-18T09:12:03.861Z"
 fingerprint: 0941030711c371eeb8676753e085b97460037e315cb1aa918669e97450882c58
 source:
   - path: "endfieldmodcontroller/activation.py"

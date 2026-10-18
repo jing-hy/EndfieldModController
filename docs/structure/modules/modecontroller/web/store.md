@@ -11,8 +11,8 @@ description:
   en: >
       Store UI: category rail plus card grid, one compact toolbar, 16:9 covers, viewport-only image loading, in-page detail, and enqueue-instead-of-navigate downloads.
       
-revision: aa44cfc4d4acf8d739688300e2e94583b312f729
-updated_at: "2026-10-16T14:01:30.071Z"
+revision: 67a073215c2dce317e8190d381e16868baade880
+updated_at: "2026-10-18T09:12:04.001Z"
 fingerprint: 5238489a697b3bd785f376f176638727a5f286a22196b9eae3481e2661529412
 source:
   - path: "frontend/src/pages/StorePage.vue"

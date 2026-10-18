@@ -11,8 +11,8 @@ description:
   en: >
       Build the diagnostic bundle the feedback flow depends on: runtime inventory with hashes, DLSS5 fingerprint, NGX consumer summary, XXMI injection-chain summary (including its importer folder and whether both sides would inject the same loader), shader list, plus a Windows event-log slice.
       
-revision: aa44cfc4d4acf8d739688300e2e94583b312f729
-updated_at: "2026-10-16T14:01:30.043Z"
+revision: 67a073215c2dce317e8190d381e16868baade880
+updated_at: "2026-10-18T09:12:03.907Z"
 fingerprint: d41eb977e6b1721a1ce2ce0f74472bd4189d2a90d23c9eccec32cf5d76ffbdfd
 source:
   - path: "endfieldmodcontroller/diagnostics.py"

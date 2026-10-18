@@ -11,13 +11,13 @@ description:
   en: >
       Status of the optional sub-plugins the launch page shows: DLSS5 injection, jiggle-physics install/launch, Poser install/uninstall/web-UI/log tail, and the component add-on toggle. Toggles apply **and** persist; opening Poser downloads nothing when the pack is already local.
       
-revision: aa44cfc4d4acf8d739688300e2e94583b312f729
-updated_at: "2026-10-16T14:01:30.021Z"
+revision: 67a073215c2dce317e8190d381e16868baade880
+updated_at: "2026-10-18T09:12:03.869Z"
 fingerprint: b2881ce249e82814abe8607ae5be5a7376721939697f4e283edd0f5894f9fc6a
 source:
   - path: "endfieldmodcontroller/api.py"
-    line: 4184
-    end_line: 10214
+    line: 4195
+    end_line: 10312
 apis:
   - protocol: rpc
     path: "dlss5_status"

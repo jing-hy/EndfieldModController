@@ -11,16 +11,16 @@ description:
   en: >
       The background watcher: follow the game process from launch to exit, sample it meanwhile, and when it exits collect evidence, write the report, build the bundle and decide whether this run was a success or a crash.
       
-revision: 0f41bf214f75c051e693ed36eb4bd6478655242e
-updated_at: "2026-10-16T14:11:18.089Z"
+revision: 67a073215c2dce317e8190d381e16868baade880
+updated_at: "2026-10-18T09:12:03.912Z"
 fingerprint: 9a4616442ca5219303056cf8f17ca406fc6d04688508e08dc170c69ca2597894
 source:
   - path: "endfieldmodcontroller/crashwatch.py"
-    line: 3513
-    end_line: 5821
+    line: 3603
+    end_line: 6001
   - path: "endfieldmodcontroller/crashwatch.py"
-    line: 3610
-    end_line: 5890
+    line: 3700
+    end_line: 6070
 apis:
   - protocol: rpc
     path: "start_watch"

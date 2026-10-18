@@ -11,16 +11,16 @@ description:
   en: >
       Browse and edit the library from the UI: rescan, fetch a mod's cover image, show its detail sheet, reassign its character or kind, remove it from the library, and list the characters the program knows plus those still waiting for confirmation.
       
-revision: aa44cfc4d4acf8d739688300e2e94583b312f729
-updated_at: "2026-10-16T14:01:30.021Z"
+revision: 67a073215c2dce317e8190d381e16868baade880
+updated_at: "2026-10-18T09:12:03.868Z"
 fingerprint: b2881ce249e82814abe8607ae5be5a7376721939697f4e283edd0f5894f9fc6a
 source:
   - path: "endfieldmodcontroller/api.py"
-    line: 2440
-    end_line: 5133
+    line: 2451
+    end_line: 5155
   - path: "endfieldmodcontroller/api.py"
-    line: 4526
-    end_line: 13716
+    line: 4537
+    end_line: 13814
 apis:
   - protocol: rpc
     path: "scan"

@@ -11,8 +11,8 @@ description:
   en: >
       The loader that actually injects: assemble the runtime beside the game, tell d3dx which loader target to use, and start the multi-loader exe — including detecting and migrating the legacy framework layout.
       
-revision: aa44cfc4d4acf8d739688300e2e94583b312f729
-updated_at: "2026-10-16T14:01:30.038Z"
+revision: 67a073215c2dce317e8190d381e16868baade880
+updated_at: "2026-10-18T09:12:03.897Z"
 fingerprint: 43a32b5be69efb4163acdf02f09c5677cabca0dcf913909a7a1c7457430de4c0
 source:
   - path: "endfieldmodcontroller/launcher.py"

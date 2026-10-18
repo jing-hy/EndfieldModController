@@ -11,8 +11,8 @@ description:
   en: >
       Makes configured paths follow the program directory: remembers the previous data root, rewrites absolute paths that lived under an old root back to relative ones on load (with a conservative heuristic when there is no record: missing or empty-shell old root), normalizes every program-derived path before it is stored, makes "leave blank = automatic" actually work, and stops creating directories outside the current data root.
       
-revision: aa44cfc4d4acf8d739688300e2e94583b312f729
-updated_at: "2026-10-16T14:01:30.027Z"
+revision: 67a073215c2dce317e8190d381e16868baade880
+updated_at: "2026-10-18T09:12:03.877Z"
 fingerprint: e38109d8df871d5bb1e4e743943f04983f2fc01300afccd32e4e236d79a3e21e
 source:
   - path: "endfieldmodcontroller/config.py"

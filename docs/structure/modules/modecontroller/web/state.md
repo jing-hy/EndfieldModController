@@ -11,8 +11,8 @@ description:
   en: >
       Frontend global state: get_state payload, current tab (hash deep-link + last_tab), theme persistence.
       
-revision: aa44cfc4d4acf8d739688300e2e94583b312f729
-updated_at: "2026-10-16T14:01:30.071Z"
+revision: 67a073215c2dce317e8190d381e16868baade880
+updated_at: "2026-10-18T09:12:04.000Z"
 fingerprint: f9b091d3c8bd0ff57b8c55d1ce9c129cbad31e0052704a5e9b183b09b6f4ab34
 source:
   - path: "frontend/src/store.js"

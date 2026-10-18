@@ -11,8 +11,8 @@ description:
   en: >
       Build the hint word table the panel uses to describe options, by mining real mod inis for variable naming patterns and keeping only the words that actually helped.
       
-revision: aa44cfc4d4acf8d739688300e2e94583b312f729
-updated_at: "2026-10-16T14:01:30.055Z"
+revision: 67a073215c2dce317e8190d381e16868baade880
+updated_at: "2026-10-18T09:12:03.940Z"
 fingerprint: 70e76547ce333a22e607931e3ad8735888082b4cadf92253193d217699f43c31
 source:
   - path: "scripts/gen_hotkey_hints.py"
