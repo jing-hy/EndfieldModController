@@ -15,7 +15,7 @@
   ],
   "builtin": {
     "XXMI": {
-      "latest": "v2.4.8",
+      "latest": "v2.4.9",
       "repo": "SpectrumQT/XXMI-Launcher"
     },
     "XXMI-Libs": {
@@ -27,7 +27,7 @@
       "repo": "SpectrumQT/EFMI-Package"
     },
     "Poser": {
-      "latest": "0.5.86",
+      "latest": "0.5.108",
       "repo": "OedoSoldier/Endfield-Poser"
     }
   },
@@ -37,10 +37,10 @@
       "note": "官方新版可能与 DLSS5 插件不兼容"
     },
     "secondary_motion": {
-      "latest": "3.1.2"
+      "latest": "3.2.0"
     },
     "jiggle_efmi": {
-      "latest": "0.2.3",
+      "latest": "0.2.4",
       "repo": "woakato/EndfieldJiggle-EFMI",
       "note": "触摸形变 Mod（EFMI Mod 包，不装游戏目录）；默认开启，上游自述游戏内验证有限"
     }
