@@ -6219,3 +6219,270 @@ modecontroller 2026-10-12 起从 MIT 改为 **GPL-3.0-or-later**（另一台电�
 **下一步**：再改代码 ⇒ 本机写 `1.4.1-beta`。
 
 `关键词：["modecontroller 状态","最新 Release v1.2.2","1.2.3-beta","main f8e0368","机器侧稳定性","kernel_instability","System 日志","蓝屏 BugCheck","非正常关机","诊断包","快照","下一个版本号"]`
+
+<!-- 增量追加 2026-10-18 17:20 · 新增 22 条（历史条目一律保留）-->
+
+<!-- rules · 设计原则 / 行为准则 -->
+### 【modecontroller · 发布规则与收尾固定动…
+*2026-10-17 12:20*
+
+【modecontroller · 发布规则与收尾固定动作】
+**① 版本号 = 「最新 Release + 1」**：有未发布改动就领先一个；一整批改动只挂一个号，别每改一次 +1（他曾纠正「你都没推github你为什么又变版本号」）。已落成 `scripts\release_version.py`（`build_release` / `prepare_release` / `push` 三处都跑）。⚠️ 改完 `version.py` 后、构建前再读一次确认实际值。
+**② 推送授权（2026-10-07 起）**：**只改源码可以不问就 push main**（原话「只是改源码你可以自己推」）；**发 Release 仍必须等他明确说**（「Releases 还是保持我说了你再发吧」；他一句「Releases 没更新啊」只是确认事实、**不算授权** —— 我曾误判擅自发了 v0.7.0）。发完要主动说清"Release 要不要发、由你定"。
+**③ 推送前必须做快照**（原话「每次推 github 都要做快照」）：`scripts\snapshot.py` 记 git 状态、exe/addon sha256、数据根关键文件、游戏目录清单；`push.py` 先快照再推、**快照失败就不推**；落 `D:\zmdmod\_snapshot_<标签>-<时间戳>\`；`complete=false` 时给醒目警告。
+**④ 每修好一个 bug**：刷 normify 结构树四步 + 顺手推 main（main 已获长期授权，结构树仍要按规矩刷）。
+**⑤ 交付形态**：「你全弄好一起打包再让我测」；给硬指标（文件大小 / 修改时间 / sha256）；改动多的版本给编号测试清单 `TESTING.md`（连续编号 + 操作 + 预期结果，新增项接末尾、老编号不动）。**"与上一版的变动"只写 Release notes，README 不写**。
+**⑥ 公告只发大事**：版本更新、功能上新默认不发公告。
+**⑦ 发版正文必须来自本版 `RELEASE_NOTES.md`**（v1.0.5 曾拿上一版正文发出去）；发版前先读首行确认。
+
+`关键词：["版本号只跟Release比", "没推只领先一个", "未经说推绝不推送", "发Release要明确说", "push main不等于发版", "推送前必须快照", "每修好bug更新结构树并推main", "交付给硬指标sha256", "TESTING编号清单", "公告只发大事"]`
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 【modecontroller 当前状态唯一真源】（20…
+*2026-10-17 12:20*
+
+【modecontroller 当前状态唯一真源】（2026-10-16 更新）
+**Latest Release = v1.4.4**（2026-10-16 22:21 设为 Latest；非 draft / 非预发布）。**本地 = 1.4.4**（同号，不欠号）。**main = 67a0732**。快照 `D:\zmdmod\_snapshot_1.4.4-20261016-222027`。
+**v1.4.4 内容**：① 修「自更新入口被运行中的下载任务静默吞掉」（后端三入口 + 前端按消息文本判完成；完整形态影响 v1.0.2–v1.4.3）② 组件更新跟随 `xxmi_launcher` 指向的那份 XXMI（保留其 `XXMI Launcher Config.json`、运行中拒绝、EFMI 取 `importer_folder`）③ 修 XXMI-Libs / EFMI 本地版本读不到（marker 目录与键）④ 诊断包新增 `diagnosis/update-forensics.txt` ⑤ 组件版本表跟随上游（XXMI v2.4.8 / Poser 0.5.86 / EndfieldJiggle 0.2.3）。
+**发布实测**：`build_release --with-tests` 全绿；附件 `EndfieldModController.exe` 35,129,392 B（sha256 `f17fa294…`）、`assets-bundle.zip` 262,029,848 B（`71e36cfe…`），与 release digest 一致；离线包未上传（走 QQ 群）。
+⚠️ `build_release.py` 会清理 `dist\` 非构建产物 ⇒ 构建前把 `deps-bundle.zip` 挪到 `_tmp\dist-keep\`、构建后挪回。
+**下一步**：再改代码 ⇒ 本机写 `1.4.5-beta`。
+
+`关键词：["当前状态唯一真源","v1.4.4 已发布","Latest Release","main 67a0732","自更新入口被静默吞掉","更新跟随指向的 XXMI","诊断包 update-forensics","下一个号 1.4.5-beta","exe sha256 f17fa294","deps-bundle 挪出 dist"]`
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 【modecontroller 待办（2026-10-1…
+*2026-10-17 12:20*
+
+【modecontroller 待办（2026-10-16 22:30 更新）】
+① **等 issue #16（xingluo667）回报**：他与华硕那台 `0xC0000135` 的真因仍未定案（已排除显卡驱动 / VC++ / 注入未进进程 / 旧版 Streamline）。
+② 每次改后端源码后补 normify 结构树四步（realign → refresh → validate 0 error → build+render）；`push.py` 只同步镜像、不重算。
+③ 商城「已安装」标记依赖 `download-info.json`（手工/整合包放进库的 Mod 不亮卡片 = 正确行为）。
+④ MMD 播放测试（Poser 侧）与提弗洛斯运动数值三选一（sbm 侧）仍未做。
+⑤ modtest 与仓库逐文件一致；其 `mod-backup` 混着工作区 ~8 GB 副本（待定是否清理）。
+⑥ **给 v1.4.4 的反馈者（`C:\Users\<user> —— 回复前先给用户过目；只讲「能不能确定 / 有没有修 / 更新后按哪几个键」，别让他移文件或改配置。
+
+`关键词：["项目待办","issue 16 等回报","0xC0000135 未定案","结构树四步","download-info.json 已安装不亮","sbm-fork 是否对齐上游","MMD 播放测试","提弗洛斯数值三选一","下一个号 1.2.2-beta"]`
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 【modecontroller 发布流程与踩坑】（202…
+*2026-10-17 12:20*
+
+【modecontroller 发布流程与踩坑】（2026-10-16 更新）
+**顺序**：改代码 → `python -m pytest tests -q`（**一律串行**，用户 2026-10-12 定；`-n 4` 已废弃）→ **自己 commit 业务改动**（`push.py` 只提交记忆日志与结构树镜像）→ `build_release.py --with-tests`（校验版本三处一致 + 组件版本表 `--strict` + 跑测试 + 构建 + 同步 modtest + 自动推 main）→ `prepare_release.py` → draft `gh release create vX --draft --notes-file RELEASE_NOTES.md` → `upload_release_assets.py --tag vX`（DoH 查真实 IP + curl 直连）→ `gh release edit vX --draft=false --latest`。
+**发版顺序硬坑（2026-10-16 实测）**：`prepare_release.py` 有闸 —— exe 内嵌版本若还是 `X-beta` 而 tag 是 `X`，它**拒绝**（装上后自更新会无限提示，v1.0.19 事故）。正确顺序：**先把版本号收成正式号（去 -beta）→ 重建 exe → 再 prepare_release**。
+**硬约定**：① 附件只推两个、都不带版本号（`EndfieldModController.exe` + `assets-bundle.zip`）；带版本号副本与伪旧版只本地留档。② draft 阶段按 tag 查 release 会 404 ⇒ 按 release id 核对 digest。③ 改过 `frontend\` 必须先 `node node_modules/vite/bin/vite.js build`（产物 `web\dist\index.html`）再打包。④ 发版前确认 `RELEASE_NOTES.md` 就是这一版、正文客观口吻。⑤ 注入 `$env:GH_TOKEN`（用户级环境变量）。⑥ modtest 同步会被"控制器正在运行"挡住 ⇒ 先请他关掉。⑦ 快照落 `D:\zmdmod\_snapshot_<标签>-<时间戳>\`（不进 git）。⑧ `dist\deps-bundle.zip` 构建前挪到 `_tmp\dist-keep\`、构建后挪回。
+**版本表闸**：`check_component_versions.py --strict` 有差异就中止构建（带着过期表发版要显式 `--skip-version-table-check`）。
+
+`关键词：["发布流程","build_release --with-tests","prepare_release beta 闸","先把版本号收成正式号","gh release draft","upload_release_assets DoH","附件不带版本号","组件版本表闸 strict","串行测试","快照先于推送"]`
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 【EndfieldModController =《明日方…
+*2026-10-17 12:20*
+
+【EndfieldModController =《明日方舟：终末地》的 **Mod 一站式管理器**】把 **DLSS5 神经渲染 + 第一人称 + 服装 Mod（EFMI）+ 物理效果（SecondaryMotion 乳摇）+ 摆姿与 MMD 播放（Endfield Poser）** 统一到一次「一键启动」，自动下载安装 XXMI Launcher / Libraries / EFMI / Poser 并维护注入与启动自检。
+**形态**：Python + pywebview(WebView2)，单文件 exe（PyInstaller onefile、`--noconsole`、`--uac-admin`）；前端 **Vue 3 + Vite**（源码 `frontend\src`、产物 `web\dist\index.html` 随 exe 打包）。核心理念 **零配置启动即用**。
+**边界**：只做编排与自检 —— 注入交给 XXMI，不改游戏本体/资源/存档；游戏目录改动一律先备份、可一键还原；不内置 Mod（Poser AGPL 不随 Release 分发）。
+**位置**：工作区 `D:\zmdmod\modecontroller`（用户明确不改文件夹名）；**数据根 = exe 所在目录**；仓库 `jing-hy/EndfieldModController`；文档 `README.md`（简略版，网页入口）+ `docs\README.detailed.md`（详细版），两版开头互链。⚠️ 版本/进展看 ops「当前状态唯一真源」条，本条不写死。
+
+`关键词：["项目概述", "DLSS5神经渲染", "EFMI服装Mod", "SecondaryMotion乳摇", "Endfield Poser", "pywebview", "Vue3+Vite前端", "单文件exe", "零配置启动即用", "数据根等于exe目录", "只做编排与自检", "uac-admin默认提权"]`
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 【modecontroller · 包与目录索引】（后端…
+*2026-10-17 12:20*
+
+【modecontroller · 包与目录索引】（后端约 3 万行）
+**后端 `endfieldmodcontroller\` 关键模块**：`config.py`（配置原子写/损坏隔离/路径推导/探测缓存）、`api.py`（pywebview js_api 层，构造必须快、重活丢后台）、`launcher.py`（一键启动/注入库/XXMI 配置/`ensure_efmi_importer_folder`）、`initialize.py`（启动自检）、`runtime_deps.py`（组件下载安装 + **`xxmi_target_root`/`efmi_target_root` 决定更新打给哪份 XXMI**）、`runtime_assets.py`（随包资产/变体选择）、`updates.py`（组件版本检查）、`selfupdate.py`（自更新 VBS）、`fastnet.py`（多线路下载）、`fsutil.py`（原子写/sha256/路径包含/JSON）、`crashwatch.py` + `diagnostics.py`（诊断包与崩溃取证）、`game_clean.py`（净化）、`activation.py` / `core.py`（Mod 库与角色识别）、`moddl.py` / `modstore.py` / `downloads.py`（下载与商城）、`poser.py` / `secondary_motion.py` / `efmi_jiggle.py` / `dlss5_fetcher.py` / `reshade_integration.py`、`version.py`（**全项目唯一版本口径**）。
+**前端**：`frontend\src` —— `pages\` 八个页签（Mod 库 / 辅助 / 商城 / 下载 / 依赖 / 启动 / 设置 / 说明）、`components\`（含 `ui\` 通用件）、`lib\bridge.js` 是**唯一**桥接点（`call("后端方法")`）、`store.js` 存 `get_state()` 快照；**改了前端必须 `node node_modules/vite/bin/vite.js build`**。
+**随包资源**：`characters.json` + `characters/`（34 张头像，**按 `index.json` 查文件名，别按角色 key 猜**）、`hotkey_hints.json`、`component_versions.json`（组件版本表）。
+**运行时目录**（数据根 = exe 旁）：`runtime\builtin\XXMI`、`runtime\dlss5`、`runtime\secondary_motion`、`runtime\poser`、`runtime\game_backup\<时间戳>`、`runtime\logs\launch.log`、`runtime\_state`、`runtime\_update`、`library\`（**用户的 Mod 库，任何自动清理都不碰**）、`assets\`。
+**脚本 `scripts\`**：build_exe / build_release / build_assets_bundle / build_deps_bundle / prepare_release / push / snapshot / upload_release_assets / release_version / normify_realign / check_component_versions / pack_nvngx_assets / fetch_characters / make_demo。
+**测试**：`python -m pytest tests -q`（**一律串行**；别在仓库根全量跑，`_tmp\` 会污染）。
+**硬约定**：内嵌组件用相对 PROJECT_ROOT 的相对路径、`config.json` 里不出现盘符；外部组件用 `available_drives()` 动态枚举（内置优先、外部兜底）；游戏用 `auto_detect_game_dir()` 自动搜索。
+
+`关键词：["包与目录索引","后端模块清单","前端 pages 与 bridge.js","modstore.py","downloads.py","StorePage DownloadsPage","characters 头像索引 index.json","运行时目录 runtime","scripts 脚本清单","pytest -n 4","相对路径硬约定"]`
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 【新增内置组件的唯一枢纽 = `runtime_deps…
+*2026-10-17 12:20*
+
+【新增内置组件的唯一枢纽 = `runtime_deps.ensure_all()` 的 steps 列表】加一项会自动进四条链路：一键启动补齐 / 依赖页 `builtin_report()`（要补 `display/present/status/required/needed/source/install_dir/version/enabled`）/ 「一键更新全部组件」（含 `_estimate_update_total()` 分母）/ 完整性检查 `integrity.py`；配套还要动 `updates.check_updates()` 与 `api.get_state()`。⚠️ `_latest_release_asset(..., include_prerelease=True)` 是**唯一能拿到预发布版**的接口（Poser 上游全是预发布）。
+**依赖机制**：清单 = 仓库根 `dependencies.json`（可被用户改）；只允许装进 `<Mod 库>\_deps\<名>`（`_safe_install_dir` 硬闸）；判据唯一入口 `core.collect_required_dependency_names()`（读 `requires` + 扫 ini 全文），**下载侧与激活侧必须共用同一判据**。
+**Mod 库保护护栏**：`fsutil.library_conflict(library_root, target)` + `activation.LibraryGuardError`，在 staging / 清理 / 收编四处**前置拒绝**。
+**两个 proxy 插件共存成立**：Poser 与乳摇 sbm 都走游戏目录 proxy + `plugin\*.dll`，上游 `src/core/proxy_loader.h` 用 `FindFirstFileW("*.dll")` 加载 plugin 下**全部** dll ⇒ 互相加载对方插件不是 bug。Poser 状态唯一真源 = `plugin\poser-install.json`；Poser 自带只读 HTTP API 在 `127.0.0.1:18923`。
+**公告/预警**只从仓库根 `alerts.json` 读，**没有任何"本地文件优先"通道**（保护性功能不留后门）。
+
+`关键词：["ensure_all枢纽", "builtin_report字段", "预发布版接口", "依赖清单dependencies.json", "_deps安装目录", "collect_required_dependency_names", "library_conflict护栏", "proxy_loader加载全部dll", "poser-install.json", "公告只读alerts.json", "无本地后门", "一键更新分母"]`
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 【XXMI 签名机制与就绪顺序】（读上游 `Spectr…
+*2026-10-17 12:20*
+
+【XXMI 签名机制与就绪顺序】（读上游 `SpectrumQT/XXMI-Launcher` 源码确认）
+`AppConfigSecurity.__init__` 里 `verify(Config.Security.user_signature, os.getlogin())` 不过 ⇒ XXMI 一启动就**重新生成密钥对** ⇒ 我们写的所有 `*_signature`（含 `extra_libraries_signature`）作废 ⇒ 弹「Failed to validate unsecure settings!」⇒ 用户点 Reset 就把 `extra_libraries` / `extra_libraries_enabled` / `game_folder` 全清空 —— **这才是空环境"注入失败"的真相**。
+**正确做法**：生成密钥对时**连同 `Security.user_signature` 一起写**（用新私钥签 `os.getlogin()`，与 XXMI 同一取值；格式 ECDSA P-384 + base64 文本包装的 DER + SHA-256）。⚠️ 补密钥必须放在**所有配置改写之前**，否则上层拿旧副本写回会把 `user_signature` 盖回空值。现统一在 `ensure_injections()` 开头做。
+**就绪顺序**：① `bootstrap_xxmi_config()`（配置缺失时 runas 拉起一次生成，提示「请再点一次一键启动」）② 密钥 + `user_signature` ③ `game_folder` + `active_importer` + `enabled_importers` 含 EFMI ④ `extra_libraries` 两条 + 签名。
+**游戏目录定位**：`game_exe` → 从 `official_launcher` 推断 → XXMI 的 `game_folder` → `auto_detect_game_dir()`（成功才缓存）。
+**自更新**：VBS 模板**必须纯 ASCII**（WSH 按 ANSI 读，带 BOM 报 `0x800A0408`）；原子换入；新 exe 起来后轮询等它出现再多留 15 秒（PyInstaller onefile 父进程校验，pyinstaller#9513）；回滚必须 `CopyFile` 保留 backup 并复核 target 真在（**不许先删 target 再 MoveFile**）。
+
+`关键词：["XXMI签名机制", "user_signature", "ECDSA P-384", "密钥对重生成", "extra_libraries签名", "ensure_injections前置", "就绪顺序", "游戏目录定位", "sbm部署DISABLED_SAFE", "自更新VBS纯ASCII", "pyinstaller父进程校验", "回滚CopyFile"]`
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 【DLSS5 运行库按显卡架构自动选变体（含代码落点）】…
+*2026-10-17 12:20*
+
+【DLSS5 运行库按显卡架构自动选变体（含代码落点）】
+**根因（实测定案）**：DLSS5 神经渲染跑在 `nvngx_dlssnr.dll`，那份运行库**按 CUDA 架构分别编译**；随包那份 fatbin 若全是 sm_120，40/30/20 系必然 `feature 18 create failed 0xbad00001`。
+**三变体**：`official`(sm_120) / `sf`(sm_75/86/89/120) / `rtx40`(sm_89/120，依赖页可选)，来源社区镜像 `RankFTW/rhi-repo`。随包 `official`+`sf` 即覆盖全部受支持型号 ⇒ **一键启动零下载**，且只展开选中那份。目标名**永远是** `runtime\dlss5\nvngx_dlssnr.dll`（NGX 只认这个名）。
+**支持判据**：NVIDIA + 型号名含 `RTX`（有 tensor core）⇒ RTX 20 系及以上；锁 GTX 10 系、**GTX 16 系**（sm_75 但无 tensor core）、A 卡、核显。
+**落盘**：判据唯一入口 = `deviceinfo.best_rtx_sm()`（**从 adapters 现算**，别读 `collect()` 派生字段）；`runtime_assets.select_dlssnr_variant()`（快路径读 marker）+ `ensure_dlssnr()`（**唯一落点**，一键启动/自检/修复都调它）；`dll_architectures()` 扫 fatbin（165 MB ≈0.1s）。
+⚠️ `baseline_mismatches`/`repair_mismatched` **必须按"本机生效的变体"判**，否则 40 系上刚装好的 `sf` 会被判偏离基线 → 换回 `official` → 再判不符 → **每次启动来回替换 165 MB**（已有测试钉住）。
+**打包**：`scripts\pack_nvngx_assets.py`（`arch` 用 fatbin **实测覆盖**声明值）；依赖页 `dlssnr_rtx40` 行仅 sm_89 显示、`needed` 固定 False。
+
+`关键词：["变体机制落点", "best_rtx_sm唯一入口", "select_dlssnr_variant", "ensure_dlssnr", "dll_architectures扫fatbin", "dlssnr_variant.json marker", "baseline按变体判防抖", "dlss5:nr_arch自检", "dlss5_gpu_scope_applied迁移", "pack_nvngx_assets变体字段"]`
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 【本机有两套**互相独立**的 ReShade/DLSS…
+*2026-10-17 12:20*
+
+【本机有两套**互相独立**的 ReShade/DLSS5 环境（解释了好几个"两边不一样"的现象）】
+**① 源码版**：数据根 `D:\zmdmod\modecontroller`，config 的 `reshade_dll` 指向工作区外 `D:\zmdmod\DLSS5\d3d12.dll`，而 `RESHADE_BASE_PATH_OVERRIDE` 由代码固定成工作区的 `runtime\reshade` ⇒ 底座在 `DLSS5\`、日志与 ini 在 `runtime\reshade\`（**真日志 = `runtime\reshade\ReShade.log`**）。`DLSS5\` 里还有一整份 ReShade 官方 shader 库。
+**② exe/modtest 版**：`reshade_dll = runtime/dlss5/d3d12.dll`（与 base path 一致，不会错位），shader 按随包清单展开。
+⇒ 由此解释两件事：**"源码启动 ReShade 报错、exe 没问题"** = `DLSS5\` 那份老 shader 在 ReShade 6.8 上编译失败（`MartysMods_FFTBLOOM.fx`、`INSIGHT.fx` 已移进 `_disabled\`；另有 3 个 X3020 暂时留着），而 modtest 里根本没有这些文件；**`CameraFirstPerson` 两套不同**（源码 0 / modtest 1），用户实测 `=0` 时按 F1 也能用 ⇒ `0` 是合理默认，**程序不该强制写 1**（原话「不要默认第一视角，这样会覆盖之前的设置」）。
+**③ 第一人称"不支持相机控制"的机制**：enhancer 靠进程内存里的 `XLua.Runtime.dll` 找 Lua 环境（终末地用 XLua + IL2CPP，游戏目录里没有 `Managed\` 也没有 `XLua*` 文件），字符串 `Waiting for LuaManager's game environment.` / `XLua.Runtime.dll image missing or ambiguous` ⇒ 游戏**极早退出**时它一直等 ⇒ **这是"起不来"的下游症状，不是独立问题**。
+
+`关键词：["两套 ReShade 环境","reshade_dll 工作区外","RESHADE_BASE_PATH_OVERRIDE","runtime\\reshade\\ReShade.log","DLSS5 目录 shader 库","MartysMods_FFTBLOOM","MartysMods_INSIGHT","X3004 编译失败","CameraFirstPerson 0 与 1","按 F1 能用","XLua.Runtime.dll","IL2CPP","不支持相机控制","modtest 与源码差异"]`
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 【反馈者身份对照 —— 认人判据：只看诊断包 `summ…
+*2026-10-17 12:20*
+
+【反馈者身份对照 —— 认人判据：只看诊断包 `summary.txt` 的 `runtime=` / `game_dir=` / 显卡，**别凭"时间接近"或"症状相似"猜**】
+· issue #16 `xingluo667`：`C:\Users\<user>\Downloads\runtime` / `D:\Hypergryph Launcher\games\Arknights Endfield` / RTX 5070 Ti Laptop；NR 键 `F6` 认得出来，但 `Camera controls installed.` 从未出现 ⇒ `nr_autostart` 一次都没按过。
+· 「第四人」`P:\TOOL`（diagnostics-20261006-080326）：`K:\game\Hypergryph Launcher\games\Endfield Game` / RTX 5080；NR 键是 `Num`（当时认不出）⇒ 退回按 F6 ⇒ NR 从未打开；⚠️ **没有对应 issue**（私下反馈）。
+· `HUAWEI`（diagnostics-20261005-223225）：`D:\Endfield Game` / Intel Arc。· `lzh18`：RTX 4060 Laptop（`importer_folder` 被指到 Mod 库那台）。
+· `10848`（2026-10-15 报「更新不了」，diagnostics-20261015-233155）：`C:\Users\<user>\Desktop` / `D:\Hypergryph Launcher\games\Endfield Game` / RTX 4060 Laptop / 用**外部** `D:\XXMI`（自带记录 2.4.1）。
+**教训**：写"回某条 issue"的草稿前**先逐项核对是不是同一个人**（我曾把 #16 与第四人的症状、显卡、根因混写进同一份草稿）。另：`CameraFirstPerson=0` 与 hook 装不装**没有因果关系**（两台结果相反），真因仍未找到——**不许猜**。
+
+`关键词：["四个反馈者身份对照", "xingluo667是5070Ti", "PTTOOL第四人是5080", "HUAWEI是Intel-Arc", "lzh18是4060", "按runtime认人", "CameraFirstPerson不是决定因素", "写issue草稿前先核对身份"]`
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 【Mod 商城 + 下载中心（2026-10-07 需求…
+*2026-10-17 12:20*
+
+【Mod 商城 + 下载中心（2026-10-07 需求原话要点）】① 「加入 mod 商城功能，看看 jasm 是怎么做的，然后匹配现在 emc 的 ui 和接入下载功能」② 「mod 批量扫描、一键更新，看看 api 能不能账号登录」③ 「把下载从依赖里面抽出来……下载可以后台进行、可以追加任务，看商城不用下一个就跳转一次，但是要有动态」④ 「不需要 fork，直接改」⑤ 「测试期间在我确认裸版本没问题之后再进行构建」。
+**结论性决定**：**账号登录本期不做** —— 实测香蕉网只有 `POST /apiv11/Member/Authenticate`（用户名+密码换 session cookie），**没有 OAuth**；浏览/下载本来不需要登录。下一期要做只做"登录态 + 收藏同步"，且不保存明文密码。
+
+`关键词：["mod 商城","下载中心","批量扫描","一键更新","账号登录","OAuth","新增任务到下载队列","不要 fork 直接改","裸版本确认后再构建","依赖页瘦身","要有动态","GameBanana"]`
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 【离线依赖包（不随 Release，QQ 群应急分发）】…
+*2026-10-17 12:20*
+
+【离线依赖包（不随 Release，QQ 群应急分发）】`scripts\build_deps_bundle.py` 本地构建 → `dist\deps-bundle.zip`（实测 325 MB / 94 文件 + `licenses/`）。**不进 Release、不进 CI**；分发 = QQ 群 1045239747（答案 `jing_hy`），定位"连不上 GitHub 时的应急搬运"。
+**包内容**：XXMI / XXMI-Libs / EFMI / ReShade / DLSS5-Feeder / iMMERSE / **Poser**（AGPL-3.0，附许可全文 + 源码地址）/ **Streamline**（MIT，只打本机已抽取的 9 个 dll ≈5.3 MB）；**不含 VC++**（微软条款，包内给官方链接）。
+**导入与安装**：依赖页顶部「导入依赖包…」→ `api.import_deps_bundle()`（按 `kind` 自动分派，逐条校验分卷/sha256/目录穿越）→ 落 `runtime\_offline\` + 索引；安装侧 `_resolve_builtin_asset()` 与 `ensure_streamline` 都**离线优先**（命中则一个网络请求都不发）。
+**措辞**：README 里 Poser 是「**不随 Release 分发**」，不是"不随包分发"。
+⚠️ `build_release.py` 会清理 `dist\` ⇒ 构建前把它挪到 `_tmp\dist-keep\`、构建后挪回。
+
+`关键词：["离线依赖包","deps-bundle.zip","不随 Release","QQ 群分发","应急方案","build_deps_bundle.py","导入依赖包按钮","offline_deps","离线源优先","不含 Poser AGPL","Streamline 排除","自动配置"]`
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 【离线"从零端到端"测试环境（可复用）】 ① **本地 …
+*2026-10-17 12:20*
+
+【离线"从零端到端"测试环境（可复用）】
+① **本地 GitHub 模拟源** = `D:\zmdmod\_mcassets\serve.py`（端口 **8791**）：提供 `/repos/<owner>/<repo>/releases/latest` JSON（含 assets 与**动态计算的 sha256 digest**）与 `/dl/<name>`（支持 Range）；`SERVE_BAD_DIGEST=1` 时故意给错 digest 做负向测试。素材包在同目录。
+② **测试副本** = `D:\zmdmod\modtest`：robocopy 源码（排除 `.git/assets/runtime/build/dist/_tmp/library/*.exe`），再把 `https://api.github.com` 与 `https://github.com` **全量替换**为 `http://127.0.0.1:8791`。
+③ **跑法**：删掉副本的 `runtime` 与 `config.json` 得"从零"，再调 `runtime_deps.ensure_all()`。
+④ **三个实测坑**：普通权限会被"XXMI 需要管理员"拦住（本机不弹 UAC）；**内联 `Start-Process cmd.exe -Verb RunAs` 捕获不到输出** ⇒ 必须先写成 `.cmd` 批处理再 runas；重装前**先杀掉正在跑的 XXMI**（占着 `Resources\Bin` 会让覆盖报 `shutil.Error`）。
+⚠️ modtest 里的 exe **删不掉时先问他**（他在用，不是杀软）。
+
+`关键词：["离线端到端测试环境", "本地GitHub模拟源", "serve.py 8791", "SERVE_BAD_DIGEST", "modtest测试副本", "URL全量替换", "从零跑ensure_all", "DLSS5无上游", "RunAs捕获不到输出", "先杀XXMI再重装", "exe删不掉先问用户"]`
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 【面板最终形态：**发 Mod 自己的按键**（F13.…
+*2026-10-17 12:20*
+
+【面板最终形态：**发 Mod 自己的按键**（F13..F24 内部通道实测走不通）】
+**实测证据**：走 F13..F24 时 `mc_action_seen` 从 8 涨到 15（数字位与提交键都被 EFMI 读到并执行），但 Mod 变量（`$\mods\mc_xxx\0.ini\coat` 等）**全是 0** ⇒ **不是键位问题**（也因此不必再试 F1..F12 —— 它们在游戏内有用，不能用）。
+**根因**：3DMigoto 的 `[CommandList]` 里变量赋值**只认本 ini 声明过的 `$name`**，带路径的跨命名空间引用会被**静默丢弃**。
+**收尾**：面板 `press_action()` 发 `actions.tsv` 的 `original_keys`（**用户实测可用**）；F13..F24 的序列代码 `[[maybe_unused]]` 保留；`controller.ini` 顶部注明这套**当前不生效、别以为它在工作**。`hotkey_hints.json` 补了 `panties`=内裤、`creditinfo`=内部标记（非 persist 的内部锁，不该当用户开关）。
+
+`关键词：["面板发Mod原键", "F13到F24走不通", "mc_action_seen涨到15", "跨命名空间变量被丢弃", "CommandList只认本ini变量", "press_all original_keys", "controller.ini注释停用", "creditinfo内部锁", "不必再试F1到F12"]`
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 【「启动前清除游戏目录里的所有第三方注入」= 开关 `c…
+*2026-10-17 12:20*
+
+【「启动前清除游戏目录里的所有第三方注入」= 开关 `clear_game_injections_on_launch`（**默认开**）】一键启动时自动跑 `game_clean.backup_and_clean`。**关键设计：先净化、后补齐** —— 先不管是谁铺的（本程序的 / 别的工具的 / 整合包残留）一律**备份移走**并把系统原版补回，随后自检按**当前开关**重新铺我们要的那份（顺序反了会把刚铺好的当残留清掉）。
+配套：游戏运行时跳过；只搬不删、写清单、可一键还原；覆盖 `d3dx.ini` / `ShaderFixes\` / `loader_debug.log` 等非本程序痕迹；自检补 `backup_ok`（缺 `.bak` 自动从 System32 补齐，补不到明确"先别点还原"）。
+
+`关键词：["clear_game_injections_on_launch", "一键还原终末地", "清除第三方注入", "backup_and_clean", "先净化后补齐", "game_backup", "backup_ok", "System32 补齐", "默认开", "启动前净化", "proxy"]`
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 【normify 结构树（粒度到单一功能单元）】**落点…
+*2026-10-17 12:20*
+
+【normify 结构树（粒度到单一功能单元）】**落点不在仓库**：`C:\Users\<user>\.dsh\profiles\desktop\normify-modecontroller\`（`modules\**\*.md` 为源，`tree.json`/`outline.md`/`api-index.json`/`renders\`/`normify.html` 为产物）；仓库里只放镜像 **`docs\structure\`**（`push.py` 每次推送前刷新并单独提交）。
+**更新四步（别手工改行号）**：① `python scripts\normify_realign.py --apply` ② `normify_module_refresh(repoRoot=…, activate=true)`（**可按 ids 只刷受影响的模块**，比 all=true 快很多）③ `normify_validate` 必须 **0 error** ④ `normify_build` → `normify_render`。
+**新增模块**：先以 `state=planned` 建，再 `refresh(activate=true)` 转 active。⚠️ ②③④ 是**插件工具**（要在有 normify 的会话里做）；`push.py` 只同步镜像、**不重算**。
+
+`关键词：["normify 结构树", "功能单元粒度", "normify-modecontroller profile", "docs/structure 镜像", "normify_realign --apply", "normify_module_refresh", "normify_validate 0 error", "normify_build render", "planned 转 active", "push.py 只同步镜像"]`
+
+<!-- topic · 话题（一件事的前因后果） -->
+### 让「更新组件」真正打到用户正在用的那份 XXMI（而不是内置副本）
+*2026-10-17 12:18*
+
+【组件更新该打给谁】同一份诊断包（`diagnostics-20261015-233155`）暴露的第二件事：`xxmi_launcher` 指向 `D:\XXMI`（其内部记 `deployed_version = 2.4.1`），而 `ensure_xxmi` / `ensure_xxmi_libs` / `ensure_efmi` 一律只更新内置副本 `runtime\builtin\XXMI`（issue #4 的约定：不劫持他填的路径）⇒ 依赖页显示「已装 v2.4.7」，他启动游戏用的那份没变，下了 58 MB 全白费（表面功夫）。2026-10-16 用户否决"只显示不更新"，原话定调：「**只要指向的 xxmi 就也包含更新**」。落地（随 v1.4.4 发布）：`runtime_deps.xxmi_target_root()` 指向哪份就更新哪份；`efmi_target_root()` 取 XXMI 配置里的 `importer_folder`（读不到或落在 Mod 库则退回 `<XXMI 根>\EFMI`）；更新对方前把它的 `XXMI Launcher Config.json` 读进内存、解压后原样写回；XXMI 在运行时**拒绝更新**；依赖页标出「更新会打进实际使用的那份」。同族顺带修：`updates._builtin_local_version()` 对 XXMI-Libs/EFMI 既读错目录又读错 marker 键（`XXMI-Libs_version` 从不被任何代码写入）⇒ 这两项以前永远不提示有新版。
+
+`关键词：["组件更新打给哪份 XXMI","xxmi_target_root","efmi_target_root","importer_folder","D:\\XXMI deployed_version 2.4.1","XXMI Launcher Config.json 保留","XXMI-Libs_version 从不被写","依赖页显示实际使用那份","XXMI 运行中拒绝更新","只要指向的 xxmi 就也包含更新"]`
+
+<!-- topic · 话题（一件事的前因后果） -->
+### 2026-10-16 诊断包「更新不了」：定案、修好并随 v1.4.4 交付
+*2026-10-17 12:19*
+
+2026-10-16 用户转来诊断包 `diagnostics-20261015-233155`（反馈者 `C:\Users\<user> 4060 Laptop，跑 v1.4.0），只有一句「用户反馈更新不了」。它牵出两件事，都随 **v1.4.4** 发布：
+
+① **自更新入口被静默吞掉**：`runtime\_update\` 里只有 `last_check.json`、日志**没有任何自更新记录** ⇒ 请求根本没进那条链路。定案两处叠加：三个入口（`start_app_update` / `start_dependency_update` / `start_full_update`）把**别的任务的进度**静默当成自己的结果返回；前端又按消息文本 `/已下载|完成/` 收尾 ⇒ 报「更新包已下载」实则没下、程序还是旧版。审计全 tag：v0.3.0–v1.0.1 只有前者；**v1.0.2–v1.4.3 为完整形态**（含 v1.2.3-beta）；触发条件 = 组件更新/依赖安装正跑着时点程序更新，故长期未暴露。修：`_dep_busy_result()` 明确拒绝（`busy` + 人话 + 落日志），前端只认 `app_update` 任务且必须 `pending_apply`。
+
+② **组件更新该打给谁**：`xxmi_launcher` 指向 `D:\XXMI`（内部记 `deployed_version = 2.4.1`），而更新一律只装内置副本 `runtime\builtin\XXMI`（issue #4 约定不劫持他填的路径）⇒ 依赖页显示「已装 v2.4.7」，他启动游戏用的那份没变、58 MB 白下。用户 2026-10-16 否决"只显示不更新"，原话定调：「**只要指向的 xxmi 就也包含更新**」。修：`xxmi_target_root()` / `efmi_target_root()`（取 XXMI 配置的 `importer_folder`，读不到或落在 Mod 库则退回 `<XXMI 根>\EFMI`）；更新对方前保留其 `XXMI Launcher Config.json`；XXMI 运行中拒绝更新；同族修 `_builtin_local_version()` 的 marker 目录与键（`XXMI-Libs_version` 从不被写 ⇒ 这两项永不提示有新版）。
+
+交付：新增 9 条测试、四处退回均实测变红；**v1.4.4** 于 2026-10-16 22:21 设为 Latest（exe 35,129,392 B sha256 `f17fa294…`，assets-bundle 262,029,848 B `71e36cfe…`）。
+
+`关键词：["更新不了","自更新入口被静默吞掉","diagnostics-20261015-233155","v1.4.4 已发布","_dep_busy_result","前端按消息文本判完成","v1.0.2 至 v1.4.3 受影响","只要指向的 xxmi 就也包含更新","xxmi_target_root","importer_folder","XXMI-Libs_version 从不被写","内置副本 vs 外部安装"]`
+
+<!-- lesson · 经验教训（被纠正过的、踩过的坑） -->
+### 【**新增"更新提示"类功能时，先确认那个数据源真的覆盖…
+*2026-10-17 12:18*
+
+【**新增"更新提示"类功能时，先确认那个数据源真的覆盖了用户要更新的东西**】（2026-10-03 用户报「下载并更新不是应该跳转到依赖页然后下载吗，点了没反应」）
+**经过**：我按用户要求把「自动更新」改成"弹窗 → 跳依赖页"，但弹窗**永远不出现**。根因：`updates.check_updates()` 返回键只有 `reshade` / `secondary_motion` / `poser` / `errors` —— **内置组件（XXMI / XXMI-Libs / EFMI）一个都不在**，而用户要更新的正是 XXMI。修法：`check_updates()` 增加 `builtin` 段（复用 `runtime_deps._latest_release_asset()` 与本地 marker）；`XXMI-Libs` 用**自己的** repo。
+⚠️ **2026-10-16 修正（当时那条"三者共用一个 marker"的判断已过时，照着做的修法反而留下新 bug）**：`ensure_xxmi_libs` / `ensure_efmi` 各自把 marker 写在自己的安装目录（`<XXMI>\Resources\Packages\XXMI`、EFMI 目录），键就是 `version`。当初为躲开"Libs/EFMI 报出 XXMI 版本号"而改成读 `f"{key}_version"` ⇒ **没有任何代码写这个键** ⇒ 本地版本恒为空串 ⇒ `update_available` 恒 False ⇒ 依赖页对这两项**永远不说有新版**（v1.4.4 才修：各读各自目录的 marker）。
+**定式**：① 做"有 X 就提示"时，**先把数据源打出来看它到底有哪些键**；② 同一份返回里混着"组件字典 + 错误列表"时，消费端必须**显式区分**；③ **写 marker 与读 marker 的键/目录必须一处定义、两处共用** —— "找不到自己的键就如实留空"会把缺陷藏成一个永远为 False 的判断，比报错更难查。
+
+`关键词：["check_updates 漏了内置组件","builtin 段","弹窗不出现","点了没反应","update_available 恒 False","_builtin_local_version","marker 键写读不一致","XXMI-Libs_version","各组件自己的 marker","errors 是列表"]`
+
+<!-- lesson · 经验教训（被纠正过的、踩过的坑） -->
+### 【"点了没反应"的常见真因：入口把**另一个任务**的进…
+*2026-10-17 12:18*
+
+【"点了没反应"的常见真因：入口把**另一个任务**的进度静默当成自己的结果返回；前端再用消息文本判状态 ⇒ 误报"已完成"】（2026-10-16，诊断包 `diagnostics-20261015-233155`，用户只报「更新不了」）
+三个入口（`start_app_update` / `start_dependency_update` / `start_full_update`）开头都是 `if self._dep_task and running: return self.get_dependency_progress()`；前端 `UpdateBadge` 轮询又用 `/已下载|完成/` 收尾 —— 而组件更新任务正常结束的消息正是「完成」⇒ 徽章报「更新包已下载」，实际没下载，程序仍是旧版，还提示有新版；**日志里一个字都没有**（请求根本没走进自更新链路），`runtime\_update\` 里只有 `last_check.json`。
+**影响范围**：后端那半 v0.3.0 起；**v1.0.2 – v1.4.3 为完整形态**（含 v1.2.3-beta）。**触发条件**：只在"组件更新 / 依赖安装正在跑"时点「程序更新」才中招 —— 所以长期没暴露（v1.0.0/1.0.1 另有独立的"下完不提示安装"老 bug，v1.0.2 修）。
+**修法（v1.4.4）**：入口冲突时 `api._dep_busy_result()` 明确拒绝（`ok=False` + `busy` + 一句人话 + 落日志），重复点自己仍返回进度；前端只认 `app_update` 任务、只认 `pending_apply` 算"包已下载"；busy 时弹窗说明。
+**定式**：① **共享同一个进度槽的多个入口，不许静默返回别人的进度** —— 要么排队，要么明确拒绝并告知；② 判"完成"只认**结构化字段**（任务类型 + 显式状态），绝不认消息文本；③ 排查"点了没反应"先看**有没有留下调用痕迹**：无载荷、无入口日志 ⇒ 请求没进到那条链路，别去怀疑下载器。
+
+`关键词：["更新不了","点了没反应","静默返回别的任务进度","_dep_busy_result","只认 app_update","pending_apply","按消息文本判完成","自更新被吞","v1.0.2 至 v1.4.3 受影响","诊断包里没有调用痕迹"]`
+
+<!-- lesson · 经验教训（被纠正过的、踩过的坑） -->
+### 【**"更新"必须打到用户实际在用的那一份，而不是我们托…
+*2026-10-17 12:18*
+
+【**"更新"必须打到用户实际在用的那一份，而不是我们托管的副本**】（2026-10-16 用户原话：「只要指向的 xxmi 就也包含更新」）
+现场：`xxmi_launcher` 指向 `D:\XXMI`，而 `ensure_xxmi` / `ensure_xxmi_libs` / `ensure_efmi` 一律只更新 `runtime\builtin\XXMI`（issue #4 的约定是不许劫持他填的路径）⇒ 依赖页显示「已装 v2.4.7」，他启动游戏用的那份仍是 2.4.1：下了 58 MB，他实际用的那份一点没变 = **表面功夫**（违反"滑块要真的有用"）。
+**落地（v1.4.4）**：新增 `runtime_deps.xxmi_target_root()`（`xxmi_launcher` 指向哪份就更新哪份；留空/指向内置则行为不变）与 `efmi_target_root()`（取 XXMI 配置里的 `importer_folder`，读不到或不可信则退回 `<XXMI 根>\EFMI`，**落在 Mod 库内一律不用**）；`builtin_report` 与 `updates._builtin_local_version` 同源同判据，依赖页标出「更新会打进实际使用的那份：<路径>」。
+**三条配套保护**：① 更新外部那份前把它自己的 `XXMI Launcher Config.json` 读进内存、解压后原样写回（便携包带的是出厂默认，覆盖就等于清掉他配好的 `game_folder`/签名）；② 目标程序正在运行时**拒绝更新**（否则留半新半旧）；③ 只"逐文件覆盖 + 不删多余文件"，绝不整目录替换（EFMI 目录下就是他的 `Mods`）。
+**定式**：托管副本与用户自己的安装是**两份东西** —— 显示、判定、更新三处必须指向同一份"实际在用的"；一旦决定"不改用户填的路径"，就必须同时解决"那更新到他那份"的问题，否则就是在更新的另一份上做表面功夫。
+
+`关键词：["更新打到实际使用那份","xxmi_target_root","efmi_target_root","importer_folder","内置副本 vs 外部安装","XXMI Launcher Config.json 保留","运行中拒绝更新","表面功夫","依赖页显示哪份版本","不整目录替换"]`
