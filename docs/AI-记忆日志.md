@@ -6525,3 +6525,31 @@ modecontroller 2026-10-12 起从 MIT 改为 **GPL-3.0-or-later**（另一台电�
 上游次级运动插件 3.2.0 的 release tag 是 Endfield-1.6-available ⇒ 游戏已进入 1.6 时代；1.5 时代的 3.1.2 属旧版本，新游戏下建议更新。XXMI v2.4.9 起 EFMI 直启新增「官方启动器目录」选项（GRYPHLINK/Epic 需要）。
 
 `关键词：["游戏 1.6","Endfield-1.6-available","SecondaryMotion 3.2.0","XXMI v2.4.9","官方启动器目录","GRYPHLINK","EFMI 直启"]`
+
+<!-- 增量追加 2026-10-18 22:17 · 新增 2 条（历史条目一律保留）-->
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 【modecontroller 当前状态唯一真源】（20…
+*2026-10-18 20:57*
+
+【modecontroller 当前状态唯一真源】（2026-10-18 21:05 更新）
+**Latest Release = v1.4.6**（2026-10-18 发布并设为 Latest；非 draft / 非预发布，draft 数 0）。**本地 = 1.4.6**（同号、不欠号）。**main = 83a004b**。tag v1.4.6 指向 a9f14a5（最后一条文档提交 83a004b 只是 TESTING.md，不含二进制）。快照 `D:\zmdmod\_snapshot_1.4.6-20261018-205443`（没定位到游戏目录，回溯价值有限）。
+**v1.4.6 内容**：① 内置 EFMI RabbitFX（GameBanana 651557）v2.6 → **v2.8**（`28_2d258.zip`，6,204 B；ini 新增 CommandListCleanTextures 通道、放宽 CB3/CB4/CB5 匹配）；② `rabbitfx.ensure_bundled` 新增**安全升级**（库里那份逐文件 sha256 对得上随包历史代才升，先整份备份到 `runtime\backups\rabbitfx\<时间戳>`，用户自己那份/改过的不动）；③ `dependencies._latest_gamebanana_file` 修「钉的文件名失效就退化成取最新文件（会拿到 examples.zip / CN Mod Fixer）」，改为主文件优先；④ RabbitFX 接进**三处**更新检查（发布前 `check_component_versions --strict` / 启动前 `pending_component_updates` + `component_versions.json` / 下载更新 `check_updates` 联网查 GameBanana 主文件）；⑤ `check_component_updates` 补 `components` 列表（修「检查组件更新」一直空列表）。
+**发布实测**：`build_release.py` 全流程通过（`check_component_versions --strict` 里 rabbitfx 表 2.8 = 上游 2.8 ✓）；附件 `EndfieldModController.exe` 35,144,018 B（sha256 `b982611a…`）、`assets-bundle.zip` 262,031,673 B（`b963a96c…`），与 release digest 一致。
+**实测的证据**（modtest 真实数据根）：`_deps\RabbitFX` 2.6 → 2.8 升级成功、备份 `runtime\backups\rabbitfx\20261018-205623`（backup.json status=complete）、再跑一次返回 present（幂等）；库里另有第三方副本 `RabbitFX -ENDMI-` 被如实报出但**没动**。
+⚠️ `build_release.py` 会清理 `dist\` 非构建产物 ⇒ 构建前把 `deps-bundle.zip` 挪到 `_tmp\dist-keep\`、构建后挪回。
+**下一步**：再改代码 ⇒ 本机写 `1.4.7-beta`。
+
+`关键词：["当前状态唯一真源","v1.4.4 已发布","Latest Release","main 67a0732","自更新入口被静默吞掉","更新跟随指向的 XXMI","诊断包 update-forensics","下一个号 1.4.5-beta","exe sha256 f17fa294","deps-bundle 挪出 dist"]`
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 【modecontroller · 内置 RabbitF…
+*2026-10-18 20:57*
+
+【modecontroller · 内置 RabbitFX 的升级与三处更新检查】（2026-10-18 用户：「把内置的更新一下，https://gamebanana.com/mods/651557」+「改完直接release，这个插件要接进依赖更新检查」+「是发布前检查、启动前检查和下载更新时检查」）
+**① 内置资产**：`assets/rabbitfx/` 跟上游 main 走（现 v2.8 `28_2d258.zip`）；`manifest.json` 里有 `mod_version` + 当前代 `files`（逐文件 sha256）+ `history`（历代的 sha256），升级时**靠 history 判定「库里那份是不是我们铺过的旧版」**。
+**② 安全升级（ensure_bundled）**：已存在时先逐文件比 sha256 —— 对上当前代 ⇒ present；对上历史代 ⇒ 备份整份到 `runtime\backups\rabbitfx\<时间戳>`（backup.json 先写 in_progress、搬完改 complete）再逐文件原子替换，用户多余文件保留；对不上任何代（自己下的/手改过）⇒ present + `kept=True`，**一律不动**并如实报「保留不动」。
+**③ 选文件判据**：`_latest_gamebanana_file` 的 `file_name_contains` 钉的是具体文件名，上游换版就失效；旧实现失效时「取最新文件」，会把 `examples.zip`（示例包）/`cnmodfixer…zip`（工具 exe）装进依赖。现在：名字命中优先 → 否则只认描述带 **Main File** 的 → 再否则排除 示例/演示/工具/修复器/实验版 字样 → 仍无可选就**报错并列出页面文件**；归档文件一律不选。
+**④ 三处检查**：发布前 `scripts/check_component_versions.py --strict`（`updates.check_updates` 新增 `rabbitfx` 段联网查主文件 + `component_versions.json` 的 external 登记 `rabbitfx.latest`）；启动前 `api.pending_component_updates`（外部键元组已加 `rabbitfx`，本机版本从 ini 首页注释解析）；下载更新 `check_updates`。顺带修 `check_component_updates` 返回分段 dict 导致界面空列表 → 现在同时返回 `components` 列表。
+
+`关键词：["RabbitFX","内置升级","ensure_bundled","GameBanana 选文件","Main File 优先","更新检查三处","component_versions","runtime backups rabbitfx","examples.zip 误装","sha256 历史代"]`
