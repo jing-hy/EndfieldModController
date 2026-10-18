@@ -11,8 +11,8 @@ description:
   en: >
       Tests for the crash side: the verdict rules (only an uploaded dump counts), crash memory including the forget-on-success behaviour, the key-file watchdog, and device reporting.
       
-revision: 67a073215c2dce317e8190d381e16868baade880
-updated_at: "2026-10-18T09:12:03.965Z"
+revision: 8665ab0f899233347bb25a1f29f1a8e010befe64
+updated_at: "2026-10-18T12:50:41.440Z"
 fingerprint: 6b72362ed498d97cb509184c47ed307b5f070972ed672da43da697f0f007e94d
 source:
   - path: "tests/test_crash_cause.py"

@@ -11,8 +11,8 @@ description:
   en: >
       Per-mod overflow menu (Vue): reassign character, fix, rollback, open folder, remove from library. The dispatcher accepts the mod either from the overflow menu or directly from the card's badge, and never swallows a local error silently. The assign dialog must be imported: an unresolved tag renders nothing and hands the code a DOM element.
       
-revision: 67a073215c2dce317e8190d381e16868baade880
-updated_at: "2026-10-18T09:12:04.000Z"
+revision: 8665ab0f899233347bb25a1f29f1a8e010befe64
+updated_at: "2026-10-18T12:50:41.445Z"
 fingerprint: 20b3b76874d7c0b895eb9bed1fdded0c7006d5c713ba4e7391f584720f5030e4
 source:
   - path: "frontend/src/pages/ModLibraryPage.vue"

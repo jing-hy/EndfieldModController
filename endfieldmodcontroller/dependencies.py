@@ -276,17 +276,64 @@ def _download(url: str, dest: Path, chunk_callback: Callable[[int, int], None] |
     return target
 
 
+# 「这个文件不是本体」的描述词：Main File 的描述是
+# `Main File, if unsure which to download get this one`；
+# 同页面上的 `examples.zip`（示例包）、`cnmodfixer…zip`（工具 exe）、实验版都带这些词。
+_GB_NON_MOD_WORDS = ("example", "demo", "tool", "fixer", "experimental")
+
+
+def _gb_added(file_info: dict[str, Any]) -> int:
+    try:
+        return int(file_info.get("_tsDateAdded") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _latest_gamebanana_file(profile: dict[str, Any], name_contains: str) -> dict[str, Any] | None:
-    files = profile.get("_aFiles") or []
+    """从 `_aFiles` 里挑**要装的那一个**文件。
+
+    ⚠️ 2026-10-18 修（更新内置 RabbitFX 时实测到的坑）：`file_name_contains` 钉的是
+    **具体文件名**（如 `28_2d258`），而上游每发一版就换一个名字 ⇒ 老链条一旦匹配不上，
+    旧实现会**退化成「取最新文件」**；可同一个页面上还挂着 `examples.zip`（1.9 MB 示例包）
+    和 `cnmodfixer…zip`（9.6 MB 工具 exe）—— 它们恰恰是最后上传的 ⇒ 依赖页点「更新」
+    会把示例包/工具装进 `_deps/RabbitFX`，用户拿到一个跑不起来的前置。
+
+    现在的判据（名字没匹配上时）：
+      ① 只认作者标了 **Main File** 的那个（`_sDescription` 里写着）；
+      ② 没有标记时，退到「描述里没有 示例/演示/工具/修复器/实验版 字样」的文件；
+      ③ 仍挑不出来 ⇒ 返回 None，由调用方**报错**（宁可失败，也不装一个猜出来的东西）。
+    归档文件（`_bIsArchived`）一律不选。
+    """
+    files = [
+        f for f in (profile.get("_aFiles") or [])
+        if isinstance(f, dict) and not f.get("_bIsArchived")
+    ]
     if not files:
         return None
     if name_contains:
         lowered = name_contains.lower()
         matches = [f for f in files if lowered in str(f.get("_sFile", "")).lower()]
         if matches:
-            files = matches
-    files = sorted(files, key=lambda f: int(f.get("_tsDateAdded") or 0), reverse=True)
-    return files[0] if files else None
+            return sorted(matches, key=_gb_added, reverse=True)[0]
+    # 名字没匹配上（或压根没给名字）：主文件优先 —— 同一页面上的 examples / CN Mod Fixer
+    # 往往是最后上传的，"取最新"必然踩坑。
+    main = [
+        f for f in files
+        if "main file" in str(f.get("_sDescription") or "").lower()
+    ]
+    if not main:
+        main = [
+            f for f in files
+            if not any(
+                word in str(f.get("_sDescription") or "").lower()
+                for word in _GB_NON_MOD_WORDS
+            )
+        ]
+    if main:
+        files = main
+    elif name_contains:
+        return None
+    return sorted(files, key=_gb_added, reverse=True)[0]
 
 
 def _download_for_spec(
@@ -299,7 +346,18 @@ def _download_for_spec(
         profile = _fetch_json(f"https://gamebanana.com/apiv11/Mod/{spec.gamebanana_id}/ProfilePage")
         file_info = _latest_gamebanana_file(profile, spec.file_name_contains)
         if not file_info:
-            raise RuntimeError(f"GameBanana mod {spec.gamebanana_id} has no downloadable file")
+            # 报错要把「页面上到底有哪些文件」带出来 —— 否则只知道「没有可下载文件」，
+            # 分不清是上游改名了、还是被归档了。
+            available = "、".join(
+                str(item.get("_sFile") or "?")
+                for item in (profile.get("_aFiles") or [])[:8]
+                if isinstance(item, dict)
+            )
+            raise RuntimeError(
+                f"GameBanana mod {spec.gamebanana_id} 没有可下载文件"
+                f"（file_name_contains={spec.file_name_contains!r} 没匹配上，"
+                f"也没有标 Main File 的文件；页面上的文件：{available or '无'}）"
+            )
         url = str(file_info.get("_sDownloadUrl") or "")
         if not url:
             raise RuntimeError("GameBanana file has no download URL")

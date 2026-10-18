@@ -11,9 +11,9 @@ description:
   en: >
       js_api surface for the store flow and the download centre: listing, categories, detail, image preparation, batch scan and update-all, plus task snapshot, pause, resume, cancel and clear. Enqueues instead of navigating.
       
-revision: 67a073215c2dce317e8190d381e16868baade880
-updated_at: "2026-10-18T09:12:03.871Z"
-fingerprint: b2881ce249e82814abe8607ae5be5a7376721939697f4e283edd0f5894f9fc6a
+revision: 8665ab0f899233347bb25a1f29f1a8e010befe64
+updated_at: "2026-10-18T12:50:41.409Z"
+fingerprint: 79911475934b5a1ab573e2f236e7e16357592e6457e80e3322deb2ef4d9984a2
 source:
   - path: "endfieldmodcontroller/api.py"
 apis:

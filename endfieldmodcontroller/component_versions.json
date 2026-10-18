@@ -39,6 +39,10 @@
     "secondary_motion": {
       "latest": "3.2.0"
     },
+    "rabbitfx": {
+      "latest": "2.8",
+      "note": "EFMI RabbitFX（GameBanana 651557 的 Main File）—— 随包 v2.8，展开到 <Mod 库>/_deps/RabbitFX；不装游戏目录"
+    },
     "jiggle_efmi": {
       "latest": "0.2.4",
       "repo": "woakato/EndfieldJiggle-EFMI",

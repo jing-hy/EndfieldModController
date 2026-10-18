@@ -4,11 +4,11 @@
     "kind": "dependency",
     "source": "gamebanana_mod",
     "gamebanana_id": 651557,
-    "file_name_contains": "v26_b2546",
+    "file_name_contains": "28_2d258",
     "install_dir": "_deps/RabbitFX",
     "enabled": true,
-    "notes": "EFMI RabbitFX v2.6 stable from GameBanana 651557. Required by some Endfield mods (Rossi/Typhoeus). v2.6 main file is selected instead of the experimental upgrade script.",
-    "version": "v2.6 stable",
+    "notes": "EFMI RabbitFX v2.8 stable from GameBanana 651557 (file 28_2d258.zip). Required by some Endfield mods (Rossi/Typhoeus). The main file (v2.8) is selected instead of the experimental 4.x line, examples.zip or the CN Mod Fixer tool.",
+    "version": "v2.8 stable",
     "required_file": "RabbitFX.ini"
   },
   "Orfix": {

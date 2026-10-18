@@ -2756,7 +2756,9 @@ class EndfieldModControllerApi:
             # ⚠️ 这里列的是"版本表里**外部**那些键"，与 `component_versions.json` 的
             # `external` 段一一对应 —— 加了新组件要同步加进来，否则它**永远不参与
             # 一键启动前的"有新版本"提示**（表里写了也白写）。
-            for key in ("reshade", "secondary_motion", "jiggle_efmi"):
+            # ⚠️ 加了新组件必须同步加进来（RabbitFX 2026-10-18 接入），否则它在
+            # 一键启动前**永远不参与"有新版本"提示**（表里写了也白写）。
+            for key in ("reshade", "secondary_motion", "jiggle_efmi", "rabbitfx"):
                 row = versions.get(key) or {}
                 installed[key] = str(row.get("version") or "")
         except Exception as exc:         # noqa: BLE001
@@ -6218,6 +6220,46 @@ class EndfieldModControllerApi:
         threading.Thread(target=worker, name="mc-app-update", daemon=True).start()
         return self.get_dependency_progress()
 
+    # 更新检查里各段的默认中文名（前端"检查组件更新/检查状态"直接显示这些）。
+    _COMPONENT_DISPLAY = {
+        "reshade": "ReShade 底座",
+        "secondary_motion": "乳摇插件 (SecondaryMotion)",
+        "poser": "Endfield Poser",
+        "jiggle_efmi": "EndfieldJiggle (触摸形变)",
+        "rabbitfx": "EFMI RabbitFX（前置）",
+    }
+
+    def _component_rows(self, report: dict[str, Any]) -> list[dict[str, Any]]:
+        """把 `updates.check_updates()` 的分段结果压成一张**列表**（前端直接渲染）。
+
+        ⚠️ 2026-10-18 补（接 RabbitFX 时发现）：接口一直返回分段 dict
+        （`reshade` / `secondary_motion` / `poser` / `jiggle_efmi` / `builtin` / `rabbitfx`），
+        而设置页与依赖页都在找 `r.components` —— 找不到就当成"没有可检查的组件"
+        ⇒ 用户点「检查组件更新」**什么都看不到**。接进来的组件等于白接。
+        """
+        rows: list[dict[str, Any]] = []
+
+        def _row(key: str, row: dict[str, Any], default: str = "") -> dict[str, Any]:
+            return {
+                "key": key,
+                "display": str(row.get("display") or default or key),
+                "current": str(row.get("current") or ""),
+                "latest": str(row.get("latest") or ""),
+                "update_available": bool(row.get("update_available")),
+                "installed": bool(row.get("installed") or row.get("current")),
+            }
+
+        for key, label in self._COMPONENT_DISPLAY.items():
+            row = report.get(key)
+            if isinstance(row, dict):
+                rows.append(_row(key, row, label))
+        builtin = report.get("builtin")
+        if isinstance(builtin, dict):
+            for key, row in builtin.items():
+                if isinstance(row, dict):
+                    rows.append(_row(key, row, label=str(key)))
+        return rows
+
     def check_component_updates(self) -> dict[str, Any]:
         from . import updates
 
@@ -6232,6 +6274,8 @@ class EndfieldModControllerApi:
             )
         except Exception as exc:  # noqa: BLE001
             report.setdefault("errors", []).append(f"DLSS5 组件检查失败: {exc}")
+        # 同时给一份**列表**（前端"检查组件更新"/"检查状态"都按 `components` 渲染）
+        report["components"] = self._component_rows(report)
         return report
 
     def _sync_firstperson_ini_after_install(self) -> dict[str, Any]:

@@ -11,9 +11,9 @@ description:
   en: >
       The manifest of third-party pieces the runtime needs: the spec dataclass (url, sha256, install dir, kind), loading the editable dependencies.json, and deciding which of them are missing for the currently selected mods.
       
-revision: 67a073215c2dce317e8190d381e16868baade880
-updated_at: "2026-10-18T09:12:03.877Z"
-fingerprint: 3d110ab16f214d7c1a524fb4b298482cc28922d0a3935749069261d570ba0d03
+revision: 8665ab0f899233347bb25a1f29f1a8e010befe64
+updated_at: "2026-10-18T12:50:41.411Z"
+fingerprint: 84c160868e64d8e2a3184c8ae837cd121004e95c8413e1ce98d807b2b0b4e93a
 source:
   - path: "endfieldmodcontroller/dependencies.py"
     line: 54
@@ -22,8 +22,8 @@ source:
     line: 101
     end_line: 119
   - path: "endfieldmodcontroller/dependencies.py"
-    line: 717
-    end_line: 850
+    line: 775
+    end_line: 966
 apis:
   - protocol: rpc
     path: "load_manifest"

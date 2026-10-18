@@ -311,12 +311,28 @@ def _check_bundled_assets(config: AppConfig, report: Report, log: Callable[[str]
 
         fx = rabbitfx.ensure_bundled(config, log=log)
         if fx.get("status") == "installed":
-            report.add("rabbitfx:bundled", True, f"RabbitFX 已随包展开到 {fx.get('dir')}", fixed=True)
+            version = fx.get("version") or ""
+            report.add("rabbitfx:bundled", True,
+                       f"RabbitFX 已随包展开到 {fx.get('dir')}"
+                       + (f"（v{version}）" if version else ""), fixed=True)
             report.action("展开随包前置 RabbitFX（庄方宜菜单包等 Mod 需要它）")
+        elif fx.get("status") == "updated":
+            # 2026-10-18：内置升版后，库里那份**确认是我们铺过的旧代**才就地升级（先备份）。
+            report.add("rabbitfx:bundled", True,
+                       f"RabbitFX 随包版本已升级：{fx.get('from_version')} → {fx.get('version')}"
+                       f"（旧版备份在 {fx.get('backup')}）", fixed=True)
+            report.action(f"升级随包前置 RabbitFX 到 v{fx.get('version')}")
         elif fx.get("status") == "already_elsewhere":
             report.add("rabbitfx:bundled", True, f"库里已有 RabbitFX：{fx.get('dir')}")
         elif fx.get("status") == "present":
-            report.add("rabbitfx:bundled", True, "RabbitFX 已就位")
+            if fx.get("kept"):
+                # 用户自己下的/自己改过的那份：如实说"没动它"，别谎报"已是最新"。
+                report.add("rabbitfx:bundled", True,
+                           fx.get("message") or "库里那份 RabbitFX 保留不动")
+            else:
+                version = fx.get("version") or ""
+                report.add("rabbitfx:bundled", True,
+                           "RabbitFX 已就位" + (f"（v{version}）" if version else ""))
         # `missing` 不报错：依赖下载那条路会兜底（dependencies.json 里也声明了它）
     except Exception as exc:  # noqa: BLE001 —— 随包展开失败不该让自检整体失败
         _log(log, f"RabbitFX 随包展开出错（忽略，依赖下载会兜底）：{exc}")

@@ -226,6 +226,16 @@ def component_versions(config: AppConfig) -> dict[str, Any]:
             "repository": "https://github.com/OedoSoldier/Endfield-Poser",
             "license": "AGPL-3.0",
         },
+        "rabbitfx": {
+            "name": "EFMI RabbitFX（前置）",
+            # ⚠️ 它**不装游戏目录**，落点是 `<Mod 库>/_deps/RabbitFX`（随包展开）。
+            # 版本号从 ini 首页那行注释读；读不到就报空 = "不知道版本"，不拿文件大小顶替。
+            "version": _rabbitfx_local_version(config),
+            "path": str(_rabbitfx_install_dir(config)),
+            "exists": _rabbitfx_local_version(config) != "",
+            "repository": "https://gamebanana.com/mods/651557",
+            "license": "CC BY-NC-ND 4.0",
+        },
         "jiggle_efmi": {
             "name": "EndfieldJiggle (触摸形变)",
             "version": _jiggle_local_version(config),
@@ -370,9 +380,25 @@ def _builtin_local_version(config: AppConfig, key: str) -> str:
         return ""
 
 
+def _rabbitfx_local_version(config: AppConfig) -> str:
+    """本机 `_deps/RabbitFX` 的版本号（读不到返回空串 = 未知/未装）。"""
+    from . import rabbitfx
+
+    return rabbitfx.local_version(config)
+
+
+def _rabbitfx_install_dir(config: AppConfig) -> Path:
+    """本机 RabbitFX 的落点（`<Mod 库>/_deps/RabbitFX`）。"""
+    from . import rabbitfx
+
+    return rabbitfx.install_dir(config)
+
+
 def check_updates(config: AppConfig, log: Callable[[str], None] | None = None) -> dict[str, Any]:
     """查询各组件的最新可用版本（联网）。"""
     report: dict[str, Any] = {"reshade": {}, "secondary_motion": {}, "poser": {},
+                              # EFMI RabbitFX（GameBanana 651557，随包前置）：2026-10-18 接进检查
+                              "rabbitfx": {},
                               # EndfieldJiggle（触摸形变 Mod，2026-10-13 接入）单独一段：
                               # 它只下"纯 Mod 包"，与上面两个注入型插件的判据不同。
                               "jiggle_efmi": {},
@@ -535,11 +561,42 @@ def check_updates(config: AppConfig, log: Callable[[str], None] | None = None) -
     except Exception as exc:  # noqa: BLE001
         report["errors"].append(f"内置组件检查失败: {exc}")
 
+    # ── EFMI RabbitFX（GameBanana 651557，随包前置）─────────────────────────
+    # 用户 2026-10-18：「这个插件要接进依赖更新检查」+「是发布前检查、启动前检查
+    # 和下载更新时检查」⇒ 三处都要看得到它：
+    #   * 发布前：scripts\check_component_versions.py --strict 比对 component_versions.json；
+    #   * 启动前：api.pending_component_updates 读同一张表（纯本地，微秒级）；
+    #   * 下载更新：本段联网查 GameBanana 上**当前主文件**的版本（唯一联网的地方）。
+    try:
+        from . import rabbitfx
+
+        upstream = rabbitfx.latest_upstream(log)
+        current = _rabbitfx_local_version(config)
+        latest = str(upstream.get("version") or "")
+        report["rabbitfx"] = {
+            "display": "EFMI RabbitFX（前置）",
+            "current": current,
+            "latest": latest,
+            "update_available": bool(latest and current
+                                     and _version_tuple(latest) > _version_tuple(current)),
+            # 没装 = 未安装（不是"有更新"）：首次安装由随包展开 / 依赖页负责
+            "installed": bool(current),
+            "download_url": str(upstream.get("url") or ""),
+            "asset": str(upstream.get("file") or ""),
+            "size": int(upstream.get("size") or 0),
+            "license": "CC BY-NC-ND 4.0",
+            "repository": "https://gamebanana.com/mods/651557",
+            "note": "终末地 Mod 的共享 shader 特效前置；全库只能有一份（多份会崩）。",
+        }
+    except Exception as exc:  # noqa: BLE001
+        report["errors"].append(f"RabbitFX 检查失败: {exc}")
+
     _log(log, "更新检查完成: " + json.dumps({
         "reshade": report["reshade"].get("latest"),
         "secondary_motion": report["secondary_motion"].get("latest"),
         "poser": report["poser"].get("latest"),
         "jiggle_efmi": report["jiggle_efmi"].get("latest"),
+        "rabbitfx": report["rabbitfx"].get("latest"),
     }, ensure_ascii=False))
     return report
 

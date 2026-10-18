@@ -11,8 +11,8 @@ description:
   en: >
       The exe's own entry script: a three-line shim that imports the package's main() and calls it, so freezing works without importing pywebview twice.
       
-revision: 67a073215c2dce317e8190d381e16868baade880
-updated_at: "2026-10-18T09:12:03.936Z"
+revision: 8665ab0f899233347bb25a1f29f1a8e010befe64
+updated_at: "2026-10-18T12:50:41.434Z"
 fingerprint: 8c514beee3e3b37271b61afd5d784466073d39291ff5812c90f1b3c25da23960
 source:
   - path: "scripts/exe_entry.py"
