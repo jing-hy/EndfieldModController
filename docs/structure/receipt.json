@@ -2,12 +2,12 @@
   "schema_version": 1,
   "ok": true,
   "project": "normify-modecontroller",
-  "compiled_at": "2026-10-18T14:17:05.993Z",
+  "compiled_at": "2026-10-19T13:51:50.777Z",
   "stats": {
     "tree_count": 1,
     "module_count": 172,
     "leaf_count": 153,
-    "api_count": 400,
+    "api_count": 398,
     "dep_count": 86,
     "cross_tree_dep_count": 0,
     "max_depth": 4,
@@ -28,19 +28,19 @@
   },
   "artifacts": {
     "tree.json": {
-      "sha256": "1440d890c735d3e45ce3682d7429cc0b8be9a37ab399fafa1b529b5c5f5a438d",
-      "bytes": 528799
+      "sha256": "8ecc67718c7af55a17439d55efb0a9e5461574b525a6ecdbd330459e979730c7",
+      "bytes": 527669
     },
     "outline.md": {
-      "sha256": "b5339a4b941787e366b02fb29cf722a40c6c3a9ebeb4489a9b3534e414b6fe64",
-      "bytes": 50541
+      "sha256": "9acb68c39f4f5585462be2b8883d4d6b362ce2e2dcd6c25ad9e3cb675a42ebc9",
+      "bytes": 50476
     },
     "api-index.json": {
-      "sha256": "7e3221c56e7de4047732dbc8951336f9360ce5b2fdaba29deba141cd110e759e",
-      "bytes": 27531
+      "sha256": "480d7a2d99c290fd2894014984f50dd58bc490efa8ea41348f528b6120e86dc5",
+      "bytes": 27416
     },
     "receipt.json": {
-      "sha256": "d4eb6a63a899142542f722d46eb19ca96cab7cdcf5bd43c1b2e0f919930585c6",
+      "sha256": "629f0e0e822a37b0f9213474f45b883908377321472bde73a9b2f7ff3c37c429",
       "bytes": 1096
     }
   }

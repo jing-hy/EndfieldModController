@@ -12,7 +12,7 @@
   <a href="LICENSE"><img alt="GPL-3.0-or-later 许可" src="https://img.shields.io/github/license/jing-hy/EndfieldModController?label=License&amp;color=3DA639"></a>
 </p>
 
-<p>Windows 桌面程序，单文件 exe。当前版本 <b>1.4.6</b> —— <a href="https://github.com/jing-hy/EndfieldModController/releases">下载最新版</a></p>
+<p>Windows 桌面程序，单文件 exe。当前版本 <b>1.4.7-beta</b> —— <a href="https://github.com/jing-hy/EndfieldModController/releases">下载最新版</a></p>
 
 <p>📖 安装步骤、目录结构、逐项排查 → <b><a href="docs/README.detailed.md">详细文档</a></b><br>
 🛠 想改代码 / 提 PR → <b><a href="CONTRIBUTING.md">维护者指南</a></b></p>
@@ -35,7 +35,7 @@
 | **游戏内统一面板** | 进游戏按 `Home` → **ModeController** 页：按角色 / Mod 分栏，**每一项就是一个按钮**。多个 Mod 抢同一个键时，从面板点就不会按错。面板还能调界面大小、一键重置布局 |
 | **启动前风险确认** | 拉起游戏之前先查"这套 Mod 会不会崩"（资源冲突 + 过去崩过的组合），有风险就说清是什么冲突，由你决定要不要继续 |
 | **崩溃归因** | 崩了会区分"Mod 资源冲突"与其它原因：是皮肤冲突的话，弹窗里**一组一个下拉框**选要保留的 Mod（只改勾选，不动你的文件）；同时生成带完整现场的诊断包 |
-| **Mod 修复 / 回滚** | 游戏版本更新后老 Mod 常需适配，在卡片上就能一键修；**改前自动整份备份、可一键回滚** |
+| **Mod 修复 / 回滚**（实验性） | 游戏版本更新后老 Mod 可能失效：卡片「⋯」里可以**单独修某一个 Mod** —— 把它的 ini 里 `ps-tN`（N 小于 21）整体 +1。这是邪修办法，不一定有用、也可能改坏，所以只在单个 Mod 上手动点，**动手前整份备份、可一键回滚**；**没有「一键修复所有」** |
 | **游戏目录净化 / 还原** | 把第三方注入物**先备份再移走**，随时一键还原；被移走的系统模块会自动补回 |
 | **摆姿 / MMD 播放**（可选） | 集成 Endfield Poser，用它自带的页面摆姿势、放 MMD |
 | **文件被反复删除会提醒你** | 关键组件被安全软件隔离时，启动时告诉你**是哪个文件**、该把**哪个目录**加入白名单 |
@@ -120,7 +120,9 @@ RTX 20 / 30 / 40 / 50 系都能用：程序会**按你的显卡架构自动准�
 先确认对应开关是开的（服装 Mod / 物理效果 / DLSS5 各自独立），再看自检结果；同一角色只会保留一个 Mod，勾选后记得点「生成控制器」。
 
 **Q：游戏版本更新后老 Mod 失效？**
-用卡片「⋯」里的「**修复**」—— 它会适配资源槽位号，**改前自动备份、可一键回滚**。
+先把 **RabbitFX** 更新到最新（那是作者维护的正规修法）；更新后还不行，再用卡片「⋯」里的
+「**修复 Mod 文件**」—— 它把该 Mod 的 `ps-tN`（N 小于 21）整体 +1（`ps-t0 → ps-t1`、
+`ps-t01 → ps-t02`）。这是邪修办法，不一定有用、也可能改坏，**改前会自动整份备份、可一键回滚**。
 
 **Q：自检或「修复」老是说某几个文件缺失，补上以后又缺？**
 多半是**安全软件把它们隔离了**（最常见的是 DLSS5 的神经渲染运行库那种大文件）。程序每次启动都会记一次"这些关键文件在不在"，连续几次发现同一个文件不见了时，你点「一键启动」就会先弹窗告诉你**具体是哪个文件**、并把**该加入白名单的目录**列出来；加完白名单再点一次即可。
@@ -146,11 +148,10 @@ RTX 20 / 30 / 40 / 50 系都能用：程序会**按你的显卡架构自动准�
 | DLSS 5 Feed | 给 DLSS5 喂颜色 / 运动矢量 / 深度 | 见其说明（无公开仓库） |
 | [SecondaryMotion](https://github.com/Sp1cHless/Arknights-Endfield-Plugin-Secondary-bodyphysics) | 物理效果 | 见上游仓库 |
 | [Endfield Poser](https://github.com/OedoSoldier/Endfield-Poser) | 摆姿 / MMD 播放（可选） | **AGPL-3.0** —— **不随 Release 分发**：常规安装只从官方 Release 下载并调用它自己的安装向导；**无法访问 GitHub 时的应急离线包内会包含它**，并随附 AGPL-3.0 全文、版权声明与[源码地址](https://github.com/OedoSoldier/Endfield-Poser) |
-| **Endfield PS-T DrawSection Fix** | 修老 Mod | **B站 up 主 可可HXL**《终末地Mod修复工具包》v1.5；版权归原作者，**随包分发** |
 | NVIDIA NGX 运行库 | DLSS 与神经渲染 | NVIDIA 版权，随包仅为免去手动下载 |
 | **社区 DLSS NR 运行库变体**（`sf` / 优化版 `rtx40`） | 让 **RTX 20 / 30 / 40 系**也能跑 DLSS5 神经渲染（把内核重定向到对应架构） | 取自社区镜像 [RankFTW/rhi-repo](https://github.com/RankFTW/rhi-repo)；NVIDIA 运行库本身闭源，此处按其发布分发 |
 
-**特别声明**：随包分发的第一人称**中文**补丁由 **B站 up 主 Hirahido** 制作，Mod 修复工具由 **B站 up 主 可可HXL** 制作，版权均归其所有。本程序只做分发与安装编排、不修改其内容 —— 两位作者若不希望被随包分发，请在 issue 里说明，我们会立即移除。
+**特别声明**：随包分发的第一人称**中文**补丁由 **B站 up 主 Hirahido** 制作，版权归其所有。本程序只做分发与安装编排、不修改其内容 —— 作者若不希望被随包分发，请在 issue 里说明，我们会立即移除。
 
 本项目自身为 **GPL-3.0-or-later**（GNU General Public License v3.0 或更高版本）许可，完整条款见 [LICENSE](LICENSE)；各源文件头部均标注了 `SPDX-License-Identifier: GPL-3.0-or-later`。Copyright (c) 2026 jing-hy。
 

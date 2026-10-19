@@ -290,40 +290,76 @@ function closeMenu() { cancelMenuClose(); menu.value = null; }
 //   ③ 这里的 catch 原来是空的（注释说"call() 已经弹过窗"），但**本地异常**（典型：弹窗组件
 //      的 ref 还没挂上时的 `TypeError`）会被静默吞掉 —— 用户看到的同样是"点了没反应"。
 //      现在控制台留痕，并在界面上说一句。
+// 修复确认框里顺带显示本机 RabbitFX 的版本 —— 数据来自**已经在 store 里**的
+// `get_state().dependency_report.manifest.RabbitFX`，不为它多发一次网络请求。
+function rabbitfxNote() {
+  const manifest = (((store.state || {}).dependency_report) || {}).manifest || {};
+  const row = manifest.RabbitFX || {};
+  const version = String(row.version || "").trim();
+  if (row.present === false) return "（依赖页显示它还没就位，先去依赖页装上或更新它）";
+  if (version) return `（本机：${version}）`;
+  return "（版本号读不到，去依赖页确认一下是不是最新的）";
+}
 async function menuAct(act, mod = null) {
   const m = mod || menu.value;
   if (!m) return;
   closeMenu();
   try {
     if (act === "fix") {
-      // ⚠️ **C5：修之前先查工具在不在**（2026-10-03 补回归）。
-      // 0.9.5（`app.js:808-817`）会先 `modfix_status`，工具缺失时讲清"放 assets\\modfix
-      // 或 runtime\\modfix"；换代后 grep `modfix_status` **0 命中** ⇒ 用户点了"修复"，
-      // 失败也只看到一句错误码，不知道该往哪放工具。
-      // ⚠️ 按用户准则：**不能因为"当前没就位"就把按钮禁用**（工具随包、点下去会自动展开），
-      // 所以只在**确实不可用**（`usable === false`：随包与 runtime 都没有）时才说明。
-      // 注意后端返回的是 `{ tool: {...} }`。
-      try {
-        const st = await call("modfix_status");
-        const tool = (st && st.tool) || {};
-        if (tool.usable === false) {
-          await showModalDialog({
-            title: "修复工具不在",
-            message: [
-              "这个修复工具是随包分发的，但当前两份都没有：",
-              "· assets\\modfix\\（随包那份）",
-              "· runtime\\modfix\\（运行时那份）",
-              "",
-              "从 Release 下载的话，重新展开一次 assets-bundle.zip 即可。",
-            ].join("\n"),
-            okText: "知道了", showCancel: false,
-          });
+      // ★ 2026-10-19 换掉旧的「跑外部工具」修复：现在做的是邪修 ——
+      //   把这个 Mod 的 ini 里所有 ps-tN（N < 21）改成 ps-t(N+1)，贴图槽位整体 +1。
+      //   接口约定：fix_mod(id) → { ok, already?, changed: [相对路径], replacements, message }；
+      //   `already === true` = 这个 Mod 之前已经 +1 过，再修就变 +2 ⇒ 二次确认后走
+      //   fix_mod(id, true) 强制再修一次。
+      //   旧版那个「修复工具在不在」的检查接口已从后端删除，这段检查随之去掉。
+      const first = await showModalDialog({
+        title: `按 ps-t+1 修复「${m.name}」？`,
+        message: [
+          "这是邪修办法：把 Mod 的 ini 里所有 ps-tN（N 小于 21）改成 ps-t(N+1)，也就是槽位整体 +1。",
+          "不一定有用；也可能把它改坏。",
+          "每个 Mod 修复前都会整份备份，可以用「⋯ → 回滚」还原。",
+          "",
+          "修复前请先确认这两件事：",
+          `① RabbitFX 已更新到最新${rabbitfxNote()}；`,
+          "② 更新 RabbitFX 之后，这个 Mod 依然不正常。",
+        ].join("\n"),
+        okText: "仍然按 ps-t+1 修复",
+        cancelText: "先去更新 RabbitFX",
+        focusCancel: true,
+      });
+      if (!first) return;
+      let r = await call("fix_mod", m.id);
+      // ⚠️ 「已经 +1 过」时后端返回的是 { ok: false, already: true, message }（不是成功）——
+      //    必须先判 already，否则会被当成"修复失败"直接弹错、永远到不了二次确认。
+      if (r && r.already === true) {
+        // 之前已经 +1 过：说清"再修会变 +2"，由用户自己决定
+        const again = await showModalDialog({
+          title: `「${m.name}」已经按 ps-t+1 修过一次`,
+          message: [
+            "这个 Mod 之前已经 +1 修复过，现在再修一次就是往上再叠一层：",
+            "槽位会从 +1 变成 +2，更容易把它改坏。",
+            "",
+            "修复前仍然会整份备份，真出问题可以用「⋯ → 回滚」还原。",
+          ].join("\n"),
+          okText: "仍然再 +1（会变成 +2）",
+          cancelText: "就停在 +1",
+          focusCancel: true,
+        });
+        if (!again) {
+          showToast(`「${m.name}」保持现在的 +1，这次没有再改`, "info");
           return;
         }
-      } catch (e) { /* 查不到就直接试，别因为检查本身挡住 */ }
-      const r = await call("fix_mod", m.id);
-      if (r && r.ok === false) await showAlert("修复失败", r.message || "未知原因");
-      else showToast(`已修复 ${m.name}`, "success");
+        r = await call("fix_mod", m.id, true);
+      }
+      if (r && r.ok === false) { await showAlert("修复失败", r.message || "未知原因"); return; }
+      const hits = Number((r && r.replacements) || 0);
+      const files = Array.isArray(r && r.changed) ? r.changed.length : 0;
+      if (hits > 0) {
+        showToast(`「${m.name}」已按 ps-t+1 修复：替换 ${hits} 处 / 改动 ${files} 个文件`, "success");
+      } else {
+        // 一处都没匹配到也是正常结果（这个 Mod 本来就不用改槽位），不该报成失败
+        showToast(`「${m.name}」里没有找到 ps-tN（N<21）这种写法，没有改动`, "info");
+      }
     } else if (act === "rollback") {
       const r = await call("rollback_mod", m.id);
       if (r && r.ok === false) await showAlert("回滚失败", r.message || "未知原因");
@@ -470,88 +506,6 @@ async function resolveConflicts(keep) {
     loadSettings();
   } catch (e) { /* call 已弹窗 */ }
 }
-// ⚠️ **「一键修复所有 Mod」补齐确认 / 进度 / 结果**（2026-10-03 修回归）。
-// 0.9.5 是：确认框（讲清会备份、可回滚、跳过已修的）→ `fix_all_mods(true)`
-// → `setInterval` 轮询 `fix_all_progress`，把「修复中 3/29：名字」写进状态行
-// → 完成后列出失败项。
-// 换代到 Vue 之后只剩一句 `await call("fix_all_mods")`：**没有确认、没有进度、没有结果**
-//（后端 `fix_all_progress` 前端零调用）—— 这是个要跑 29 个 Mod 的后台长任务，
-// 全程零反馈会让人以为卡死了。这里按 0.9.5 的语义补回来，展示沿用现有 Btn/Card/Toast。
-const fixRunning = ref(false);
-const fixText = ref("");
-let fixTimer = null;
-
-function stopFixPoll() {
-  if (fixTimer) { clearInterval(fixTimer); fixTimer = null; }
-}
-
-async function fixAll() {
-  const ok = await showModalDialog({
-    title: "一键修复所有 Mod",
-    message: [
-      "会逐个修复「服装 Mod」里还没修过的那些。",
-      "",
-      "• 每个 Mod 修复前都会**备份**，可随时用 ⋯→「回滚」还原",
-      "• 已经修过的会跳过",
-      "• 过程中界面不会卡（后台跑，这里显示进度）",
-    ].join("\n"),
-    okText: "开始修复", cancelText: "先不修复",
-  });
-  if (!ok) return;
-
-  const started = await call("fix_all_mods", true);
-  if (started && started.ok === false) {
-    showToast(String(started.message || "启动修复失败"), "danger");
-    return;
-  }
-  if (started && started.already) {
-    showToast("已经有一轮修复在进行中", "info");
-  } else {
-    // ⚠️ 后端 `fix_all_mods()` 返回的是 `{ok, started, total, message}`（2026-10-04 修）：
-    // 原来读 `started.count` ⇒ 恒 undefined ⇒ 数量永远不显示，提示退化成"已开始修复 Mod…"。
-    showToast(
-      `已开始修复${started && started.total ? ` ${started.total} 个` : ""} Mod…`,
-      "success",
-    );
-  }
-
-  fixRunning.value = true;
-  fixText.value = "修复中…";
-  stopFixPoll();
-  fixTimer = setInterval(async () => {
-    let p = null;
-    try { p = await call("fix_all_progress"); } catch (e) { /* 忽略单次失败 */ }
-    if (!p) return;
-    const cur = Number(p.current || 0);
-    const total = Number(p.total || 0);
-    if (p.running) {
-      fixText.value = total
-        ? `修复中 ${cur}/${total}：${p.name || ""}`
-        : `修复中：${p.name || ""}`;
-      return;
-    }
-    // 跑完了
-    stopFixPoll();
-    fixRunning.value = false;
-    fixText.value = "";
-    const results = Array.isArray(p.results) ? p.results : [];
-    const failed = results.filter((r) => r && r.ok === false);
-    await scan();
-    await refreshState();
-    if (failed.length) {
-      await showModalDialog({
-        title: `修复完成（${results.length - failed.length} 成功 / ${failed.length} 失败）`,
-        message: "这几项没修好：\n\n" +
-          failed.slice(0, 12).map((r) => `• ${r.name || r.id || "?"}：${r.message || "未知原因"}`).join("\n") +
-          (failed.length > 12 ? `\n…另有 ${failed.length - 12} 项` : ""),
-        okText: "知道了",
-      });
-    } else {
-      showToast(`修复完成，共 ${results.length} 个 Mod`, "success");
-    }
-  }, 800);
-}
-
 
 
 // ⚠️ 2026-10-04 删掉 `speedText()`：它读的是一个**本文件从未定义**的 `dl.value`，
@@ -607,7 +561,6 @@ onUnmounted(() => {
   window.removeEventListener("keydown", onEscapeKey);
   if (timer) clearInterval(timer);
   if (avatarTimer) { clearInterval(avatarTimer); avatarTimer = null; }
-  stopFixPoll();
   coverQueue = [];
 });
 
@@ -721,7 +674,6 @@ watch(() => store.demoCovers, (val) => {
           <template v-if="store.ready">已发现 {{ store.state.mods ? store.state.mods.length : 0 }} 个 Mod，按角色分组显示</template>
           <template v-else>正在读取 Mod 库…</template>
         </span>
-        <Btn @click="fixAll">一键修复所有 Mod</Btn>
         <span class="ml-auto flex items-center gap-2">
           <input v-model="keyword" class="field" style="width: 220px" placeholder="搜索 Mod / 角色…" />
         </span>

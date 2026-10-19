@@ -6,59 +6,41 @@ tags: [repair]
 name: {zh: "Mod 包修复", en: "Mod Package Repair"}
 description:
   zh: >
-      收拾“加载不了”的 Mod 包：随身带一个外部解包工具、先备份（备份目录 + 回收目录，带索引）、就地修复、回滚或删除 —— 永远可回退，绝不破坏性。
+      Mod 修复（实验性）：把该 Mod 的 .ini 里所有 ps-tN（N<21）整体 +1（ps-t0→ps-t1、ps-t01→ps-t02），先整份备份、可回滚；备份目录 + 回收目录带索引。不再使用任何外部工具。
       
   en: >
-      Repair a mod package that will not load: carry an external unpacking tool, back the mod up (to a backup dir and a trash dir with an index), fix in place, roll back, or delete — always reversible, never destructive.
+      Mod repair (experimental): shifts every ps-tN (N<21) in the mod's .ini files up by one, backing the mod up first and keeping a rollback index. No external tool is used anymore.
       
-revision: 83a004bf635eab9ddbc7e3aa0e1545b11a005bff
-updated_at: "2026-10-18T14:16:51.084Z"
-fingerprint: a6c1c086c6ed2fce62f061a035927988b3624ed73a39770ef51be24c19c93cca
+revision: f975cf1217353501f422ba3582c8ac5ca1fe6a13
+updated_at: "2026-10-19T13:51:34.884Z"
+fingerprint: 0746b5f00822271ad4f6c7feb0f31aefb15c1bfb8203148c303440ed083e6e2e
 source:
   - path: "endfieldmodcontroller/modfix.py"
-    line: 53
-    end_line: 157
+    line: 64
+    end_line: 99
   - path: "endfieldmodcontroller/modfix.py"
-    line: 156
-    end_line: 349
+    line: 116
+    end_line: 274
   - path: "endfieldmodcontroller/modfix.py"
-    line: 348
-    end_line: 472
+    line: 307
+    end_line: 413
 apis:
   - protocol: rpc
     path: "modfix.fix_mod"
     description:
       zh: >
-          在临时目录里用外部工具修 Mod 包，**先整份备份原包**（库里不留残留）。
+          把该 Mod 的 ps-tN（N<21）整体 +1：先整份备份，已修过默认拒绝（force 才再 +1）；这不是正规修法。
           
       en: >
-          Repair a mod package in a temp directory with an external tool, backing the original up first (library left untouched).
+          Shift every ps-tN (N<21) up by one after a full backup; already-fixed mods need force.
           
   - protocol: rpc
     path: "modfix.rollback_mod"
     description:
       zh: >
-          把修过的 Mod 回滚到逐字节一致。
+          用最近一次修复前的备份还原（逐字节一致），并消费掉那条备份。
           
       en: >
-          Roll a repaired mod back, byte-for-byte.
-          
-  - protocol: rpc
-    path: "modfix.fix_all"
-    description:
-      zh: >
-          把整库跑一遍修复，已修过的默认跳过。
-          
-      en: >
-          Run the whole library through the repair tool, skipping what is already fixed.
-          
-  - protocol: rpc
-    path: "modfix.tool_status"
-    description:
-      zh: >
-          外部修复工具在不在、现在能不能用。
-          
-      en: >
-          Is the external repair tool present, and is it usable right now.
+          Restore from the latest pre-fix backup, byte-for-byte, consuming that backup.
           
 ---

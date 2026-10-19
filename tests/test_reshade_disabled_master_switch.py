@@ -89,9 +89,11 @@ def test_defaults_are_safe_and_consistent():
 
     assert config.reshade_disabled is True, "「禁用所有 ReShade 注入」默认要开着"
     assert config.minimal_injection is False, "统一管理器（ReShade 管的）默认要关着"
+    # ⚠️ 2026-10-19：jiggle_efmi_injection 已删除 —— 触摸形变 Mod 改成库里的普通
+    # 辅助 Mod（开关是辅助 Mod 页的勾选），不再是一个注入开关。
     for key in ("dlss5_injection", "dlss5_addon_enabled", "firstperson_addon_enabled",
                 "efmi_injection", "secondary_motion_injection", "poser_injection",
-                "hotkey_takeover", "jiggle_efmi_injection"):
+                "hotkey_takeover"):
         assert getattr(config, key) is True, f"{key} 应保持默认开"
 
 

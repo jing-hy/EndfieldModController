@@ -2650,89 +2650,42 @@ def _check_secondary_motion(config: AppConfig, report: Report, log: Callable[[st
 
 
 def _check_jiggle_efmi(config: AppConfig, report: Report, log: Callable[[str], None] | None) -> None:
-    """EndfieldJiggle（触摸形变 Mod）自检（2026-10-13 接入）。
+    """EndfieldJiggle（触摸形变 Mod）自检（2026-10-19 改为"库里的普通辅助 Mod"）。
 
-    它是**EFMI 框架下的一个 Mod 目录**，不碰游戏目录、不需要 loader ⇒ 自检只有三件事：
-    开关真正落地（关 = 把目录**移出** Mods）、本地载荷缺失时报可读原因、就位后核对关键文件。
+    用户 2026-10-19：「触摸 mod 移出自带，加入自动识别进辅助 mod」——起因是反馈
+    "触摸一键启动不行、需要手动把目录移进 Mods"。它现在只做两件事：
+
+      ① 保证它在 **Mod 库**里（没有就自动装；旧版直接铺在 Mods 顶层的会被收进库）；
+      ② 如实报版本与内容完整性（"文件在、内容不对"也要查出来）。
+
+    勾选状态归用户：这里**不去改**用户关掉的那一项（关掉就是不加载）。
     """
     from . import efmi_jiggle
 
-    if not getattr(config, "jiggle_efmi_injection", False):
-        # 开关关着 = 「进游戏不加载它」。**已经铺进去的要真移出 Mods**：EFMI 的 d3dx.ini 是
-        # `include_recursive = Mods`，改名或挪进子目录都挡不住加载（"界面关了、游戏里还在"）。
-        try:
-            state = efmi_jiggle.status(config)
-            if state.get("in_mods"):
-                result = efmi_jiggle.set_enabled(config, False, log=log)
-                if result.get("changed"):
-                    report.add("jiggle_efmi", True,
-                               "已按开关把 EndfieldJiggle 移出 EFMI\\Mods（可逆，未删除任何文件）",
-                               fixed=True)
-                    report.action("移出 EndfieldJiggle（启动页开关已关闭）")
-                    return
-                report.add("jiggle_efmi", False,
-                           str(result.get("message") or "移出 EndfieldJiggle 失败"), manual=True)
-                return
-        except Exception as exc:  # noqa: BLE001
-            report.add("jiggle_efmi", False, f"按开关移出 EndfieldJiggle 失败: {exc}", manual=True)
-            return
-        report.add("jiggle_efmi", True, "已在启动页关闭 EndfieldJiggle")
+    try:
+        result = efmi_jiggle.ensure_in_library(config, log=log)
+    except Exception as exc:  # noqa: BLE001
+        report.add("jiggle_efmi", False, f"EndfieldJiggle 检查失败: {exc}", manual=True)
         return
-
-    state = efmi_jiggle.status(config)
-    if state.get("enabled") and state.get("verified", True):
-        report.add("jiggle_efmi", True, _jiggle_detail(state))
-        return
-
-    if not state.get("payload_ready"):
-        report.add(
-            "jiggle_efmi", False,
-            "EndfieldJiggle 安装包未就位 —— 依赖页点「自动安装/更新」会从上游 Release 拉取"
-            "纯 Mod 包（约 120 KB；本程序不随包分发它）",
-            manual=True,
-        )
-        return
-
-    # ★ **内容级损坏 / 还没铺进 Mods：先用本地原始安装包重铺一次（不联网）**。
-    #   用户 2026-10-13：「下载后的文件损坏检测按钮和启动检查不出来」—— 只判"文件在不在"
-    #   查不出半截下载、被安全软件破坏、复制中断的文件（大小对、内容不对）。所以这里按
-    #   sha256 基线判，判不过就用 `_pack` 里留存的原始包重解重铺（能自动做掉的别让用户手动）。
-    damaged = bool(state.get("enabled")) and not state.get("verified", True)
-    if damaged:
-        # 先用本地原始包重解出载荷（重写载荷与 sha256 基线），**不联网**。
-        repack = efmi_jiggle.repack_from_local(config, log=log)
-        for action in repack.get("actions") or []:
-            report.action(f"EndfieldJiggle：{action}")
-        if not repack.get("ok"):
-            _log(log, f"EndfieldJiggle：本地原始安装包不可用（{repack.get('message')}）")
-    # ⚠️ 重解完**必须再部署一次**（2026-10-13 测试抓到）：`repack_from_local` 只重建
-    #    「载荷 + 基线」，Mods 里那份旧内容不会被它动到；而 `deploy` 的短路判据包含
-    #    `_content_ok`（内容对不对），所以这一步才会把坏的那份真正覆盖掉。
-    result = efmi_jiggle.deploy(config, log=log)
     for action in result.get("actions") or []:
         report.action(f"EndfieldJiggle：{action}")
-    state = result.get("state") or efmi_jiggle.status(config)
-
-    if not (result.get("ok") and state.get("enabled")):
-        report.add("jiggle_efmi", False, str(result.get("message") or "EndfieldJiggle 部署失败"),
-                   manual=True)
+    try:
+        state = efmi_jiggle.status(config)
+    except Exception as exc:  # noqa: BLE001
+        report.add("jiggle_efmi", False, f"EndfieldJiggle 状态读取失败: {exc}", manual=True)
         return
-
+    if not state.get("in_library"):
+        report.add("jiggle_efmi", True,
+                   "EndfieldJiggle（触摸形变 Mod）不在 Mod 库里"
+                   " —— 可选组件，需要时在下载页点「安装/更新」，它会装进 Mod 库")
+        return
     if not state.get("verified", True):
-        report.add(
-            "jiggle_efmi", False,
-            f"EndfieldJiggle 已铺进 Mods，但**文件内容与安装基线不符**"
-            f"（{_jiggle_corrupt_detail(state)}）—— 本地原始安装包重铺过一遍仍不一致，"
-            "依赖页点「自动安装/更新」重新下载",
-            manual=True,
-        )
+        report.add("jiggle_efmi", False,
+                   "EndfieldJiggle（触摸形变 Mod）文件与安装基线不符（"
+                   + _jiggle_corrupt_detail(state)
+                   + "）—— 下载页点「安装/更新」会重铺一遍", manual=True)
         return
-
-    ok = bool(state.get("efmi_ok", True))
-    detail = _jiggle_detail(state)
-    if damaged:
-        detail = "检测到文件损坏，已用本地原始安装包重新铺好；" + detail
-    report.add("jiggle_efmi", ok, detail, fixed=True, manual=not ok)
+    report.add("jiggle_efmi", True, _jiggle_detail(state), fixed=bool(result.get("changed")))
 
 
 def _jiggle_corrupt_detail(state: dict[str, Any]) -> str:
@@ -2759,8 +2712,9 @@ def _jiggle_detail(state: dict[str, Any]) -> str:
     ShaderRegex（按游戏着色器反汇编文本匹配），游戏更新重编译着色器就可能失配，
     真实判据在游戏内：按 `Ctrl+Shift+F9` 看是否出现 `EJ: NO COMPATIBLE NATIVE PROGRAM`。
     """
-    detail = (f"已铺进 EFMI\\Mods（{state.get('file_count', 0)} 个文件"
-              + (f"，v{state['version']}" if state.get("version") else "") + "）")
+    detail = (f"已在 Mod 库（{state.get('file_count', 0)} 个文件"
+              + (f"，v{state['version']}" if state.get("version") else "")
+              + "；辅助 Mod 页可开关）")
     if state.get("efmi_unknown"):
         detail += "；EFMI 版本读不到，未做版本核对"
     elif not state.get("efmi_ok"):

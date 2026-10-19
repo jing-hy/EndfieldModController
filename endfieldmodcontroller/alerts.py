@@ -328,9 +328,8 @@ def mark_seen(config: Any, ids: list[str] | None) -> None:
 # ---------------------------------------------------------------- 还原配置（保护动作）
 INJECTION_FIELDS = (
     "dlss5_injection", "efmi_injection", "secondary_motion_injection", "poser_injection",
-    # EndfieldJiggle（触摸形变 Mod，2026-10-13 接入）：漏了它 ⇒ 安全模式「还原配置」
-    # 不会关掉它 ⇒ 用户以为环境已经退回"纯原版可启动"，游戏里其实还挂着一个第三方 Mod。
-    "jiggle_efmi_injection",
+    # ⚠️ 2026-10-19：EndfieldJiggle（触摸形变 Mod）**不在这个名单里了** —— 它已经改成
+    # Mod 库里的一个普通辅助 Mod（开关是页面上那个勾选），不再是一个"注入开关"。
 )
 
 

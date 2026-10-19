@@ -1,16 +1,19 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Mod 修复 / 回滚 / 移出库的离线单测（不真的跑那个 exe）。
+"""Mod 修复（ps-t+1）/ 回滚 / 移出库的离线单测。
+
+2026-10-19 用户定的新规则：把该 Mod 的 .ini 里所有 ps-tN（**N < 21**）整体 +1
+（ps-t0 → ps-t1、ps-t01 → ps-t02、ps-t20 → ps-t21；21 及以上不动）。
+不再跑随包 exe，也不再有一键修复；每个 Mod 只能单独修，修前整份备份、可回滚。
 
 覆盖的都是"错了会伤用户数据"的点：
-* 修复状态判定（靠工具写下的 `; PS-T DRAW-SECTION SHIFT -1 APPLIED` 标记）；
-* **修复前一定先备份**、备份按数量滚动、回滚能把目录恢复到备份时的样子（含删掉多出来的文件）；
-* **工具在临时目录里跑**（不在 Mod 库/Mods 里留 `_ps_t_draw_fix_backup_*` 与日志）、带 `CREATE_NO_WINDOW`、做完喂回车；
-* 移出库是"移动"不是"删除"。
+* 边界（0/20/21/70、前导零、大小写）；
+* 只改 .ini、跳过 d3dx.ini；
+* 编码与换行原样保留（GBK / CRLF 的 Mod 不能变成乱码）；
+* 已修过默认拒绝、force 才再 +1；
+* 备份失败即中止、回滚精确还原、旧工具标记只作提示。
 """
 from __future__ import annotations
 
-import json
-import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -19,7 +22,7 @@ import pytest
 from endfieldmodcontroller import modfix
 from endfieldmodcontroller.config import AppConfig
 
-FIX_MARK_LINE = f"; {modfix.FIX_MARK} v2.1"
+LEGACY_MARK = "; PS-T DRAW-SECTION SHIFT -1 APPLIED v2.1"
 
 
 @pytest.fixture()
@@ -37,49 +40,117 @@ def env(tmp_path, monkeypatch):
     (mod_dir / "d3dx.ini").write_text(
         "[TextureOverrideA]\nhash = aaaa\nchecktextureoverride = ps-t3\n", encoding="utf-8")
     (mod_dir / "sub" / "extra.ini").write_text("[Other]\nkey = value\n", encoding="utf-8")
-    tool = tmp_path / "fake-tool.exe"
-    tool.write_bytes(b"MZ fake tool")
-    return SimpleNamespace(tmp=tmp_path, config=config, library=library,
-                           mod_dir=mod_dir, tool=tool)
+    return SimpleNamespace(config=config, library=library, runtime=runtime, mod_dir=mod_dir)
 
 
-# --------------------------------------------------------------- 状态判定
-def test_is_fixed_reads_marker(env):
-    assert modfix.is_fixed(env.mod_dir)["fixed"] is False
-    (env.mod_dir / "sub" / "extra.ini").write_text(FIX_MARK_LINE + "\n", encoding="utf-8")
-    state = modfix.is_fixed(env.mod_dir)
-    assert state["fixed"] is True
-    assert state["files"] == ["sub/extra.ini"] or state["files"] == ["sub\\extra.ini"]
+# --------------------------------------------------------------- 规则本身
+def test_shift_rule_bounds_and_zero_padding(env):
+    ini = env.mod_dir / "mod.ini"
+    ini.write_text(
+        "[A]\nps-t0 = a\nps-t3 = b\nps-t20 = c\nps-t21 = d\nps-t70 = e\nps-t01 = f\n",
+        encoding="utf-8")
+    result = modfix.fix_mod(env.config, "mod-1", env.mod_dir)
+    assert result["ok"], result
+    assert result["replacements"] == 4, result          # 0 / 3 / 20 / 01
+    text = ini.read_text(encoding="utf-8")
+    assert "ps-t1 = a" in text
+    assert "ps-t4 = b" in text
+    assert text.count("ps-t21 = ") == 2                 # 20→21 与原有 21 并存
+    assert "ps-t70 = e" in text                          # 70 高于 21，必须原样
+    assert "ps-t02 = f" in text                         # 保留两位宽度
 
 
-# --------------------------------------------------------------- 备份 / 回滚
-def test_backup_then_rollback_restores_exactly(env):
-    backup = modfix.backup_mod(env.config, "mod-1", env.mod_dir)
-    assert backup["ok"] and Path(backup["path"]).is_dir()
+def test_case_insensitive_and_prefix_kept(env):
+    ini = env.mod_dir / "mod.ini"
+    ini.write_text("[A]\nPS-T3 = a\nPs-T9 = b\n", encoding="utf-8")
+    modfix.fix_mod(env.config, "mod-1", env.mod_dir)
+    text = ini.read_text(encoding="utf-8")
+    assert "PS-T4 = a" in text and "Ps-T10 = b" in text
 
-    # 模拟"被修复过"：改内容 + 多出文件（工具会留下备份目录/日志）
-    (env.mod_dir / "d3dx.ini").write_text("checktextureoverride = ps-t1\n" + FIX_MARK_LINE, encoding="utf-8")
-    (env.mod_dir / "PS_T_Draw_Section_Fix_log.txt").write_text("log", encoding="utf-8")
-    (env.mod_dir / "_ps_t_draw_fix_backup_x").mkdir()
 
-    result = modfix.rollback_mod(env.config, "mod-1")
-    assert result["ok"], result.get("message")
+def test_d3dx_ini_and_non_ini_untouched(env):
+    (env.mod_dir / "readme.txt").write_text("ps-t3\n", encoding="utf-8")
+    result = modfix.fix_mod(env.config, "mod-1", env.mod_dir)
+    assert result["ok"] and result["replacements"] == 0
     assert "ps-t3" in (env.mod_dir / "d3dx.ini").read_text(encoding="utf-8")
-    assert not (env.mod_dir / "PS_T_Draw_Section_Fix_log.txt").exists()
-    assert not (env.mod_dir / "_ps_t_draw_fix_backup_x").exists()
-    # 回滚会把那条备份消费掉，避免反复回滚
+    assert (env.mod_dir / "readme.txt").read_text(encoding="utf-8") == "ps-t3\n"
+
+
+def test_no_match_reports_without_backup(env):
+    ini = env.mod_dir / "mod.ini"
+    ini.write_text("[A]\nps-t30 = a\n", encoding="utf-8")
+    result = modfix.fix_mod(env.config, "mod-1", env.mod_dir)
+    assert result["ok"] and result["replacements"] == 0
+    assert "没有找到" in result["message"]
     assert modfix.list_backups(env.config, "mod-1") == []
 
 
-def test_backup_keeps_only_three_per_mod(env):
-    for _ in range(5):
-        modfix.backup_mod(env.config, "mod-1", env.mod_dir)
-    assert len(modfix.list_backups(env.config, "mod-1")) == modfix.BACKUP_KEEP_PER_MOD
+def test_subdirectory_ini_is_processed(env):
+    sub = env.mod_dir / "sub" / "deep"
+    sub.mkdir()
+    (sub / "x.ini").write_text("ps-t5 = a\n", encoding="utf-8")
+    result = modfix.fix_mod(env.config, "mod-1", env.mod_dir)
+    assert result["ok"] and result["replacements"] == 1
+    assert "ps-t6 = a" in (sub / "x.ini").read_text(encoding="utf-8")
 
 
-def test_rollback_without_backup_is_readable(env):
-    result = modfix.rollback_mod(env.config, "mod-404")
-    assert result["ok"] is False and "备份" in result["message"]
+def test_encoding_and_newline_preserved(env):
+    ini = env.mod_dir / "gbk.ini"
+    raw = "# 中文注释\r\nps-t2 = 值\r\n".encode("gbk")
+    ini.write_bytes(raw)
+    modfix.fix_mod(env.config, "mod-1", env.mod_dir)
+    data = ini.read_bytes()
+    text = data.decode("gbk")                       # 仍是 GBK，不是被改写成 UTF-8
+    assert "中文注释" in text and "ps-t3 = 值" in text
+    assert b"\r\n" in data                         # 换行没被统一成 \n
+
+
+# --------------------------------------------------------------- 备份 / 回滚
+def test_fix_writes_sidecar_record_and_rollback_restores(env):
+    ini = env.mod_dir / "mod.ini"
+    ini.write_text("[A]\nps-t3 = a\n", encoding="utf-8")
+    result = modfix.fix_mod(env.config, "mod-1", env.mod_dir)
+    assert result["ok"] and result["changed"] == ["mod.ini"]
+    assert modfix.is_fixed(env.mod_dir)["fixed"] is True
+    assert modfix.list_backups(env.config, "mod-1")
+
+    rolled = modfix.rollback_mod(env.config, "mod-1")
+    assert rolled["ok"], rolled.get("message")
+    assert "ps-t3 = a" in ini.read_text(encoding="utf-8")
+    assert modfix.is_fixed(env.mod_dir)["fixed"] is False
+    assert modfix.list_backups(env.config, "mod-1") == []
+
+
+def test_fix_twice_needs_force(env):
+    ini = env.mod_dir / "mod.ini"
+    ini.write_text("[A]\nps-t3 = a\n", encoding="utf-8")
+    first = modfix.fix_mod(env.config, "mod-1", env.mod_dir)
+    assert first["ok"]
+    second = modfix.fix_mod(env.config, "mod-1", env.mod_dir)
+    assert second["ok"] is False and second["already"] is True
+    assert "ps-t4 = a" in ini.read_text(encoding="utf-8")     # 没被再动
+    forced = modfix.fix_mod(env.config, "mod-1", env.mod_dir, force=True)
+    assert forced["ok"]
+    assert "ps-t5 = a" in ini.read_text(encoding="utf-8")     # 明确要再 +1 才动
+
+
+def test_backup_failure_aborts_without_touching_files(env, monkeypatch):
+    ini = env.mod_dir / "mod.ini"
+    ini.write_text("[A]\nps-t3 = a\n", encoding="utf-8")
+    monkeypatch.setattr(modfix, "backup_mod",
+                        lambda *a, **k: {"ok": False, "message": "磁盘满了"})
+    result = modfix.fix_mod(env.config, "mod-1", env.mod_dir)
+    assert result["ok"] is False and "备份失败" in result["message"]
+    assert "ps-t3 = a" in ini.read_text(encoding="utf-8")
+    assert modfix.is_fixed(env.mod_dir)["fixed"] is False
+
+
+def test_legacy_marker_is_only_reported(env):
+    ini = env.mod_dir / "mod.ini"
+    ini.write_text("[A]\nps-t3 = a\n" + LEGACY_MARK + "\n", encoding="utf-8")
+    result = modfix.fix_mod(env.config, "mod-1", env.mod_dir)
+    assert result["ok"]
+    assert result["legacy_shift_minus_one"] == ["mod.ini"]
 
 
 # --------------------------------------------------------------- 移出库
@@ -91,139 +162,8 @@ def test_delete_moves_to_trash(env):
     assert (Path(result["moved_to"]) / "d3dx.ini").is_file()
 
 
-# --------------------------------------------------------------- 工具调用（打桩）
-class _FakeProc:
-    def __init__(self, work: Path):
-        import io
-
-        self.stdin = io.BytesIO()
-        self._work = work
-        self.fed_enter = False
-
-    def poll(self):
-        return None
-
-    def wait(self, timeout=None):
-        return 0
-
-    def kill(self):
-        pass
-
-
-def test_fix_mod_runs_tool_in_temp_dir_after_backup(env, monkeypatch):
-    seen: dict = {}
-
-    def fake_popen(args, **kwargs):
-        work = Path(kwargs["cwd"])
-        seen["args"] = list(args)
-        seen["cwd"] = work
-        seen["creationflags"] = kwargs.get("creationflags")
-        # 模拟工具：写自己的日志 + 改临时目录里的 ini（并带上标记）
-        (work / modfix.LOG_NAME).write_text(
-            "Endfield PS-T Draw Section Fix -1 v2.1.0\n"
-            "FIXED-V2.1 | replacements=1 | v2-migrations=0 | sections=1 | ps-t0-skipped=0 | d3dx.ini\n",
-            encoding="utf-8")
-        target = next(work.rglob("d3dx.ini"))
-        target.write_text("checktextureoverride = ps-t1\n" + FIX_MARK_LINE + "\n", encoding="utf-8")
-        # 工具还会在临时目录里留备份目录 —— 它必须随临时目录一起消失
-        (work.parent / (modfix.BACKUP_PREFIX + "_20260101_000000")).mkdir(exist_ok=True)
-        return _FakeProc(work)
-
-    monkeypatch.setattr(modfix.subprocess, "Popen", fake_popen)
-    monkeypatch.setattr(modfix, "ensure_tool",
-                        lambda config, log=None: {"ok": True, "path": str(env.tool)})
-
-    result = modfix.fix_mod(env.config, "mod-1", env.mod_dir)
-    assert result["ok"], result.get("message")
-    assert result["changed_count"] == 1
-    assert result["marked"] is True
-    assert result["tool_log"] and "FIXED-V2.1" in result["tool_log"][1]
-
-    # ① 工具跑在临时目录里（不是库目录）
-    assert seen["cwd"] != env.mod_dir and "mc-modfix-" in str(seen["cwd"])
-    # ② 无黑窗
-    assert seen["creationflags"] == getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    # ③ 库里已被更新 + 带了标记
-    assert modfix.is_fixed(env.mod_dir)["fixed"] is True
-    # ④ 改之前先备份了（回滚点）
-    assert modfix.list_backups(env.config, "mod-1")
-    # ⑤ 库目录里没有工具留下的备份/日志残留，临时目录也没了
-    leftovers = [p.name for p in env.mod_dir.iterdir()
-                 if p.name.startswith(modfix.BACKUP_PREFIX) or p.name == modfix.LOG_NAME]
-    assert leftovers == []
-    assert not seen["cwd"].exists()
-
-
-def test_fix_mod_skips_when_already_fixed(env, monkeypatch):
-    (env.mod_dir / "d3dx.ini").write_text("checktextureoverride = ps-t1\n" + FIX_MARK_LINE, encoding="utf-8")
-    monkeypatch.setattr(modfix, "ensure_tool",
-                        lambda config, log=None: {"ok": True, "path": str(env.tool)})
-    called: list = []
-    monkeypatch.setattr(modfix.subprocess, "Popen", lambda *a, **k: called.append(1))
-
-    result = modfix.fix_mod(env.config, "mod-1", env.mod_dir, skip_if_fixed=True)
-    assert result["ok"] and result["skipped"] is True
-    assert called == []                                  # 没再跑工具
-    assert modfix.list_backups(env.config, "mod-1") == []  # 也没白备份
-
-
-def test_fix_mod_aborts_when_backup_fails(env, monkeypatch):
-    monkeypatch.setattr(modfix, "ensure_tool",
-                        lambda config, log=None: {"ok": True, "path": str(env.tool)})
-    monkeypatch.setattr(modfix, "backup_mod",
-                        lambda *a, **k: {"ok": False, "message": "磁盘满了"})
-    called: list = []
-    monkeypatch.setattr(modfix.subprocess, "Popen", lambda *a, **k: called.append(1))
-
-    result = modfix.fix_mod(env.config, "mod-1", env.mod_dir)
-    assert result["ok"] is False and "备份失败" in result["message"]
-    assert called == []                                  # 备份失败就绝不跑工具
-
-
-# --------------------------------------------------------------- 批量
-def test_fix_all_keeps_going_after_one_failure(env, monkeypatch):
-    mods = [SimpleNamespace(id="a", name="A", path=env.mod_dir),
-            SimpleNamespace(id="b", name="B", path=env.tmp / "does-not-exist")]
-
-    def fake_fix(config, mod_id, mod_dir, **kwargs):
-        if mod_id == "a":
-            return {"ok": True, "changed_count": 2, "skipped": False}
-        return {"ok": False, "message": "Mod 目录不存在"}
-
-    monkeypatch.setattr(modfix, "fix_mod", fake_fix)
-    result = modfix.fix_all(env.config, mods, skip_if_fixed=True)
-    assert result["total"] == 2 and result["succeeded"] == 1
-    assert result["changed_total"] == 2
-    assert any(not item["ok"] for item in result["results"])
-
-
-# --------------------------------------------------------------- 工具就位
-def test_ensure_tool_reports_missing_readable(env, monkeypatch):
-    monkeypatch.setattr(modfix, "_tool_candidates", lambda config: [env.tmp / "nope.exe"])
-    result = modfix.ensure_tool(env.config)
-    assert result["ok"] is False and "找不到修复工具" in result["message"]
-
-
-def test_ensure_tool_copies_from_assets_and_verifies_sha(env, monkeypatch):
-    from endfieldmodcontroller import fsutil
-
-    asset_dir = env.tmp / "assets" / "modfix"
-    asset_dir.mkdir(parents=True, exist_ok=True)
-    asset = asset_dir / modfix.TOOL_NAME
-    asset.write_bytes(b"MZ real tool")
-    (asset_dir / modfix.MANIFEST_NAME).write_text(json.dumps({
-        "files": {modfix.TOOL_NAME: {"sha256": fsutil.sha256_file(asset)}},
-    }), encoding="utf-8")
-    monkeypatch.setattr(modfix, "_tool_candidates", lambda config: [asset])
-
-    result = modfix.ensure_tool(env.config)
-    assert result["ok"] and result["changed"] is True
-    assert modfix.tool_path(env.config).is_file()
-
-    # 清单里的 sha256 对不上时必须拒绝
-    (asset_dir / modfix.MANIFEST_NAME).write_text(json.dumps({
-        "files": {modfix.TOOL_NAME: {"sha256": "0" * 64}},
-    }), encoding="utf-8")
-    modfix.tool_path(env.config).unlink()
-    bad = modfix.ensure_tool(env.config)
-    assert bad["ok"] is False and "sha256" in bad["message"]
+# --------------------------------------------------------------- 旧接口必须消失
+def test_old_tool_entrypoints_are_gone():
+    for name in ("fix_all", "ensure_tool", "tool_status", "tool_path", "ensure_tool"):
+        assert not hasattr(modfix, name), f"{name} 应该已经删除"
+    assert not hasattr(modfix, "FIX_MARK") or modfix.LEGACY_FIX_MARK

@@ -37,7 +37,7 @@
       "note": "官方新版可能与 DLSS5 插件不兼容"
     },
     "secondary_motion": {
-      "latest": "3.2.0"
+      "latest": "3.2.1"
     },
     "rabbitfx": {
       "latest": "2.8",
@@ -46,7 +46,7 @@
     "jiggle_efmi": {
       "latest": "0.2.4",
       "repo": "woakato/EndfieldJiggle-EFMI",
-      "note": "触摸形变 Mod（EFMI Mod 包，不装游戏目录）；默认开启，上游自述游戏内验证有限"
+      "note": "触摸形变 Mod：装进 Mod 库（辅助 Mod 页勾选），一键启动自动铺进 EFMI\\Mods；上游自述游戏内验证有限"
     }
   }
 }

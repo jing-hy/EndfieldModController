@@ -3235,6 +3235,21 @@ def launch(
             _append_log(config, f"missing dependency install failed: {exc}")
 
     if not dry_run:
+        # ★ 触摸形变 Mod（EndfieldJiggle）**在一键启动这条路上真正生效的关键**（2026-10-19）：
+        #   它已经改成 Mod 库里的一个普通辅助 Mod，所以必须在 stage **之前**把它放进库
+        #   （没有就自动装；旧版直接铺在 Mods 顶层的会被收进库）—— 之后 stage_and_prepare
+        #   按 `selected_mods` 一并铺进 `Mods`。
+        #   以前只有 `initialize.ensure_all` 那条路（"检查/修复完整性"按钮）会部署它，
+        #   而 `launcher.launch` 根本不调 initialize ⇒ 用户反馈"一键启动不行、得手动移进 Mods"。
+        try:
+            from . import efmi_jiggle
+
+            touch = efmi_jiggle.ensure_in_library(
+                config, log=lambda message: _append_log(config, message))
+            if touch.get("changed"):
+                _append_log(config, str(touch.get("message") or ""))
+        except Exception as exc:  # noqa: BLE001 —— 可选 Mod，失败绝不能拦启动
+            _append_log(config, f"WARN EndfieldJiggle 自动安装失败（继续启动）: {exc}")
         set_launch_stage("正在重建 Mod 目录（按当前勾选，可能要复制较大的 Mod）…")
         activation.stage_and_prepare(
             config.library_path,

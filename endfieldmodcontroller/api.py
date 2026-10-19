@@ -1569,39 +1569,9 @@ class EndfieldModControllerApi:
             }
         except Exception:  # noqa: BLE001
             pass
-        # EndfieldJiggle（触摸形变 Mod）也作为依赖项并列显示 —— 与乳摇同构，
-        # 但状态文案不同：它不注入游戏目录，"启用"= 目录在 EFMI\Mods 里。
-        try:
-            from . import efmi_jiggle as jiggle_mod
-            from . import updates as updates_mod
-
-            state = jiggle_mod.status(self.config)
-            local = updates_mod._jiggle_local_version(self.config)   # noqa: SLF001 - 同一口径
-            # ⚠️ 依赖页是**纯文本**渲染（不解析 markdown），所以这里不要用 `**` 之类的标记。
-            if state.get("enabled") and not state.get("verified", True):
-                verify = state.get("verify") or {}
-                names = [str(n) for n in (list(verify.get("corrupt") or [])
-                                          + list(verify.get("missing") or []))]
-                head = "、".join(names[:2]) or "与安装基线不符"
-                status = (f"v{local} 已启用，但文件损坏（{head}）"
-                          "—— 点上方「自动安装/更新」重铺" if local
-                          else f"已启用，但文件损坏（{head}）—— 点上方「自动安装/更新」重铺")
-            elif state.get("enabled"):
-                status = f"v{local} 已启用" if local else "已启用"
-            elif state.get("present"):
-                status = "已安装未启用（启动页开关关着）"
-            else:
-                status = "未安装（点上方「自动安装/更新」会从官方仓库拉取，约 120 KB）"
-            report["manifest"]["jiggle_efmi"] = {
-                "display": "EndfieldJiggle（触摸形变 Mod）",
-                "status": status,
-                "present": bool(state.get("present")),
-                "required": False,
-                "source": f"GitHub {jiggle_mod.REPO}（GPL-3.0-only）",
-                "install_dir": state.get("mod_dir") or "",
-            }
-        except Exception:  # noqa: BLE001
-            pass
+        # ⚠️ 2026-10-19：EndfieldJiggle（触摸形变 Mod）**不再作为依赖页组件列出** ——
+        # 用户要求「触摸 mod 移出自带、自动识别进辅助 mod」：它现在装在 Mod 库里，
+        # 在「辅助 Mod」页用普通勾选开关；更新入口在它卡片的「⋯ → 更新到最新版」。
         # 「本管理器」也作为一项依赖并列显示，而且**排在最上面**（用户要求）
         try:
             manifest = {"endfieldmodcontroller": self._app_dependency_entry()}
@@ -1794,8 +1764,7 @@ class EndfieldModControllerApi:
             #   Poser 的 Web UI 现状改由专门接口 `poser_status()` 按需取。
             "poser_status": poser.status(self.config, include_web=False),
             # Mod 修复工具是否就位（库页用它提示"找不到工具"的原因）
-            "modfix_status": self.modfix_status(),
-            # 未读的公告（info/warning）：前端首屏就绪后弹一次，**不锁启动**。
+                # 未读的公告（info/warning）：前端首屏就绪后弹一次，**不锁启动**。
             # 异常状态预警（critical）不在这里 —— 见 prelaunch_alerts()。
             "announcements": list(self._announcements),
             # 关键文件被反复删掉（疑似杀毒软件）→ 前端弹窗建议加白名单（用户 2026-10-01 要求）。
@@ -2085,6 +2054,16 @@ class EndfieldModControllerApi:
         # 也避免"一键启动关了皮肤、再点一次生成控制器又把它装回去"。
         if active_ids is None:
             active_ids = list(self.config.effective_selected_mods)
+        # ★ 触摸形变 Mod（EndfieldJiggle）：它现在是库里的普通辅助 Mod，**"生成控制器"
+        #   这条路上也要保证它在库**（否则用户点这个按钮而不是一键启动时会漏掉它）。
+        #   已有则零动作；没有就自动装（本地载荷零网络）。
+        try:
+            from . import efmi_jiggle
+
+            efmi_jiggle.ensure_in_library(
+                self.config, log=lambda message: launcher._append_log(self.config, message))
+        except Exception as exc:  # noqa: BLE001 —— 可选 Mod，绝不拦生成控制器
+            launcher._append_log(self.config, f"WARN EndfieldJiggle 自动安装失败（忽略）: {exc}")
         if not getattr(self.config, "efmi_injection", True):
             launcher._append_log(
                 self.config, "皮肤 Mod 已关闭：本次生成控制器不放入任何皮肤（Mods 会清空）"
@@ -2587,40 +2566,9 @@ class EndfieldModControllerApi:
                                                            message=latest_p or current_p or "?"))
                     except Exception as exc:  # noqa: BLE001
                         results.append(SimpleNamespace(key="poser", status="跳过", message=str(exc)))
-                    # EndfieldJiggle（触摸形变 Mod）：它只是一个 EFMI Mod 包（约 120 KB），
-                    # 复用上面那次 check_updates 的结果，不重复联网；游戏目录侧零动作。
-                    try:
-                        from . import efmi_jiggle as jiggle_mod
-
-                        jj = ureport.get("jiggle_efmi") or {}
-                        current_j = str(jj.get("current") or "")
-                        latest_j = str(jj.get("latest") or "")
-                        need_install_j = not current_j
-                        need_update_j = bool(current_j and latest_j and jj.get("update_available"))
-                        if need_install_j or need_update_j:
-                            if dry_run:
-                                results.append(SimpleNamespace(
-                                    key="jiggle_efmi",
-                                    status="待安装" if need_install_j else "可更新",
-                                    message=(f"未安装 → {latest_j}" if need_install_j
-                                             else f"{current_j} → {latest_j}")))
-                            elif not getattr(self.config, "jiggle_efmi_injection", False):
-                                # 与 Poser 同一条规矩：开关关着就跳过，不偷偷装回去。
-                                results.append(SimpleNamespace(key="jiggle_efmi", status="跳过",
-                                                               message="启动页已关闭该组件"))
-                            else:
-                                outcome = jiggle_mod.install(self.config)
-                                results.append(SimpleNamespace(
-                                    key="jiggle_efmi",
-                                    status=(("已安装" if need_install_j else "已更新")
-                                            if outcome.get("ok") else "失败"),
-                                    message=str(outcome.get("message")
-                                                or outcome.get("version") or "")))
-                        else:
-                            results.append(SimpleNamespace(key="jiggle_efmi", status="已是最新",
-                                                           message=latest_j or current_j or "?"))
-                    except Exception as exc:  # noqa: BLE001
-                        results.append(SimpleNamespace(key="jiggle_efmi", status="跳过", message=str(exc)))
+                    # ⚠️ 2026-10-19：EndfieldJiggle（触摸形变 Mod）已从依赖/组件清单移出 ——
+                    # 它是 Mod 库里的普通辅助 Mod，更新入口在它卡片的「⋯ → 更新到最新版」
+                    #（`api.jiggle_update`），不再参与「一键更新全部组件」。
                 except Exception as exc:  # noqa: BLE001
                     from types import SimpleNamespace as _NS
 
@@ -2758,7 +2706,9 @@ class EndfieldModControllerApi:
             # 一键启动前的"有新版本"提示**（表里写了也白写）。
             # ⚠️ 加了新组件必须同步加进来（RabbitFX 2026-10-18 接入），否则它在
             # 一键启动前**永远不参与"有新版本"提示**（表里写了也白写）。
-            for key in ("reshade", "secondary_motion", "jiggle_efmi", "rabbitfx"):
+            # ⚠️ 2026-10-19：jiggle_efmi 从这里移出 —— 它已不是依赖/组件（改走 Mod 库），
+            # 留着会让一键启动弹「有新版本，去下载页更新」，而下载页已经没有它的条目。
+            for key in ("reshade", "secondary_motion", "rabbitfx"):
                 row = versions.get(key) or {}
                 installed[key] = str(row.get("version") or "")
         except Exception as exc:         # noqa: BLE001
@@ -3199,25 +3149,43 @@ class EndfieldModControllerApi:
 
         return efmi_jiggle.status(self.config)
 
-    def jiggle_efmi_install(self) -> dict[str, Any]:
-        """装/修：本地载荷已在位就一个字节都不下，直接铺进 Mods（同 Poser 的语义）。"""
+    def jiggle_update(self) -> dict[str, Any]:
+        """把 EndfieldJiggle 更新到上游最新版（装进 Mod 库）。
+
+        入口：辅助 Mod 卡片「⋯ → 更新到最新版」。先比一遍上游最新版本与本地版本，
+        已经是最新就**一个字节都不下**；要更新时才走 `install_to_library(force=True)`。
+        """
         from . import efmi_jiggle
 
-        launcher._append_log(self.config, "安装/修复 EndfieldJiggle requested from UI")
-        result = efmi_jiggle.install(
-            self.config, log=lambda message: launcher._append_log(self.config, message)
-        )
-        return self._persist_injection_switch("jiggle_efmi_injection", True, result)
+        launcher._append_log(self.config, "更新 EndfieldJiggle requested from UI")
+        current = efmi_jiggle.installed_version(self.config)
+        try:
+            from . import github
 
-    def jiggle_efmi_uninstall(self) -> dict[str, Any]:
-        from . import efmi_jiggle
+            release = github.releases_latest(efmi_jiggle.REPO)
+            picked = efmi_jiggle.pick_asset(release)
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "message": f"查上游 Release 失败: {exc}"}
+        if picked is None:
+            return {"ok": False,
+                    "message": f"上游 {efmi_jiggle.REPO} 的 Release 里没有可用的纯 Mod 包"}
+        latest, _asset = picked
+        try:
+            from .version import parse_version
 
-        launcher._append_log(self.config, "移出 EndfieldJiggle requested from UI")
-        result = efmi_jiggle.set_enabled(
-            self.config, False,
+            up_to_date = bool(current) and parse_version(latest) <= parse_version(current)
+        except Exception:  # noqa: BLE001
+            up_to_date = False
+        if up_to_date:
+            return {"ok": True, "changed": False, "version": current,
+                    "message": f"EndfieldJiggle 已是最新（v{current}）"}
+        result = efmi_jiggle.install_to_library(
+            self.config, force=True,
             log=lambda message: launcher._append_log(self.config, message),
         )
-        return self._persist_injection_switch("jiggle_efmi_injection", False, result)
+        result.setdefault("latest", latest)
+        self._invalidate_mods()
+        return result
 
     def open_jiggle_efmi_upstream(self) -> dict[str, Any]:
         """设置页入口：打开上游仓库（安装说明 / 兼容范围 / 诊断提示词都在那边）。"""
@@ -3318,15 +3286,10 @@ class EndfieldModControllerApi:
 
     # ------------------------------------------------------------------
     # Mod 修复 / 回滚 / 移出库（**实验性**）
-    #   工具来源：B站 up 主「可可HXL」《终末地Mod修复工具包》v1.5
-    #   （`Endfield_PS-T_DrawSection_Fix_v2.1.exe`，随包分发，见 modfix.py 顶部说明）
+    #   2026-10-19：修复规则改成纯文本 —— 把该 Mod 的 `ps-tN`（N<21）整体 +1
+    #   （见 modfix.py 顶部说明）。不再有随包 exe，所以也不再需要 `modfix_status`。
     #   约定：一律"先整份备份再动手"，并提供一键回滚；删除只是移出库（进回收区）。
     # ------------------------------------------------------------------
-    def modfix_status(self) -> dict[str, Any]:
-        from . import modfix
-
-        return {"tool": modfix.tool_status(self.config)}
-
     def sbm_data_status(self) -> dict[str, Any]:
         """乳摇（SBM）角色参数现状：本地几个角色、来源是谁、上次检查补了什么。
 
@@ -3338,7 +3301,11 @@ class EndfieldModControllerApi:
         return sbm_data_sync.status(self.config)
 
     def mod_more_info(self, mod_id: str) -> dict[str, Any]:
-        """「更多」菜单要显示的信息：修过没、能不能回滚、修复工具在不在。"""
+        """「更多」菜单要显示的信息：修过没、能不能回滚。
+
+        ⚠️ 2026-10-19：修复改成**纯文本规则**（ps-tN 且 N<21 整体 +1），不再需要
+        随包 exe，所以这里不再返回 `tool` 字段。
+        """
         from . import modfix
 
         mod = next((m for m in self._mods() if m.id == mod_id), None)
@@ -3349,21 +3316,27 @@ class EndfieldModControllerApi:
         return {
             "ok": True, "id": mod_id, "name": mod.name,
             "fixed": state["fixed"], "fixed_files": state["files"],
+            "fixed_record": state["record"] or {},
             "can_rollback": bool(backups), "backup_count": len(backups),
             "last_backup": str(backups[0].get("at_text") or "") if backups else "",
-            "tool": modfix.tool_status(self.config),
+            "rule": modfix.RULE_ID, "rule_version": modfix.RULE_VERSION,
         }
 
-    def fix_mod(self, mod_id: str) -> dict[str, Any]:
-        """修复一个 Mod：临时目录里跑工具（先整份备份，可回滚）。"""
+    def fix_mod(self, mod_id: str, force: bool = False) -> dict[str, Any]:
+        """修复一个 Mod：把所有 `ps-tN`（N<21）整体 +1（先整份备份，可回滚）。
+
+        用户 2026-10-19 要求：这是一条"邪修"规则，不一定有用、可能改坏 ⇒ 界面必须先
+        弹窗讲清楚；同一个 Mod 已经 +1 过时默认**不再动它**（`already=True`），
+        要再修一次必须显式传 `force=True`（前端会二次确认，因为再点会变成 +2）。
+        """
         from . import modfix
 
         mod = next((m for m in self._mods() if m.id == mod_id), None)
         if mod is None:
             return {"ok": False, "message": "找不到这个 Mod"}
-        launcher._append_log(self.config, f"修复 Mod（实验性）: {mod.name}")
+        launcher._append_log(self.config, f"修复 Mod（ps-t+1，实验性）: {mod.name}")
         result = modfix.fix_mod(
-            self.config, mod.id, mod.path,
+            self.config, mod.id, mod.path, force=bool(force),
             log=lambda message: launcher._append_log(self.config, message),
         )
         self._invalidate_mods()
@@ -3394,6 +3367,17 @@ class EndfieldModControllerApi:
             log=lambda message: launcher._append_log(self.config, message),
         )
         if result.get("ok"):
+            # 用户主动把触摸 Mod 移出库 ⇒ 记住"不要自动装回来"（否则下次一键启动又装一份，
+            # 用户的意愿会被自动补齐覆盖掉）。
+            try:
+                from . import core
+
+                if core.is_touch_mod(mod.path, (mod.group or "", mod.name or "")):
+                    from . import efmi_jiggle
+
+                    efmi_jiggle.mark_optout(self.config, "用户移出 Mod 库")
+            except Exception:  # noqa: BLE001
+                pass
             try:
                 selected = list(self.config.selected_mods or [])
                 if mod_id in selected:
@@ -3485,6 +3469,16 @@ class EndfieldModControllerApi:
             return {"ok": False, "message": f"删除失败: {exc}"}
 
         self._invalidate_mods()
+        # 用户彻底删除触摸 Mod ⇒ 同样记住"不要自动装回来"。
+        try:
+            from . import core
+
+            if core.is_touch_mod(mod.path, (mod.group or "", mod.name or "")):
+                from . import efmi_jiggle
+
+                efmi_jiggle.mark_optout(self.config, "用户彻底删除")
+        except Exception:  # noqa: BLE001
+            pass
         launcher._append_log(self.config, f"彻底删除 Mod: {mod.name} → {top}")
         return {"ok": True, "name": mod.name, "removed": str(top), "unselected": unselected,
                 "message": f"已彻底删除「{mod.name}」"}
@@ -3614,59 +3608,6 @@ class EndfieldModControllerApi:
         self._invalidate_mods()
         launcher._append_log(self.config, f"换了预览图: {mod.name} → {dest.name}")
         return {"ok": True, "id": mod_id, "cover": dest.name, "path": str(dest)}
-
-    def fix_all_mods(self, only_unfixed: bool = True) -> dict[str, Any]:
-        """一键修复所有：**后台线程**逐个修（每个都走同一套隔离流程），可轮询进度。
-
-        同步跑会让 pywebview 的界面卡住（29 个 Mod × 复制+跑工具），所以放后台，
-        前端用 `fix_all_progress()` 轮询。
-        """
-        from . import modfix
-
-        mods = [m for m in self._mods() if not m.is_dependency and m.kind in {"character", "unknown"}]
-        task = getattr(self, "_modfix_task", None)
-        if task is None:
-            task = {"running": False, "current": 0, "total": 0, "name": "",
-                    "results": [], "message": "", "ok": None}
-            self._modfix_task = task
-        if task.get("running"):
-            return {"ok": True, "already": True, "message": "已经在修了", **task}
-        if not mods:
-            return {"ok": True, "started": False, "total": 0, "message": "库里没有可修复的 Mod"}
-
-        task.update({"running": True, "current": 0, "total": len(mods), "name": "",
-                     "results": [], "message": "开始修复…", "ok": None})
-        launcher._append_log(self.config, f"一键修复所有 Mod（实验性）: {len(mods)} 个")
-
-        def worker() -> None:
-            def progress(index: int, total: int, name: str) -> None:
-                task.update({"current": index, "total": total, "name": name})
-
-            try:
-                result = modfix.fix_all(
-                    self.config, mods,
-                    log=lambda message: launcher._append_log(self.config, message),
-                    progress=progress, skip_if_fixed=only_unfixed,
-                )
-                task["results"] = result.get("results") or []
-                task["message"] = str(result.get("message") or "")
-                task["ok"] = bool(result.get("ok"))
-            except Exception as exc:  # noqa: BLE001
-                task["message"] = f"失败: {exc}"
-                task["ok"] = False
-            finally:
-                task["running"] = False
-                task["current"] = task.get("total", 0)
-                self._invalidate_mods()
-
-        threading.Thread(target=worker, name="emc-modfix", daemon=True).start()
-        return {"ok": True, "started": True, "total": len(mods),
-                "message": f"已开始修复 {len(mods)} 个 Mod（后台进行，可继续用界面）"}
-
-    def fix_all_progress(self) -> dict[str, Any]:
-        """一键修复的进度（前端轮询）。"""
-        task = getattr(self, "_modfix_task", None) or {}
-        return dict(task)
 
     # ------------------------------------------------------------------
     # 初始化自检（一键启动时自动跑，也可手动触发）

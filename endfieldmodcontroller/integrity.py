@@ -208,30 +208,9 @@ def check_integrity(config: AppConfig) -> dict:
             add("hotkey_panel", Path(status["addon"]), True,
                 "统一 Mod 控制面板 —— 当前注入方式用不上面板，已保持 Mod 自带快捷键不被锁")
 
-    # EndfieldJiggle（触摸形变 Mod）：**只在这个开关打开时才算检项**（默认关，与上面同规矩），
-    # 而且 **`critical=False`** —— 它只是个可选 Mod，内容不对也**不该拦死启动**；但
-    # 「完整性检查」这个按钮必须**看得见**它（用户 2026-10-13：「下载后的文件损坏检测按钮
-    # 和启动检查不出来」）：这里查的不只是"文件在不在"，还有**内容对不对**（sha256 基线）。
-    if getattr(config, "jiggle_efmi_injection", False):
-        try:
-            from . import efmi_jiggle
-
-            state = efmi_jiggle.status(config)
-            jiggle_dir = Path(str(state.get("mod_dir") or "<unset>"))
-            if not state.get("enabled"):
-                add("jiggle_efmi", jiggle_dir, False,
-                    "EndfieldJiggle 未铺进 EFMI\\Mods（启动页开关开着）—— "
-                    "依赖页点「自动安装/更新」可补齐", critical=False)
-            elif state.get("verified", True):
-                add("jiggle_efmi", jiggle_dir, True, "EndfieldJiggle（触摸形变 Mod）",
-                    critical=False)
-            else:
-                add("jiggle_efmi", jiggle_dir, False,
-                    "EndfieldJiggle 文件不完整或已损坏（与安装时记下的 sha256 不符）—— "
-                    "依赖页点「自动安装/更新」重新铺一遍", critical=False)
-        except Exception as exc:  # noqa: BLE001
-            add("jiggle_efmi", Path("<error>"), False,
-                f"EndfieldJiggle 检查失败: {exc}", critical=False)
+    # ⚠️ 2026-10-19：EndfieldJiggle（触摸形变 Mod）**不再是运行完整性组件** ——
+    # 它已经迁到 Mod 库（辅助 Mod 页勾选），内容损坏由 `efmi_jiggle.ensure_in_library`
+    # 在启动前自愈、并在卡片状态里显示；再放在这里会让"用户主动不要它"的机器永远报一项。
 
     critical_failures = [check for check in checks if check.critical and not check.ok]
     # 「要联网下载才能补齐」的那些项（缺内置组件 / 缺有公开上游的 DLSS5 组件）——

@@ -415,6 +415,10 @@ class ModInfo:
             "source_page": self.source_page,
             "cover": str(self.cover_path) if self.cover_path else "",
             "source_root": str(self.source_root) if self.source_root else "",
+            # 触摸形变 Mod（EndfieldJiggle）：辅助页的「⋯ → 更新到最新版」靠它显示。
+            # ⚠️ 只对 kind=assist 判，避免给每个服装 Mod 都做一次目录探测。
+            "is_touch": (is_touch_mod(self.path, (self.group or "", self.name or ""))
+                         if self.kind == "assist" else False),
             "description": guess_mod_description(self.name, self.path),
         }
         if include_actions:
@@ -867,6 +871,14 @@ def infer_kind_and_group(
         lowered = " ".join(rel_parts).lower() + " " + str(meta.get("name", "")).lower()
         if is_dependency_package(lowered, path):
             kind = "dependency"
+        elif is_touch_mod(path, rel_parts):
+            # EndfieldJiggle（触摸形变 Mod，2026-10-19 从"自带组件"迁进 Mod 库）：
+            # 它不换装、只改行为 ⇒ 归「辅助 Mod」，页内子类落「其它辅助」。
+            # ⚠️ 必须排在下面 `looks_like_assist` 之前：那个判据是"没有换装资源 +
+            #   名字里有辅助关键词 / ini 是 skip 型"，而触摸 Mod 的名字和 ini 都不带那些特征
+            #   ⇒ 会一路掉到 `kind = "character"`，被要求确认角色归属、还会锁它的键。
+            kind = "assist"
+            group = ASSIST_GROUP_OTHER
         elif any(k in lowered for k in ("tool", "tools", "utility")):
             kind = "tool"
         # ⚠️ 「加载页 / 壁纸」要排在 looks_like_assist **之前**判断：
@@ -966,6 +978,38 @@ WALLPAPER_GROUP = "加载页与壁纸"
 ASSIST_GROUP_HIDE = "界面功能类"
 ASSIST_GROUP_TOOL = "工具画质类"
 ASSIST_GROUP_OTHER = "其它辅助"
+
+# ── 触摸形变 Mod（EndfieldJiggle）──────────────────────────────────────────────
+# 用户 2026-10-19 要求：「触摸 mod 移出自带，加入自动识别进辅助 mod」——
+# 它不再是启动页开关 / 依赖页组件，而是**库里的一个普通辅助 Mod**：
+# 控制器自动装进 Mod 库、一键启动按普通 Mod 流程铺进 EFMI\Mods，开关就是页面上那个。
+#
+# 识别判据（两条，任一条命中即可）：
+#   ① 目录/相对路径名里有 `jiggle` 或 `触摸`（上游包名 `EndfieldJiggleEFMI`）；
+#   ② 目录里有 `EndfieldJiggle.ini`（用户把它改名后仍然认得出）。
+# ⚠️ 只能在"名字没命中"时做一次廉价的一层探测，**不许 rglob 全目录** ——
+#    `scan_library` 对每个 Mod 都会调到这里，深递归会拖慢整个库的扫描。
+TOUCH_MOD_HINTS = ("jiggle", "触摸")
+TOUCH_INI_NAME = "EndfieldJiggle.ini"
+
+
+def is_touch_mod(path: Path | None, rel_parts: Sequence[str] = ()) -> bool:
+    """是不是 EndfieldJiggle（触摸形变 Mod）。"""
+    lowered = "/".join(str(part) for part in rel_parts).lower()
+    if any(hint in lowered for hint in TOUCH_MOD_HINTS):
+        return True
+    if path is None:
+        return False
+    root = Path(path)
+    try:
+        if not root.is_dir():
+            return False
+        if (root / TOUCH_INI_NAME).is_file():
+            return True
+        # 只探一层子目录（上游包解开后可能是 <包名>/EndfieldJiggleEFMI/…）
+        return any(child.is_file() for child in root.glob(f"*/{TOUCH_INI_NAME}"))
+    except OSError:
+        return False
 # ⚠️ **只替换贴图、不换模型**的那一类（2026-10-03 用户要求）：
 # 典型代表是「弭弗饮料罐」——它把饮料罐贴图换成真实品牌，有 Textures 但**没有 Meshes**。
 # 这类以前会被 `looks_like_assist` 的"没有换装资源"一条挡掉（它确实有 .dds）
@@ -1048,6 +1092,11 @@ def looks_like_ui_mod(path: Path | None, rel_parts: Sequence[str] = (), meta: di
     """
     if path is None:
         return False
+    # 触摸形变 Mod 自己处理输入（Ctrl+Shift+F7/F8/F9、鼠标按住拖动）⇒ 与"自带 UI 的
+    # Mod"同一待遇：**不锁它的键**、也**不把它的 Key* 塞进 ReShade 面板**
+    # （用户 2026-10-19：迁移到 Mod 库后，它必须和以前一样能直接按自己的键）。
+    if is_touch_mod(path, rel_parts):
+        return True
     try:
         text = ""
         for ini in sorted(path.rglob("*.ini"))[:12]:

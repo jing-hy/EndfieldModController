@@ -1,19 +1,21 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""EndfieldJiggle（触摸形变 Mod）接入回归（2026-10-13）。
+"""EndfieldJiggle（触摸形变 Mod）迁进 Mod 库的回归（2026-10-19 用户要求）。
 
-钉住四件事 —— 每一条都对应这套接入**踩过或差点踩到**的坑：
+用户原话：「触摸 mod 移出自带，加入自动识别进辅助 mod」——
+起因是反馈「触摸现在一键启动不行，需要手动移动进 mods 文件夹才行」。
+旧实现只在初始化自检那条路部署它，而 `launcher.launch` 根本不跑 initialize。
 
-① **「关」必须把目录真的移出 `EFMI\\Mods`**：EFMI 的 `d3dx.ini` 是
-   `include_recursive = Mods`（按递归扫 ini 加载），改名 / 挪进子目录**都挡不住加载**，
-   所以"界面关了、游戏里还在"就是这么来的。
-② **三份 staging 白名单必须认识它**（`activation.CONTROLLER_OWNED_NAMES` /
-   `initialize.MOD_CONFLICT_IGNORE_NAMES` / `crashwatch._CONTROLLER_DIRS`）：少了任何一处，
-   它要么被 `import_manual_mods` 当"用户手工放的 Mod"**收编进库再从 staging 搬走**
-   （`api.prepare_launch` 点一次「生成控制器」就触发，**不受** `auto_adopt_manual_mods`
-   开关保护），要么每次自检报一条"手动 Mod"红项。
-③ **安装包解析不能按固定层级取**：上游纯 Mod 包是三段套法
-   （`.../Mods/EndfieldJiggleEFMI/`），而拖放包 / 独立包的层级又不同。
-④ **只挑纯 Mod 包**：同一个 Release 里还有 72 MB 拖放包与 149 MB 独立包。
+现在它是一条**库里的普通辅助 Mod**：
+  * 自动装进 Mod 库（首次一键启动 / 生成控制器 / 自检都会补），默认勾选；
+  * 之后走 `stage_and_prepare`，一键启动自动铺进 `EFMI\\Mods\\MC_其它辅助_…`；
+  * 开关 = 辅助 Mod 页上那个勾选；旧版直接铺在 Mods 顶层的目录会被自动收进库。
+
+钉住这些判据：
+① 识别（kind/group、不锁键、不进 ReShade 面板）；
+② 装进库 + 写 sidecar + 默认勾选；已有则不动；用户移出后不再自动装回；
+③ 旧 Mods 目录迁移（先复制成功再删来源）；失败节流；
+④ 内容级校验（"文件在、内容不对"也查得出）；
+⑤ 不再有启动页开关 / 依赖页条目 / 完整性检项。
 """
 from __future__ import annotations
 
@@ -24,7 +26,7 @@ import zipfile
 from pathlib import Path
 from unittest import mock
 
-from endfieldmodcontroller import activation, alerts, crashwatch, efmi_jiggle, initialize
+from endfieldmodcontroller import activation, core, efmi_jiggle, initialize, integrity
 from endfieldmodcontroller import api as api_mod
 
 MOD_FILES = {
@@ -48,7 +50,15 @@ def make_pack(path: Path, *, version: str = "0.2.2", layout: str = "", name: str
     return path
 
 
-class JiggleEfmiTests(unittest.TestCase):
+def write_mod_dir(target: Path) -> None:
+    target.mkdir(parents=True, exist_ok=True)
+    for rel, text in MOD_FILES.items():
+        path = target / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+
+class JiggleLibraryTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory(prefix="mc-jiggle-test-")
         root = Path(self._tmp.name)
@@ -60,26 +70,26 @@ class JiggleEfmiTests(unittest.TestCase):
                        encoding="utf-8")
         self.api = api_mod.EndfieldModControllerApi(str(cfg))
         self.config = self.api.config
+        self.library = Path(self.config.library_path)
         self.staging = Path(self.config.staging_mods_path)
-        self.target = efmi_jiggle.mod_dir(self.config)
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
 
+    def _payload(self) -> dict:
+        return efmi_jiggle.import_pack(self.config, make_pack(Path(self._tmp.name)))
+
     # ---------------------------------------------------------------- 安装包
     def test_import_pack_finds_the_nested_mod_dir(self):
-        """三段套法的 zip 也要能识别（`.../Mods/EndfieldJiggleEFMI/`）。"""
-        archive = make_pack(Path(self._tmp.name))
-        result = efmi_jiggle.import_pack(self.config, archive)
+        """三段套法的 zip 也要能识别（.../Mods/EndfieldJiggleEFMI/）。"""
+        result = self._payload()
         self.assertTrue(result["ok"], result)
         self.assertTrue(efmi_jiggle.payload_ready(self.config))
         self.assertEqual(efmi_jiggle.installed_version(self.config), "0.2.2")
         self.assertTrue((efmi_jiggle.payload_dir(self.config) / "EndfieldJiggle.ini").is_file())
-        # 上游原文也要留一份（离线重装 / 回滚要用）
         self.assertTrue(list((efmi_jiggle.component_root(self.config) / "_pack").glob("*.zip")))
 
     def test_import_pack_rejects_source_like_zip(self):
-        """没有 `EndfieldJiggle.ini` 的包（例如 GitHub 自动生成的源码归档）要明确拒绝。"""
         archive = Path(self._tmp.name) / "source.zip"
         with zipfile.ZipFile(archive, "w") as bundle:
             bundle.writestr("repo-main/README.md", "no mod here\n")
@@ -87,8 +97,16 @@ class JiggleEfmiTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("EndfieldJiggle.ini", result["message"])
 
+    def test_import_pack_rejects_a_crc_broken_zip(self):
+        archive = make_pack(Path(self._tmp.name))
+        raw = bytearray(archive.read_bytes())
+        raw[-60:-20] = b"\x00" * 40
+        archive.write_bytes(bytes(raw))
+        result = efmi_jiggle.import_pack(self.config, archive)
+        self.assertFalse(result["ok"])
+        self.assertIn("损坏", result["message"])
+
     def test_pick_asset_only_takes_the_mod_pack(self):
-        """同一 Release 里的 drop-in（72 MB）与 standalone（149 MB）都不许被选中。"""
         release = {"assets": [
             {"name": "EndfieldJiggleEFMI-v0.2.2-drop-in-win64.zip", "browser_download_url": "drop"},
             {"name": "EndfieldJiggleEFMI-v0.2.2-standalone-win64.zip", "browser_download_url": "stand"},
@@ -103,233 +121,211 @@ class JiggleEfmiTests(unittest.TestCase):
         self.assertEqual(version, "0.2.2")
         self.assertEqual(asset["browser_download_url"], "mod")
 
-    # ---------------------------------------------------------------- 开关 / 装卸
-    def test_toggle_really_moves_the_dir_out_of_mods(self):
-        """⭐ 核心：关闭 = 目录**真的离开** Mods（`include_recursive` 照加载，改名挡不住）。"""
-        efmi_jiggle.import_pack(self.config, make_pack(Path(self._tmp.name)))
-
-        on = efmi_jiggle.set_enabled(self.config, True)
-        self.assertTrue(on["ok"] and on["changed"], on)
-        self.assertTrue((self.target / "EndfieldJiggle.ini").is_file())
-        self.assertTrue(efmi_jiggle.status(self.config)["enabled"])
-
-        off = efmi_jiggle.set_enabled(self.config, False)
-        self.assertTrue(off["ok"] and off["changed"], off)
-        self.assertFalse(self.target.is_dir(),
-                         "关闭后 Mods 里不许还留着它 —— EFMI 是 include_recursive，改名也会加载")
-        self.assertFalse(list(self.staging.glob("EndfieldJiggleEFMI*")),
-                         "连改名副本也不许留在 Mods 里（同样会被递归加载）")
-        self.assertTrue(efmi_jiggle.park_dir(self.config).is_dir())
-        self.assertFalse(efmi_jiggle.status(self.config)["enabled"])
-
-        # 幂等 + 再打开能回来（停用副本是**移动**，不是复制）
-        self.assertFalse(efmi_jiggle.set_enabled(self.config, False)["changed"])
-        again = efmi_jiggle.set_enabled(self.config, True)
-        self.assertTrue(again["ok"], again)
-        self.assertTrue((self.target / "EndfieldJiggle.ini").is_file())
-        self.assertFalse(efmi_jiggle.park_dir(self.config).is_dir())
-        self.assertFalse((efmi_jiggle.component_root(self.config) / "_parked").exists())
-
-    def test_install_reports_network_failure_without_deploying(self):
-        """本地没载荷时会去上游取；取不到要给**可读原因**，并且不许把目录铺出来。"""
-        with mock.patch("endfieldmodcontroller.github.releases_latest",
-                                 side_effect=RuntimeError("断网")):
-            result = efmi_jiggle.install(self.config)
-        self.assertFalse(result["ok"])
-        self.assertIn("断网", result["message"])
-        self.assertFalse(self.target.is_dir())
+    # ---------------------------------------------------------------- 装进库
+    def test_install_to_library_places_mod_and_selects_it(self):
+        self._payload()
+        result = efmi_jiggle.install_to_library(self.config)
+        self.assertTrue(result["ok"], result)
+        target = efmi_jiggle.library_dir(self.config)
+        self.assertTrue((target / "EndfieldJiggle.ini").is_file())
+        meta = json.loads((target / "mod.meta.json").read_text(encoding="utf-8"))
+        self.assertEqual(meta["kind"], "assist")
+        self.assertEqual(meta["group"], "其它辅助")
+        self.assertEqual(meta["jiggle_version"], "0.2.2")
+        self.assertIn(meta["id"], self.config.selected_mods, "装进来要默认启用")
+        state = efmi_jiggle.status(self.config)
+        self.assertTrue(state["in_library"])
+        self.assertFalse(state["in_mods"])
+        self.assertEqual(state["version"], "0.2.2")
 
     def test_install_uses_local_payload_without_any_network(self):
-        """⭐ 本地已在位 ⇒ **一个网络请求都不发**（CONTRIBUTING：别在流程里偷偷联网）。"""
-        efmi_jiggle.import_pack(self.config, make_pack(Path(self._tmp.name)))
+        self._payload()
         with mock.patch("endfieldmodcontroller.github.releases_latest",
-                                 side_effect=AssertionError("本地已就位时不该联网")):
-            result = efmi_jiggle.install(self.config)
+                        side_effect=AssertionError("本地载荷在位时不该联网")):
+            result = efmi_jiggle.install_to_library(self.config)
         self.assertTrue(result["ok"], result)
-        self.assertTrue((self.target / "EndfieldJiggle.ini").is_file())
 
-    def test_deploy_reports_when_payload_missing(self):
-        result = efmi_jiggle.deploy(self.config)
+    def test_install_reports_network_failure_without_writing_library(self):
+        with mock.patch("endfieldmodcontroller.offline_deps.resolve_offline", return_value=None), \
+                mock.patch("endfieldmodcontroller.github.releases_latest",
+                           side_effect=RuntimeError("断网")):
+            result = efmi_jiggle.install_to_library(self.config)
         self.assertFalse(result["ok"])
-        self.assertFalse(result["actions"])
+        self.assertIn("断网", result["message"])
+        self.assertFalse(efmi_jiggle.library_dir(self.config).exists())
 
-    # ---------------------------------------------------------------- 三份白名单
-    def test_staging_whitelists_know_the_component(self):
-        self.assertIn("EndfieldJiggleEFMI", activation.CONTROLLER_OWNED_NAMES)
-        self.assertIn("EndfieldJiggleEFMI", crashwatch._CONTROLLER_DIRS)          # noqa: SLF001
-        self.assertIn("EndfieldJiggleEFMI", initialize.MOD_CONFLICT_IGNORE_NAMES)
+    def test_ensure_is_noop_when_already_in_library(self):
+        self._payload()
+        efmi_jiggle.install_to_library(self.config)
+        with mock.patch("endfieldmodcontroller.github.releases_latest",
+                        side_effect=AssertionError("已在库里时不该联网")):
+            result = efmi_jiggle.ensure_in_library(self.config)
+        self.assertTrue(result["ok"], result)
+        self.assertFalse(result["changed"])
+        self.assertTrue(result["in_library"])
 
-    def test_find_manual_mods_skips_it_but_not_user_mods(self):
-        """它不能被认成"用户手工放的 Mod"（否则会被收编、勾选、再搬出 staging）。"""
-        self.target.mkdir(parents=True, exist_ok=True)
-        (self.target / "EndfieldJiggle.ini").write_text("namespace = x\n", encoding="utf-8")
-        (self.staging / "某人手放的皮肤").mkdir(parents=True, exist_ok=True)
-        manual = [p.name for p in activation.find_manual_mods(self.staging)]
-        self.assertNotIn("EndfieldJiggleEFMI", manual)
-        self.assertIn("某人手放的皮肤", manual)
+    def test_ensure_adopts_legacy_mods_dir(self):
+        """旧版直接铺在 EFMI\\Mods 顶层的那份要**收进库**，然后在库里生效。"""
+        legacy = efmi_jiggle.staging_legacy_dir(self.config)
+        write_mod_dir(legacy)
+        with mock.patch("endfieldmodcontroller.github.releases_latest",
+                        side_effect=AssertionError("迁移不该联网")):
+            result = efmi_jiggle.ensure_in_library(self.config)
+        self.assertTrue(result["ok"], result)
+        self.assertTrue(result.get("adopted"))
+        target = efmi_jiggle.library_dir(self.config)
+        self.assertTrue((target / "EndfieldJiggle.ini").is_file())
+        self.assertFalse(legacy.exists(), "收进库之后要把 Mods 里那份移走（两份同 namespace 会打架）")
+        self.assertIn(json.loads((target / "mod.meta.json").read_text(encoding="utf-8"))["id"],
+                      self.config.selected_mods)
 
-    def test_safe_mode_field_is_registered(self):
-        """安全模式「还原配置」必须能关掉它（漏了它 = 以为退回原版其实还挂着一个 Mod）。"""
-        self.assertIn("jiggle_efmi_injection", alerts.INJECTION_FIELDS)
+    def test_ensure_respects_user_optout(self):
+        efmi_jiggle.mark_optout(self.config, "用户移出 Mod 库")
+        with mock.patch("endfieldmodcontroller.github.releases_latest",
+                        side_effect=AssertionError("用户已经移出，不该自动装回")):
+            result = efmi_jiggle.ensure_in_library(self.config)
+        self.assertTrue(result["ok"])
+        self.assertTrue(result.get("skipped"))
+        self.assertFalse(efmi_jiggle.library_dir(self.config).exists())
 
-    # ---------------------------------------------------------------- 启动自检
-    def test_selfcheck_parks_when_switch_off(self):
-        self.target.mkdir(parents=True, exist_ok=True)
-        (self.target / "EndfieldJiggle.ini").write_text("namespace = x\n", encoding="utf-8")
-        self.config.jiggle_efmi_injection = False
-        report = initialize.Report()
-        initialize._check_jiggle_efmi(self.config, report, None)                  # noqa: SLF001
-        self.assertFalse(self.target.is_dir(), "开关关着时自检要把已经铺进去的移出来")
+    def test_ensure_throttles_after_a_failed_attempt(self):
+        with mock.patch("endfieldmodcontroller.offline_deps.resolve_offline", return_value=None), \
+                mock.patch("endfieldmodcontroller.github.releases_latest",
+                           side_effect=RuntimeError("断网")):
+            first = efmi_jiggle.ensure_in_library(self.config)
+        self.assertFalse(first["ok"])
+        with mock.patch("endfieldmodcontroller.github.releases_latest",
+                        side_effect=AssertionError("6 小时内不该再重试")):
+            second = efmi_jiggle.ensure_in_library(self.config)
+        self.assertTrue(second["ok"])
+        self.assertEqual(second.get("reason"), "retry-throttle")
 
-    def test_selfcheck_deploys_when_switch_on(self):
-        efmi_jiggle.import_pack(self.config, make_pack(Path(self._tmp.name)))
-        self.config.jiggle_efmi_injection = True
-        report = initialize.Report()
-        initialize._check_jiggle_efmi(self.config, report, None)                  # noqa: SLF001
-        payload = report.to_dict()
-        self.assertTrue((self.target / "EndfieldJiggle.ini").is_file())
-        row = [c for c in payload["checks"] if c["key"] == "jiggle_efmi"]
-        self.assertTrue(row and row[0]["ok"], payload["checks"])
-
-    def test_selfcheck_reports_missing_pack_as_manual(self):
-        self.config.jiggle_efmi_injection = True
-        report = initialize.Report()
-        initialize._check_jiggle_efmi(self.config, report, None)                  # noqa: SLF001
-        payload = report.to_dict()
-        row = [c for c in payload["checks"] if c["key"] == "jiggle_efmi"][0]
-        self.assertFalse(row["ok"])
-        self.assertFalse(self.target.is_dir())
-
-    # ---------------------------------------------------------------- 接口 / 前端
-    def test_api_entrypoints_exist(self):
-        for name in ("jiggle_efmi_status", "jiggle_efmi_install", "jiggle_efmi_uninstall",
-                     "open_jiggle_efmi_upstream"):
-            self.assertTrue(callable(getattr(self.api, name, None)), name)
-        state = self.api.jiggle_efmi_status()
-        self.assertIn("enabled", state)
-        self.assertIn("staging_root", state)
-
-    def test_launch_page_has_the_switch(self):
-        """启动页开关要真的绑到装卸接口上（前端漏改 = 界面上没有这个开关）。"""
-        vue = (Path(__file__).resolve().parents[1] / "frontend" / "src" / "pages"
-               / "LaunchPage.vue").read_text(encoding="utf-8")
-        self.assertIn('k: "jiggle_efmi_injection"', vue)
-        self.assertIn('"jiggle_efmi_install"', vue)
-        self.assertIn('"jiggle_efmi_uninstall"', vue)
-        # 依赖页是泛型渲染，条目由后端 manifest 提供 —— 这里钉住后端那一处
-        api_py = (Path(api_mod.__file__)).read_text(encoding="utf-8")
-        self.assertIn('report["manifest"]["jiggle_efmi"]', api_py)
-        # 版本表与更新流程也各要有一处（漏了 = 依赖页永远说"已是最新"）
-        self.assertIn("jiggle_efmi", (Path(initialize.__file__).parent
-                                      / "component_versions.json").read_text(encoding="utf-8"))
-
-
-class JiggleEfmiDamageTests(unittest.TestCase):
-    """「文件在、内容不对」必须查得出来（用户 2026-10-13 反馈的缺口）。
-
-    用户原话：「下载后的文件损坏**检测按钮和启动检查都查不出来**」——
-    老逻辑只判 `is_file()`，所以半截下载、安全软件破坏、复制中断留下的
-    "大小看着正常、内容不对"的文件，界面一路显示"完整"。
-    这里钉住四层防线：装的时候记基线、平时能比对、启动自检能自愈、完整性检查能看到。
-    """
-
-    def setUp(self) -> None:
-        self._tmp = tempfile.TemporaryDirectory(prefix="mc-jiggle-dmg-")
-        root = Path(self._tmp.name)
-        (root / "runtime").mkdir(parents=True, exist_ok=True)
-        (root / "library").mkdir(parents=True, exist_ok=True)
-        cfg = root / "config.json"
-        cfg.write_text(json.dumps({"data_root": "", "runtime_dir": "runtime",
-                                   "library_dir": "library"}, ensure_ascii=False),
-                       encoding="utf-8")
-        self.api = api_mod.EndfieldModControllerApi(str(cfg))
-        self.config = self.api.config
-        self.target = efmi_jiggle.mod_dir(self.config)
-
-    def tearDown(self) -> None:
-        self._tmp.cleanup()
-
-    def _install(self) -> None:
-        efmi_jiggle.import_pack(self.config, make_pack(Path(self._tmp.name)))
-        efmi_jiggle.deploy(self.config)
-
+    # ---------------------------------------------------------------- 内容校验
     def test_verify_catches_a_corrupted_file(self):
-        """装完之后改坏一个文件 ⇒ 内容级校验必须报出来（而不是显示"完整"）。"""
-        self._install()
+        self._payload()
+        efmi_jiggle.install_to_library(self.config)
         self.assertTrue(efmi_jiggle.verify(self.config)["ok"])
-        (self.target / "Passes.ini").write_text("corrupted\n", encoding="utf-8")
+        (efmi_jiggle.library_dir(self.config) / "Passes.ini").write_text("corrupted\n",
+                                                                        encoding="utf-8")
         state = efmi_jiggle.status(self.config)
         self.assertFalse(state["verified"])
         self.assertIn("Passes.ini", state["corrupt"])
-        self.assertFalse(efmi_jiggle.verify(self.config)["ok"])
 
     def test_verify_catches_a_dropped_file(self):
-        self._install()
-        (self.target / "shaders" / "motion_model.hlsl").unlink()
+        self._payload()
+        efmi_jiggle.install_to_library(self.config)
+        (efmi_jiggle.library_dir(self.config) / "shaders" / "motion_model.hlsl").unlink()
         verify = efmi_jiggle.verify(self.config)
         self.assertFalse(verify["ok"])
         self.assertIn("shaders/motion_model.hlsl", verify["missing"])
 
     def test_verify_without_baseline_never_false_alarms(self):
-        """没记过基线（手工放进去的目录）不许被当成损坏 —— 读不到基线 ≠ 坏。"""
-        for rel, text in MOD_FILES.items():
-            path = self.target / rel
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(text, encoding="utf-8")
+        """没记过基线（用户手工放进去的目录）不许被当成损坏 —— 读不到基线 ≠ 坏。"""
+        write_mod_dir(efmi_jiggle.library_dir(self.config))
         verify = efmi_jiggle.verify(self.config)
         self.assertTrue(verify["ok"])
         self.assertFalse(verify["known"])
 
-    def test_import_pack_rejects_a_crc_broken_zip(self):
-        """半截/损坏的 zip 当场拒绝，而不是铺一堆坏文件进 Mods。"""
-        archive = make_pack(Path(self._tmp.name))
-        raw = bytearray(archive.read_bytes())
-        raw[-60:-20] = b"\x00" * 40
-        archive.write_bytes(bytes(raw))
-        result = efmi_jiggle.import_pack(self.config, archive)
-        self.assertFalse(result["ok"])
-        self.assertIn("损坏", result["message"])
-
-    def test_deploy_does_not_trust_a_damaged_dir(self):
-        """Mods 里那份内容不符基线时，`deploy` 不许说"已就位"（否则自愈是空转）。"""
-        self._install()
-        (self.target / "EndfieldJiggle.ini").write_text("broken\n", encoding="utf-8")
-        result = efmi_jiggle.deploy(self.config)
-        self.assertTrue(result["changed"], result)
+    def test_ensure_repairs_a_damaged_library_copy(self):
+        self._payload()
+        efmi_jiggle.install_to_library(self.config)
+        (efmi_jiggle.library_dir(self.config) / "Passes.ini").write_text("broken\n",
+                                                                        encoding="utf-8")
+        result = efmi_jiggle.ensure_in_library(self.config)
+        self.assertTrue(result["ok"], result)
+        self.assertTrue(result.get("damaged"))
         self.assertTrue(efmi_jiggle.verify(self.config)["ok"])
 
-    def test_selfcheck_repairs_damage_from_local_pack(self):
-        """启动自检要能自己修：本地留着原始包 ⇒ 重解重铺，**不联网**。"""
-        self._install()
-        (self.target / "Passes.ini").write_text("broken\n", encoding="utf-8")
-        self.config.jiggle_efmi_injection = True
+    # ---------------------------------------------------------------- 识别
+    def test_core_recognizes_touch_mod(self):
+        target = efmi_jiggle.library_dir(self.config)
+        write_mod_dir(target)
+        self.assertTrue(core.is_touch_mod(target, (target.name,)))
+        kind, group = core.infer_kind_and_group((target.name,), {}, target)
+        self.assertEqual(kind, "assist")
+        self.assertEqual(group, core.ASSIST_GROUP_OTHER)
+        # 它自己处理输入 ⇒ 不锁键、也不把 Key* 塞进 ReShade 面板
+        self.assertTrue(core.looks_like_ui_mod(target, ("其它辅助", "EndfieldJiggle（触摸形变）"), {}))
+        mods = core.scan_library(self.library, self.staging)
+        touch = [m for m in mods if m.kind == "assist"]
+        self.assertTrue(touch, "库里那份必须被识别成辅助 Mod")
+        self.assertTrue(touch[0].to_dict()["is_touch"])
+
+    def test_old_dir_name_is_still_controller_owned(self):
+        """旧版铺在 Mods 顶层的那份不能被当成"用户手放的 Mod"收编/搬走。"""
+        self.assertIn("EndfieldJiggleEFMI", activation.CONTROLLER_OWNED_NAMES)
+        self.assertIn("EndfieldJiggleEFMI", initialize.MOD_CONFLICT_IGNORE_NAMES)
+
+    # ---------------------------------------------------------------- 自检 / 完整性
+    def test_selfcheck_installs_into_library(self):
+        self._payload()
         report = initialize.Report()
         initialize._check_jiggle_efmi(self.config, report, None)                  # noqa: SLF001
+        self.assertTrue((efmi_jiggle.library_dir(self.config) / "EndfieldJiggle.ini").is_file())
+        row = [c for c in report.to_dict()["checks"] if c["key"] == "jiggle_efmi"]
+        self.assertTrue(row and row[0]["ok"], report.to_dict()["checks"])
+
+    def test_selfcheck_without_pack_is_not_a_blocker(self):
+        with mock.patch("endfieldmodcontroller.offline_deps.resolve_offline", return_value=None), \
+                mock.patch("endfieldmodcontroller.github.releases_latest",
+                           side_effect=RuntimeError("断网")):
+            report = initialize.Report()
+            initialize._check_jiggle_efmi(self.config, report, None)              # noqa: SLF001
         row = [c for c in report.to_dict()["checks"] if c["key"] == "jiggle_efmi"][0]
-        self.assertTrue(row["ok"], row)
-        self.assertTrue(efmi_jiggle.verify(self.config)["ok"])
+        self.assertTrue(row["ok"], "可选 Mod 没装上不该拦启动")
 
-    def test_integrity_button_surfaces_the_damage(self):
-        """「完整性检查」按钮必须看得见它，而且**不许**因此拦死启动（critical=False）。"""
-        from endfieldmodcontroller import integrity
-
-        self._install()
-        (self.target / "Passes.ini").write_text("broken\n", encoding="utf-8")
-        self.config.jiggle_efmi_injection = True
-        report = integrity.check_integrity(self.config)
-        rows = [c for c in report["checks"] if c["key"] == "jiggle_efmi"]
-        self.assertTrue(rows, "完整性检查里必须有这一项")
-        self.assertFalse(rows[0]["ok"])
-        self.assertFalse(rows[0]["critical"], "可选 Mod 损坏不该拦死启动")
-        self.assertNotIn("jiggle_efmi", [item["key"] for item in report["failures"]])
-
-    def test_switch_off_is_not_reported_by_integrity(self):
-        """开关关着（默认）⇒ 完整性检查里**不该**出现这一项（不打扰）。"""
-        from endfieldmodcontroller import integrity
-
-        self.config.jiggle_efmi_injection = False
+    def test_integrity_no_longer_checks_it(self):
         report = integrity.check_integrity(self.config)
         self.assertFalse([c for c in report["checks"] if c["key"] == "jiggle_efmi"])
+
+    # ---------------------------------------------------------------- 接口 / 前端
+    def test_api_entrypoints(self):
+        self.assertTrue(callable(getattr(self.api, "jiggle_update", None)))
+        self.assertTrue(callable(getattr(self.api, "jiggle_efmi_status", None)))
+        self.assertFalse(hasattr(self.api, "jiggle_efmi_install"))
+        self.assertFalse(hasattr(self.api, "jiggle_efmi_uninstall"))
+        state = self.api.jiggle_efmi_status()
+        self.assertIn("in_library", state)
+
+    def test_launch_page_has_no_switch(self):
+        """启动页不许再有这个组件的单独开关（用户：用和其他 Mod 一样的就行）。"""
+        vue = (Path(__file__).resolve().parents[1] / "frontend" / "src" / "pages"
+               / "LaunchPage.vue").read_text(encoding="utf-8")
+        self.assertNotIn("jiggle_efmi", vue)
+
+    def test_deps_page_has_no_entry(self):
+        source = Path(api_mod.__file__).read_text(encoding="utf-8")
+        self.assertNotIn('report["manifest"]["jiggle_efmi"]', source)
+        self.assertNotIn("jiggle_efmi_injection", source)
+
+    def test_pending_component_updates_excludes_it(self):
+        """它已经不是组件 ⇒ 启动前那张"有新版本，去下载页更新"的清单里不该出现。"""
+        result = self.api.pending_component_updates()
+        self.assertNotIn("jiggle_efmi", result.get("installed") or {})
+
+    def test_launcher_install_before_stage(self):
+        """一键启动必须在 stage **之前**保证它在库里（否则还是会"必须手动移进 Mods"）。"""
+        import inspect
+
+        from endfieldmodcontroller import launcher
+
+        source = inspect.getsource(launcher.launch)
+        self.assertIn("ensure_in_library", source)
+        stage_call = source.index("activation.stage_and_prepare(")
+        self.assertLess(source.index("ensure_in_library"), stage_call)
+
+
+class JigglePackageParseTests(unittest.TestCase):
+    """（保留）上游包层级/CRC 的两个老判据 —— 它们是"铺一堆坏文件"的最后一道闸。"""
+
+    def test_three_level_layout(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive = make_pack(root, layout="EndfieldJiggleEFMI-v0.9.9/Mods/EndfieldJiggleEFMI")
+            with zipfile.ZipFile(archive) as bundle:
+                names = bundle.namelist()
+            self.assertTrue(any(name.endswith("EndfieldJiggleEFMI/EndfieldJiggle.ini")
+                                for name in names))
 
 
 if __name__ == "__main__":

@@ -161,11 +161,6 @@ const SWITCHES = [
       }
       return call("set_poser_enabled", v);
     } },
-  { k: "jiggle_efmi_injection", name: "EndfieldJiggle", desc: "触摸形变（按住 Shift + 左键拖动角色，松手回弹）",
-    // 它**不是注入型插件**：只是一个 EFMI Mod 包，所以开关 = 铺进 / 移出 EFMI 的 Mods。
-    // 开启走 `jiggle_efmi_install`（本地没有安装包才联网，约 120 KB），
-    // 关闭走 `jiggle_efmi_uninstall`（把目录**真的**移出 Mods —— EFMI 递归加载，改名挡不住）。
-    apply: (v) => call(v ? "jiggle_efmi_install" : "jiggle_efmi_uninstall") },
 ];
 
 // 切换一个开关：有专用接口的走专用接口（它们还要动文件/注入库），其余只写配置。

@@ -450,13 +450,10 @@ class AppConfig:
     # EndfieldJiggle（触摸形变 Mod）组件目录：默认 <主路径>/runtime/jiggle_efmi，
     # 里面放上游安装包原文（_pack）、本地载荷（_payload）、停用副本（_parked）与 version.txt。
     jiggle_efmi_dir: str = ""
-    # 启动前把这个 EFMI Mod 铺进 EFMI 的 Mods（关掉 = 把目录**移出** Mods，游戏内不再加载）。
-    # ★ **默认开**（2026-10-13 用户定：「EndfieldJiggle 也默认开」）—— 与乳摇 / Poser 一致：
-    #   首次一键启动会从上游拉约 120 KB 的**纯 Mod 包**并铺进 `Mods`。
-    #   ⚠️ 它的"能不能生效"由上游抓的游戏 shader 决定（`Passes.ini` 是 12 组 ShaderRegex），
-    #   上游自述游戏内视觉 / 同进程热重载 / 全干员覆盖尚未全部验证 ⇒ 自检与依赖页只**如实报
-    #   事实**（版本、在不在、内容有没有坏），不承诺"装了就一定有效果"。
-    jiggle_efmi_injection: bool = True
+    # ⚠️ 2026-10-19：`jiggle_efmi_injection` 字段已删除 —— EndfieldJiggle（触摸形变 Mod）
+    # 用户要求「移出自带、自动识别进辅助 mod」，现在它是 **Mod 库里的一条普通辅助 Mod**：
+    # 开关就是辅助 Mod 页上那个勾选，一键启动按普通 Mod 流程 stage。
+    # 旧 config.json 里残留的这个键会被 `load()` 的 known 过滤丢掉，不需要迁移。
 
     theme: str = "light"
     last_tab: str = "library"

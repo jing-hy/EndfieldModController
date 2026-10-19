@@ -239,9 +239,10 @@ def component_versions(config: AppConfig) -> dict[str, Any]:
         "jiggle_efmi": {
             "name": "EndfieldJiggle (触摸形变)",
             "version": _jiggle_local_version(config),
-            # ⚠️ 它**不装游戏目录**，落点是 EFMI 的 Mods 目录 ⇒ "在不在"看的就是那个目录。
+            # ⚠️ 2026-10-19：它已经改成 **Mod 库里的普通辅助 Mod**（不再是"铺进 EFMI\Mods"），
+            # 所以"在不在"= 本地能读到版本号（库里那份的 sidecar / 载荷 version.txt）。
             "path": str(_jiggle_mod_dir(config)),
-            "exists": _jiggle_mod_dir(config).is_dir(),
+            "exists": _jiggle_local_version(config) != "",
             "repository": f"https://github.com/{JIGGLE_REPO}",
             "license": "GPL-3.0-only",
         },
@@ -282,10 +283,13 @@ def _poser_local_version(config: AppConfig) -> str:
 
 
 def _jiggle_mod_dir(config: AppConfig) -> Path:
-    """EndfieldJiggle 的落点目录（EFMI 的 `Mods\\EndfieldJiggleEFMI`）。"""
+    """EndfieldJiggle 现在所在的位置（库里那份优先，否则本地载荷目录）。"""
     from . import efmi_jiggle
 
-    return efmi_jiggle.mod_dir(config)
+    try:
+        return efmi_jiggle.current_dir(config)
+    except Exception:  # noqa: BLE001
+        return efmi_jiggle.library_dir(config)
 
 
 def _jiggle_local_version(config: AppConfig) -> str:
@@ -727,8 +731,8 @@ def update_jiggle_efmi(config: AppConfig, url: str = "", log: Callable[[str], No
     from . import efmi_jiggle
 
     if not url:
-        # 不给 URL 就交给组件自己：本地载荷在位不联网，否则查上游拿纯 Mod 包。
-        return efmi_jiggle.install(config, log=log, force=True)
+        # 不给 URL 就交给组件自己：查上游拿纯 Mod 包并**装进 Mod 库**。
+        return efmi_jiggle.install_to_library(config, force=True, log=log)
     # ⚠️ 文件名要保留资产原名：`import_pack` 是从**文件名**解析版本号的，
     #    写死成 `EndfieldJiggleEFMI.zip` 会让版本号永远读不到（"更新完还说有新版"那类事故）。
     name = url.rsplit("/", 1)[-1].split("?")[0] or "EndfieldJiggleEFMI.zip"
@@ -740,10 +744,10 @@ def update_jiggle_efmi(config: AppConfig, url: str = "", log: Callable[[str], No
         return {"ok": False, "message": f"下载失败: {exc}"}
     if not result.get("ok"):
         return result
-    deployed = efmi_jiggle.deploy(config, log=log)
+    deployed = efmi_jiggle.install_to_library(config, force=True, log=log)
     deployed["pack"] = result
     if deployed.get("ok"):
-        deployed.setdefault("note", "安装包已铺进 EFMI\\Mods；进游戏后重启一次再按 Ctrl+Shift+F8 开触摸。")
+        deployed.setdefault("note", "已装进 Mod 库；「辅助 Mod」页勾选它即可，一键启动会自动铺进游戏。")
     return deployed
 
 
