@@ -6553,3 +6553,33 @@ modecontroller 2026-10-12 起从 MIT 改为 **GPL-3.0-or-later**（另一台电�
 **④ 三处检查**：发布前 `scripts/check_component_versions.py --strict`（`updates.check_updates` 新增 `rabbitfx` 段联网查主文件 + `component_versions.json` 的 external 登记 `rabbitfx.latest`）；启动前 `api.pending_component_updates`（外部键元组已加 `rabbitfx`，本机版本从 ini 首页注释解析）；下载更新 `check_updates`。顺带修 `check_component_updates` 返回分段 dict 导致界面空列表 → 现在同时返回 `components` 列表。
 
 `关键词：["RabbitFX","内置升级","ensure_bundled","GameBanana 选文件","Main File 优先","更新检查三处","component_versions","runtime backups rabbitfx","examples.zip 误装","sha256 历史代"]`
+
+<!-- 增量追加 2026-10-19 21:57 · 新增 3 条（历史条目一律保留）-->
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 【modecontroller · 离线依赖包（deps…
+*2026-10-18 22:17*
+
+【modecontroller · 离线依赖包（deps-bundle.zip）现行状态与规矩】（2026-10-18 22:17 重打）
+**位置**：`dist\deps-bundle.zip` + `.sha256`，并自动复制一份到 `D:\zmdmod\modtest\deps-bundle.zip`（脚本默认 `sync_modtest=True`）。**不进 Release**（只在 QQ 群应急分发）。
+**本次实测**：330.5 MB（346,541,089 B），sha256 `8a52b57ea0a4d46170af90533085f9cee1373c959b34ba536354f9802de7c843`；内容 = XXMI 2.4.9 / XXMI-Libs 1.2.2 / EFMI 1.4.8 / ReShade 6.8.0 / DLSS5-Feeder 1.19.0 / iMMERSE f57d3afa1ebe / Poser 0.5.108 / EndfieldJiggle 0.2.4 / Streamline 2.14.1 + `assets/` 段（含 **EFMI RabbitFX v2.8**，RabbitFX.ini 33,375 B）。
+**规矩**：组件版本一变（或随包 assets 里的 RabbitFX 变）就要重打 `python scripts\build_deps_bundle.py`，否则用户拿到的离线包还是旧组件（本次用户就是这么发现的：「离线包没更新啊」）。脚本每次在**临时目录**重新下载原件，没有复用已有包的能力 ⇒ 一次约 330 MB 下载、3 分钟左右。
+**2026-10-18 顺手更正**：manifest 的 `note` 原写「Poser / Streamline / VC++ 不在包内（许可原因）」与实际矛盾（Poser AGPL-3.0 / Streamline MIT 都允许再分发，包里一直带着）⇒ 现在只写 VC++；包内说明补了「assets 段含 EFMI RabbitFX v2.8」一段。
+
+`关键词：["离线包","deps-bundle.zip","build_deps_bundle","离线依赖包重打","sha256 8a52b57e","modtest 同步","不进 Release","QQ 群分发","assets 段 RabbitFX","VC++ 不在包内"]`
+
+<!-- lesson · 经验教训（被纠正过的、踩过的坑） -->
+### 后端 fix_mod 在「已经 ps-t+1 修过」时返…
+*2026-10-19 21:41*
+
+后端 fix_mod 在「已经 ps-t+1 修过」时返回的是 ok:false + already:true（不是成功）—— 前端必须先判 already 再判 ok===false，否则会被当成修复失败直接弹错，永远到不了 +2 的二次确认。
+
+`关键词：["fix_mod","already","ok:false","二次确认","ps-t+1","修复失败","force","modfix","槽位+1","返回约定"]`
+
+<!-- fact · 事实（细碎的原子信息） -->
+### 修复接口换成「邪修」ps-t+1 后：call('fix…
+*2026-10-19 21:41*
+
+修复接口换成「邪修」ps-t+1 后：call('fix_mod', id) → {ok, already?, changed:[相对路径], replacements, message}，强制再修传第三参 true；call('jiggle_update') 无参给触摸 Mod 重铺最新版；后端删了 fix_all_mods / fix_all_progress / modfix_status；触摸 Mod 的 state 带 is_touch: true。
+
+`关键词：["fix_mod","jiggle_update","is_touch","ps-t+1","fix_all_mods","modfix_status","replacements","接口约定","触摸 Mod","邪修修复"]`
