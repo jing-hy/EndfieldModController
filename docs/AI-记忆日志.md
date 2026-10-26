@@ -6583,3 +6583,58 @@ modecontroller 2026-10-12 起从 MIT 改为 **GPL-3.0-or-later**（另一台电�
 修复接口换成「邪修」ps-t+1 后：call('fix_mod', id) → {ok, already?, changed:[相对路径], replacements, message}，强制再修传第三参 true；call('jiggle_update') 无参给触摸 Mod 重铺最新版；后端删了 fix_all_mods / fix_all_progress / modfix_status；触摸 Mod 的 state 带 is_touch: true。
 
 `关键词：["fix_mod","jiggle_update","is_touch","ps-t+1","fix_all_mods","modfix_status","replacements","接口约定","触摸 Mod","邪修修复"]`
+
+<!-- 增量追加 2026-10-26 21:43 · 新增 6 条（历史条目一律保留）-->
+
+<!-- rules · 设计原则 / 行为准则 -->
+### 【离线包 / 随包资产动了就必须重打包】用户 2026-…
+*2026-10-19 22:00*
+
+【离线包 / 随包资产动了就必须重打包】用户 2026-10-19 原话：「还有离线包动了就要重打包」。判据：只要改动了会进 deps-bundle 的东西（删/换随包 exe、assets/ 目录内容、组件版本、组件清单），就要跑 `python scripts/build_deps_bundle.py` 重打，它会默认把 deps-bundle.zip + .sha256 同步进 modtest；打前顺手跑 `python scripts/check_component_versions.py --strict` 对齐版本表。
+
+`关键词：["离线包","重打包","deps-bundle","build_deps_bundle","随包资产","assets","check_component_versions","modtest","组件版本表","strict"]`
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 2026-10-19 用户把 Mod 修复换成「邪修」新…
+*2026-10-19 22:00*
+
+2026-10-19 用户把 Mod 修复换成「邪修」新规则（原话：「把mod.ini里面的代码中ps-t小于21的，ps-t后面全部+1，例如ps-t01改成ps-t02。去掉一键修复，每个mod只能单独修复，并且点了修复之后要先弹窗说明这是邪修方法，不一定有用，且可能修坏，要先确定已使用最新rabbitfx且依然损坏」）。落地：modfix.fix_mod 对 <21 的 ps-tN 全部 +1（保留前导零宽度）、跳过 d3dx.ini、保留编码/换行、先整份备份、写 sidecar ps_t_fix 做幂等（已修过返回 ok:false+already:true，force 才再 +1）；删掉 fix_all/fix_all_progress/modfix_status；随包 exe 与 assets/modfix 已删除，readme/详细文档/手测清单同步改掉。
+
+`关键词：["ps-t+1","邪修修复","modfix.fix_mod","去掉一键修复","邪修弹窗","RabbitFX 最新","ps_t_fix","already","assets/modfix 删除","修复 exe 移除","ps-t01"]`
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 2026-10-19 用户要求「触摸mod移出自带，加入…
+*2026-10-19 22:00*
+
+2026-10-19 用户要求「触摸mod移出自带，加入自动识别进辅助mod」，理由是「用户反映触摸现在一键启动不行，需要手动移动进mods文件夹才行」；并要求「不要在启动页给他单独开关，就用和其他mod一样的就行」。根因：旧实现只在 initialize 自检那条路部署 EndfieldJiggle，而 launcher.launch 根本不跑 initialize。落地：efmi_jiggle 改为装进 Mod 库（library/EndfieldJiggleEFMI，写 sidecar kind=assist/group=其它辅助、默认勾选）；ensure_in_library 接入 launcher.launch（stage 之前）、api.prepare、initialize 自检；旧版铺在 Mods 顶层的目录自动收进库（先复制成功再移除来源）；用户移出/彻底删除后写 optout 不再自动装回；core.is_touch_mod 识别 + looks_like_ui_mod 认它 ⇒ 不锁键、不进面板；删掉启动页开关/依赖页条目/完整性检项。
+
+`关键词：["EndfieldJiggle","触摸形变","移出自带","辅助 Mod","ensure_in_library","is_touch_mod","optout","一键启动不行","Mod 库","stage 之前","in_library"]`
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### v1.4.7 已发布（2026-10-19，Latest…
+*2026-10-19 22:00*
+
+v1.4.7 已发布（2026-10-19，Latest、非草稿/非预发布）：exe 35,145,570 B（sha256 add1ce3b…）、assets-bundle.zip 261,972,004 B（sha256 2029da38…）；tag v1.4.7，main 到 4c20d3f。离线依赖包已重打：93 个文件 / 330.4 MB（sha256 a91accc3…），含 EndfieldJiggle 0.2.4 纯 Mod 包、不含修复工具，已放 D:\zmdmod\modtest\deps-bundle.zip。component_versions.json 的 secondary_motion 同步到 3.2.1。
+
+`关键词：["v1.4.7","Release","sha256","deps-bundle","离线依赖包","EndfieldJiggle 0.2.4","secondary_motion 3.2.1","modtest","assets-bundle","Latest"]`
+
+<!-- lesson · 经验教训（被纠正过的、踩过的坑） -->
+### 发版时必须先把版本号收成正式号再去构建：prepare_…
+*2026-10-19 22:00*
+
+发版时必须先把版本号收成正式号再去构建：prepare_release.py 有发版闸 —— exe 内嵌版本若还是 `1.4.7-beta` 而这一版要发 `1.4.7`，它会直接拦下（否则用户装上后自更新无限提示）。正确顺序：版本号三处去 beta → commit → build_release.py（重建 exe 并推 main）→ prepare_release.py → gh release create --draft → upload_release_assets.py --tag（DoH+curl 绕反代）→ gh release edit --draft=false --latest。gh 需要先注入用户级 GH_TOKEN。
+
+`关键词：["发版流程","prepare_release","发版闸","beta","build_release","gh release","upload_release_assets","GH_TOKEN","draft","latest","自更新无限提示"]`
+
+<!-- fact · 事实（细碎的原子信息） -->
+### 终末地 Mod 每次游戏更新后通常都要打"修复补丁"（把…
+*2026-10-19 22:00*
+
+终末地 Mod 每次游戏更新后通常都要打"修复补丁"（把 ini 里的资源槽位号适配新版本），社区里有成型的修复工具包。
+**来源（2026-09-30 确认，README 里务必写对）**：**B站 up 主「可可HXL」** 的《终末地Mod修复工具包》，用户本机在 `C:\Users\<user>\Downloads\终末地Mod修复工具包v1.5（内附使用教程）`，**要用的就是 v1.5**：`v1.5修复\Endfield_PS-T_DrawSection_Fix_v2.1.exe`（58 KB）。包内另有历史版本：v1.1/v1.2（打包 exe）、v1.3（热修复 ini，直接丢进 Mods）、v1.4（`CNModFixerV2.py` + Python 安装包）。
+（旧记忆里写的"源自 arca.live 作者 푸나/Puna、B站 MrCreeprBoom 有教程"是**另一条线的来源**，别当成这个工具包的作者；`_tmp\Endfield_mod_fixer.exe`（35 MB）也是**另一个**东西，不是 v1.5。）
+**用法（工具包自带教程的要点）**：把工具和待修的 Mod 放**同一个文件夹** → 双击运行 → 会生成 `_ps_t_draw_fix_backup_*` 与 `PS_T_Draw_Section_Fix_log.txt`，**这两个不能留在 Mods 里** → 修完游戏内按 `F10` 刷新。行为细节/实测结论见"修复工具行为与约束"那条 ops 记忆。
+
+⚠️ 2026-10-19 起这个工具**已从仓库与随包资产中删除**（assets/modfix 整个目录移除），修复改为纯文本规则 ps-t+1（只对 N<21 的 ps-tN 整体 +1），不再调用任何 exe。本条只作历史来源记录；现行规则见 modecontroller 的 decisions 条。
+
+`关键词：["修复工具来源", "B站可可HXL", "终末地Mod修复工具包v1.5", "Endfield_PS-T_DrawSection_Fix_v2.1", "v1.4 CNModFixerV2.py", "v1.3热修复ini", "备份目录不能留Mods", "修完按F10刷新", "_tmp那个是另一个工具", "README要写对来源"]`
