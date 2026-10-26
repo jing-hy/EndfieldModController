@@ -11,9 +11,9 @@ description:
   en: >
       Frontend error reporting (Vue): window error and unhandledrejection are forwarded to the backend log.
       
-revision: 4c20d3f6f853c184a5b5f45604e8a406d2d05d30
-updated_at: "2026-10-26T13:41:19.250Z"
-fingerprint: 0e7871012c31c8dd07f93b75d8ec9f3923a4c1648c4a4bfbad45f027e51b1160
+revision: 0120311d3899178b1012f04bba614b1cec30e883
+updated_at: "2026-10-26T14:34:24.410Z"
+fingerprint: 7fe83653992baa51db09e9ab79d9e325122b81bdf89fad9b5d4c5d47f2b53ce5
 source:
   - path: "frontend/src/App.vue"
     line: 2

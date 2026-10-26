@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "id": "modecontroller.backend.observe",
-  "updated_at": "2026-10-07T14:33:00.874Z",
+  "updated_at": "2026-10-26T14:17:09.958Z",
   "mode": "groups",
   "reading": {
-    "zh": "按一次事故的脉络读：采集事实（证据 / 运行时采样 / 注入现场时间线 / 机器自身的稳定性）→ 判定是不是崩了、崩在哪 → 记住它（或者后来跑通了就把记忆撤掉）→ 把现场打包给人看 → 继续盯守，好让下一次也被抓到。",
-    "en": "Follow one incident: collect the facts (evidence, runtime sampling, injection timeline, the machine's own stability), judge whether it was a crash and why, remember it (or withdraw the memory when a later run succeeds), package the scene for a human, and keep watching so the next one is captured too."
+    "zh": "按一次事故的脉络读：采集事实（证据 / 运行时采样 / 注入现场时间线 / 机器自身的稳定性）→ 判定是不是崩了、崩在哪 → 记住它（或者后来跑通了就把记忆撤掉）→ 把现场打包给人看 → 继续盯守，好让下一次也被抓到。启动时还会顺手看一眼「程序是不是被放在桌面运行」（依赖会全铺在桌面），放在最后这组。",
+    "en": "Follow one incident: collect the facts (evidence, runtime sampling, injection timeline, the machine's own stability), judge whether it was a crash and why, remember it (or withdraw the memory when a later run succeeds), package the scene for a human, and keep watching so the next one is captured too. At startup it also checks whether the program is running from the Desktop (where every generated folder would land), so that lives in the last group."
   },
   "order": [
     "modecontroller.backend.observe.evidence",
@@ -22,7 +22,8 @@
     "modecontroller.backend.observe.diag-bundle",
     "modecontroller.backend.observe.watch",
     "modecontroller.backend.observe.proc-monitor",
-    "modecontroller.backend.observe.file-watch"
+    "modecontroller.backend.observe.file-watch",
+    "modecontroller.backend.observe.desktop-root"
   ],
   "groups": [
     {
@@ -56,7 +57,7 @@
       "id": "output",
       "title": {
         "zh": "打包产出",
-        "en": "Package It Up"
+        "en": "Package"
       },
       "children": [
         "modecontroller.backend.observe.report",
@@ -73,7 +74,8 @@
       "children": [
         "modecontroller.backend.observe.watch",
         "modecontroller.backend.observe.proc-monitor",
-        "modecontroller.backend.observe.file-watch"
+        "modecontroller.backend.observe.file-watch",
+        "modecontroller.backend.observe.desktop-root"
       ]
     }
   ]
