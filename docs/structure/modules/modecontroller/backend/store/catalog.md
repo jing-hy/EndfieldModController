@@ -11,8 +11,8 @@ description:
   en: >
       Anonymous access layer for the GameBanana apiv11 API: listings, search, category tree, details, thumbnails and the full index. Three measured constraints shape it, plus field-versioned caches.
       
-revision: f975cf1217353501f422ba3582c8ac5ca1fe6a13
-updated_at: "2026-10-19T13:51:34.882Z"
+revision: 4c20d3f6f853c184a5b5f45604e8a406d2d05d30
+updated_at: "2026-10-26T13:41:19.224Z"
 fingerprint: e1ddc1c46dde8380a2dc44e90cddcef3ced3019a497fd2e2f74f14f146343b10
 source:
   - path: "endfieldmodcontroller/modstore.py"

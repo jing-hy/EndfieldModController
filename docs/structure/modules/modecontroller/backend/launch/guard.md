@@ -11,8 +11,8 @@ description:
   en: >
       Processes and the heavy safety switches: list running processes, stop the ones locking our files, enter/restore the elevated anti-cheat safe mode and the d3d12 proxy mode, and enforce the single-instance rule for the game.
       
-revision: f975cf1217353501f422ba3582c8ac5ca1fe6a13
-updated_at: "2026-10-19T13:51:34.868Z"
+revision: 4c20d3f6f853c184a5b5f45604e8a406d2d05d30
+updated_at: "2026-10-26T13:41:19.210Z"
 fingerprint: d24ff6d065e2d2ae29d9f3cfa841b9f9b1330967f599ea40c80b130ce5fe0efd
 source:
   - path: "endfieldmodcontroller/launcher.py"
@@ -20,10 +20,10 @@ source:
     end_line: 251
   - path: "endfieldmodcontroller/launcher.py"
     line: 3224
-    end_line: 6003
+    end_line: 6033
   - path: "endfieldmodcontroller/launcher.py"
-    line: 3979
-    end_line: 6402
+    line: 3994
+    end_line: 6432
 apis:
   - protocol: rpc
     path: "launcher._stop_locked_files_processes"

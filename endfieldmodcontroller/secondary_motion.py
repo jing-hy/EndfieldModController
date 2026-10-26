@@ -403,7 +403,7 @@ def ensure_injection(config: AppConfig, log: Callable[[str], None] | None = None
     #
     # 现在补一条：**源里那份与游戏目录里那份内容不同 ⇒ 备份旧的、换上**。
     # 源本身仍是"随包 assets 优先、乳摇工具目录其次"（`_source_candidates`），
-    # 而随包那份就是照上游 3.1.2 取的，所以两条路都通向同一个新版。
+    # 而随包那份就是照上游 3.2.1 取的，所以两条路都通向同一个新版。
     if plugin_source is not None and (
         not plugin_target.is_file() or not _same_file(plugin_source, plugin_target)
     ):
