@@ -23,12 +23,18 @@ XXMI···），把它的 `latest` 与表里的 `latest` 逐项比对：
   * 随包比表旧 → `stale`：不许发版（先换随包资产，或把表退回）；
   * 随包比表新 → `asset_ahead`：表漏更新。
 只有**真的随包分发**的组件参与这一道（`BUNDLED_ASSET_PROBES` 里登记）；
-XXMI / XXMI-Libs / EFMI / Poser / reshade 是联网安装（或由 exe 内嵌），探测不到就跳过，不误报。
+XXMI / XXMI-Libs / EFMI / Poser / reshade 是联网安装（或由 exe 内嵌），不登记就完全不参与。
+
+**探测不到资产要报警，不许静默通过**（用户 2026-10-26：「你改检测，让他会报警就行」）：
+`*.dll` 不进 git，新克隆的仓库本来就没有 sbm.dll —— 那时"查不了"本身就是要人知道的事，
+记成 `missing` 并中止构建；确实只想研究源码、手上没有资产包的机器可以显式加
+`--allow-missing-assets` 放过（状态记成 `absent`，仍会打印出来）。
 
 用法：
     python scripts\\check_component_versions.py            # 只检查，永远 return 0
     python scripts\\check_component_versions.py --strict    # 有差异时 return 1（发版流程用）
     python scripts\\check_component_versions.py --skip      # 明确跳过（离线构建）
+    python scripts\\check_component_versions.py --allow-missing-assets   # 本机没有随包二进制时放过
 """
 from __future__ import annotations
 
@@ -94,45 +100,77 @@ def _cmp_common(left: str, right: str) -> int:
     return (a > b) - (a < b)
 
 
-def _bundled_version(key: str) -> str:
-    """仓库里随包资产自己的版本号；没有随包那份（联网安装的组件）返回空串。"""
+def _probe_bundled(key: str) -> tuple[str, str]:
+    """读随包资产自己的版本号；返回 `(版本, 读不到的原因)`。
+
+    第二个值是**报警用的**（用户 2026-10-26：「你改检测，让他会报警就行」）：
+    文件不在 / 读不出时要把原因如实交还给调用方，而不是当成"这不归我管"静默跳过。
+    典型场景：`*.dll` 不进 git，新克隆的仓库里没有 sbm.dll —— 那时必须出声，
+    否则「表对、货没换」这种事故在别的机器上永远发现不了。
+    """
     probe = BUNDLED_ASSET_PROBES.get(str(key))
     if not probe:
-        return ""
+        return ("", "")
     parts, how = probe
+    rel = "/".join(parts)
     path = ROOT.joinpath(*parts)
     try:
         if not path.is_file():
-            return ""
+            return ("", f"仓库里没有 {rel}（随包二进制不进 git：从 assets-bundle.zip 解开，或按上游重放一次）")
         if how == "pe":
-            return str(updates.file_version(path) or "").strip()
+            version = str(updates.file_version(path) or "").strip()
+            return (version, "" if version else f"{rel} 读不出 PE 版本资源")
         data = json.loads(path.read_text(encoding="utf-8"))
-        return str((data or {}).get("mod_version") or "").strip()
-    except (OSError, ValueError, json.JSONDecodeError):
-        return ""
+        version = str((data or {}).get("mod_version") or "").strip()
+        return (version, "" if version else f"{rel} 里没有 mod_version")
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        return ("", f"{rel} 读不动（{exc}）")
 
 
-def collect_assets(table: dict[str, Any]) -> list[dict[str, Any]]:
-    """逐项比对「表里的 latest」与「随包资产自己的版本号」。"""
+def _bundled_version(key: str) -> str:
+    """仓库里随包资产自己的版本号；没有随包那份（联网安装的组件）返回空串。"""
+    return _probe_bundled(key)[0]
+
+
+def collect_assets(table: dict[str, Any], *, allow_missing: bool = False) -> list[dict[str, Any]]:
+    """逐项比对「表里的 latest」与「随包资产自己的版本号」。
+
+    ★ 探测不到资产**不再静默跳过**（用户 2026-10-26：「你改检测，让他会报警就行」）：
+    记成 missing 并参与报警 —— `*.dll` 不进 git，新克隆的仓库本来就没有它，
+    这时"查不了"本身就是一条要人知道的事；只有显式 --allow-missing-assets 才放过。
+    """
     rows: list[dict[str, Any]] = []
     for section in ("builtin", "external"):
         for key, info in (table.get(section) or {}).items():
             if not isinstance(info, dict):
                 continue
-            bundled = _bundled_version(key)
-            if not bundled:
-                continue  # 不随包分发 ⇒ 这一道不适用
+            probe = BUNDLED_ASSET_PROBES.get(str(key))
+            if not probe:
+                continue  # 不随包分发（联网安装）⇒ 这一道不适用
+            bundled, why = _probe_bundled(key)
+            display = str(info.get("display") or key)
             table_version = str(info.get("latest") or "").strip()
+            if not bundled:
+                rows.append({
+                    "section": section,
+                    "key": key,
+                    "display": display,
+                    "table": table_version,
+                    "bundled": "",
+                    "status": "absent" if allow_missing else "missing",
+                    "source": "/".join(probe[0]),
+                    "reason": why,
+                })
+                continue
             if not table_version:
                 status = "unknown"
             else:
                 diff = _cmp_common(table_version, bundled)
                 status = "stale" if diff > 0 else ("asset_ahead" if diff < 0 else "ok")
-            probe = BUNDLED_ASSET_PROBES.get(str(key)) or ((), "")
             rows.append({
                 "section": section,
                 "key": key,
-                "display": str(info.get("display") or key),
+                "display": display,
                 "table": table_version,
                 "bundled": bundled,
                 "status": status,
@@ -141,7 +179,7 @@ def collect_assets(table: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
-def collect() -> dict[str, Any]:
+def collect(*, allow_missing_assets: bool = False) -> dict[str, Any]:
     table = component_versions.load()
     if not table:
         return {"ok": True, "skipped": "没有 component_versions.json（旧版本/未随包）", "rows": []}
@@ -170,9 +208,9 @@ def collect() -> dict[str, Any]:
                 "status": status,
                 "reason": reason,
             })
-    asset_rows = collect_assets(table)
+    asset_rows = collect_assets(table, allow_missing=allow_missing_assets)
     problems = [row for row in rows if row["status"] in ("outdated", "ahead")]
-    asset_problems = [row for row in asset_rows if row["status"] in ("stale", "asset_ahead")]
+    asset_problems = [row for row in asset_rows if row["status"] in ("stale", "asset_ahead", "missing")]
     errors = [str(item) for item in (report.get("errors") or [])]
     return {
         "ok": not problems and not asset_problems,
@@ -190,13 +228,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--strict", action="store_true", help="有差异时返回非零（发版流程用）")
     parser.add_argument("--json", action="store_true", help="输出 JSON")
     parser.add_argument("--skip", action="store_true", help="跳过检查（离线构建）")
+    parser.add_argument("--allow-missing-assets", action="store_true",
+                        help="本机没有随包二进制时不算问题（默认会报警）")
     args = parser.parse_args(argv)
 
     if args.skip:
         print("[组件版本表] 已按 --skip 跳过检查")
         return 0
 
-    data = collect()
+    data = collect(allow_missing_assets=args.allow_missing_assets)
     if args.json:
         print(json.dumps(data, ensure_ascii=False, indent=2))
         return 0 if (data.get("ok") or not args.strict) else 1
@@ -219,7 +259,8 @@ def main(argv: list[str] | None = None) -> int:
         print("")
         print("[组件版本表] 表里的版本 vs 随包资产自己的版本：")
         asset_marks = {"ok": "✓", "stale": "⚠ 随包还是旧版", "asset_ahead": "⚠ 表漏更新",
-                       "unknown": "？ 表里没版本"}
+                       "unknown": "？ 表里没版本", "missing": "⚠ 随包资产缺失",
+                       "absent": "？ 不在本机（已放过）"}
         for row in asset_rows:
             print(f"  {asset_marks.get(row['status'], row['status']):<16} {row['display']:<12} "
                   f"表={row['table'] or '(空)':<10} 随包={row['bundled']}")
@@ -235,9 +276,11 @@ def main(argv: list[str] | None = None) -> int:
     asset_problems = data.get("asset_problems") or []
     if asset_problems:
         print("")
-        print(f"⚠ 有 {len(asset_problems)} 项「表与随包资产不一致」—— 先决定改哪一边再发版：")
+        print(f"⚠ 有 {len(asset_problems)} 项「表与随包资产核对不上」—— 先处理再发版：")
         for row in asset_problems:
-            if row["status"] == "stale":
+            if row["status"] == "missing":
+                print(f'    {row["display"]}：查不了随包资产 —— {row["reason"]}')
+            elif row["status"] == "stale":
                 print(f'    {row["display"]}：表写 {row["table"]}，随包只带了 {row["bundled"]}'
                       f'（{row["source"]}）⇒ 把随包资产换成 {row["table"]}，'
                       f'或把表退回 {row["bundled"]}')
@@ -246,7 +289,7 @@ def main(argv: list[str] | None = None) -> int:
                       f'（{row["source"]}）⇒ 把表改成 {row["bundled"]}')
     if not problems and not asset_problems:
         print("")
-        print("✓ 表里所有组件都是上游最新；随包资产与表一致（或有查不到的项，见上）")
+        print("✓ 表里所有组件都是上游最新；随包资产都在本机且与表一致（或有查不到的项，见上）")
     for message in data.get("errors") or []:
         print(f"  （联网提示：{message}）")
 

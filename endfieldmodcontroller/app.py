@@ -372,6 +372,25 @@ def _cleanup_stale_mei_dirs(bases: list[str] | None = None, *,
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    # ① 桌面启动 ⇒ 自动搬到 D 盘（回退 C 盘）、建桌面快捷方式、在那里重启（用户 2026-10-26 要求）。
+    #    数据根就是 exe 所在目录，放桌面等于把 config.json / runtime / assets 全铺在桌面。
+    #    必须赶在**抢单实例锁、建窗口之前**——搬成功了本进程就直接收工，桌面那份不再运行。
+    try:
+        from . import desktop_root as _desktop_root
+
+        _moved = _desktop_root.relocate_if_needed()
+        if _moved is not None and _moved.get("ok"):
+            return 0
+    except Exception:  # noqa: BLE001
+        pass
+    # ② 被搬过来的新实例：把桌面上那份旧 exe 收掉（用户 2026-10-26 追加要求）。
+    #    后台线程带重试地删 —— 桌面那个进程此刻可能还没松手，绝不阻塞界面。
+    try:
+        from . import desktop_root as _desktop_root_cleanup
+
+        _desktop_root_cleanup.schedule_source_cleanup()
+    except Exception:  # noqa: BLE001
+        pass
     # 防多开：工具自身也只允许一个实例（用户要求「防多开」）
     try:
         from .config import AppConfig
@@ -392,6 +411,13 @@ def main(argv: list[str] | None = None) -> int:
     api = EndfieldModControllerApi()
 
     if "--cli" in argv:
+        # 控制台默认是 GBK：`get_state` 里带 "⇒" 这类字符会让 print 直接抛 UnicodeEncodeError
+        #（2026-10-26 实测：exe --cli 崩在 position 9833，一个箭头就把诊断命令干掉了）。
+        # 诊断输出本来就是给人看的，切 UTF-8 + replace，宁可显示成"?"也别崩。
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:  # noqa: BLE001
+            pass
         print(json.dumps(api.get_state(), ensure_ascii=False, indent=2))
         _release_lock()
         return 0

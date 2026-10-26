@@ -107,7 +107,7 @@ def test_missing_table_skips(monkeypatch):
 def _stub_both(monkeypatch, module, table, report, bundled):
     monkeypatch.setattr(module.component_versions, "load", lambda: table)
     monkeypatch.setattr(module.updates, "check_updates", lambda *a, **k: {**report, "errors": []})
-    monkeypatch.setattr(module, "_bundled_version", lambda key: bundled)
+    monkeypatch.setattr(module, "_probe_bundled", lambda key: (bundled, "" if bundled else "探测不到"))
 
 
 def test_bundled_asset_older_than_table_blocks_release(monkeypatch):
@@ -140,12 +140,12 @@ def test_bundled_asset_newer_than_table_is_flagged(monkeypatch):
 
 
 def test_build_suffix_in_bundled_version_is_not_a_mismatch(monkeypatch):
-    """PE 文件版本常带构建号（6.8.0.2155 vs 表里 6.8.0）—— 不能判成"随包比表新"。"""
+    """PE 文件版本常带构建号（3.2.1.0 vs 表里 3.2.1）—— 不能判成"随包比表新"。"""
     module = _load()
     _stub_both(monkeypatch, module,
-               {"external": {"reshade": {"latest": "6.8.0"}}},
-               {"reshade": {"latest": "6.8.0"}},
-               "6.8.0.2155")
+               {"external": {"secondary_motion": {"latest": "3.2.1"}}},
+               {"secondary_motion": {"latest": "3.2.1"}},
+               "3.2.1.0")
 
     data = module.collect()
 
@@ -154,17 +154,53 @@ def test_build_suffix_in_bundled_version_is_not_a_mismatch(monkeypatch):
 
 
 def test_component_without_bundled_asset_is_skipped(monkeypatch):
-    """XXMI 是联网安装、没有"随包那份" ⇒ 探测不到就跳过，不误报。"""
+    """XXMI 是联网安装、没有"随包那份"（不在探测表里）⇒ 不参与这一道，也不报警。"""
     module = _load()
-    _stub_both(monkeypatch, module,
-               {"builtin": {"XXMI": {"latest": "v2.4.9"}}},
-               {"builtin": {"XXMI": {"latest": "v2.4.9"}}},
-               "")
+    monkeypatch.setattr(module.component_versions, "load",
+                        lambda: {"builtin": {"XXMI": {"latest": "v2.4.9"}}})
+    monkeypatch.setattr(module.updates, "check_updates",
+                        lambda *a, **k: {"builtin": {"XXMI": {"latest": "v2.4.9"}}, "errors": []})
 
     data = module.collect()
 
     assert data["ok"] is True
     assert data["assets"] == []
+
+
+def test_missing_bundled_asset_is_reported(monkeypatch):
+    """★ 2026-10-26 用户要求：「你改检测，让他会报警就行」。
+
+    仓库里没有随包二进制（*.dll 不进 git，新克隆就是这种状态）时必须出声，
+    不能因为"探测不到"就静默通过 —— 否则同一个事故在别的机器上永远发现不了。
+    """
+    module = _load()
+    monkeypatch.setattr(module.component_versions, "load",
+                        lambda: {"external": {"secondary_motion": {"latest": "3.2.1"}}})
+    monkeypatch.setattr(module.updates, "check_updates",
+                        lambda *a, **k: {"secondary_motion": {"latest": "3.2.1"}, "errors": []})
+    monkeypatch.setattr(module, "_probe_bundled",
+                        lambda key: ("", "仓库里没有 assets/secondary_motion/plugin/sbm.dll"))
+
+    data = module.collect()
+
+    assert data["ok"] is False, "缺随包资产时必须判为不通过（会报警）"
+    assert data["assets"][0]["status"] == "missing"
+    assert "sbm.dll" in data["assets"][0]["reason"]
+
+
+def test_missing_bundled_asset_can_be_allowed(monkeypatch):
+    """没有资产的机器（只研究源码）可以显式放过：--allow-missing-assets。"""
+    module = _load()
+    monkeypatch.setattr(module.component_versions, "load",
+                        lambda: {"external": {"secondary_motion": {"latest": "3.2.1"}}})
+    monkeypatch.setattr(module.updates, "check_updates",
+                        lambda *a, **k: {"secondary_motion": {"latest": "3.2.1"}, "errors": []})
+    monkeypatch.setattr(module, "_probe_bundled", lambda key: ("", "没有"))
+
+    data = module.collect(allow_missing_assets=True)
+
+    assert data["ok"] is True
+    assert data["assets"][0]["status"] == "absent"
 
 
 def test_rabbitfx_bundled_probe_reads_real_manifest():

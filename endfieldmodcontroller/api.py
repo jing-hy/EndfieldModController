@@ -1698,7 +1698,7 @@ class EndfieldModControllerApi:
         #    只要禁用 reshade 开了，那几个都被关」）。放在这里是因为前端**必然会调
         #    get_state()**（界面一活就会调），所以升级上来的老配置也能被自动纠正一次。
         self._enforce_master_switch_consistency()
-        from . import diagnostics, poser, secondary_motion
+        from . import desktop_root, diagnostics, poser, secondary_motion
 
         # 留痕：用来判断前端是否真的完成了初始化（界面空白时先看这几行有没有）
         diagnostics.log_event(self.config, "UI 调用 get_state()", category="ui")
@@ -1732,6 +1732,8 @@ class EndfieldModControllerApi:
             "pending_update": self.pending_update(),
             # 未初始化（组件没装齐/控制器没生成）时，前端启动后弹窗说明"再点一次一键启动"
             "first_run": self.first_run_state(),
+            # 「程序放在桌面运行」提醒（用户 2026-10-26）：只做路径判断，不扫盘。
+            "desktop_root": desktop_root.report(self.config),
             "warming": not self._warm_done,
             # ★ **一键启动当前走到哪一步**（2026-10-07 用户要求："启动到扫除mod还是很慢，
             #   要是要时间就显示加载页面"）。纯展示：没在启动时是空 dict。

@@ -317,8 +317,9 @@ const shownNoticeKeys = new Set();
 function refreshThenShowAnnouncements() {
   // **不要 await**：刷新失败或悬挂时，消费必须照常跑（用当前快照试一次）。
   // 反过来也一样 —— 消费（可能弹窗）绝不阻塞状态刷新。
-  refreshState().catch(() => {}).finally(() => { maybeShowAnnouncements(); });
+  refreshState().catch(() => {}).finally(() => { maybeShowAnnouncements(); maybePromptDesktopRoot(); });
   maybeShowAnnouncements();       // 先用现有快照试一次，立即执行
+  maybePromptDesktopRoot();       // 桌面运行提醒同理：先试一次，刷完再试一次（幂等）
 }
 
 async function maybeShowAnnouncements() {
@@ -347,6 +348,32 @@ async function maybeShowAnnouncements() {
     // 记已读：下次启动不再弹（后端会把这些 id 从公告列表里摘掉）
     await call("announcements_seen", fresh.map((n) => n.key));
   } catch (e) { /* 记不上也不影响本次显示 */ }
+}
+
+// 「程序放在桌面运行」的处理（用户 2026-10-26 改定）：
+// 后端在启动最早期就把 exe 搬到 D 盘（没有 D 盘就用 C 盘）并在那儿重启，桌面只留一个快捷方式 ——
+// 所以正常情况下这张框**根本不该出现**；只有搬不动（D / C 都写不进去）时，才在这里说一句。
+let desktopRootAsked = false;
+async function maybePromptDesktopRoot() {
+  if (desktopRootAsked) return;
+  const info = store.state && store.state.desktop_root;
+  if (!info || !info.relocate_failed) return;
+  desktopRootAsked = true;
+  try {
+    await showModalDialog({
+      title: "没搬成：程序还在桌面",
+      message: [
+        "这个 exe 在桌面运行，而它的 config.json、runtime、assets 都会生成在 exe 旁边 —— 也就是全部铺在桌面。",
+        "",
+        "本来应该自动搬到磁盘根目录再启动，这次没搬成：" + (info.relocate_reason || "原因未知"),
+        "",
+        "可以手动把整个程序文件夹挪到 D:\\EndfieldModController（没有 D 盘就用 C:\\EndfieldModController），",
+        "再启动里面的 exe；桌面上留一个快捷方式就行。",
+      ].join("\n"),
+      okText: "知道了",
+      showCancel: false,
+    });
+  } catch (e) { /* 弹窗失败不该影响启动 */ }
 }
 
 // 打开外部链接（弹窗里的网址点了直接开，与"能点的网址不另外配按钮"一致）
