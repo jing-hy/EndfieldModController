@@ -6638,3 +6638,37 @@ v1.4.7 已发布（2026-10-19，Latest、非草稿/非预发布）：exe 35,145,
 ⚠️ 2026-10-19 起这个工具**已从仓库与随包资产中删除**（assets/modfix 整个目录移除），修复改为纯文本规则 ps-t+1（只对 N<21 的 ps-tN 整体 +1），不再调用任何 exe。本条只作历史来源记录；现行规则见 modecontroller 的 decisions 条。
 
 `关键词：["修复工具来源", "B站可可HXL", "终末地Mod修复工具包v1.5", "Endfield_PS-T_DrawSection_Fix_v2.1", "v1.4 CNModFixerV2.py", "v1.3热修复ini", "备份目录不能留Mods", "修完按F10刷新", "_tmp那个是另一个工具", "README要写对来源"]`
+
+<!-- 增量追加 2026-11-06 21:21 · 新增 4 条（历史条目一律保留）-->
+
+<!-- rules · 设计原则 / 行为准则 -->
+### 【GUI 线程热路径禁止同步网络】get_state()…
+*2026-11-05 22:07*
+
+【GUI 线程热路径禁止同步网络】get_state() 与首屏路径里不允许任何会发 HTTP 的调用（典型反例：selfupdate.check_update 缓存过期就现拉 GitHub，各 25 秒超时，整块界面冻住）。判据：首屏只读磁盘缓存（selfupdate.peek_cache），联网动作一律交给后台预热；新加的 selfupdate.peek_cache 就是为了这条。启动各段耗时由 startup_trace 记一行「启动时间线」进 launch.log —— 以后再报「启动慢」，先看这行再动代码。
+
+`关键词：["GUI线程","首屏","同步网络","get_state","预热线程","启动时间线","startup_trace","加载页","卡顿","peek_cache","缓存","启动慢"]`
+
+<!-- lesson · 经验教训（被纠正过的、踩过的坑） -->
+### 启动慢定案（2026-11-05 实测）：用户报「出加载…
+*2026-11-05 22:07*
+
+启动慢定案（2026-11-05 实测）：用户报「出加载页面和在加载页面都很久」。拆开是三段——① onefile 解压+引导约 1.1s（进程创建→首行日志）；② 窗口+WebView2+前端到桥可用约 1.6s；③ 首屏 get_state 冷 0.52s，但其中 _app_dependency_entry→selfupdate.check_update(use_cache=True) 一旦缓存 6 小时过期就同步拉 GitHub（网页路线 2 个请求、各 25s 超时，本机实测 3.1s），且跑在 GUI 线程 ⇒ 加载页不动、窗口点不动。修法：首屏只读 selfupdate.peek_cache，联网交给预热收尾（_request_update_refresh/_spawn_update_check）；前端加载页补计时与重试。源码方式加载页消失 2.36s→1.6s。
+
+`关键词：["启动慢","加载页","get_state","check_update","首屏","同步网络","预热线程","peek_cache","GUI线程","onefile解压","启动时间线","WebView2"]`
+
+<!-- fact · 事实（细碎的原子信息） -->
+### 2026-11-01 核对 component_vers…
+*2026-11-01 16:28*
+
+2026-11-01 核对 component_versions.json：8 项全部与上游一致，无需更新（XXMI v2.4.9 / Libs v1.2.2 / EFMI v1.4.8 / Poser 0.5.108 / reshade 6.8.0 / 乳摇 3.2.1 / RabbitFX 2.8 / Jiggle 0.2.4；随包 sbm.dll=3.2.1.0、rabbitfx manifest=2.8）。上游最近一次发布是 2026-10-17。
+
+`关键词：["component_versions","上游版本表","check_component_versions","核对","XXMI v2.4.9","Poser 0.5.108","乳摇 3.2.1","reshade 6.8.0","RabbitFX 2.8","Jiggle 0.2.4","上游最新版"]`
+
+<!-- fact · 事实（细碎的原子信息） -->
+### 新手引导第 2 步（2026-11-05 用户要求）= …
+*2026-11-06 21:09*
+
+新手引导第 2 步（2026-11-05 用户要求）= 切到「Mod 商城」页、高亮 #store-browse-box（StorePage.vue 顶部那张「Mod 商城」卡片），正文写清三种添加方式：① 拖 .zip/.7z/.rar 进窗口 ② 在本页商城点下载 ③ 去下载页粘贴网址（含香蕉网页面地址）。tests/test_frontend_tour_targets.py 静态钉住：每步 target id 必须真实存在，且第 2 步是商城、正文含这三种。
+
+`关键词：["新手引导","引导第2步","Mod商城","store-browse-box","三种添加方式","TOUR_STEPS","落点","高亮目标","StorePage","OnboardingTour","拖入","粘贴网址"]`
