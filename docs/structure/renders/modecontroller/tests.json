@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "id": "modecontroller.tests",
-  "updated_at": "2026-10-02T08:38:49.045Z",
+  "updated_at": "2026-11-06T13:05:21.372Z",
   "mode": "layers",
   "reading": {
-    "zh": "47 个测试文件按“钉住哪件事”分组，顺序与程序实际运行一致：库 → 激活 → 配置（数据根自愈） → 启动 → DLSS5 → 崩溃 → 组件 → 运维，最后是面板注入链路（它要编译器，没有就 skip）。全部离线：路径都打到临时目录，**不碰**你真实的游戏目录与 runtime。",
-    "en": "47 test files grouped by the subject they pin down, in the same order the program runs: library → activation → config (data-root self-healing) → launch → DLSS5 → crash → components → upkeep, plus the panel's injection link. Everything is offline: paths are patched into tmp dirs, nothing touches your real game folder or runtime."
+    "zh": "测试文件按「钉住哪件事」分组，顺序与程序实际运行一致：库 → 激活 → 配置（数据根自愈） → 启动 → DLSS5 → 崩溃 → 组件 → 运维，接着是前端的静态回归（菜单动作 / 组件导入 / 新手引导落点），最后是注入开关、单实例与面板注入链路（后者要编译器，没有就 skip）。全部离线：路径都打到临时目录，不碰你真实的游戏目录与 runtime。",
+    "en": "Test files grouped by the subject they pin down, in the order the program runs: library → activation → config (data-root self-healing) → launch → DLSS5 → crash → components → upkeep, then the static front-end regressions (menu actions / component imports / tour anchors), and finally injection switches, single-instance, and the panel's injection link. Everything is offline: paths are patched into tmp dirs, nothing touches the real game folder or runtime."
   },
   "order": [
     "modecontroller.tests.library",
@@ -16,6 +16,11 @@
     "modecontroller.tests.crash",
     "modecontroller.tests.components",
     "modecontroller.tests.upkeep",
+    "modecontroller.tests.frontend-menu",
+    "modecontroller.tests.frontend-components",
+    "modecontroller.tests.frontend-tour",
+    "modecontroller.tests.injection-switches",
+    "modecontroller.tests.single-instance",
     "modecontroller.tests.addon-hook"
   ]
 }

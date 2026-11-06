@@ -542,7 +542,7 @@ onUnmounted(() => {
 
     <!-- ══════════ 列表视图（左侧分类栏 + 右侧网格，照 JASM 的排布）══════════ -->
     <template v-else>
-      <Card title="Mod 商城">
+      <Card title="Mod 商城" id="store-browse-box">
         <template #badge>
           <span class="text-xs" style="color: var(--text-muted)">
             香蕉网 · 终末地{{ total ? ` · ${total} 个` : "" }}

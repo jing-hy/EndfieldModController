@@ -11,8 +11,8 @@ description:
   en: >
       Tests for upkeep and data: mod package repair and rollback, library backup, the Poser plugin, character-table sync, jiggle-parameter sync, alert version gating, and the integrity check chain.
       
-revision: 0120311d3899178b1012f04bba614b1cec30e883
-updated_at: "2026-10-26T14:34:24.410Z"
+revision: 6956df017aaf625c5a15ea64c5d6f1d0f5ac2bd4
+updated_at: "2026-11-06T13:05:30.486Z"
 fingerprint: 4230dfa268e399c126d0e84f153fed5e2858677c22c10ceb37dedd2766ddb1f7
 source:
   - path: "tests/test_modfix.py"

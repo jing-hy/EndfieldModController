@@ -11,13 +11,13 @@ description:
   en: >
       First-run onboarding (Vue): gated on the backend's first_run + onboarding_done so it only ever shows once.
       
-revision: 0120311d3899178b1012f04bba614b1cec30e883
-updated_at: "2026-10-26T14:34:24.414Z"
-fingerprint: 7fe83653992baa51db09e9ab79d9e325122b81bdf89fad9b5d4c5d47f2b53ce5
+revision: 6956df017aaf625c5a15ea64c5d6f1d0f5ac2bd4
+updated_at: "2026-11-06T13:05:30.489Z"
+fingerprint: 6c538c2a63c3c16b36c78bcac0c3c8bb36658166c001a1eba81392af6055dee0
 source:
   - path: "frontend/src/App.vue"
     line: 2
-    end_line: 1622
+    end_line: 1826
 apis:
   - protocol: rpc
     path: "web.TOUR_STEPS"

@@ -11,8 +11,8 @@ description:
   en: >
       Pack the NVIDIA NGX runtime pieces into the tree the program expects, with the per-file hashes recorded — these files cannot be downloaded by the user, so they have to be carried.
       
-revision: 0120311d3899178b1012f04bba614b1cec30e883
-updated_at: "2026-10-26T14:34:24.403Z"
+revision: 6956df017aaf625c5a15ea64c5d6f1d0f5ac2bd4
+updated_at: "2026-11-06T13:05:30.472Z"
 fingerprint: 17f0839d8e2915aeba62895b4ec76220c10636c6dae085f356f89fae471bbc61
 source:
   - path: "scripts/pack_nvngx_assets.py"

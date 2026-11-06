@@ -115,6 +115,38 @@ def _pick_asset(release: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+
+def peek_cache(config: AppConfig) -> dict[str, Any]:
+    """**只读磁盘缓存**，绝不发网络请求（专供 GUI 线程上的首屏 get_state()）。
+
+    ⚠️ 这个函数是 2026-11-05 从「加载页卡很久」里拆出来的。以前首屏那条路直接调
+    check_update(use_cache=True)，而那份缓存的有效期是 CHECK_CACHE_SECONDS（6 小时）
+    —— 一旦过期/缺失，check_update 会**当场**去拉 GitHub（网页路线两个请求、各 25 秒
+    超时，弱网时更长）。偏偏它跑在 GUI 线程上、又是加载页等待的那个 get_state()，
+    于是用户看到的就是「窗口出来了、加载页不动、点什么都没反应」。
+
+    现在首屏只问「缓存里有什么」（毫秒级），过期就交给后台线程刷新；
+    下一次 get_state() 自然就带上了新结果。
+
+    返回结构与 check_update() 同构，额外多一个 stale（缓存过期/缺失）：
+    调用方据此决定要不要起后台刷新。
+    """
+    current = current_version()
+    data = _read_cache(config)
+    checked_at = int(float(data.get("checked_at") or 0)) if data else 0
+    latest = str(data.get("latest") or "")
+    stale = (not data) or (time.time() - float(checked_at or 0) >= CHECK_CACHE_SECONDS)
+    return {
+        "current": current,
+        "latest": latest,
+        "tag": str(data.get("tag") or ""),
+        "checked_at": checked_at,
+        "cached": True,
+        "stale": stale,
+        "error": str(data.get("error") or ""),
+        "update_available": bool(latest) and _version_tuple(latest) > _version_tuple(current),
+    }
+
 def check_update(
     config: AppConfig,
     *,

@@ -225,6 +225,11 @@ class EndfieldModControllerApi:
         self._modbackup_lock = threading.Lock()
         self._modbackup_running = False
         self._warm_up_thread: threading.Thread | None = None
+        # 「本管理器」自己那条版本检查的后台闸门（2026-11-05）：首屏只读缓存缓存，
+        # 过期时由下面这个后台线程去拉 —— **同一时刻只允许一个**。
+        self._update_checking = False
+        self._update_check_wanted = False
+        self._update_check_lock = threading.Lock()
         self._start_warm_up()
 
     def _start_warm_up(self) -> None:
@@ -242,6 +247,12 @@ class EndfieldModControllerApi:
     def ui_ready(self) -> dict[str, Any]:
         """前端首屏渲染完成后调用：这时才允许后台开始全盘探测。"""
         self._ui_ready.set()
+        try:
+            from . import startup_trace
+
+            startup_trace.mark_once("frontend_ready")
+        except Exception:  # noqa: BLE001 —— 打点失败绝不能影响启动
+            pass
         return {"ok": True}
 
     # ── 配置热重载（用户 2026-10-03：「改一下就读一次」）──────────────────────
@@ -588,6 +599,13 @@ class EndfieldModControllerApi:
             except Exception:  # noqa: BLE001
                 pass
         self._warm_done = True
+        # 首屏如果「举手」过（本管理器版本缓存过期），到这里才真的联网：
+        # 预热本来就是后台、不挡界面；早于这里发起会把首屏拖成"加载页不动"。
+        if getattr(self, "_update_check_wanted", False):
+            try:
+                self._spawn_update_check()
+            except Exception:  # noqa: BLE001
+                pass
 
     # ------------------------------------------------------------------
     # helpers
@@ -1581,8 +1599,55 @@ class EndfieldModControllerApi:
             pass
         return report
 
+    def _request_update_refresh(self) -> None:
+        """首屏只是「举手」：标记这份缓存需要刷新，**绝不在这里联网**（2026-11-05）。
+
+        背景：用户报「启动这么慢，出加载页面和在加载页面都很久」。`_app_dependency_entry()`
+        被 `get_state()` 调用，而 `get_state()` 跑在 GUI 线程上、又是加载页等待的对象；
+        它以前直接 `selfupdate.check_update(use_cache=True)` —— 缓存（6 小时）一过期就
+        **同步**拉两个 GitHub 页面（各 25 秒超时），弱网时整块界面冻住。
+
+        现在分两步：
+          * 首屏只读磁盘缓存（`selfupdate.peek_cache`，毫秒级）；
+          * 这里只把 `_update_check_wanted` 立起来，**真正的联网交给后台预热收尾**
+            （`_spawn_update_check`）—— 与「重活都放预热线程」的既有约定一致，
+            也不给首屏额外加线程。
+        """
+        self._update_check_wanted = True
+        if getattr(self, "_warm_done", False):
+            self._spawn_update_check()
+
+    def _spawn_update_check(self) -> None:
+        """真的去拉一次更新信息（**同一时刻只留一个线程**，失败静默）。"""
+        with self._update_check_lock:
+            if getattr(self, "_update_checking", False):
+                return
+            self._update_checking = True
+
+        def worker() -> None:
+            try:
+                selfupdate.check_update(
+                    self.config,
+                    log=lambda message: launcher._append_log(self.config, message),
+                )
+            except Exception as exc:  # noqa: BLE001 —— 后台检查失败不该影响任何东西
+                try:
+                    launcher._append_log(self.config, f"WARN 后台检查更新失败: {exc}")
+                except Exception:  # noqa: BLE001
+                    pass
+            finally:
+                with self._update_check_lock:
+                    self._update_checking = False
+
+        threading.Thread(target=worker, name="mc-update-check", daemon=True).start()
+
     def _app_dependency_entry(self) -> dict[str, Any]:
-        """把 EndfieldModController 自己也当成一项可更新的依赖（置顶显示）。"""
+        """把 EndfieldModController 自己也当成一项可更新的依赖（置顶显示）。
+
+        ⚠️ **这里绝不发网络请求**（2026-11-05）：它被 `get_state()` 调用，而 `get_state()`
+        跑在 GUI 线程上、又是加载页等待的对象。只用磁盘缓存，过期就交给预热线程收尾时刷新
+        —— 详见 `_request_update_refresh()` 的说明。
+        """
         from .version import REPO_URL, __version__
 
         exe = selfupdate.executable_path()
@@ -1599,7 +1664,10 @@ class EndfieldModControllerApi:
             "is_app": True,
         }
         try:
-            info = selfupdate.check_update(self.config, use_cache=True)
+            info = selfupdate.peek_cache(self.config)
+            if info.get("stale"):
+                # 缓存过期 / 没有 ⇒ 先给个诚实的状态，刷新交给预热收尾（不阻塞首屏）
+                self._request_update_refresh()
             latest = str(info.get("latest") or "")
             entry["latest"] = latest
             entry["update_available"] = bool(info.get("update_available"))
@@ -1690,6 +1758,14 @@ class EndfieldModControllerApi:
         return changed
 
     def get_state(self) -> dict[str, Any]:
+        # 启动时间线（2026-11-05）：前端有时先发 get_state、有时先发 ui_ready，
+        # 两个都要能填上"前端就绪"这个点 —— 谁先到算谁（mark_once 不覆盖）。
+        try:
+            from . import startup_trace
+
+            startup_trace.mark_once("frontend_ready")
+        except Exception:  # noqa: BLE001 —— 打点失败绝不能影响启动
+            pass
         # 双保险：前端**必然**会调 get_state()，所以它一到就等于"界面活着"。
         # `_warm_up` 靠这个信号决定什么时候开始拉公告 / 角色表；只靠显式 ui_ready() 的话，
         # 哪天前端漏调一次，所有人就要白等满 15 秒（2026-10-03 实际就是这个情况）。
@@ -1710,7 +1786,7 @@ class EndfieldModControllerApi:
         # 后台预热完成后前端会自动再刷一次，那时就能经 official_launcher 推断出来。
         game_dir = reshade_integration.detect_game_dir(self.config, allow_scan=False)
         render_api = reshade_integration.detect_render_api(game_dir) if game_dir is not None else "unknown"
-        return {
+        payload: dict[str, Any] = {
             "config": self.config.to_dict(),
             # **主路径**（= 程序所在目录 = config.json / runtime / library 的基准）。
             # 设置页第一项显示它：用户把程序目录改名/搬走后，一眼就能看出程序认的是哪个
@@ -1778,6 +1854,27 @@ class EndfieldModControllerApi:
             # 每次 state 刷新上会让"打开管理器"明显卡住（用户对启动慢很敏感）。
             "antivirus": self._antivirus_snapshot(),
         }
+        self._report_startup_timeline_once(payload)
+        return payload
+
+    def _report_startup_timeline_once(self, payload: dict[str, Any]) -> None:
+        """首屏那次 get_state 收尾时，把启动时间线写进日志（**只写一次**）。
+
+        为什么在这里：加载页等的就是这次 get_state 的返回，把这一刻记下来，"窗口出现但
+        加载页不动"的耗时才有据可查（用户 2026-11-05 报「出加载页面和在加载页面都很久」）。
+        写日志失败一律吞掉 —— 打点绝不能影响启动本身。
+        """
+        if getattr(self, "_startup_timeline_logged", False):
+            return
+        self._startup_timeline_logged = True
+        try:
+            from . import startup_trace
+
+            startup_trace.mark("first_state")
+            launcher._append_log(self.config, startup_trace.report_line())
+        except Exception:  # noqa: BLE001
+            pass
+
     def autodetect_paths(self) -> dict[str, Any]:
         """**自动检测外部程序路径并回填配置**（2026-10-03 补回归）。
 

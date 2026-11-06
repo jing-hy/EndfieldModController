@@ -66,9 +66,20 @@ let dragDepth = 0;
 // 免得桥/后端出问题时把人永久锁在加载页上。
 const bootStuck = ref(false);
 let bootFallbackTimer = null;
+// 加载页上显示"已经等了多少秒"（用户 2026-11-05：「出加载页面和在加载页面都很久」——
+// 干等没有反馈最像卡死；给个在走的数字，至少能分清真慢和真卡）。
+const bootStartedAt = Date.now();
+const bootElapsed = ref(0);
+let bootTicker = null;
+const bootPhase = ref("正在启动界面");   // 桥就绪前 / 之后就绪；文案跟着走
+function stopBootTicker() {
+  if (bootTicker) { clearInterval(bootTicker); bootTicker = null; }
+}
 function enterAnyway() {
   bootStuck.value = true;
   store.ready = true;              // 只影响这层遮罩：界面照常工作、列表读到了会自己补上
+  // 先放行也别放弃取数：再补一次（成功后会覆盖空列表）
+  refreshState().catch(() => {});
 }
 // ── 下载徽标轮询（2026-10-07）────────────────────────────────────────────────
 // 用户原话：「看商城不用下一个就跳转一次，**但是要有动态**」。那个"动态"由这里供给：
@@ -86,6 +97,9 @@ async function pollDownloads() {
 
 onMounted(() => {
   bootFallbackTimer = setTimeout(() => { bootStuck.value = true; }, 12000);
+  bootTicker = setInterval(() => {
+    bootElapsed.value = Math.round((Date.now() - bootStartedAt) / 100) / 10;
+  }, 100);
   pollDownloads();
   downloadTimer = setInterval(pollDownloads, 2000);
 });
@@ -533,12 +547,17 @@ onMounted(async () => {
   // 抛 `api[e] is not a function`（用户截图反馈的那条红框）。
   // 现在等的是 boot 真正要用的第一个方法 `ui_ready` 出现为止。
   if (await waitForBridge(15000, "ui_ready")) {
+    bootPhase.value = "正在读取 Mod 库与配置";
     // 告诉后端"界面已经起来了" —— `_warm_up` 第一件事就是等这个信号（最多 15 秒），
     // 等不到它就会白等满 15 秒才开始拉公告/角色表。前端此前**从没调用过**它（grep 无结果），
     // 所以公告要等 15 秒后才可能到。这里一进 boot 就先发信号。
     try { await call("ui_ready"); } catch (e) { /* 不支持也不影响 */ }
     try {
-      await refreshState();
+      // 首次扫描大库时后端可能超过一次超时窗口（refreshState 内部 8 秒）—— 再给一次机会，
+      // 别让加载页只能干等 12 秒后的「先进界面」按钮（用户 2026-11-05 抱怨的正是这段）。
+      let bootData = await refreshState();
+      if (!bootData) bootData = await refreshState();
+      stopBootTicker();
       // ⚠️ 必须把 config 灌进 settings —— 否则所有设置项/开关都显示成空（2026-10-02 实测：
       // 注入开关全显示"关"，因为 settings 从没被填充过）。
       loadSettings();
@@ -561,8 +580,9 @@ onMounted(async () => {
   }
 });
 
-// 引导步骤（沿用 0.4.0 的四步，内容按现在的界面更新；
-// 第二步按用户要求补上"也可以直接下载"这条路）。
+// 引导步骤（沿用 0.4.0 的四步，内容按现在的界面更新）。
+// ⚠️ 2026-11-05 用户要求：第二步改成**展示 Mod 商城**，并把「拖进来 / 商城 / 粘贴网址」
+// 三种添加方式都写清楚（原来只讲拖入 + 下载页那个框，商城只是一句带过）。
 const TOUR_STEPS = [
   {
     tab: "dependencies", target: "dep-update-all-btn",
@@ -572,14 +592,16 @@ const TOUR_STEPS = [
       + "点下去会跳到「下载」页 —— 进度、速度与日志都在那儿看。装完再回启动页。",
   },
   {
-    // ⚠️ 2026-10-07：这张卡片从「服装 Mod / 辅助 Mod」页**搬到了「下载」页**，引导的落点
-    // 跟着改 —— 不改的话第 2 步会去高亮一个本页不存在的元素（0.9.5 就踩过这个坑）。
-    tab: "downloads", target: "mod-download-box",
-    title: "第二步：把 Mod 弄进来",
-    body: "有两种方式：\n"
-      + "① 把 Mod 的 .zip / .7z / .rar 拖到窗口任意位置 —— 松手后自动解压进库并识别角色；\n"
-      + "② 直接下载：在这个「下载 Mod」框里粘贴网址（一行一个），也支持香蕉网页面地址，\n"
-      + "   会自动取真实文件直链、并带出封面；想逛现成的就去「Mod 商城」。\n\n"
+    // 2026-11-05 用户要求：这一步改成**展示 Mod 商城**，并把「拖入 / 商城 / 粘贴网址」三种方式都讲清。
+    // 落点是商城的「Mod 商城」卡片（id 在 StorePage.vue）；换页面 / 换卡片时这边必须一起改，
+    // 否则第 2 步会去高亮一个本页不存在的元素（0.9.5 踩过这个坑，高亮框会退化成不可见）。
+    tab: "store", target: "store-browse-box",
+    title: "第二步：把 Mod 弄进来（三种方式任选）",
+    body: "① 拖进来 —— 把 .zip / .7z / .rar 拖到窗口任意位置，松手自动解压进库并识别角色；\n"
+      + "② 在这里逛 —— 就是当前这页「Mod 商城」：按角色 / 分类找，看中哪个点「下载」；\n"
+      + "   进度都汇到左侧「下载」页，可以接着逛，不用守着。\n"
+      + "③ 有链接就粘贴 —— 去「下载」页，把网址贴进「下载 Mod」框（一行一个，香蕉网页面地址也行），\n"
+      + "   程序会自动取到真实文件直链并带出封面。\n\n"
       + "同一个角色默认只保留一个 Mod（自动互斥），避免游戏崩。",
   },
   {
@@ -635,6 +657,9 @@ announceTimers.push(setInterval(() => {
 
 // 关窗/刷新时一律清干净，绝不拖住退出流程
 function clearAnnounceTimers() {
+  stopBootTicker();
+  if (bootFallbackTimer) { clearTimeout(bootFallbackTimer); bootFallbackTimer = null; }
+  if (downloadTimer) { clearInterval(downloadTimer); downloadTimer = null; }
   if (crashTimer) { clearInterval(crashTimer); crashTimer = null; }
   crashKickTimers.forEach((t) => clearTimeout(t));
   crashKickTimers.length = 0;
@@ -654,10 +679,12 @@ window.addEventListener("pagehide", clearAnnounceTimers);
          style="background: var(--bg)">
       <div class="text-base font-semibold" style="color: var(--text)">终末地 Mod 管理器</div>
       <div class="text-sm" style="color: var(--text-muted)">
-        {{ bootStuck ? "读取时间比平时长（可能正在扫描较大的 Mod 库）…" : "正在读取 Mod 库与配置…" }}
+        {{ bootStuck ? "读取时间比平时长（可能正在扫描较大的 Mod 库）…" : bootPhase + "…" }}
       </div>
       <div class="text-xs" style="color: var(--text-muted)">
-        {{ bootStuck ? "列表读完会自动出现，也可以先进入界面。" : "首次启动会久一点。" }}
+        {{ bootStuck
+          ? "列表读完会自动出现，也可以先进入界面。"
+          : "已等待 " + bootElapsed.toFixed(1) + " 秒（首次启动会久一点）" }}
       </div>
       <button v-if="bootStuck" @click="enterAnyway"
               class="px-4 py-1.5 rounded text-sm"

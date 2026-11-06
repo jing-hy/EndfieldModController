@@ -51,9 +51,9 @@ async function openDir() {
 </script>
 
 <template>
-  <!-- ⚠️ **C6：这个 id 是新手引导第 2 步的高亮目标**（2026-10-03 补回归）。
-       0.9.5 的引导第 2 步指向 `#mod-download-box`，换代后那个 id **不存在**
-       ⇒ 第二步没有聚光高亮、只能把卡片居中显示，用户看不出该点哪。 -->
+  <!-- 这个 id 曾经是新手引导第 2 步的高亮目标（2026-10-03 补的回归）。
+       ⚠️ 2026-11-05 起第 2 步改去高亮** Mod 商城**（`#store-browse-box`），这里不再是落点；
+       id 仍保留 —— 它是「粘贴网址下载」这条路的标识，删了以后不好回挂引导/文档。 -->
   <Card title="下载 Mod" id="mod-download-box">
     <template #badge><span class="text-xs" style="color: var(--text-muted)">粘网址，一行一个</span></template>
     <p class="text-xs mb-2" style="color: var(--text-muted)">

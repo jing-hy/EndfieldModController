@@ -11,8 +11,8 @@ description:
   en: >
       Make big downloads survive a bad line: probe candidate mirrors, remember which one was fast and which one was blocked, fall back to a slower line, resume from partial parts, and download in parallel chunks with a speed estimate.
       
-revision: 0120311d3899178b1012f04bba614b1cec30e883
-updated_at: "2026-10-26T14:34:24.375Z"
+revision: 6956df017aaf625c5a15ea64c5d6f1d0f5ac2bd4
+updated_at: "2026-11-06T13:05:30.426Z"
 fingerprint: 821268b6697936614a42127c09c8dcb4cdba902ba30d9b80e92961f315e6209b
 source:
   - path: "endfieldmodcontroller/fastnet.py"

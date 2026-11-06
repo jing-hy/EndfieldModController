@@ -11,19 +11,19 @@ description:
   en: >
       The dependency page's backend: status report, batch install/update with progress polling, per-component versions, and the specialised installers for the DLSS5 runtime and the feeder add-on.
       
-revision: 0120311d3899178b1012f04bba614b1cec30e883
-updated_at: "2026-10-26T14:34:24.368Z"
-fingerprint: 0b7d03e181ec61c60fa08bda8e1f9d74408be2c1842ec5c1e14bfad466dbeed7
+revision: 6956df017aaf625c5a15ea64c5d6f1d0f5ac2bd4
+updated_at: "2026-11-06T13:05:30.420Z"
+fingerprint: 07e29d698d0f820d6c4a2a1d940df07fef254e2a366b8239a14de5eda7086723
 source:
   - path: "endfieldmodcontroller/api.py"
-    line: 2550
-    end_line: 5165
+    line: 2826
+    end_line: 5717
   - path: "endfieldmodcontroller/api.py"
-    line: 2756
-    end_line: 9035
+    line: 3032
+    end_line: 9587
   - path: "endfieldmodcontroller/api.py"
-    line: 8300
-    end_line: 14028
+    line: 8576
+    end_line: 14580
 apis:
   - protocol: rpc
     path: "dependency_status"

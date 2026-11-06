@@ -372,6 +372,14 @@ def _cleanup_stale_mei_dirs(bases: list[str] | None = None, *,
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    # 启动时间线第一点（2026-11-05）：此处距**进程创建**的差值 = onefile 解压 + Python 引导。
+    # 之后的点见 api.ui_ready() / api.get_state()，整行由 startup_trace.report_line() 汇总。
+    try:
+        from . import startup_trace
+
+        startup_trace.mark("entry")
+    except Exception:  # noqa: BLE001 —— 打点失败绝不能影响启动
+        pass
     # ① 桌面启动 ⇒ 自动搬到 D 盘（回退 C 盘）、建桌面快捷方式、在那里重启（用户 2026-10-26 要求）。
     #    数据根就是 exe 所在目录，放桌面等于把 config.json / runtime / assets 全铺在桌面。
     #    必须赶在**抢单实例锁、建窗口之前**——搬成功了本进程就直接收工，桌面那份不再运行。
@@ -409,6 +417,12 @@ def main(argv: list[str] | None = None) -> int:
     atexit.register(_release_lock)
 
     api = EndfieldModControllerApi()
+    try:
+        from . import startup_trace
+
+        startup_trace.mark("api")
+    except Exception:  # noqa: BLE001
+        pass
 
     if "--cli" in argv:
         # 控制台默认是 GBK：`get_state` 里带 "⇒" 这类字符会让 print 直接抛 UnicodeEncodeError
@@ -471,6 +485,12 @@ def main(argv: list[str] | None = None) -> int:
         # pywebview 默认 text_select=False，会在 WebView2 层禁掉选择，CSS 压不住。
         text_select=True,
     )
+    try:
+        from . import startup_trace
+
+        startup_trace.mark("window")
+    except Exception:  # noqa: BLE001
+        pass
 
     # ⚠️⚠️ **关窗口不再做任何拦截**（2026-10-03 用户拍板：「**如果难搞就直接不要那个弹窗了**」）。
     #

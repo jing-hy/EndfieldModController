@@ -11,8 +11,8 @@ description:
   en: >
       A headless entry for scripts and smoke tests: build the config, run the pieces that live behind the UI, and print the result as text instead of opening a window.
       
-revision: 0120311d3899178b1012f04bba614b1cec30e883
-updated_at: "2026-10-26T14:34:24.396Z"
+revision: 6956df017aaf625c5a15ea64c5d6f1d0f5ac2bd4
+updated_at: "2026-11-06T13:05:30.455Z"
 fingerprint: 991ca6bc0312d7dbd6a6567572ef6f289323954a2fc2ad147f22179b98db4d48
 source:
   - path: "endfieldmodcontroller/cli.py"

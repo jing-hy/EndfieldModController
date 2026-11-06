@@ -19,11 +19,11 @@
       "repo": "SpectrumQT/XXMI-Launcher"
     },
     "XXMI-Libs": {
-      "latest": "v1.2.2",
+      "latest": "v1.2.3",
       "repo": "SpectrumQT/XXMI-Libs-Package"
     },
     "EFMI": {
-      "latest": "v1.4.8",
+      "latest": "v1.4.9",
       "repo": "SpectrumQT/EFMI-Package"
     },
     "Poser": {
@@ -44,7 +44,7 @@
       "note": "EFMI RabbitFX（GameBanana 651557 的 Main File）—— 随包 v2.8，展开到 <Mod 库>/_deps/RabbitFX；不装游戏目录"
     },
     "jiggle_efmi": {
-      "latest": "0.2.4",
+      "latest": "0.2.7",
       "repo": "woakato/EndfieldJiggle-EFMI",
       "note": "触摸形变 Mod：装进 Mod 库（辅助 Mod 页勾选），一键启动自动铺进 EFMI\\Mods；上游自述游戏内验证有限"
     }

@@ -11,8 +11,8 @@ description:
   en: >
       The panel itself: loads `actions.tsv` (`hint` / `key_label` / `char_group` / `condition`), groups by **character → mod**, draws **every entry as a button** (one click = press that mod's own key, which cycles its own logic; no toggles, no sliders), and sends it through the in-process key injection. Shows the "injection OK · EFMI hits N · sent M" line. Keeps (but no longer calls) the F13..F24 internal sequencer, which could not change mod variables.
       
-revision: 0120311d3899178b1012f04bba614b1cec30e883
-updated_at: "2026-10-26T14:34:24.366Z"
+revision: 6956df017aaf625c5a15ea64c5d6f1d0f5ac2bd4
+updated_at: "2026-11-06T13:05:30.417Z"
 fingerprint: 3134bfe2300552c3d654b6759931103fac92b2e1a94456a0c1de185040a1396d
 source:
   - path: "reshade_addon/src/endfieldmodcontroller_addon.cpp"
