@@ -11,8 +11,8 @@ description:
   en: >
       Regression tests for config and data-root self-healing: follow a rename, stay idempotent, never rewrite external paths, never resurrect the old root, refill blanks, normalize stored paths, and record a relative tool dir on first install.
       
-revision: f6f018e650111be669b39896b4a614a0d757c3a7
-updated_at: "2026-11-07T04:47:38.286Z"
+revision: 89bc0c73458ae7cf701d5c51691a28cfbebc2135
+updated_at: "2026-11-07T05:15:40.259Z"
 fingerprint: a361d31a55d12472c7191cc8e018cb183829f8fd669830c8339d2753beec1dbd
 source:
   - path: "tests/test_config_data_root_relocation.py"

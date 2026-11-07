@@ -6,14 +6,14 @@ tags: [api, store, download]
 name: {zh: "商城与下载中心接口", en: "Store & Download APIs"}
 description:
   zh: >
-      商城主流程与下载中心的 js_api 面：列表/分类/详情/备图/索引刷新/批量扫描与一键更新，以及下载任务的快照、暂停、继续、取消、清空。列表与分类数字同源于本地索引；索引刷新是后台任务，状态行如实报"就绪 / 不完整 / 用了旧索引"。下载动作只入队不跳转。
+      商城主流程与下载中心的 js_api 面：列表/分类/详情/备图/索引刷新（全量与顶部增量）/批量扫描与一键更新，以及下载任务的快照、暂停、继续、取消、清空。列表与分类数字同源于本地索引；索引刷新是后台任务，状态行如实报「就绪 / 不完整 / 用了旧索引」；顶部增量刷新在打开与停留商城页时进行。下载动作只入队不跳转。
       
   en: >
-      js_api surface for the store flow and the download centre: listing, categories, detail, images, index refresh, batch scan and update-all, plus download task control. List and category counts share the local index; index refresh is a background task with an honest status line. Enqueues instead of navigating.
+      js_api surface for the store flow and the download centre: listing, categories, detail, images, full and incremental index refresh, batch scan and update-all, plus download task control. List and category counts share the local index; index refresh is a background task with an honest status line; the top of the index is refreshed incrementally while the store page is open.
       
-revision: f6f018e650111be669b39896b4a614a0d757c3a7
-updated_at: "2026-11-07T04:47:38.254Z"
-fingerprint: d4747ea6c02c00507de3113260fb95ed7a96c782001b24a0feb4fca2141804b4
+revision: 89bc0c73458ae7cf701d5c51691a28cfbebc2135
+updated_at: "2026-11-07T05:17:26.532Z"
+fingerprint: b58c2e78f8f342b29db070ced33864572a28482cb35daa8aef878dc44a417a99
 source:
   - path: "endfieldmodcontroller/api.py"
 apis:
@@ -61,6 +61,15 @@ apis:
           
       en: >
           Background index refresh (short retry when incomplete, honest status)
+          
+  - protocol: rpc
+    path: "mod_store_head_refresh"
+    description:
+      zh: >
+          顶部增量刷新（只拉最新几页并与索引合并；打开/停留在商城页时调）
+          
+      en: >
+          Incremental top refresh (merge the newest pages into the index)
           
   - protocol: rpc
     path: "mod_store_refresh_index"

@@ -209,6 +209,7 @@
   "rpc:mod_store_categories": "modecontroller.backend.api.store",
   "rpc:mod_store_check_updates": "modecontroller.backend.api.store",
   "rpc:mod_store_detail": "modecontroller.backend.api.store",
+  "rpc:mod_store_head_refresh": "modecontroller.backend.api.store",
   "rpc:mod_store_list": "modecontroller.backend.api.store",
   "rpc:mod_store_prefetch": "modecontroller.backend.api.store",
   "rpc:mod_store_prepare_images": "modecontroller.backend.api.store",

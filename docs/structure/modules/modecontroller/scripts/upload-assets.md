@@ -11,8 +11,8 @@ description:
   en: >
       Upload the two release assets, working around this network: resolve the real GitHub IP over DoH, then send with curl --resolve so the upload does not die on a hijacked DNS answer; reports per-file HTTP status and timing.
       
-revision: f6f018e650111be669b39896b4a614a0d757c3a7
-updated_at: "2026-11-07T04:47:38.284Z"
+revision: 89bc0c73458ae7cf701d5c51691a28cfbebc2135
+updated_at: "2026-11-07T05:15:40.258Z"
 fingerprint: 505e323bef8afea3fd09341c2638e4b8a6e49709333dd8595b16d970c12c6674
 source:
   - path: "scripts/upload_release_assets.py"

@@ -6,14 +6,14 @@ tags: [gamebanana, catalog, thumbnail]
 name: {zh: "香蕉网数据层", en: "GameBanana Catalog"}
 description:
   zh: >
-      GameBanana apiv11 的匿名访问层：列表、搜索、分类树、详情、缩略图与全量索引。三条实测约束决定实现：① 只有 Subfeed 认排序且每页固定 15；② Mod/Index 能翻大页但完全不支持排序；③ 图片 CDN 极慢，因此自带本地缓存并由进程内只读服务直出。索引与分类树都带字段版本号，口径变化会自动失效重建。索引每页失败先重试，残缺时与旧缓存按 id 合并并标记 complete=False（残缺不许让 Mod 消失），分类/角色的数字由同一份索引数出来（标签上的数 == 点进去的条数）。
+      GameBanana apiv11 的匿名访问层：列表、搜索、分类树、详情、缩略图与全量索引。三条实测约束决定实现：① 只有 Subfeed 认排序且每页固定 15；② Mod/Index 能翻大页但完全不支持排序；③ 图片 CDN 极慢，因此自带本地缓存并由进程内只读服务直出。索引与分类树都带字段版本号，口径变化会自动失效重建。索引支持三级刷新：启动时按 TTL 全量（每页失败自动重试、残缺时与旧缓存按 id 合并并标 complete=False）、商城页打开/停留时只拉最上面几页做增量合并（不动其余条目）、以及强制全量重建；全量与增量用同一把读写锁互斥。分类/角色的数字由同一份索引数出（标签上的数 == 点进去的条数）。
       
   en: >
-      Anonymous GameBanana apiv11 layer: listings, search, category tree, details, thumbnails and the full index. Three measured constraints shape it, plus field-versioned caches. Failed index pages are retried; incomplete results merge with the previous cache by id and are flagged complete=False, and category counts are derived from the same index so labels always match the list.
+      Anonymous GameBanana apiv11 layer: listings, search, category tree, details, thumbnails and the full index, with field-versioned caches. Three refresh modes: TTL full rebuild with page retries and merge-on-incomplete, incremental top refresh of the newest pages while the store page is open, and forced full rebuild; full and incremental share one read-modify-write lock. Category counts come from the same index as the list.
       
-revision: f6f018e650111be669b39896b4a614a0d757c3a7
-updated_at: "2026-11-07T04:47:38.278Z"
-fingerprint: a9a76a13092b43971d7de7ef05f6baf37bb2edf34c299e7d65b4f6786482c26c
+revision: 89bc0c73458ae7cf701d5c51691a28cfbebc2135
+updated_at: "2026-11-07T05:17:26.532Z"
+fingerprint: 003d7fbcf3ae58a16bb170d40ec875d193e71944dcd81edda3e131eb5e931540
 source:
   - path: "endfieldmodcontroller/modstore.py"
 apis:

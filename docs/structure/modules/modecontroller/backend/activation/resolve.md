@@ -11,8 +11,8 @@ description:
   en: >
       Decide the final set that will actually load: filter to non-dependency candidates, apply same-character exclusivity (or keep all when the switch is off), activate dependencies only on demand, and produce a report of selected / dropped / missing / blocked.
       
-revision: f6f018e650111be669b39896b4a614a0d757c3a7
-updated_at: "2026-11-07T04:47:38.248Z"
+revision: 89bc0c73458ae7cf701d5c51691a28cfbebc2135
+updated_at: "2026-11-07T05:15:40.213Z"
 fingerprint: 0941030711c371eeb8676753e085b97460037e315cb1aa918669e97450882c58
 source:
   - path: "endfieldmodcontroller/activation.py"

@@ -11,13 +11,13 @@ description:
   en: >
       The one place the program's version number and repository coordinates live — so the updater, the release scripts and the UI all compare against the same string.
       
-revision: f6f018e650111be669b39896b4a614a0d757c3a7
-updated_at: "2026-11-07T04:47:38.259Z"
-fingerprint: 15d7f8ba84052b4f096c148b1f4573d6738aa8e86116946cc641c3dea377f409
+revision: 89bc0c73458ae7cf701d5c51691a28cfbebc2135
+updated_at: "2026-11-07T05:15:40.225Z"
+fingerprint: 997036629ba2d890a91cb3d98445d9909ff81de0e71110fc5e45f2cea6cfbb87
 source:
   - path: "endfieldmodcontroller/version.py"
     line: 2
-    end_line: 192
+    end_line: 196
 apis:
   - protocol: rpc
     path: "version.__version__"

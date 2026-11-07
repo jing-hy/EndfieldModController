@@ -11,8 +11,8 @@ description:
   en: >
       Put ReShade in and take it out safely: keep a manifest of every file installed so removal is exact, copy files atomically, disable add-ons that conflict and restore them later, adopt a ReShade dll the user already had, and download the official installer when asked.
       
-revision: f6f018e650111be669b39896b4a614a0d757c3a7
-updated_at: "2026-11-07T04:47:38.263Z"
+revision: 89bc0c73458ae7cf701d5c51691a28cfbebc2135
+updated_at: "2026-11-07T05:15:40.231Z"
 fingerprint: 3d170dadf46508faffaf06bc676c8b7820bee2a05676f17248b781a7206884ea
 source:
   - path: "endfieldmodcontroller/reshade_integration.py"
