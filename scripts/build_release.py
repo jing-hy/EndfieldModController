@@ -110,13 +110,55 @@ README_VERSION_SOURCES: tuple[tuple[str, str], ...] = (
 )
 
 
-def check_readme_versions(version: str) -> None:
-    """卡住"改了 version.py 却忘了改 README"这件事。
+def _plain_version(value: str) -> str:
+    """去掉前缀 v 与 `-beta` 之类的后缀，只留数字号。"""
+    return re.split(r"[-+]", str(value or "").strip().lstrip("vV"))[0].strip()
 
-    我此前连着两版（v0.7.0 / v0.7.1）都只升了 `version.py`，两份 README 停在 0.6.1，
-    被用户点出来（README 是 GitHub 首页，用户一眼就能看到版本号对不对）。
-    与其指望记性，不如让**构建直接失败** —— 宁可现在停下，也别把不一致的版本推上去。
+
+def _version_key(value: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in re.findall(r"\d+", _plain_version(value))) or (0,)
+
+
+def latest_release_version() -> str:
+    """本地 git tag 里最新的**正式**版本号（不带 v、不带 -beta）；取不到返回空串。
+
+    只读本地 tag、**不联网** —— 构建不该因为查不到 GitHub 就失败（离线构建也要能跑）。
     """
+    try:
+        result = subprocess.run(["git", "tag", "-l", "v*"], cwd=str(ROOT),
+                                capture_output=True, text=True,
+                                encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    best = ""
+    for line in (result.stdout or "").splitlines():
+        tag = line.strip()
+        if not tag or re.search(r"[-+]", tag):
+            continue                      # 预发布 tag 不算"最新 Release"
+        if not best or _version_key(tag) > _version_key(best):
+            best = _plain_version(tag)
+    return best
+
+
+def check_readme_versions(version: str) -> None:
+    """卡住"改了 version.py 却忘了改 README" —— 但**未发版的 beta 号不许写进 README**。
+
+    历史（2026-09-30 用户要求）：「以后每次推 release 的时候都要更新 README」——
+    README 是 GitHub 首页，版本号写错一眼就看见；所以**发版时**三处必须一致。
+    此前连着两版（v0.7.0 / v0.7.1）只升了 `version.py`、两份 README 停在 0.6.1，
+    于是把这条做成"构建直接失败"的硬闸，而不是指望记性。
+
+    2026-11-07 用户纠正：「为什么现在 github 上的 readme 会写 1.4.11-beta 是最新版，
+    都没推上去为什么要改」⇒ 未发版（本地 `X-beta`）时，两份 README **停在最新 Release 的号**；
+    真正发版时才把 version.py 收成正式号、README 跟着写成同一个正式号。
+    """
+    expected = version
+    note = ""
+    if re.search(r"[-+]", str(version or "")):
+        latest = latest_release_version()
+        if latest:
+            expected = latest
+            note = f"；未发版（{version}），README 停在最新 Release v{latest}"
     problems: list[str] = []
     for relative, pattern in README_VERSION_SOURCES:
         path = ROOT / relative
@@ -126,15 +168,16 @@ def check_readme_versions(version: str) -> None:
         match = re.search(pattern, path.read_text(encoding="utf-8"))
         if not match:
             problems.append(f"{relative}：找不到「当前版本 …」那一行")
-        elif match.group(1).strip() != version:
+        elif match.group(1).strip() != expected:
             problems.append(
-                f"{relative}：写的是 {match.group(1).strip()}，而 version.py 是 {version}")
+                f"{relative}：写的是 {match.group(1).strip()}，应为 {expected}"
+                + (f"（未发版不写 {version}）" if expected != version else ""))
     if problems:
         print("!! 版本号不一致 —— 发版前这些地方要一起改：", flush=True)
         for item in problems:
             print(f"     {item}", flush=True)
         raise SystemExit(1)
-    print(f"   版本号一致：{version}（version.py + {' + '.join(r for r, _ in README_VERSION_SOURCES)}）",
+    print(f"   版本号一致：version.py = {version}，README/docs = {expected}{note}",
           flush=True)
 
 

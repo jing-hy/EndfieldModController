@@ -284,6 +284,12 @@ async function loadMore() {
   } finally {
     loading.value = false;
     loadingMore.value = false;
+    if (headReloadPending) {
+      headReloadPending = false;
+      // 顶部刷新拿到了新条目，而这次列表是从旧索引读出来的 ⇒ 等它落地后重载一次
+      loadCategories();
+      reload();
+    }
   }
 }
 
@@ -445,6 +451,34 @@ async function pollScan() {
   } catch (e) { /* 轮询失败忽略 */ }
 }
 
+// ── 顶部增量刷新（2026-11-07 用户要求）────────────────────────────────────────
+// 「刷新应该增量刷新，改成点开 mod 商城页就刷新最上面，停留 mod 商城页就继续刷新」。
+// 只拉第 1~2 页（100 条，约 1 秒）并进索引 —— 新 Mod 立刻出现，老条目一条不动；
+// 全量重建仍在程序启动时由 `mod_store_prefetch` 按 TTL 在后台做。
+const HEAD_REFRESH_MS = 60 * 1000;
+let headTimer = null;
+let headReloadPending = false;
+const headNote = ref("");          // "顶部新增 N 个 Mod"
+
+async function refreshHead() {
+  try {
+    const result = await call("mod_store_head_refresh", nsfwMode.value);
+    if (!result || result.ok === false) return;   // busy / 没索引 / 网络抖：都不打扰用户
+    if (result.counts) counts.value = result.counts;
+    if (result.index) indexMeta.value = result.index;
+    if (result.added > 0) {
+      headNote.value = `顶部新增 ${result.added} 个 Mod`;
+      // 用户就在顶部 ⇒ 顺手重载，新 Mod 直接出现在列表里；滚到很下面时不打断他
+      if (window.scrollY < 800 && !detail.value) {
+        if (loading.value || loadingMore.value) headReloadPending = true;
+        else { await loadCategories(); reload(); }
+      }
+    } else {
+      headNote.value = "";
+    }
+  } catch (e) { /* 顶部刷新失败不打扰：网络抖一下很常见 */ }
+}
+
 // 强制重建索引（自动刷新有 TTL，用户"那个 Mod 不见了"是当场的事，不能等一天）
 async function refreshIndex() {
   try {
@@ -453,7 +487,8 @@ async function refreshIndex() {
       showAlert("索引刷新没能开始", (result && result.message) || "未知原因");
       return;
     }
-    scan.value = { ...scan.value, running: true, message: "正在重建索引…" };
+    // 与后端 `_store_start_task` 的开场白保持一致（自动刷新走同一条状态行）
+    scan.value = { ...scan.value, running: true, kind: "index", message: "正在刷新索引…" };
   } catch (e) { /* call 已经弹过错误窗 */ }
 }
 
@@ -504,14 +539,20 @@ function formatSize(bytes) {
 
 let timer = null;
 onMounted(() => {
-  prefetch();
+  prefetch();                       // 索引过期/残缺 ⇒ 后台全量重建（启动时已发起，这里只兜底）
   loadCategories();
-  loadMore();
+  // 列表先用本地索引出（毫秒级），再补"最上面" —— 打开商城页就能看到最新发布的那批
+  loadMore().finally(() => refreshHead());
   pollScan();
   timer = setInterval(pollScan, 2000);
+  // 停留在商城页：每 60 秒继续增量刷新顶部（切走/在详情页时不做）
+  headTimer = setInterval(() => {
+    if (!document.hidden && !detail.value) refreshHead();
+  }, HEAD_REFRESH_MS);
 });
 onUnmounted(() => {
   if (timer) clearInterval(timer);
+  if (headTimer) { clearInterval(headTimer); headTimer = null; }
   if (observer) { observer.disconnect(); observer = null; }
   if (sentinelObserver) { sentinelObserver.disconnect(); sentinelObserver = null; }
 });
@@ -623,7 +664,7 @@ onUnmounted(() => {
           </div>
           <span class="flex-1"></span>
           <Btn size="sm" :disabled="scan.running" @click="scanUpdates">
-            {{ scan.running ? "扫描中…" : "扫描更新" }}
+            {{ scan.running ? (scan.kind === "index" ? "刷新中…" : "扫描中…") : "扫描更新" }}
           </Btn>
           <Btn size="sm" variant="primary" :disabled="!updateCount" @click="updateAll">
             一键更新{{ updateCount ? `（${updateCount}）` : "" }}
@@ -635,6 +676,7 @@ onUnmounted(() => {
           <span v-if="updateCount">· 有 {{ updateCount }} 个可更新</span>
           <span v-if="missingCount">· {{ missingCount }} 个远端已找不到</span>
           <span v-if="indexed">· 已用本地索引</span>
+          <span v-if="headNote" style="color: var(--accent)">· {{ headNote }}</span>
           <!-- 索引状态要说清楚：条数 / 多久以前 / 完整不完整 ——
                「数字对不上」「Mod 消失了」时，用户看这一行就能判断是不是索引的问题 -->
           <template v-if="indexMeta && indexMeta.items">

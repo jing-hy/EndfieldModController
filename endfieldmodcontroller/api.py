@@ -598,6 +598,16 @@ class EndfieldModControllerApi:
                 launcher._append_log(self.config, f"文件守护跳过: {exc}")
             except Exception:  # noqa: BLE001
                 pass
+        # 商城索引：**程序一启动就在后台刷新**（用户 2026-11-07：「索引要自动刷新，点开 mod
+        # 管理器就可以开始刷新」）。放在预热最后：它只发起线程、不等待，商城页轮询的是同一份
+        # `_store_task` ⇒ **自动刷新与点「刷新索引」看到的是同一条状态行**。
+        try:
+            self._warm_up_store_index()
+        except Exception as exc:  # noqa: BLE001 —— 商城索引不该影响启动
+            try:
+                launcher._append_log(self.config, f"商城索引自动刷新跳过: {exc}")
+            except Exception:  # noqa: BLE001
+                pass
         self._warm_done = True
         # 首屏如果「举手」过（本管理器版本缓存过期），到这里才真的联网：
         # 预热本来就是后台、不挡界面；早于这里发起会把首屏拖成"加载页不动"。
@@ -4905,7 +4915,10 @@ class EndfieldModControllerApi:
                 return {"ok": False,
                         "message": f"上一个商城任务还在跑（{self._store_task.get('message') or ''}）"}
             self._store_task = {
-                "kind": kind, "running": True, "message": "准备中…",
+                "kind": kind, "running": True,
+                # 索引刷新与"批量扫描"用同一套状态行 ⇒ 两边的开场白也统一（用户
+                # 2026-11-07 要求自动刷新与手动刷新"显示一样"）。
+                "message": "正在刷新索引…" if kind == "index" else "准备中…",
                 "result": {}, "started_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             }
         threading.Thread(target=worker, daemon=True).start()
@@ -4922,6 +4935,29 @@ class EndfieldModControllerApi:
             "result": task.get("result") or {},
             "scan": fsutil.read_json(modstore.scan_path(self.config)),
         }
+
+    def _warm_up_store_index(self) -> None:
+        """开机就在后台刷一次商城索引（**只发起、不等待**）。
+
+        做什么：调 `mod_store_prefetch()` —— 是否真的拉取由 `modstore.ensure_index`
+        的 TTL 判（完整索引一天、残缺索引十分钟），这里不重复实现判据。
+        为什么放在预热里：用户要的是"点开管理器就开始刷新"，而不是"进了商城页才刷新"；
+        真正拉取仍在 `_store_start_task` 起的线程里，进度写进 `_store_task`，
+        商城页轮询的就是它（所以自动刷新与手动刷新**显示完全一致**）。
+        """
+        result = self.mod_store_prefetch()
+        if result.get("ok") and result.get("started"):
+            launcher._append_log(
+                self.config, "商城索引：程序启动后自动刷新已开始（进度见商城页状态行）")
+        elif result.get("cached"):
+            launcher._append_log(
+                self.config,
+                f"商城索引：{self._format_age(result.get('age'))}更新过"
+                f"（{result.get('total') or 0} 个 Mod），本次不刷新")
+        else:
+            launcher._append_log(
+                self.config,
+                f"商城索引：自动刷新未开始（{result.get('message') or '未知原因'}）")
 
     @classmethod
     def _store_index_message(cls, index: dict[str, Any], state: dict[str, Any]) -> str:
@@ -5015,6 +5051,48 @@ class EndfieldModControllerApi:
                         self._store_task["running"] = False
                         self._store_task["message"] = f"索引刷新失败：{exc}"
         return self._store_start_task("index", worker)
+
+    def mod_store_head_refresh(self, nsfw: str = "blur") -> dict[str, Any]:
+        """**顶部增量刷新**：只拉最上面几页，把新 Mod 并进本地索引（打开/停留在商城页时调）。
+
+        用户 2026-11-07：「刷新应该增量刷新，改成点开 mod 商城页就刷新最上面，
+        停留 mod 商城页就继续刷新」。所以这里**不是**全量重建：
+        * 打开商城页 → 拉第 1~2 页（100 条）约 1 秒，新 Mod 立刻能看见；
+        * 停留期间前端每 60 秒再调一次 → 继续补"最上面"；
+        * 全量重建仍由 `mod_store_prefetch` 按 TTL 在启动时做（十几页、十几秒）。
+
+        `busy=True`：正有一次全量刷新在跑（索引锁被占），这次跳过即可 —— 前端不该报错。
+        """
+        mode = str(nsfw or "blur").lower()
+        if mode not in ("show", "blur", "hide"):
+            mode = "blur"
+        try:
+            result = modstore.head_refresh(
+                self.config,
+                log=lambda line: launcher._append_log(self.config, line))
+        except modstore.StoreBadRequest as exc:
+            return {"ok": False, "added": 0, "message": f"香蕉网拒绝了这次请求：{exc}"}
+        except modstore.StoreUnreachable as exc:
+            return {"ok": False, "added": 0, "unreachable": True,
+                    "message": "访问不上香蕉网（超时 / DNS / 证书 / 地区限制）—— "
+                               "建议检查 VPN 或加速器后重试。"
+                               + (f"（{exc}）" if str(exc) else "")}
+        if not result.get("ok"):
+            payload: dict[str, Any] = {"ok": False, "added": 0,
+                                       "busy": bool(result.get("busy")),
+                                       "need_full": bool(result.get("need_full"))}
+            if payload["busy"]:
+                payload["message"] = "索引正在全量刷新，稍后自动继续"
+            elif payload["need_full"]:
+                payload["message"] = "还没有本地索引，先做一次全量索引"
+            return payload
+        items = result.get("items") or []
+        return {
+            "ok": True,
+            "added": int(result.get("added") or 0),
+            "counts": modstore.category_counts(items, nsfw=mode),
+            "index": modstore.index_state(result),
+        }
 
     def mod_store_installed_list(self) -> list[dict[str, Any]]:
         """库里**从香蕉网下载来的** Mod 清单（含"本地这份是什么时候下的"）。

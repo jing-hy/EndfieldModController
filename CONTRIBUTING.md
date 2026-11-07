@@ -51,10 +51,11 @@ python -m pytest tests -q
 ### 2. 版本号（只跟「最新 Release」比）
 
 * 规则：**本地 = 最新 Release + 1**；**只推了源码、没发 Release 时，版本号不用改**（这是软约束，可豁免但要说明）。
-* 改了 `endfieldmodcontroller/version.py` 就**必须同时改这两处的"当前版本"**：
-  * `README.md`（hero 区那行）
-  * `docs/README.detailed.md`（开头）
-  * `scripts/build_release.py` 第 0 步会**卡住**不一致的提交（直接 exit 1），别绕。
+* **两份 README 只写"已经发出去"的版本**（用户 2026-11-07：「为什么现在 github 上的 readme 会写
+  1.4.11-beta 是最新版，都没推上去为什么要改」）：
+  * **未发版**（`version.py` 是 `X-beta`）⇒ `README.md` 与 `docs/README.detailed.md` **停在最新 Release 的号**；
+  * **真正发版** ⇒ `version.py` 收成正式号，同时把这两处改成同一个正式号（三处一致）。
+  * `scripts/build_release.py` 第 0 步按这条校验（不再要求把 beta 号写进 README），不一致直接 exit 1，别绕。
 * 可以先跑 `python scripts/release_version.py` 看当前该怎么定号。
 
 ### 3. 结构树（normify）—— 改了源码就要刷新

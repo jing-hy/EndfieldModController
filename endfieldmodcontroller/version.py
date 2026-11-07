@@ -10,6 +10,8 @@ GitHub 上只推了源码（main 更新）但没发 Release 时，版本号不�
 **2026-10-04 用户新增（原话）**：「在正式推版本之前，都采用比 release 多一，但是加 -beta，
 检测到 github 正式版要跳更新，比如 1.0.9 比 1.0.9-beta 新」+「推 release 的都不带 beta」。落地：
   * **未发版**：本地版本 = 「最新 Release + 1」+ **`-beta`**（Release 是 `1.0.9` ⇒ 本地 `1.0.10-beta`）；
+    ⚠️ 但**两份 README 不写这个 beta 号**（用户 2026-11-07：「都没推上去为什么要改」）——
+    未发版时 README 停在**最新 Release 的号**，等发版再一起收成正式号；`build_release.py` 按这条校验。
   * **同号时正式版更新**：`1.0.9` **比** `1.0.9-beta` 新（beta 是预发布语义，与 PEP 440 一致）
     ⇒ 用户手上装着 `1.0.9-beta` 时，一旦 `1.0.9` 正式发布，更新检测**必须**提示可更新；
   * **发 Release 时去掉 beta**：tag 与正文都是 `1.0.10`（`strip_prerelease` 负责这一步）。
@@ -24,7 +26,7 @@ from __future__ import annotations
 import re
 
 APP_NAME = "EndfieldModController"
-__version__ = "1.4.11-beta"
+__version__ = "1.4.11"
 
 # 自我更新与"检查更新"指向的仓库
 REPO = "jing-hy/EndfieldModController"

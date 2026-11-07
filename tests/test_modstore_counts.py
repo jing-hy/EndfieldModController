@@ -24,8 +24,22 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+import pytest
+
+from endfieldmodcontroller import alerts, character_sync, filewatch, sbm_data_sync, selfupdate
 from endfieldmodcontroller import api as api_mod
 from endfieldmodcontroller import moddl, modstore
+
+
+@pytest.fixture(autouse=True)
+def _no_background_warm_up(monkeypatch):
+    """**禁掉 API 构造时起的预热线程**。
+
+    这些用例只测索引逻辑，而真实预热线程会联网（角色表 / 商城索引…）—— 它会在测试
+    结束后继续跑，撞上下一个用例打桩的 `fastnet.fetch`，表现为"莫名多了一个 Mod/Index 请求"。
+    （2026-11-07 实测踩到：detail 用例断言 2 次请求，实际 3 次。）
+    """
+    monkeypatch.setattr(api_mod.EndfieldModControllerApi, "_start_warm_up", lambda self: None)
 
 
 def _item(mod_id, root, character, *, nsfw=False, updated=1000):
@@ -231,3 +245,140 @@ def test_index_status_message_is_honest():
     stale = dict(ready, age=3 * 86400)
     message = cls._store_index_message({"reused_cache": True}, stale)
     assert "刷新失败" in message and "3 天前" in message
+
+# ── ④ 增量刷新：只拉最上面几页（2026-11-07 追加要求）────────────────────────
+def test_head_refresh_merges_only_the_top_pages(tmp_path, monkeypatch):
+    """顶部增量刷新：新条目并入、老条目一条不丢、更新的字段以这次为准。"""
+    config = SimpleNamespace(runtime_path=tmp_path)
+    _write_index(config, [{"id": 1, "name": "old-1"}, {"id": 2, "name": "old-2"},
+                          {"id": 3, "name": "old-3"}], total=3, fetched_at=111.0)
+
+    def fake_list(page, per_page=modstore.PAGE_MAX, **kwargs):
+        rows = {1: [{"id": 2, "name": "updated-2"}, {"id": 4, "name": "new-4"}],
+                2: [{"id": 5, "name": "new-5"}]}[page]
+        return {"items": rows, "total": 5, "page": page,
+                "per_page": per_page, "source": "index"}
+
+    monkeypatch.setattr(modstore, "list_mods", fake_list)
+    result = modstore.head_refresh(config, pages=2)
+    assert result["ok"] is True and result["added"] == 2
+
+    saved = modstore.load_index(config)
+    assert sorted(int(item["id"]) for item in saved["items"]) == [1, 2, 3, 4, 5]
+    # 全量刷新时间**不许**被顶部刷新改掉（否则就永远不再全量核对了）
+    assert saved["fetched_at"] == 111.0
+    assert saved["head_at"] > 0
+    assert next(item for item in saved["items"] if int(item["id"]) == 2)["name"] == "updated-2"
+
+
+def test_head_refresh_needs_a_full_index_first(tmp_path):
+    config = SimpleNamespace(runtime_path=tmp_path)
+    result = modstore.head_refresh(config)
+    assert result["ok"] is False and result["need_full"] is True
+
+
+def test_head_refresh_stands_down_while_a_full_build_is_running(tmp_path):
+    """全量构建持锁时顶部刷新必须让开（别两个线程读-改-写同一份缓存）。"""
+    config = SimpleNamespace(runtime_path=tmp_path)
+    _write_index(config, [{"id": 1}], total=1)
+    assert modstore._INDEX_LOCK.acquire(blocking=False)
+    try:
+        result = modstore.head_refresh(config)
+    finally:
+        modstore._INDEX_LOCK.release()
+    assert result["ok"] is False and result["busy"] is True
+
+
+def test_ensure_index_returns_the_cache_when_another_refresh_holds_the_lock(tmp_path):
+    config = SimpleNamespace(runtime_path=tmp_path)
+    _write_index(config, [{"id": 1}], total=1, fetched_at=0.0)
+    assert modstore._INDEX_LOCK.acquire(blocking=False)
+    try:
+        data = modstore.ensure_index(config, force=True)
+    finally:
+        modstore._INDEX_LOCK.release()
+    assert data["busy"] is True
+    assert data["items"][0]["id"] == 1
+
+
+def test_api_head_refresh_returns_counts(tmp_path, monkeypatch):
+    """接口层：顶部刷新要带回与列表同源的计数（R18 隐藏时一起少）。"""
+    inst = _api(tmp_path)
+    _write_index(inst.config, [_item(1, "Skins", "Chen Qianyu")])
+
+    def fake_list(page, per_page=modstore.PAGE_MAX, **kwargs):
+        return {"items": [_item(2, "Skins", "Chen Qianyu", nsfw=True)], "total": 2,
+                "page": page, "per_page": per_page, "source": "index"}
+
+    monkeypatch.setattr(modstore, "list_mods", fake_list)
+    monkeypatch.setattr(api_mod.launcher, "_append_log", lambda cfg, line: None)
+    result = inst.mod_store_head_refresh("hide")
+    assert result["ok"] is True and result["added"] == 1
+    assert result["counts"]["total"] == 1        # 隐藏 R18 ⇒ 只算没标 R18 的那条
+    assert result["index"]["items"] == 2
+
+# ── ③ 开机就自动刷新索引（2026-11-07 追加要求）──────────────────────────────
+def test_prefetch_starts_a_task_for_a_stale_index(tmp_path, monkeypatch):
+    """索引过期 ⇒ 进商城页/开机预热都会发起后台任务，进度走同一条状态行。"""
+    inst = _api(tmp_path)
+    _write_index(inst.config, [{"id": 1}], total=1, fetched_at=time.time() - 3 * 86400)
+    monkeypatch.setattr(
+        api_mod.EndfieldModControllerApi, "_store_index",
+        lambda self, **kwargs: {"items": [{"id": 1}], "total": 1, "complete": True,
+                                "failed_pages": [], "fetched_at": time.time()})
+    result = inst.mod_store_prefetch()
+    assert result["ok"] and result["started"]
+    status = inst.mod_store_task_status()
+    for _ in range(100):
+        status = inst.mod_store_task_status()
+        if not status["running"]:
+            break
+        time.sleep(0.05)
+    assert status["kind"] == "index"
+    assert "索引就绪" in status["message"]
+
+
+def test_prefetch_does_nothing_when_the_index_is_fresh(tmp_path):
+    inst = _api(tmp_path)
+    _write_index(inst.config, [{"id": 1}], total=1, fetched_at=time.time())
+    result = inst.mod_store_prefetch()
+    assert result.get("cached") is True
+    assert inst.mod_store_task_status()["running"] is False
+
+
+def test_warm_up_store_index_logs_what_it_did(tmp_path, monkeypatch):
+    """预热里的日志要让人看得出"这次刷了/没刷、为什么"。"""
+    inst = _api(tmp_path)
+    lines: list[str] = []
+    monkeypatch.setattr(api_mod.launcher, "_append_log", lambda cfg, line: lines.append(line))
+
+    monkeypatch.setattr(inst, "mod_store_prefetch", lambda: {"ok": True, "started": True})
+    inst._warm_up_store_index()
+    assert "自动刷新已开始" in lines[-1]
+
+    monkeypatch.setattr(inst, "mod_store_prefetch",
+                        lambda: {"ok": True, "cached": True, "age": 7200, "total": 796})
+    inst._warm_up_store_index()
+    assert "本次不刷新" in lines[-1] and "2 小时前" in lines[-1]
+
+
+def test_warm_up_calls_the_store_index_refresh(tmp_path, monkeypatch):
+    """⭐ 用户要求：**点开管理器就开始刷新**，不必先进商城页。
+
+    只加个方法不接进预热线程等于没做，所以这里把整段预热真跑一遍。
+    """
+    inst = _api(tmp_path)
+    calls: list[int] = []
+    monkeypatch.setattr(inst, "_mods", lambda: [])
+    monkeypatch.setattr(inst, "_ui_ready",
+                        SimpleNamespace(wait=lambda timeout=0: True, set=lambda: None))
+    monkeypatch.setattr(inst.config, "autofill", lambda **kwargs: False)
+    monkeypatch.setattr(selfupdate, "cleanup_stale", lambda cfg: [])
+    monkeypatch.setattr(character_sync, "sync", lambda cfg, **kwargs: {})
+    monkeypatch.setattr(sbm_data_sync, "sync", lambda cfg, **kwargs: {})
+    monkeypatch.setattr(inst, "_backup_new_mods", lambda **kwargs: {})
+    monkeypatch.setattr(alerts, "overview", lambda cfg, **kwargs: {})
+    monkeypatch.setattr(filewatch, "scan", lambda cfg, **kwargs: {})
+    monkeypatch.setattr(inst, "_warm_up_store_index", lambda: calls.append(1))
+    inst._warm_up()
+    assert calls == [1]

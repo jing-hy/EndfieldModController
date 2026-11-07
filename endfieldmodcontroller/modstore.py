@@ -68,6 +68,10 @@ INDEX_TTL_SECONDS = 24 * 3600          # 全量索引：一天一次足够
 INDEX_INCOMPLETE_RETRY_SECONDS = 10 * 60
 #: 索引单页最多重试几次（站点/线路抖一下不要整页丢掉，见 `build_index`）。
 INDEX_PAGE_ATTEMPTS = 3
+#: **顶部增量刷新**默认拉几页。实测 `Mod/Index` 第 1 页就是"最近更新"靠前的那批
+#: （2026-11-07：Subfeed 最新的 15 条全在第 1 页里），所以 1 页 × 50 条足够覆盖
+#: 打开商城前新增/刚更新的 Mod；比全量 16 页快一个数量级（实测 1 页约 2 秒）。
+INDEX_HEAD_PAGES = 1
 CATEGORIES_TTL_SECONDS = 7 * 24 * 3600  # 分类树（角色名单）：一周一次
 
 #: 商城**缓存字段版本号**（全量索引与分类树共用）。
@@ -122,6 +126,10 @@ class StoreBadRequest(RuntimeError):
 # ── 请求层 ───────────────────────────────────────────────────────────────────
 _throttle_lock = threading.Lock()
 _last_request_at = 0.0
+
+#: 索引缓存的**读-改-写锁**。全量构建（十几秒）与顶部的增量刷新（一两秒）都会读-改-写
+#: 同一份缓存 —— 不互斥的话，后写的会把先写进去的条目吃掉（2026-11-07）。
+_INDEX_LOCK = threading.Lock()
 
 
 def user_agent() -> str:
@@ -979,8 +987,9 @@ def index_state(index: dict | None = None, *, now: float | None = None) -> dict:
     data = index or {}
     items = data.get("items") or []
     total = int(data.get("total") or len(items))
-    age = max(0.0, float(now if now is not None else time.time())
-              - float(data.get("fetched_at") or 0))
+    stamp = float(now if now is not None else time.time())
+    age = max(0.0, stamp - float(data.get("fetched_at") or 0))
+    head_at = float(data.get("head_at") or 0)
     return {
         "items": len(items),
         "total": total,
@@ -989,6 +998,9 @@ def index_state(index: dict | None = None, *, now: float | None = None) -> dict:
         "failed_pages": list(data.get("failed_pages") or []),
         "fetched_at": float(data.get("fetched_at") or 0),
         "age": age,
+        # 顶部增量刷新（只拉最新几页）的时间 —— 打开商城页就会做一次，见 head_refresh()
+        "head_at": head_at,
+        "head_age": max(0.0, stamp - head_at) if head_at else 0.0,
     }
 
 
@@ -1127,48 +1139,110 @@ def ensure_index(config: Any, *, ttl: int = INDEX_TTL_SECONDS, force: bool = Fal
     缺的条目**补回来**（`merge_index_items`），并标记 `complete=False`；
     完整刷新才以这次为准（站点上真下架的条目该跟着消失）。
     """
-    from . import fsutil
-
     cached = load_index(config)
     state = index_state(cached)
     # 残缺索引**缩短重试间隔**：这次少了一页，不该等一整天再补（用户正看着"少 77 个"的商城）。
     fresh_enough = ttl if state["complete"] else min(ttl, INDEX_INCOMPLETE_RETRY_SECONDS)
     if not force and cached.get("items") and state["age"] < fresh_enough:
         return {**cached, "refreshed": False, "reused_cache": False, "reused": 0}
-    try:
-        fresh = build_index(cancel=cancel, progress=progress, log=log)
-    except Exception as exc:  # noqa: BLE001
+    # 同一时刻只允许一次刷新在跑：全量构建要十几秒，期间商城页的**顶部增量刷新**必须先让开，
+    # 否则两个线程读-改-写同一份缓存，后写的会把先写的条目吃掉。
+    if not _INDEX_LOCK.acquire(blocking=False):
         if cached.get("items"):
-            _log(log, f"商城索引：刷新失败，先用上次缓存（{exc}）")
-            return {**cached, "refreshed": False, "reused_cache": True, "reused": 0,
-                    "error": str(exc)}
-        raise
-    fresh_items = fresh.get("items") or []
-    if not fresh_items and cached.get("items"):
-        _log(log, "商城索引：这次一条都没取到，保留上次缓存")
-        return {**cached, "refreshed": False, "reused_cache": True, "reused": 0}
-    items = fresh_items
-    reused = 0
-    if not fresh.get("complete") and cached.get("items"):
-        items, reused = merge_index_items(fresh_items, cached["items"])
-        if reused:
-            _log(log, f"商城索引：这次只拿到 {len(fresh_items)} 条（站点 "
-                      f"{fresh.get('total') or '?'} 条），已补回 {reused} 条旧索引")
-    payload = {
-        **fresh,
-        "items": items,
-        "total": max(int(fresh.get("total") or 0), len(items)),
-        "complete": bool(fresh.get("complete")),
-        "reused": reused,
-    }
-    # 只落盘"界面要用的字段"，不把整个 raw 塞进索引（几百条 raw 会让文件胖到几 MB）
-    slim = [{key: value for key, value in item.items() if key != "raw"} for item in items]
+            return {**cached, "refreshed": False, "reused_cache": False,
+                    "reused": 0, "busy": True}
+        raise StoreUnreachable("索引正在刷新，请稍后再试")
+    try:
+        try:
+            fresh = build_index(cancel=cancel, progress=progress, log=log)
+        except Exception as exc:  # noqa: BLE001
+            if cached.get("items"):
+                _log(log, f"商城索引：刷新失败，先用上次缓存（{exc}）")
+                return {**cached, "refreshed": False, "reused_cache": True, "reused": 0,
+                        "error": str(exc)}
+            raise
+        fresh_items = fresh.get("items") or []
+        if not fresh_items and cached.get("items"):
+            _log(log, "商城索引：这次一条都没取到，保留上次缓存")
+            return {**cached, "refreshed": False, "reused_cache": True, "reused": 0}
+        items = fresh_items
+        reused = 0
+        if not fresh.get("complete") and cached.get("items"):
+            items, reused = merge_index_items(fresh_items, cached["items"])
+            if reused:
+                _log(log, f"商城索引：这次只拿到 {len(fresh_items)} 条（站点 "
+                          f"{fresh.get('total') or '?'} 条），已补回 {reused} 条旧索引")
+        payload = {
+            **fresh,
+            "items": items,
+            "total": max(int(fresh.get("total") or 0), len(items)),
+            "complete": bool(fresh.get("complete")),
+            "reused": reused,
+        }
+        _write_index(config, payload, log=log)
+        return {**payload, "refreshed": True, "reused_cache": False}
+    finally:
+        _INDEX_LOCK.release()
+
+
+def head_refresh(config: Any, *, pages: int = INDEX_HEAD_PAGES, per_page: int = PAGE_MAX,
+                 timeout: int = REQUEST_TIMEOUT, cancel: Cancel = None,
+                 log: Callable[[str], None] | None = None) -> dict:
+    """**增量刷新**：只拉最上面几页，把新 Mod 并进本地索引，其余条目一条都不动。
+
+    用户 2026-11-07：「刷新应该增量刷新，改成点开 mod 商城页就刷新最上面，
+    停留 mod 商城页就继续刷新」。一页 50 条约 1 秒，比全量 16 页快一个数量级：
+    打开商城先把"最近更新"的那批补进来；老条目不会变，没必要每次重拉
+    （真正需要全量重建时仍由 ensure_index 按 TTL 负责）。
+
+    fetched_at（全量刷新时间）**保持不动**，只写 head_at —— 顶部刷新不能把
+    "这份索引该不该全量重建"的判据一起刷新掉，否则会永远不再全量核对。
+
+    返回 ok/added/…；busy=True 表示正有一次全量刷新在跑（这次跳过即可）。
+    """
+    if not _INDEX_LOCK.acquire(blocking=False):
+        return {"ok": False, "busy": True, "added": 0}
+    try:
+        cached = load_index(config)
+        if not cached.get("items"):
+            return {"ok": False, "need_full": True, "added": 0}
+        fetched: list[dict] = []
+        total = int(cached.get("total") or 0)
+        for page in range(1, max(1, int(pages)) + 1):
+            result = list_mods(page, per_page, timeout=timeout, cancel=cancel)
+            total = result.get("total") or total
+            fetched.extend(result.get("items") or [])
+        before = {str(item.get("id") or "") for item in cached["items"]}
+        merged, _ = merge_index_items(fetched, cached["items"])
+        added = len({str(item.get("id") or "") for item in merged} - before)
+        payload = {
+            **cached,
+            "items": merged,
+            "total": max(total, len(merged)),
+            "head_at": time.time(),
+        }
+        _write_index(config, payload, log=log)
+        return {"ok": True, "added": added, **payload}
+    finally:
+        _INDEX_LOCK.release()
+
+
+def _write_index(config: Any, payload: dict, *,
+                 log: Callable[[str], None] | None = None) -> None:
+    """把索引落盘（**调用方必须持 _INDEX_LOCK**）。
+
+    只存"界面要用的字段"，不把整个 raw 塞进索引（几百条 raw 会让文件胖到几 MB）。
+    写失败只记日志、不抛 —— 缓存写不进去不该让本次浏览失败。
+    """
+    from . import fsutil
+
+    slim = [{key: value for key, value in item.items() if key != "raw"}
+            for item in (payload.get("items") or [])]
     try:
         fsutil.write_json(index_path(config),
                           {**payload, "schema": STORE_SCHEMA, "items": slim})
     except OSError as exc:  # noqa: BLE001
         _log(log, f"商城索引：缓存写入失败（{exc}）")
-    return {**payload, "refreshed": True, "reused_cache": False}
 
 
 # ── 更新判定（"批量扫描"的核心，不需要逐个查详情）───────────────────────────
@@ -1246,8 +1320,8 @@ __all__ = [
     "categories", "load_categories", "categories_path",
     "detail",
     "index_path", "load_index", "index_age", "build_index", "ensure_index",
-    "INDEX_PAGE_ATTEMPTS", "INDEX_INCOMPLETE_RETRY_SECONDS",
-    "index_state", "category_counts", "merge_index_items",
+    "head_refresh", "INDEX_PAGE_ATTEMPTS", "INDEX_INCOMPLETE_RETRY_SECONDS",
+    "INDEX_HEAD_PAGES", "index_state", "category_counts", "merge_index_items",
     "compare_updates", "parse_download_time",
     "thumb_root", "thumb_path", "prepare_images", "ThumbServer",
 ]
