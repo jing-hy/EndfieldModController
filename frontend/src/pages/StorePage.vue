@@ -66,7 +66,9 @@ const queued = ref({});
 
 const detail = ref(null);
 const detailLoading = ref(false);
-const lightbox = ref("");
+const lightbox = ref("");          // 要放大的那张（可能是要现下的"大图"）
+const lightboxFallback = ref("");  // 已在本地的缩略图：大图没到之前先用它顶着
+const lightboxSlow = ref(false);   // 超过 12 秒还没到位 ⇒ 换一句实话，别一直"加载中"
 
 const scan = ref({ running: false, message: "", result: {}, saved: {} });
 
@@ -366,7 +368,10 @@ async function openDetail(item) {
     if (result && result.ok) {
       detail.value = { ...item, ...result.item, loading: false };
       // 详情换**大档**（列表用的是 220 小档）—— 用户已经点进来了，值得多等一会儿换清晰
-      prepareImages((result.item.images || []).map((img) => img.thumb_big || img.thumb));
+      // ⚠️ 2026-11-07：detail 的 images 只有 full/big/thumb 三档，**没有 thumb_big**
+      // （列表卡片才有）。原来这里取 img.thumb_big || img.thumb ⇒ 预取的永远是缩略图，
+      // 点开"大图"每次都要现下 —— 用户看到的就是"大图加载中"（第一张常常已经缓存所以能开）。
+      prepareImages((result.item.images || []).map((img) => img.big || img.full || img.thumb));
     } else {
       detail.value = { ...item, loading: false, error: (result && result.message) || "详情没取到" };
     }
@@ -379,20 +384,37 @@ async function openDetail(item) {
 
 function closeDetail() {
   detail.value = null;
-  lightbox.value = "";
+  closeLightbox();
   // 列表重新渲染出来 ⇒ 哨兵是新的 DOM，得重新盯上（否则从详情返回后就不再自动加载）
   nextTick(() => { watchSentinel(); fillIfNeeded(); });
 }
 
-function openLightbox(url) {
-  if (!url) return;
-  lightbox.value = url;
-  prepareImages([url]);
+function openLightbox(url, small = "") {
+  const big = String(url || small || "");
+  if (!big) return;
+  lightbox.value = big;
+  lightboxFallback.value = String(small || "");
+  lightboxSlow.value = false;
+  // 先把已经在本地的那张备好（点开立刻有画面），再去要真正的大图
+  prepareImages([big, lightboxFallback.value].filter(Boolean));
+  // 12 秒还拿不到 ⇒ 明确说"取不回来"，而不是永远转"加载中"
+  //（GameBanana 有些截图根本没有大档，也有整个域名抽风的时候）
+  setTimeout(() => {
+    if (lightbox.value === big && !imageSrc(big) && !imageSrc(lightboxFallback.value)) {
+      lightboxSlow.value = true;
+    }
+  }, 12000);
 }
 
 function closeLightbox() {
   lightbox.value = "";
+  lightboxFallback.value = "";
+  lightboxSlow.value = false;
 }
+
+// 灯箱里到底画哪张：大图到位就画大图，否则先用缩略图顶着
+const lightboxSrc = computed(() =>
+  imageSrc(lightbox.value) || imageSrc(lightboxFallback.value) || "");
 
 // ── 下载（不跳转）───────────────────────────────────────────────────────────
 async function download(item) {
@@ -472,10 +494,34 @@ let headTimer = null;
 let headReloadPending = false;
 const headNote = ref("");          // "顶部新增 N 个 Mod"
 
-async function refreshHead() {
+let headRetryTimer = null;
+let headRetries = 0;            // busy 时的重试次数（全量索引十几秒，最多等 ~30 秒）
+async function refreshHead(retried = false) {
   try {
     const result = await call("mod_store_head_refresh", nsfwMode.value);
-    if (!result || result.ok === false) return;   // busy / 没索引 / 网络抖：都不打扰用户
+    if (!result) return;
+    if (result.ok === false) {
+      // 全量索引正在建（busy）：6 秒后再来一次，而不是干等 60 秒的定时器
+      if (result.busy) {
+        headRetries += 1;
+        if (headRetries <= 5) {
+          if (headRetryTimer) clearTimeout(headRetryTimer);
+          headRetryTimer = setTimeout(() => refreshHead(true), 6000);
+          headNote.value = `索引正在全量刷新，好后自动继续（第 ${headRetries} 次等待）`;
+          return;
+        }
+        headNote.value = "索引正在全量刷新，本次先不做顶部检查（稍后会自动再试）";
+        return;
+      }
+      headRetries = 0;
+      // ⚠️ 失败**必须让用户看到**（2026-11-07 用户反馈"根本不会自动刷新"时，
+      //   前端把失败全吞了，界面上没有任何痕迹）。
+      headNote.value = result.unreachable
+        ? "顶部刷新失败：连不上香蕉网（开加速器后可点「刷新索引」重试）"
+        : (result.message || "顶部刷新失败，下次自动再试");
+      return;
+    }
+    headRetries = 0;
     if (result.counts) counts.value = result.counts;
     if (result.index) indexMeta.value = result.index;
     if (result.added > 0) {
@@ -523,6 +569,15 @@ function rowCount(row, kind) {
 const rootRows = computed(() => (categories.value.roots || []).map((row) => ({ ...row, count: rowCount(row, "roots") })));
 const characterRows = computed(() => (categories.value.characters || []).map((row) => ({ ...row, count: rowCount(row, "characters") })));
 const catalogTotal = computed(() => (counts.value ? Number(counts.value.total || 0) : 0));
+const headAgeText = computed(() => {
+  const meta = indexMeta.value || {};
+  if (!meta.head_at) return "";
+  const seconds = Number(meta.head_age || 0);
+  if (seconds < 90) return "顶部已检查（刚刚）";
+  if (seconds < 3600) return `顶部已检查（${Math.floor(seconds / 60)} 分钟前）`;
+  return `顶部已检查（${Math.floor(seconds / 3600)} 小时前）`;
+});
+
 const indexAgeText = computed(() => {
   const seconds = Number((indexMeta.value && indexMeta.value.age) || 0);
   if (!seconds) return "";
@@ -553,8 +608,11 @@ let timer = null;
 onMounted(() => {
   prefetch();                       // 索引过期/残缺 ⇒ 后台全量重建（启动时已发起，这里只兜底）
   loadCategories();
-  // 列表先用本地索引出（毫秒级），再补"最上面" —— 打开商城页就能看到最新发布的那批
-  loadMore().finally(() => refreshHead());
+  // 列表先用本地索引出（毫秒级）；**顶部增量刷新并行起**（2026-11-07 用户：进商城仍不会自动刷新）
+  // —— 以前是 `loadMore().finally(refreshHead)`：第一页读完才开始拉最新 100 条，慢，而且
+  //    界面上完全看不出"到底刷过没有"（状态行显示的是全量索引的 fetched_at）。
+  loadMore();
+  refreshHead();
   pollScan();
   timer = setInterval(pollScan, 2000);
   // 停留在商城页：每 60 秒继续增量刷新顶部（切走/在详情页时不做）
@@ -596,7 +654,7 @@ onUnmounted(() => {
           <div v-for="(img, index) in detailImages" :key="index"
                class="shrink-0 rounded overflow-hidden cursor-pointer"
                style="width: 200px; aspect-ratio: 16 / 9; background: var(--surface-2); border: 1px solid var(--border)"
-               @click="openLightbox(img.big || img.full || img.thumb)">
+               @click="openLightbox(img.big || img.full || img.thumb, img.thumb)">
             <img v-if="imageSrc(img.thumb_big || img.thumb)" :src="imageSrc(img.thumb_big || img.thumb)"
                  class="w-full h-full object-cover" alt="" />
             <div v-else class="w-full h-full flex items-center justify-center text-xs" style="color: var(--text-muted)">…</div>
@@ -697,6 +755,7 @@ onUnmounted(() => {
               （不完整 {{ indexMeta.items }}/{{ indexMeta.total }}）
             </span>
             <span v-else-if="indexAgeText">（{{ indexAgeText }}）</span>
+            <span v-if="headAgeText" style="color: var(--accent)">· {{ headAgeText }}</span>
           </template>
           <a class="ml-2 cursor-pointer" style="color: var(--accent)"
              :style="scan.running ? 'opacity:.4; pointer-events:none' : ''"
@@ -833,9 +892,11 @@ onUnmounted(() => {
     <!-- 灯箱：点预览图看大图 -->
     <div v-if="lightbox" class="fixed inset-0 z-50 flex items-center justify-center p-6"
          style="background: rgba(0,0,0,.8)" @click="closeLightbox">
-      <img v-if="imageSrc(lightbox)" :src="imageSrc(lightbox)"
+      <img v-if="lightboxSrc" :src="lightboxSrc"
            style="max-width: 94vw; max-height: 88vh; object-fit: contain" alt="" />
-      <div v-else class="text-sm" style="color: #fff">大图加载中…（点任意处关闭）</div>
+      <div v-else class="text-sm" style="color: #fff">
+        {{ lightboxSlow ? "这张大图取不回来（点任意处关闭）" : "大图加载中…（点任意处关闭）" }}
+      </div>
     </div>
   </div>
 </template>

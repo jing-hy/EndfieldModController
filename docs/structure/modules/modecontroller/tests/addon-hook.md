@@ -11,8 +11,8 @@ description:
   en: >
       The pytest shell for the injection link: runs `scripts.test-addon-hook` and asserts the output says "0 failures"; it **skips when no compiler is present** (a machine without MSVC must not turn the whole suite red). If this link breaks — e.g. a Windows version changes the import-table shape, or `press` starts setting the low bit every frame — this test goes red.
       
-revision: bf4fd078330843729d79451ed7aa1a080a39340a
-updated_at: "2026-11-07T06:45:10.141Z"
+revision: 0d5ce7647bb3183c20bc6a6d74935298ff8fc9f2
+updated_at: "2026-11-07T11:53:09.814Z"
 fingerprint: 249dad99d1b1a8f0f5380aecd814c3f7fe946fe324f3c00233ce0a4fc5ef473a
 source:
   - path: "tests/test_addon_hook.py"

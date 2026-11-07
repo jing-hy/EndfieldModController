@@ -38,10 +38,12 @@
 python -m pytest tests -q
 ```
 
-* 日常改动只需跑相关用例：`python scripts/run_tests.py --changed`（按 git diff 挑文件，几十秒）；
-  **全量交给 CI**（本机全量 15~25 分钟、文件 IO 密集，见 `.github/workflows/ci.yml` 顶部注释），
-  推上去跟进 Actions 结果；发版前再在本机跑一次全量。
-* 当前基线：**630 passed**（数字随版本增长）。
+* 日常改动先用 `python scripts/run_tests.py --changed`（按 git diff 挑文件，几十秒）；
+  **交付/发版前在本机跑一次全量**：`python scripts/run_tests.py tests --serial`
+  （实测 1453 passed / 约 3 分 10 秒，一律串行）。
+* ⚠️ **不再依赖 GitHub Actions**（2026-11-07 用户取消了 Actions 的 run，要求「全部本地跑」）：
+  `.github/workflows/ci.yml` 现在只在手动触发时运行，push / PR 不会起 run。
+* 当前基线：**1453 passed**（数字随版本增长）。
 * **修 bug 要配回归测试**，否则它迟早复发；测试文件顶部写清"这钉住的是什么现象/哪次实测"。
 * ⚠️ 不要在仓库根跑全量（`_tmp/` 会污染），始终 `python -m pytest tests -q`。
 * 仓库里已有几条"防复发"的静态检查，改前端/脚本时特别注意：

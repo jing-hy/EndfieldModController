@@ -11,8 +11,8 @@ description:
   en: >
       The data tables the rest of the program reads: the character alias table (official site sync + bundled fallback + pinyin aliases), the jiggle-physics per-character parameters, the panel hotkey wording, and the ini linter that checks generated files against 3DMigoto's parsing rules.
       
-revision: bf4fd078330843729d79451ed7aa1a080a39340a
-updated_at: "2026-11-07T06:45:10.116Z"
+revision: 0d5ce7647bb3183c20bc6a6d74935298ff8fc9f2
+updated_at: "2026-11-07T11:53:09.764Z"
 fingerprint: 4b04436bf32235387150ab48123d55f575c66e801fc697a1ce5c6b3d5bb8e890
 source:
   - path: "endfieldmodcontroller/character_sync.py"

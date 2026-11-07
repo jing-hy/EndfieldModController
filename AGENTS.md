@@ -30,7 +30,7 @@
 | 「加个重试」「加个延迟」 | 先给根因分析；能修根因就别加重试。用户确认确实要，再按他的意图执行 |
 | 缺组件 / 缺下载 | 引导到**下载页**（有进度、日志、重试）；**不许在启动流程里偷偷下载**（关掉自动更新 + 本地已就位 ⇒ 零网络请求） |
 | 加 / 改一个开关 | 三种情况都要覆盖：**开、关、启动时按当前状态重放**；并实测读回状态（「写了配置」不等于「生效」） |
-| 改完代码 | 本机 `python scripts/run_tests.py --changed` 跑绿（**全量交给 GitHub Actions**，见下）；**补一条测试把 bug 钉住**，并做反向验证（退回修复 ⇒ 测试变红） |
+| 改完代码 | 本机 `python scripts/run_tests.py tests --serial` **全量绿**（约 3 分钟；**不依赖 GitHub Actions**，见下）；**补一条测试把 bug 钉住**，并做反向验证（退回修复 ⇒ 测试变红） |
 | 改了 `frontend/` | 必须重建产物（`web/dist/index.html`）——**程序加载的是产物，不是源码** |
 | 改了后端源码 | 同步 `docs/structure/`（结构树四步收尾，见 `CONTRIBUTING.md` 第三节） |
 | 要用户「点一下试试」 | 先把环境**冻结并打快照**（dll 大小 / 注入库 / proxy / 开关），一次只改**一个**变量，并告知当前指纹 |
@@ -77,14 +77,16 @@
 2. **不动第三方依赖本体**：XXMI Launcher / EFMI / ReShade / SecondaryMotion（乳摇）/ Endfield Poser / OptiScaler —— 它们由别人维护，改了别人也从 GitHub 重新拉，我们的改动会**静默失效**。它们自身的问题属于它们自己的仓库。
 3. **`library/` 是用户的 Mod 库，只读**：不删、不移、不重命名、不换位置、不"整理"。唯一允许的删除入口是用户自己在卡片菜单点「移出 Mod 库」。
 
-### ② 自测 —— 自己做，但别把本机当 CI
+### ② 自测 —— 自己做，全量在本机跑（CI 已停用）
 
 ```bash
-python scripts/run_tests.py --changed   # 日常：只跑与本次改动相关的测试（几十秒）
+python scripts/run_tests.py --changed     # 改完先快速过一遍相关用例（几十秒）
+python scripts/run_tests.py tests --serial  # 交付/发版前跑全量（实测 1453 passed / 约 3 分 10 秒）
 ```
 
-- **全量 `tests/` 交给 GitHub Actions**（`.github/workflows/ci.yml`）：这套测试是文件 IO 密集型，本机全量 15~25 分钟，2026-10-10 起一律交给 CI —— 推上去**跟进 CI 结果**，红了就修；**不要在本机反复重跑全量**。
-- 改了 `tests/**`、或用户明确要全量时，本机跑 `python scripts/run_tests.py tests --serial`。
+- **全部在本机跑，不要指望 CI**（2026-11-07 用户取消了 Actions 的 run，并要求「所有写了相关的流程全部改掉，都用本地的」）：`.github/workflows/ci.yml` 现在**只在手动触发时**运行，push / PR 不会起 run —— 也就是说「推上去等 CI」那条路已经不存在了。
+- 一律**串行**（文件 IO 密集型，并行 worker 互相拖，见 `CONTRIBUTING.md`）。
+- **不要在本机反复重跑同一套全量**（用户 2026-10-07：「不要测了，赶快构建，测这么多次干嘛」）：改动期间用 `--changed`，交付前跑**一次**全量就够。
 - **能复现的故障要能证明修好了**；本仓库的规矩是「**修过的 bug 要有测试把它钉住**」，所以请补一条测试，并做**反向验证**（把修复退回去、确认测试变红）。
 
 ### ③ 同步衍生产物 —— 这几样是"改了源码就要一起更新"的
@@ -131,7 +133,7 @@ XXMI Launcher / EFMI / ReShade / SecondaryMotion / Endfield Poser / OptiScaler �
 
 - [ ] **三条硬边界**没越线：只改本仓库 / 没动第三方本体 / 没碰 `library/`
 - [ ] 新增或修改的行为**有测试钉住**，并做过**反向验证**（把修复退回去 ⇒ 测试变红）
-- [ ] 本机 `run_tests.py --changed` 跑绿，推上去 **CI 全量绿**（「改完没验证」不叫交活）
+- [ ] 本机 `run_tests.py tests --serial` **全量绿**（不再是「推上去等 CI」—— CI 已停用；「改完没验证」不叫交活）
 - [ ] 改了 `frontend/` ⇒ 已重建 `web/dist/index.html`；改了后端 ⇒ 已同步 `docs/structure/`（四步收尾）
 - [ ] 开关类改动：**开 / 关 / 启动时重放**三条路径都覆盖，且实测能读回状态
 - [ ] 没有**静默失败**：`except` 至少写日志；面向用户的失败给一句人话

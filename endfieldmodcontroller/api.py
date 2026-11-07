@@ -5100,8 +5100,10 @@ class EndfieldModControllerApi:
                 self.config,
                 log=lambda line: launcher._append_log(self.config, line))
         except modstore.StoreBadRequest as exc:
+            launcher._append_log(self.config, f"商城: 顶部增量刷新失败（香蕉网拒绝）：{exc}")
             return {"ok": False, "added": 0, "message": f"香蕉网拒绝了这次请求：{exc}"}
         except modstore.StoreUnreachable as exc:
+            launcher._append_log(self.config, f"商城: 顶部增量刷新失败（连不上香蕉网）：{exc}")
             return {"ok": False, "added": 0, "unreachable": True,
                     "message": "访问不上香蕉网（超时 / DNS / 证书 / 地区限制）—— "
                                "建议检查 VPN 或加速器后重试。"
@@ -5112,15 +5114,24 @@ class EndfieldModControllerApi:
                                        "need_full": bool(result.get("need_full"))}
             if payload["busy"]:
                 payload["message"] = "索引正在全量刷新，稍后自动继续"
+                launcher._append_log(self.config, "商城: 顶部增量刷新跳过（正在全量刷新）")
             elif payload["need_full"]:
                 payload["message"] = "还没有本地索引，先做一次全量索引"
+                launcher._append_log(self.config, "商城: 顶部增量刷新跳过（还没有本地索引）")
             return payload
         items = result.get("items") or []
+        state_now = modstore.index_state(result)
+        # ⚠️ 2026-11-07：**成功也要留一行日志**。前端以前把失败/跳动静默吞掉，用户在界面上
+        # 只看到"索引 N 小时前"（那是全量索引的 fetched_at），根本判断不出"顶部到底刷过没有"。
+        launcher._append_log(
+            self.config,
+            f"商城: 顶部增量刷新 +{int(result.get('added') or 0)} 条"
+            f"（索引 {state_now['items']} 个）")
         return {
             "ok": True,
             "added": int(result.get("added") or 0),
             "counts": modstore.category_counts(items, nsfw=mode),
-            "index": modstore.index_state(result),
+            "index": state_now,
         }
 
     def mod_store_installed_list(self) -> list[dict[str, Any]]:

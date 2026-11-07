@@ -1,19 +1,19 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 name: 测试与构建
 
-# **为什么把全量测试放到这里**（用户 2026-10-10）：
-# 维护者的机器性能较差，本机跑一次全量测试要 15~25 分钟 —— 这套测试是**文件 IO 密集**型
-# （复制 / 解压 / 扫描真实目录），并行反而互相拖（实测 `-n 4` 跑全量 18 分钟仍未完成）。
-# 本仓库是公开仓库，Actions 免费且不限分钟数 ⇒ **全量测试一律交给 GitHub**，
-# 本机只跑 `python scripts/run_tests.py --changed`（按 git 改动挑相关测试，几十秒）。
+# ⚠️ **2026-11-07 起：不再依赖 GitHub Actions 跑测试**
+# 维护者取消了 Actions 的 run，并明确要求「所有写了相关的流程全部改掉，都用本地的」。
+# 所以本工作流**只在手动触发时**运行（`workflow_dispatch`），push / PR 都不会再起 run；
+# 日常与交付前的验证一律在本机跑：
+#     python scripts/run_tests.py tests --serial      # 全量，实测 1453 passed / 约 3 分 10 秒
+#     python scripts/run_tests.py --changed           # 改完先快速过一遍相关用例
+# （串行是硬约定：这套测试是文件 IO 密集型，并行 worker 互相拖，见 CONTRIBUTING.md。）
 #
+# 保留这个文件只为「换机器 / 想用云 runner 手动兜底」这一种场景。
 # runner 必须用 **windows-latest**：这套测试大量依赖 Windows —— `robocopy`、注册表、
 # 拿 `System32` 里的模块做基准、长路径语义、`.exe` 路径等，ubuntu 上会大面积失败。
 on:
-  push:
-    branches: [main]
-  pull_request:
-  workflow_dispatch:          # 手动触发（下面那个构建 job 只在这里跑）
+  workflow_dispatch:          # 只有手动触发（push / PR 不再自动跑）
 
 jobs:
   test:
@@ -53,8 +53,7 @@ jobs:
   build:
     name: 构建 exe
     needs: test
-    # 构建只在手动触发时做：推 main 不该顺手产出构建产物（用户 2026-10-10 的要求是
-    # "全量测试交给 GitHub"，构建仍由维护者按需触发）。
+    # 构建只在手动触发时做（2026-11-07 起整个工作流都只在手动触发时运行）。
     if: github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     timeout-minutes: 40

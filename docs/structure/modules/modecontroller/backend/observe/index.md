@@ -11,8 +11,8 @@ description:
   en: >
       Seeing what actually happened: watch the game process and sample it every few seconds, collect crash evidence (CrashSight markers, Player.log, module list, event log), classify the cause, build crash/diagnostic bundles, keep a crash memory of mod combinations, and report device/GPU facts.
       
-revision: bf4fd078330843729d79451ed7aa1a080a39340a
-updated_at: "2026-11-07T06:45:10.129Z"
+revision: 0d5ce7647bb3183c20bc6a6d74935298ff8fc9f2
+updated_at: "2026-11-07T11:53:09.785Z"
 fingerprint: da1844f542cf732bfc294410b51fa0eb2bdd80b3eae24881b9c2a64a32c257f2
 source:
   - path: "endfieldmodcontroller/crashwatch.py"
