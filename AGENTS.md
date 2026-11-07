@@ -42,6 +42,7 @@
 | 缺截图 / 日志 / 复现步骤却要你直接改 | 按已有信息写初稿，把不确定处标成 `【待补：…】` 并列清还缺什么；**不许编造日志内容、路径、行号、数值** |
 | 改 ReShade 面板遥控（`MC_Panel<n>`） | 这是**双端契约**：`core.inject_panel_lists`（生成指令）↔ `reshade_addon/src/*.cpp`（按键与解析）。改动作号或协议键要**两边一起改**，并跑 `panel:hotkey_conflicts` 自检（协议键不许占用键盘上存在的键） |
 | 验证用的临时脚本 / 临时文件 | 放 `_tmp/`（已 gitignore），做完删掉；**根目录不留临时文件** |
+| 要判断「实例在不在跑」/ 想替换 exe / 想清理数据根 | 跑 `python scripts\who_is_running.py`（**四条证据**：可见窗口 / 同名进程 / `.mc.lock` 的 PID 指纹 / exe 能否独占打开）。**不要只看进程名** —— 源码方式启动时进程是 `pythonw.exe`，按名字查会判成「没在跑」 |
 
 **合规优先 + 主动提醒**：用户指令可能越过上面的红线（动 `library/`、改第三方本体、替他把程序目录搬走…）时，
 **先提醒并给出合规的替代方案**，但不替他做最终判断 —— 他确认要，就按他的意图做。
@@ -81,7 +82,7 @@
 
 ```bash
 python scripts/run_tests.py --changed     # 改完先快速过一遍相关用例（几十秒）
-python scripts/run_tests.py tests --serial  # 交付/发版前跑全量（实测 1453 passed / 约 3 分 10 秒）
+python scripts/run_tests.py tests --serial  # 交付/发版前跑全量（实测 1467 passed / 约 3 分半）
 ```
 
 - **全部在本机跑，不要指望 CI**（2026-11-07 用户取消了 Actions 的 run，并要求「所有写了相关的流程全部改掉，都用本地的」）：`.github/workflows/ci.yml` 现在**只在手动触发时**运行，push / PR 不会起 run —— 也就是说「推上去等 CI」那条路已经不存在了。

@@ -24,6 +24,8 @@
 2. **不动第三方依赖本体** —— XXMI Launcher / EFMI / ReShade / SecondaryMotion（乳摇）/
    Endfield Poser / OptiScaler 这些是别人维护的：改了别人也从 GitHub 重新拉，我们的改动会静默失效。
    发现它们的问题 → **去它自己的仓库提 issue**，我们这边只做"编排、自检、补齐"。
+5. **判断实例在不在跑，用 `python scripts\who_is_running.py`**（窗口 / 同名进程 / 锁文件 PID 指纹 / exe 占用，四条独立证据）。
+   ⚠️ **不要只看 `Get-Process -Name EndfieldModController`**：源码方式启动（`pythonw run.py`）时进程名是 `pythonw.exe`，按名字查会误判成"没在跑"，然后替换 exe 或清目录就容易撞上占用/数据竞争。
 3. **用户数据红线**：`library/`（用户的 Mod 库）**只读** —— 不删、不移、不重命名、不换位置、不"整理"。
    唯一允许的删除入口是用户自己在卡片菜单点「移出 Mod 库」（移到 `runtime/backups/mod-trash/`，可找回）。
 4. **改游戏目录之前先备份、并且可一键还原**；游戏正在运行时不要替换它占用的文件（先查进程）。
