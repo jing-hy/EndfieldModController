@@ -6,14 +6,14 @@ tags: [gamebanana, catalog, thumbnail]
 name: {zh: "香蕉网数据层", en: "GameBanana Catalog"}
 description:
   zh: >
-      GameBanana apiv11 的匿名访问层：列表、搜索、分类树、详情、缩略图与全量索引。三条实测约束决定实现：① 只有 Subfeed 认排序且每页固定 15；② Mod/Index 能翻大页但完全不支持排序；③ 图片 CDN 极慢，因此自带本地缓存并由进程内只读服务直出。索引与分类树都带字段版本号，口径变化会自动失效重建。
+      GameBanana apiv11 的匿名访问层：列表、搜索、分类树、详情、缩略图与全量索引。三条实测约束决定实现：① 只有 Subfeed 认排序且每页固定 15；② Mod/Index 能翻大页但完全不支持排序；③ 图片 CDN 极慢，因此自带本地缓存并由进程内只读服务直出。索引与分类树都带字段版本号，口径变化会自动失效重建。索引每页失败先重试，残缺时与旧缓存按 id 合并并标记 complete=False（残缺不许让 Mod 消失），分类/角色的数字由同一份索引数出来（标签上的数 == 点进去的条数）。
       
   en: >
-      Anonymous access layer for the GameBanana apiv11 API: listings, search, category tree, details, thumbnails and the full index. Three measured constraints shape it, plus field-versioned caches.
+      Anonymous GameBanana apiv11 layer: listings, search, category tree, details, thumbnails and the full index. Three measured constraints shape it, plus field-versioned caches. Failed index pages are retried; incomplete results merge with the previous cache by id and are flagged complete=False, and category counts are derived from the same index so labels always match the list.
       
-revision: 6956df017aaf625c5a15ea64c5d6f1d0f5ac2bd4
-updated_at: "2026-11-06T13:05:30.457Z"
-fingerprint: e1ddc1c46dde8380a2dc44e90cddcef3ced3019a497fd2e2f74f14f146343b10
+revision: 89ad502e368be7ee5b8c45c1a4d735e1870f43b9
+updated_at: "2026-11-07T04:43:41.690Z"
+fingerprint: a9a76a13092b43971d7de7ef05f6baf37bb2edf34c299e7d65b4f6786482c26c
 source:
   - path: "endfieldmodcontroller/modstore.py"
 apis:

@@ -6,14 +6,14 @@ tags: [api, store, download]
 name: {zh: "商城与下载中心接口", en: "Store & Download APIs"}
 description:
   zh: >
-      商城主流程与下载中心的 js_api 面：列表/分类/详情/备图/批量扫描与一键更新，以及下载任务的快照、暂停、继续、取消、清空。下载动作只入队不跳转；重活都在后台线程里做。
+      商城主流程与下载中心的 js_api 面：列表/分类/详情/备图/索引刷新/批量扫描与一键更新，以及下载任务的快照、暂停、继续、取消、清空。列表与分类数字同源于本地索引；索引刷新是后台任务，状态行如实报"就绪 / 不完整 / 用了旧索引"。下载动作只入队不跳转。
       
   en: >
-      js_api surface for the store flow and the download centre: listing, categories, detail, image preparation, batch scan and update-all, plus task snapshot, pause, resume, cancel and clear. Enqueues instead of navigating.
+      js_api surface for the store flow and the download centre: listing, categories, detail, images, index refresh, batch scan and update-all, plus download task control. List and category counts share the local index; index refresh is a background task with an honest status line. Enqueues instead of navigating.
       
-revision: 6956df017aaf625c5a15ea64c5d6f1d0f5ac2bd4
-updated_at: "2026-11-06T13:05:30.425Z"
-fingerprint: 07e29d698d0f820d6c4a2a1d940df07fef254e2a366b8239a14de5eda7086723
+revision: 89ad502e368be7ee5b8c45c1a4d735e1870f43b9
+updated_at: "2026-11-07T04:43:41.667Z"
+fingerprint: 43275d255d70e23ea5822f87048fcf96695312ae473eb9e4d2e8649ba2981d89
 source:
   - path: "endfieldmodcontroller/api.py"
 apis:
@@ -21,19 +21,19 @@ apis:
     path: "mod_store_list"
     description:
       zh: >
-          商城列表（分页/分类/角色/排序/R18 三档）
+          商城列表（分页/分类/角色/排序/R18 三档，附与列表同源的分类计数）
           
       en: >
-          Store listing with filters and R18 tri-state
+          Store listing with filters, R18 tri-state and index-derived category counts
           
   - protocol: rpc
     path: "mod_store_categories"
     description:
       zh: >
-          分类树与角色名单（附中文名）
+          分类树与角色名单（中文名；数字以本地索引为准）
           
       en: >
-          Category tree and characters (Chinese names)
+          Category tree and characters (Chinese names; counts from the local index)
           
   - protocol: rpc
     path: "mod_store_detail"
@@ -52,6 +52,24 @@ apis:
           
       en: >
           Prepare images, return local URLs
+          
+  - protocol: rpc
+    path: "mod_store_prefetch"
+    description:
+      zh: >
+          后台补全/刷新全量索引（残缺时缩短重试间隔，状态行如实报条数）
+          
+      en: >
+          Background index refresh (short retry when incomplete, honest status)
+          
+  - protocol: rpc
+    path: "mod_store_refresh_index"
+    description:
+      zh: >
+          强制重建全量索引（"少的 Mod 不见了"时的恢复入口）
+          
+      en: >
+          Force a full index rebuild (recovery entry)
           
   - protocol: rpc
     path: "mod_store_check_updates"
