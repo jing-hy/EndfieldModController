@@ -24,22 +24,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-import pytest
-
 from endfieldmodcontroller import alerts, character_sync, filewatch, sbm_data_sync, selfupdate
 from endfieldmodcontroller import api as api_mod
 from endfieldmodcontroller import moddl, modstore
-
-
-@pytest.fixture(autouse=True)
-def _no_background_warm_up(monkeypatch):
-    """**禁掉 API 构造时起的预热线程**。
-
-    这些用例只测索引逻辑，而真实预热线程会联网（角色表 / 商城索引…）—— 它会在测试
-    结束后继续跑，撞上下一个用例打桩的 `fastnet.fetch`，表现为"莫名多了一个 Mod/Index 请求"。
-    （2026-11-07 实测踩到：detail 用例断言 2 次请求，实际 3 次。）
-    """
-    monkeypatch.setattr(api_mod.EndfieldModControllerApi, "_start_warm_up", lambda self: None)
+# 预热线程的全局桩在 tests/conftest.py（对所有测试生效，避免后台线程跨用例污染）
 
 
 def _item(mod_id, root, character, *, nsfw=False, updated=1000):
