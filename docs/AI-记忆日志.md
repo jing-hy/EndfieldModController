@@ -6682,3 +6682,21 @@ v1.4.7 已发布（2026-10-19，Latest、非草稿/非预发布）：exe 35,145,
 v1.4.10 已于 2026-11-06 发布（GitHub Latest）：main 与 tag 同为提交 89ad502；资产 EndfieldModController.exe 35,164,745 B sha256 dc4f3effa46ec1193630de93ba657c47b93bf058ac74494f862fecce2b6916a1、assets-bundle.zip 261,987,364 B sha256 68f0258e634c4c8bb5e4b5baae20cbd78e0c2792b3a51eb56442478144a7f117。版本号三处一致 1.4.10；组件版本表随版同步（XXMI-Libs v1.2.3 / EFMI v1.4.9 / jiggle_efmi 0.2.7）。发版流程：pytest → commit → build_release.py（内含 push.py 推 main，先快照）→ prepare_release.py → gh release create --notes-file（只取 RELEASE_NOTES.md 里本版那一节，整份会带上旧版本）。
 
 `关键词：["发版","v1.4.10","Release","Latest","tag","sha256","assets-bundle","prepare_release","build_release","push.py","版本号","组件版本表"]`
+
+<!-- 增量追加 2026-11-07 13:29 · 新增 2 条（历史条目一律保留）-->
+
+<!-- rules · 设计原则 / 行为准则 -->
+### 【商城数字/列表必须同源；残缺缓存不许覆盖完整缓存】20…
+*2026-11-07 12:51*
+
+【商城数字/列表必须同源；残缺缓存不许覆盖完整缓存】2026-11-07 用户实测「分类数字和右上角不符」「前一小时还在的 mod 现在消失了」。根因①：数字取站点 Mod/Categories 的 _nItemCount（分类树缓存 7 天），列表取本地索引（TTL 1 天、失败更旧、残缺陷少）⇒ 点「皮肤」标签 744、列表 666。修法：modstore.category_counts() 从**列表用的那份索引**数，list 返回 counts/index 状态，categories 也改用索引计数（标签数==点进去条数，R18 隐藏一起少）。根因②：build_index 单页失败不重试、残缺结果原样写盘、界面仍报「索引就绪」且 24h 内不补。修法：每页重试 3 次+按 id 去重+complete=False；ensure_index 残缺时与旧缓存按 id 合并（只增不减），完整刷新才以本次为准；残缺 10 分钟后可重试；状态行如实写不完整/暂用 N 天前索引；新增 mod_store_refresh_index（UI「刷新索引」），索引建完前端自动重载。判据：凡是给用户看的两个数字，必须能从同一份数据算出；凡是缓存刷新，残缺结果与旧缓存合并而不是覆盖。
+
+`关键词：["商城分类数字","右上角总数","同源","残缺索引","覆盖缓存","complete=False","merge_index_items","mod_store_refresh_index","索引TTL","mod 消失","category_counts","列表与数字不符"]`
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 【2026-11-07 商城显示修复的交付状态】Late…
+*2026-11-07 12:51*
+
+【2026-11-07 商城显示修复的交付状态】Latest Release 仍是 v1.4.10（**本次未发版**，等用户明确说）。main = 89bc0c7（`fix(商城): 分类数字与列表同源 + 残缺索引不再让 Mod 消失` 的提交为 fe56966，其后是 push.py 自动的记忆日志/结构树提交）。本地版本 = **1.4.11-beta**（version.py + README.md + docs/README.detailed.md 三处一致）。构建产物 dist\EndfieldModController.exe = 35,176,330 B，sha256 `48f554b159956366f75437bdca33b1ee65ad6638e9038550cbffaa8f9ad2e6b2`，已同步 `D:\zmdmod\modtest\EndfieldModController.exe`（同 sha）。测试：全量 pytest 1430 passed；新增 `tests/test_modstore_counts.py`（9 条）钉住「分类数字==列表条数」「残缺刷新合并旧缓存」「状态行如实」。结构树已四步收尾（realign→refresh→validate 0 error→build+render），docs/structure 镜像已随 push 更新。
+
+`关键词：["1.4.11-beta","商城修复","main 89bc0c7","EndfieldModController.exe","sha256 48f554b1","modtest 同步","未发 Release","test_modstore_counts","结构树收尾","分类数字同源"]`
