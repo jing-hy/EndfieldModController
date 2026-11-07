@@ -4923,12 +4923,43 @@ class EndfieldModControllerApi:
             "scan": fsutil.read_json(modstore.scan_path(self.config)),
         }
 
+    @classmethod
+    def _store_index_message(cls, index: dict[str, Any], state: dict[str, Any]) -> str:
+        """索引任务结束后给用户看的一句话 —— **必须如实**（刷新失败/残缺不许说"就绪"）。
+
+        旧实现无论刷新成功、失败还是残缺都写"索引就绪（N 个 Mod）"，
+        于是"少了一批 Mod"和"用的是几天前的数据"都看不出来（2026-11-07 用户实测）。
+        """
+        items = int(state.get("items") or 0)
+        total = int(state.get("total") or items)
+        if index.get("reused_cache"):
+            age_text = cls._format_age(state.get("age"))
+            which = "上次缓存的索引" if age_text == "刚刚" else f"{age_text}的索引"
+            return (f"索引刷新失败，暂用{which}（{items} 个 Mod）—— 下次进商城会自动重试")
+        if not state.get("complete"):
+            parts = [f"索引不完整（{items}/{total} 个 Mod"]
+            failed = len(state.get("failed_pages") or [])
+            if failed:
+                parts.append(f"，{failed} 页没取到")
+            reused = int(state.get("reused") or 0)
+            if reused:
+                parts.append(f"，已补回 {reused} 条旧条目")
+            return "".join(parts) + "）—— 稍后会自动重试，也可点「刷新索引」立即重来"
+        return f"索引就绪（{items} 个 Mod）"
+
     def mod_store_prefetch(self) -> dict[str, Any]:
-        """后台补全全量索引（进商城页时调一次；缓存新鲜就立刻返回，什么都不做）。"""
+        """后台补全全量索引（进商城页时调一次；缓存新鲜就立刻返回，什么都不做）。
+
+        "新鲜"分两档：**完整**索引按一天算；**残缺**索引 10 分钟后就能再试
+        （残缺不该等一整天，那段时间里被漏掉的 Mod 用户根本看不到）。
+        """
         cached = modstore.load_index(self.config)
-        age = modstore.index_age(self.config)
-        if cached.get("items") and age < modstore.INDEX_TTL_SECONDS:
-            return {"ok": True, "cached": True, "total": len(cached["items"]), "age": int(age)}
+        state = modstore.index_state(cached)
+        fresh_enough = (modstore.INDEX_TTL_SECONDS if state["complete"]
+                        else min(modstore.INDEX_TTL_SECONDS, modstore.INDEX_INCOMPLETE_RETRY_SECONDS))
+        if cached.get("items") and state["age"] < fresh_enough:
+            return {"ok": True, "cached": True, "total": state["items"],
+                    "age": int(state["age"]), "complete": state["complete"]}
 
         def worker() -> None:
             try:
@@ -4938,20 +4969,51 @@ class EndfieldModControllerApi:
                             self._store_task["message"] = message
 
                 fresh = self._store_index(allow_build=True, progress=progress)
-                rows = fresh.get("items") or []
+                state_now = modstore.index_state(fresh)
+                message = self._store_index_message(fresh, state_now)
+                launcher._append_log(self.config, f"商城: {message}")
                 with self._store_lock:
                     if self._store_task:
                         self._store_task["running"] = False
-                        self._store_task["message"] = f"索引就绪（{len(rows)} 个 Mod）"
-                        self._store_task["result"] = {
-                            "total": len(rows), "failed_pages": fresh.get("failed_pages") or [],
-                        }
+                        self._store_task["message"] = message
+                        self._store_task["result"] = {"index": state_now}
             except Exception as exc:  # noqa: BLE001
                 launcher._append_log(self.config, f"商城: 索引构建失败（{exc}）")
                 with self._store_lock:
                     if self._store_task:
                         self._store_task["running"] = False
                         self._store_task["message"] = f"索引失败：{exc}"
+        return self._store_start_task("index", worker)
+
+    def mod_store_refresh_index(self) -> dict[str, Any]:
+        """**强制重建**全量索引（后台任务）。
+
+        为什么需要这个入口：自动刷新有 TTL，而"我要找的那个 Mod 不见了"是用户**当场**
+        就发现的事 —— 他不能等一天，也不该去猜"是不是缓存"。点一下立刻重来；
+        索引残缺时前端也会把这条入口摆出来。
+        """
+        def worker() -> None:
+            try:
+                def progress(message: str) -> None:
+                    with self._store_lock:
+                        if self._store_task:
+                            self._store_task["message"] = message
+
+                fresh = self._store_index(allow_build=True, force=True, progress=progress)
+                state_now = modstore.index_state(fresh)
+                message = self._store_index_message(fresh, state_now)
+                launcher._append_log(self.config, f"商城: {message}")
+                with self._store_lock:
+                    if self._store_task:
+                        self._store_task["running"] = False
+                        self._store_task["message"] = message
+                        self._store_task["result"] = {"index": state_now}
+            except Exception as exc:  # noqa: BLE001
+                launcher._append_log(self.config, f"商城: 重建索引失败（{exc}）")
+                with self._store_lock:
+                    if self._store_task:
+                        self._store_task["running"] = False
+                        self._store_task["message"] = f"索引刷新失败：{exc}"
         return self._store_start_task("index", worker)
 
     def mod_store_installed_list(self) -> list[dict[str, Any]]:
@@ -5034,8 +5096,16 @@ class EndfieldModControllerApi:
 
     def _store_payload(self, rows: list[dict[str, Any]], *, total: int, page: int,
                        per_page: int, source: str, installed: dict[str, Any],
-                       indexed: bool, has_more: bool | None = None) -> dict[str, Any]:
-        """统一出口：给每条打上「已安装 / 有更新」标记，再附来源与分页信息。"""
+                       indexed: bool, has_more: bool | None = None,
+                       counts: dict[str, Any] | None = None,
+                       index_meta: dict[str, Any] | None = None) -> dict[str, Any]:
+        """统一出口：给每条打上「已安装 / 有更新」标记，再附来源与分页信息。
+
+        `counts` = 分类/角色的条目数，**从列表用的同一份索引里数出来**（见
+        `modstore.category_counts`）；`index_meta` = 这份索引的条数/是否完整/多久以前拿的。
+        两个都只在该次列表确实来自本地索引时给 —— 界面据此把左边数字和右上角总数
+        绑在同一份数据上（2026-11-07「分类数字和右上角不符」的修法）。
+        """
         out: list[dict[str, Any]] = []
         for row in rows:
             local = installed.get(str(row.get("id") or ""))
@@ -5049,11 +5119,46 @@ class EndfieldModControllerApi:
                 local and float(row.get("updated") or 0) > float((local or {}).get("installed_at") or 0))
             out.append(item)
         count = int(total or 0)
-        return {
+        payload = {
             "ok": True, "items": out, "total": count, "page": page, "per_page": per_page,
             "has_more": (page * per_page < count) if has_more is None else bool(has_more),
             "source": source, "indexed": bool(indexed), "installed_count": len(installed),
         }
+        if counts is not None:
+            payload["counts"] = counts
+        if index_meta is not None:
+            payload["index"] = index_meta
+        return payload
+
+    @staticmethod
+    def _counts_lookup(counts: Any) -> dict[str, int]:
+        """`{名字: 条数}` → `{小写名字: 条数}`（比对时忽略首尾空格与大小写）。
+
+        站点分类接口里的名字（Skins / Chen Qianyu）与索引里 `_aSubCategory` 的名字
+        实测完全一致，但**不拿"实测一致"当契约** —— 差一个空格就让某个分类恒为 0。
+        """
+        lookup: dict[str, int] = {}
+        if isinstance(counts, dict):
+            for name, value in counts.items():
+                key = str(name or "").strip().lower()
+                if key:
+                    lookup[key] = int(value or 0)
+        return lookup
+
+    @staticmethod
+    def _format_age(seconds: Any) -> str:
+        """把"多少秒以前"说成人话（索引状态的提示用）。"""
+        try:
+            value = max(0.0, float(seconds or 0))
+        except (TypeError, ValueError):
+            value = 0.0
+        if value < 120:
+            return "刚刚"
+        if value < 3600:
+            return f"{int(value // 60)} 分钟前"
+        if value < 86400:
+            return f"{int(value // 3600)} 小时前"
+        return f"{int(value // 86400)} 天前"
 
     def mod_store_list(self, options: Any = None) -> dict[str, Any]:
         """商城列表。
@@ -5081,9 +5186,13 @@ class EndfieldModControllerApi:
             batch = self._store_filter(index["items"], category=category, character=character,
                                        sort=sort, nsfw=nsfw)
             start = (page - 1) * per_page
-            return self._store_payload(batch[start:start + per_page], total=len(batch), page=page,
-                                       per_page=per_page, source="index", installed=installed,
-                                       indexed=True)
+            return self._store_payload(
+                batch[start:start + per_page], total=len(batch), page=page,
+                per_page=per_page, source="index", installed=installed, indexed=True,
+                # ⚠️ 分类数字与列表**同源**：同一个索引、同一条 nsfw 口径（R18「隐藏」时
+                #    数字也要跟着少，否则又变成"写着 N 个、点进去只有 N 减 R18"）。
+                counts=modstore.category_counts(index["items"], nsfw=nsfw),
+                index_meta=modstore.index_state(index))
 
         try:
             if query:
@@ -5116,7 +5225,27 @@ class EndfieldModControllerApi:
             return {"ok": False, "unreachable": True,
                     "message": "访问不上香蕉网（超时 / DNS / 证书 / 地区限制）—— "
                                "建议检查 VPN 或加速器后重试。"}
-        return {"ok": True, **data}
+        payload: dict[str, Any] = {"ok": True, **data, "counts_source": "site"}
+        # ⚠️ 数字以**本地索引**为准（与列表同源，见 `modstore.category_counts`）。
+        #    只有索引还没建好时才退回站点自报的 `_nItemCount`——那份缓存 TTL 一周，
+        #    而列表索引 TTL 一天，两个时间点天然会对不上（2026-11-07 用户实测）。
+        index = modstore.load_index(self.config)
+        if index.get("items"):
+            counted = modstore.category_counts(index["items"])
+            roots = self._counts_lookup(counted.get("roots"))
+            characters = self._counts_lookup(counted.get("characters"))
+            payload["counts_source"] = "index"
+            payload["index"] = modstore.index_state(index)
+            payload["counts"] = counted
+            payload["roots"] = [
+                {**row, "count": roots.get(str(row.get("name") or "").strip().lower(), 0)}
+                for row in (data.get("roots") or [])
+            ]
+            payload["characters"] = [
+                {**row, "count": characters.get(str(row.get("name") or "").strip().lower(), 0)}
+                for row in (data.get("characters") or [])
+            ]
+        return payload
 
     def mod_store_detail(self, mod_id: Any = 0) -> dict[str, Any]:
         """商城详情（版本 / 更新说明 / 文件大小 / 许可 / 作者）—— 点开卡片才调，属网络请求。"""

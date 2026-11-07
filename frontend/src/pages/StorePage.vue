@@ -56,6 +56,12 @@ const NSFW_MODES = [
 const nsfwMode = ref(localStorage.getItem("mc-store-nsfw") || "blur");
 
 const categories = ref({ roots: [], characters: [] });
+// 分类/角色的条目数 —— **从列表用的那份本地索引里数出来**（跟着 `mod_store_list` 一起来）。
+// 2026-11-07 用户实测：「mod商城分类显示的数字和右上角不符」「前一小时还在的 mod 现在消失了」。
+// 根因是数字取站点分类接口（分类树缓存 7 天）、列表取本地索引（缓存 1 天、刷新失败还会更旧、
+// 残缺时还会少一批）—— 两个来源各说各话。现在**标签上的数 == 点进去看到的条数**。
+const counts = ref(null);       // {total, roots:{名字:条数}, characters:{名字:条数}}
+const indexMeta = ref(null);    // {items,total,complete,age,...}
 const queued = ref({});
 
 const detail = ref(null);
@@ -269,6 +275,9 @@ async function loadMore() {
     total.value = Number(result.total || 0);
     hasMore.value = !!result.has_more;
     indexed.value = !!result.indexed;
+    // 分类数字跟着列表走（同源）；没有就置空，避免拿上一次的旧数字硬套
+    counts.value = result.counts || null;
+    indexMeta.value = result.index || null;
     observeThumbs();               // 只把这一页里**进入视口**的图排进下载
   } catch (e) {
     errorText.value = String((e && e.message) || "商城数据没取到");
@@ -414,16 +423,67 @@ async function updateAll() {
   } catch (e) { /* 已经弹过 */ }
 }
 
+// 上一轮轮询时"索引任务"是否在跑 —— 用来捕捉"刚跑完"这个时刻
+let indexTaskRunning = false;
+
 async function pollScan() {
   try {
     const result = await call("mod_store_task_status");
     if (!result || result.ok === false) return;
+    const wasIndexRunning = indexTaskRunning;
+    indexTaskRunning = !!result.running && String(result.kind || "") === "index";
     scan.value = {
-      running: !!result.running, message: result.message || "",
+      running: !!result.running, kind: String(result.kind || ""), message: result.message || "",
       result: result.result || {}, saved: result.scan || {},
     };
+    // 索引刚建完 ⇒ **立刻重载列表与分类**。否则后台补好的新索引要等用户手动切一次分类才生效，
+    // 观感就是"刚补到的 Mod 还是不出现"（2026-11-07 用户实测）。
+    if (wasIndexRunning && !indexTaskRunning && !detail.value) {
+      await loadCategories();
+      reload();
+    }
   } catch (e) { /* 轮询失败忽略 */ }
 }
+
+// 强制重建索引（自动刷新有 TTL，用户"那个 Mod 不见了"是当场的事，不能等一天）
+async function refreshIndex() {
+  try {
+    const result = await call("mod_store_refresh_index");
+    if (!result || result.ok === false) {
+      showAlert("索引刷新没能开始", (result && result.message) || "未知原因");
+      return;
+    }
+    scan.value = { ...scan.value, running: true, message: "正在重建索引…" };
+  } catch (e) { /* call 已经弹过错误窗 */ }
+}
+
+// ── 左侧分类/角色的数字：优先用索引数出来的（与列表同源），没有才用站点自报的 ──────────
+function lowerCounts(source) {
+  const out = {};
+  for (const [name, value] of Object.entries(source || {})) {
+    out[String(name || "").trim().toLowerCase()] = Number(value) || 0;
+  }
+  return out;
+}
+const countLookup = computed(() => (counts.value
+  ? { roots: lowerCounts(counts.value.roots), characters: lowerCounts(counts.value.characters) }
+  : null));
+function rowCount(row, kind) {
+  const key = String((row && row.name) || "").trim().toLowerCase();
+  if (!countLookup.value) return (row && row.count) || 0;
+  return countLookup.value[kind][key] || 0;
+}
+const rootRows = computed(() => (categories.value.roots || []).map((row) => ({ ...row, count: rowCount(row, "roots") })));
+const characterRows = computed(() => (categories.value.characters || []).map((row) => ({ ...row, count: rowCount(row, "characters") })));
+const catalogTotal = computed(() => (counts.value ? Number(counts.value.total || 0) : 0));
+const indexAgeText = computed(() => {
+  const seconds = Number((indexMeta.value && indexMeta.value.age) || 0);
+  if (!seconds) return "";
+  if (seconds < 120) return "刚刚更新";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} 分钟前更新`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)} 小时前更新`;
+  return `${Math.floor(seconds / 86400)} 天前更新`;
+});
 
 const updateRows = computed(() => (scan.value.saved && scan.value.saved.updates) || []);
 const updateCount = computed(() => updateRows.value.length);
@@ -569,11 +629,24 @@ onUnmounted(() => {
             一键更新{{ updateCount ? `（${updateCount}）` : "" }}
           </Btn>
         </div>
-        <div v-if="scan.running || scan.message" class="text-xs mt-2" style="color: var(--text-muted)">
+        <div v-if="scan.running || scan.message || indexMeta" class="text-xs mt-2"
+             style="color: var(--text-muted)">
           {{ scan.message }}
           <span v-if="updateCount">· 有 {{ updateCount }} 个可更新</span>
           <span v-if="missingCount">· {{ missingCount }} 个远端已找不到</span>
           <span v-if="indexed">· 已用本地索引</span>
+          <!-- 索引状态要说清楚：条数 / 多久以前 / 完整不完整 ——
+               「数字对不上」「Mod 消失了」时，用户看这一行就能判断是不是索引的问题 -->
+          <template v-if="indexMeta && indexMeta.items">
+            <span>· 索引 {{ indexMeta.items }} 个</span>
+            <span v-if="!indexMeta.complete" style="color: var(--danger)">
+              （不完整 {{ indexMeta.items }}/{{ indexMeta.total }}）
+            </span>
+            <span v-else-if="indexAgeText">（{{ indexAgeText }}）</span>
+          </template>
+          <a class="ml-2 cursor-pointer" style="color: var(--accent)"
+             :style="scan.running ? 'opacity:.4; pointer-events:none' : ''"
+             @click="refreshIndex">刷新索引</a>
         </div>
       </Card>
 
@@ -591,12 +664,15 @@ onUnmounted(() => {
              宽度也略放宽（中文角色名 + 数量在 178px 里容易被截断）。 -->
         <Card title="分类" class="shrink-0" style="width: 198px">
           <div class="space-y-0.5 text-sm">
-            <button class="w-full text-left px-2 py-1 rounded"
+            <button class="w-full text-left px-2 py-1 rounded flex items-center gap-1"
                     :style="!category && !character
                       ? { background: 'var(--accent-soft)', color: 'var(--accent)' }
                       : { color: 'var(--text-muted)' }"
-                    @click="category = 0; character = ''; reload()">全部</button>
-            <button v-for="root in categories.roots" :key="root.id"
+                    @click="category = 0; character = ''; reload()">
+              <span class="truncate flex-1">全部</span>
+              <span v-if="catalogTotal" class="text-xs">{{ catalogTotal }}</span>
+            </button>
+            <button v-for="root in rootRows" :key="root.id"
                     class="w-full text-left px-2 py-1 rounded flex items-center gap-1"
                     :style="category === root.id
                       ? { background: 'var(--accent-soft)', color: 'var(--accent)' }
@@ -612,7 +688,7 @@ onUnmounted(() => {
             <!-- 「做长一点」：原来只给 320px（一屏看得到十来个角色、其余要滚）⇒ 加高到 620px，
                  并与窗口高度联动（`calc(100vh - 320px)`），长列表尽量一屏看完。 -->
             <div class="space-y-0.5 overflow-auto" style="max-height: max(320px, calc(100vh - 340px)); min-height: 420px">
-              <button v-for="row in categories.characters" :key="row.id"
+              <button v-for="row in characterRows" :key="row.id"
                       class="w-full text-left px-2 py-1 rounded text-sm flex items-center gap-1"
                       :style="character === row.name
                         ? { background: 'var(--accent-soft)', color: 'var(--accent)' }

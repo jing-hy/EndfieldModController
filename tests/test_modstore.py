@@ -365,24 +365,25 @@ def test_categories_raise_when_there_is_no_cache_and_no_network(tmp_path):
 
 
 def test_build_index_does_not_fail_fast_on_a_bad_page(monkeypatch):
-    """**不 fail-fast**（项目既定规则）：某一页失败就记下来继续，最后如实报哪几页没拿到。
+    """**不 fail-fast**（项目既定规则）：某一页重试完仍失败就记下来继续，最后如实报哪几页没拿到。
 
     宁可索引不全，也不要因为第 7 页超时就整份丢弃（那样"浏览"整页都是空的）。
+    ⚠️ 2026-11-07 起每页会先**重试**（`INDEX_PAGE_ATTEMPTS`）；这里让第 2 页**一直**失败，
+    才测得到"记下来继续下一页"这条。顺带钉住 `complete=False`（返回码要能说明残缺）。
     """
-    calls = {"n": 0}
-
     def flaky(page, per_page=modstore.PAGE_MAX, **kwargs):
-        calls["n"] += 1
-        if calls["n"] == 2:
+        if page == 2:
             raise modstore.StoreUnreachable("这一页超时")
-        rows = [_record(_idRow=1000 + calls["n"])]
+        rows = [_record(_idRow=1000 + page)]
         return {"items": [modstore.normalize(r) for r in rows], "total": 3,
                 "page": page, "per_page": per_page, "source": "index"}
 
     monkeypatch.setattr(modstore, "list_mods", flaky)
+    monkeypatch.setattr(modstore.time, "sleep", lambda *_: None)   # 重试退避别真等
     result = modstore.build_index(pages=3)
     assert result["failed_pages"] == [2]
     assert len(result["items"]) == 2          # 第 1、3 页的条目照样留下
+    assert result["complete"] is False        # 残缺必须如实标记（见下一条测试）
 
 
 def test_index_cache_is_used_when_refresh_fails(tmp_path):

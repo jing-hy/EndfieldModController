@@ -63,6 +63,11 @@ REQUEST_TIMEOUT = 20
 REQUEST_INTERVAL = 0.2
 
 INDEX_TTL_SECONDS = 24 * 3600          # 全量索引：一天一次足够
+#: 索引**残缺**（有页没取到 / 条数不够）时的重试间隔 —— 残缺不该等一整天，
+#: 但也不能每进一次商城就重拉十几页（那会让站点限流、用户只看到"一直转圈"）。
+INDEX_INCOMPLETE_RETRY_SECONDS = 10 * 60
+#: 索引单页最多重试几次（站点/线路抖一下不要整页丢掉，见 `build_index`）。
+INDEX_PAGE_ATTEMPTS = 3
 CATEGORIES_TTL_SECONDS = 7 * 24 * 3600  # 分类树（角色名单）：一周一次
 
 #: 商城**缓存字段版本号**（全量索引与分类树共用）。
@@ -964,23 +969,109 @@ def index_age(config: Any) -> float:
     return time.time() - float(load_index(config).get("fetched_at") or 0)
 
 
+def index_state(index: dict | None = None, *, now: float | None = None) -> dict:
+    """索引的**可信状态**（条数 / 站点总数 / 是否完整 / 多久以前拿的 / 失败页）。
+
+    界面与接口都从这里取口径，别再各算一套 —— 2026-11-07 用户实测
+    「分类显示的数字和右上角不符」「前一小时还在的 mod 现在消失了」，
+    根因之一就是"列表用一份索引、数字用另一份分类缓存"，两边各说各话。
+    """
+    data = index or {}
+    items = data.get("items") or []
+    total = int(data.get("total") or len(items))
+    age = max(0.0, float(now if now is not None else time.time())
+              - float(data.get("fetched_at") or 0))
+    return {
+        "items": len(items),
+        "total": total,
+        "complete": bool(data.get("complete", True)),
+        "reused": int(data.get("reused") or 0),
+        "failed_pages": list(data.get("failed_pages") or []),
+        "fetched_at": float(data.get("fetched_at") or 0),
+        "age": age,
+    }
+
+
+def category_counts(items: Iterable[dict], *, nsfw: str = "blur") -> dict:
+    """按**本地索引**数根分类 / 角色各有多少条（与列表筛选同一份数据、同一条 nsfw 口径）。
+
+    ⚠️ 这就是"分类数字和右上角不符"的修法：原先数字取站点 `Mod/Categories` 的
+    `_nItemCount`（分类树自己一份缓存、TTL 一周），而列表取本地索引（TTL 一天，
+    刷新失败还会更旧）—— 两个来源、两个时间点，用户点「皮肤」看到 744、列表却只有 666。
+    现在数字从**列表用的那份索引**里数：标签上写的数 == 点进去看到的条数，
+    索引再旧、再不完整也自洽（索引缺了谁，数字也一起少，不会互相打脸）。
+    """
+    roots: dict[str, int] = {}
+    characters: dict[str, int] = {}
+    total = 0
+    hide = str(nsfw or "").strip().lower() == "hide"
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        if hide and item.get("nsfw"):
+            continue
+        total += 1
+        root = str(item.get("root_category") or "").strip()
+        if root:
+            roots[root] = roots.get(root, 0) + 1
+        character = str(item.get("character") or "").strip()
+        if character:
+            characters[character] = characters.get(character, 0) + 1
+    return {"total": total, "roots": roots, "characters": characters}
+
+
+def merge_index_items(fresh: Iterable[dict], cached: Iterable[dict]) -> tuple[list[dict], int]:
+    """按 id 合并两份索引：**这次拿到的优先、旧缓存补齐**。返回 (合并结果, 补进来的条数)。
+
+    只该用于"这次没取全"的场合（见 `ensure_index`）：少一页不能等于"用户眼前那批 Mod
+    消失了"。完整刷新时不合并 —— 站点上真的删掉的条目该跟着消失。
+    """
+    seen: set[str] = set()
+    merged: list[dict] = []
+    reused = 0
+    for source, from_cache in ((fresh, False), (cached, True)):
+        for item in source or []:
+            if not isinstance(item, dict):
+                continue
+            key = str(item.get("id") or "")
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            merged.append(item)
+            if from_cache:
+                reused += 1
+    return merged, reused
+
+
 def build_index(*, pages: int = 0, per_page: int = PAGE_MAX,
                 timeout: int = REQUEST_TIMEOUT, cancel: Cancel = None,
                 progress: Progress = None, log: Callable[[str], None] | None = None) -> dict:
-    """把所有 Mod 拉一遍（707 条 = 15 页 × 50）。
+    """把所有 Mod 拉一遍（2026-11-07 实测站点 796 条 = 16 页 × 50）。
 
-    **不 fail-fast**（项目既定规则）：某一页失败就重试，重试完仍失败**记下来继续下一批**，
-    最后如实报"哪几页没拿到"——宁可索引不全，也不要因为第 7 页超时就整份丢弃。
+    **不 fail-fast**（项目既定规则）：某一页失败先**重试**（最多 `INDEX_PAGE_ATTEMPTS` 次），
+    仍失败就记下来继续下一页，最后如实报"哪几页没拿到"并把自己标记成 `complete=False`。
+
+    ⚠️ 为什么必须**重试 + 如实标记残缺**（2026-11-07 用户实测「前一小时还在的 mod
+    现在消失了」）：线路抖一下少拿一页，旧实现把这份**残缺结果原样写进缓存**、界面还写着
+    "索引就绪" ⇒ 用户看到的就是"Mod 凭空消失"，而且接下来一整天都不会再补。
     """
-    items: list[dict] = []
+    by_id: dict[str, dict] = {}
     failed_pages: list[int] = []
     total = 0
+    stalled = 0
     page = 1
     while True:
-        try:
-            result = list_mods(page, per_page, timeout=timeout, cancel=cancel)
-        except Exception as exc:  # noqa: BLE001 —— 单项失败不中断整批
-            _log(log, f"商城索引：第 {page} 页失败（{exc}）")
+        result = None
+        for attempt in range(1, INDEX_PAGE_ATTEMPTS + 1):
+            try:
+                result = list_mods(page, per_page, timeout=timeout, cancel=cancel)
+                break
+            except Exception as exc:  # noqa: BLE001 —— 单页失败先重试，不中断整批
+                _log(log, f"商城索引：第 {page} 页第 {attempt} 次失败（{exc}）")
+                if attempt >= INDEX_PAGE_ATTEMPTS:
+                    break
+                time.sleep(0.6 * attempt)
+        if result is None:
             failed_pages.append(page)
             if len(failed_pages) > 3:      # 连续多页都不行 ⇒ 网络确实不通，别再硬撑
                 break
@@ -988,18 +1079,37 @@ def build_index(*, pages: int = 0, per_page: int = PAGE_MAX,
             continue
         total = result["total"] or total
         rows = result["items"]
-        items.extend(rows)
+        added = 0
+        for row in rows:
+            key = str(row.get("id") or "")
+            if not key or key in by_id:
+                continue          # 站点分页偶尔会跨页重复（记录在翻页期间被顶动）
+            by_id[key] = row
+            added += 1
         if progress:
-            progress(f"已取 {len(items)}/{total or '?'} 个 Mod…")
-        if not rows or (total and len(items) >= total):
+            progress(f"已取 {len(by_id)}/{total or '?'} 个 Mod…")
+        if not rows:
+            break
+        if rows and not added:
+            # 一整页全是重复 ⇒ 再翻也不会有新东西（防"同一页反复返回"把循环卡死）
+            stalled += 1
+            if stalled >= 2:
+                _log(log, f"商城索引：第 {page} 页全是重复条目，停止翻页")
+                break
+        else:
+            stalled = 0
+        if total and len(by_id) >= total:
             break
         if pages and page >= pages:
             break
         page += 1
+    items = list(by_id.values())
     return {
         "items": items,
         "total": total or len(items),
         "failed_pages": failed_pages,
+        # 完整 = 没有失败页、且拿到的条数不少于站点自报的总数
+        "complete": not failed_pages and (not total or len(items) >= total),
         "fetched_at": time.time(),
     }
 
@@ -1007,30 +1117,58 @@ def build_index(*, pages: int = 0, per_page: int = PAGE_MAX,
 def ensure_index(config: Any, *, ttl: int = INDEX_TTL_SECONDS, force: bool = False,
                  cancel: Cancel = None, progress: Progress = None,
                  log: Callable[[str], None] | None = None) -> dict:
-    """确保本地索引可用（新鲜就直接用；拉失败**静默回退旧缓存**）。"""
+    """确保本地索引可用（新鲜就直接用；拉失败**静默回退旧缓存**）。
+
+    返回的 dict 里带 `refreshed` / `reused_cache` / `reused` / `complete`，
+    调用方据此告诉用户"这次到底刷新了没有"——旧实现"刷新失败也报索引就绪"，
+    用户根本看不出自己看的是几天前的数据。
+
+    ⚠️ **残缺结果不许覆盖完整缓存**（2026-11-07 修）：这次少拿了几页时，把旧缓存里
+    缺的条目**补回来**（`merge_index_items`），并标记 `complete=False`；
+    完整刷新才以这次为准（站点上真下架的条目该跟着消失）。
+    """
     from . import fsutil
 
     cached = load_index(config)
-    if not force and cached.get("items") and index_age(config) < ttl:
-        return cached
+    state = index_state(cached)
+    # 残缺索引**缩短重试间隔**：这次少了一页，不该等一整天再补（用户正看着"少 77 个"的商城）。
+    fresh_enough = ttl if state["complete"] else min(ttl, INDEX_INCOMPLETE_RETRY_SECONDS)
+    if not force and cached.get("items") and state["age"] < fresh_enough:
+        return {**cached, "refreshed": False, "reused_cache": False, "reused": 0}
     try:
         fresh = build_index(cancel=cancel, progress=progress, log=log)
     except Exception as exc:  # noqa: BLE001
         if cached.get("items"):
             _log(log, f"商城索引：刷新失败，先用上次缓存（{exc}）")
-            return cached
+            return {**cached, "refreshed": False, "reused_cache": True, "reused": 0,
+                    "error": str(exc)}
         raise
-    if not fresh.get("items") and cached.get("items"):
+    fresh_items = fresh.get("items") or []
+    if not fresh_items and cached.get("items"):
         _log(log, "商城索引：这次一条都没取到，保留上次缓存")
-        return cached
-    # 只落盘"界面要用的字段"，不把整个 raw 塞进索引（707 条 raw 会让文件胖到几 MB）
-    slim = [{key: value for key, value in item.items() if key != "raw"} for item in fresh["items"]]
+        return {**cached, "refreshed": False, "reused_cache": True, "reused": 0}
+    items = fresh_items
+    reused = 0
+    if not fresh.get("complete") and cached.get("items"):
+        items, reused = merge_index_items(fresh_items, cached["items"])
+        if reused:
+            _log(log, f"商城索引：这次只拿到 {len(fresh_items)} 条（站点 "
+                      f"{fresh.get('total') or '?'} 条），已补回 {reused} 条旧索引")
+    payload = {
+        **fresh,
+        "items": items,
+        "total": max(int(fresh.get("total") or 0), len(items)),
+        "complete": bool(fresh.get("complete")),
+        "reused": reused,
+    }
+    # 只落盘"界面要用的字段"，不把整个 raw 塞进索引（几百条 raw 会让文件胖到几 MB）
+    slim = [{key: value for key, value in item.items() if key != "raw"} for item in items]
     try:
         fsutil.write_json(index_path(config),
-                          {**fresh, "schema": STORE_SCHEMA, "items": slim})
+                          {**payload, "schema": STORE_SCHEMA, "items": slim})
     except OSError as exc:  # noqa: BLE001
         _log(log, f"商城索引：缓存写入失败（{exc}）")
-    return fresh
+    return {**payload, "refreshed": True, "reused_cache": False}
 
 
 # ── 更新判定（"批量扫描"的核心，不需要逐个查详情）───────────────────────────
@@ -1108,6 +1246,8 @@ __all__ = [
     "categories", "load_categories", "categories_path",
     "detail",
     "index_path", "load_index", "index_age", "build_index", "ensure_index",
+    "INDEX_PAGE_ATTEMPTS", "INDEX_INCOMPLETE_RETRY_SECONDS",
+    "index_state", "category_counts", "merge_index_items",
     "compare_updates", "parse_download_time",
     "thumb_root", "thumb_path", "prepare_images", "ThumbServer",
 ]
