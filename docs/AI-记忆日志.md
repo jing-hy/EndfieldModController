@@ -6742,3 +6742,146 @@ Vue 的 `watch` 默认 flush:'pre'（DOM 更新前回调）：如果被观察的
 「更新依赖」最开始那几十秒=在**查上游最新版本**（`runtime_deps._resolve_builtin_asset` → `github.releases_latest` → `_release_via_web` 两次 fastnet.fetch，直连被掐要走镜像+探测）；前面本地阶段实测极快（scan_library 0.8s、asset_report 0.1s、load_manifest 0s）。已加阶段计时日志与「正在读取上游最新版本…」。
 
 `关键词：["更新依赖","41秒","releases_latest","查最新版本","启动慢","阶段计时","_resolve_builtin_asset","镜像线路","日志"]`
+
+<!-- 增量追加 2026-11-07 19:53 · 新增 13 条（历史条目一律保留）-->
+
+<!-- rules · 设计原则 / 行为准则 -->
+### 【下载线路规则（核心机制 + 2026-11-07 实测…
+*2026-11-07 18:17*
+
+【下载线路规则（核心机制 + 2026-11-07 实测更新）】
+**① 用户原话**：「只要直连不达到单片 1.5MB/s，而且没有 ghtoken，就直接进动态抢块测试，如果抢块比直连快就继续，比直连慢就恢复直连」＋「**抢块不包含直连**」。落点：`fastnet._parallel_gate()` / `_direct_last_mbps()` / `download()` 里的 `line_dead` 与循环外兜底；测试 `tests/test_fastnet_direct_slow.py`。
+**② 默认线路表（2026-11-07 实测重排）**：直连 → **gh.monlor.com（0.49 MB/s，最快）** → ghproxy.net（0.18–0.21）→ gh.nxnow.top（0.12）→ gh-proxy.com（0.04）。一批候选被剔除：返回 text/html 的 ghps.cc / ghproxy.cfd / ghproxy.link / gh-proxy.net / gh.tryxd.cn；证书不符的 ghproxy.cc / cf.ghproxy.cc / fast.ghproxy.cc / gh.zzbjb.com；gh.ddlc.top 429、github.ur1.fun 402、ghproxy.homeboyc.cn 403；域名没了 gh.xxooo.cf / ghproxy.0309.io / hub.gitmirror.com。
+**③ 假包早判（2026-11-07 加）**：`probe()` 在同一个 Range 请求里取回前 64 字节 + Content-Type；`validate_payload()` 见 `text/html` / HTML 首字节 / 与扩展名不符（PK·MZ·Rar!·7z）⇒ 直接判这条线路无效并记账，不再下完才发现 sha256 不符。
+**④ 工作文件消失**：`FileNotFoundError` 时一并 `_clear_parts()`（否则会留下「长度正确、内部有空洞」的坏包），并给可读原因（杀软隔离 / 并发清理）。
+
+`关键词：["下载线路","抢块不含直连","gh.monlor.com","DEFAULT_LINES","假包早判","validate_payload","text/html","SLOW_MBPS","回直连单连接","mcdownload"]`
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### v1.4.12 已发布（2026-11-07 14:51…
+*2026-11-07 14:53*
+
+v1.4.12 已发布（2026-11-07 14:51 UTC+8 转正）：附件 EndfieldModController.exe（sha256 0427ba7b7bc84ffb281b561d2f5cfb19c65bb853c6e603cc96216d34f5c135a6，35,184,109 B）+ assets-bundle.zip（sha256 02d15110311171b5138ea858bfd94e40a14670bc7f55350f81f7135465c7377a）。本地全量测试 1453 passed。`dist/` 与 `modtest/` 的 exe 哈希一致。GitHub Actions 对近期 push 没有产生 run（历史全是 cancelled）⇒ 本机全量测试是当前唯一门槛。
+
+`关键词：["v1.4.12","Release","sha256","assets-bundle","发布","modtest","Actions","全量测试"]`
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 【modecontroller 当前状态唯一真源】（20…
+*2026-11-07 18:17*
+
+【modecontroller 当前状态唯一真源】（2026-11-07 更新）
+**Latest Release = v1.4.12**（Latest、非 draft/非预发布，main = 0d5ce76；tag v1.4.12 指向同一提交）。资产：`EndfieldModController.exe` 35,184,109 B · sha256 `0427ba7b7bc84ffb281b561d2f5cfb19c65bb853c6e603cc96216d34f5c135a6`；`assets-bundle.zip` 261,987,364 B · sha256 `02d15110311171b5138ea858bfd94e40a14670bc7f55350f81f7135465c7377a`（与 release digest 一致）。`dist\` 与 `D:\zmdmod\modtest\` 的 exe 哈希相同。
+**本地版本 = 1.4.12**（与 Release 同号、不欠号）。版本号三处一致（`version.py` + 两份 README）。
+**离线依赖包**：`dist\deps-bundle.zip`（≈330 MB，不进 Release，QQ 群 1045239747 应急分发），组件或随包 assets 一变就重打并同步 modtest。
+⚠️ **GitHub Actions 对近期 push 不产生 run**（`gh run list` 只有旧的 cancelled 历史，`enabled=true`）⇒ 发版门槛实际靠本机全量（1453 passed / 3 分 10 秒）。
+历史版本（v1.4.11 / v1.4.10 / v1.4.7 / v1.4.6 等）的明细看 GitHub Releases 与 `RELEASE_NOTES.md`，不再单存记忆。
+
+`关键词：["当前状态","Latest Release","v1.4.12","sha256","assets-bundle","版本号","离线依赖包","modtest","Actions 未触发","发布"]`
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 【modecontroller 发布流程 · 照抄即可】…
+*2026-11-07 18:17*
+
+【modecontroller 发布流程 · 照抄即可】（2026-11-07 更新）
+① 改代码 → 本机 `python scripts\run_tests.py tests --serial`（全量；一律串行）→ **自己 `git add -A && git commit`** → `python scripts\build_release.py`（校验版本三处一致 + 组件版本表 `--strict` + 构建 exe + 同步 modtest + **自动 push main**）→ `python scripts\prepare_release.py`（会重建 assets-bundle，打印两个 sha256）→ `gh release create vX --repo jing-hy/EndfieldModController --draft --notes-file <本版小节>` → `python scripts\upload_release_assets.py --tag vX`（DoH 查真实 IP + curl 直连）→ `gh release edit vX --draft=false --latest` → 核对 digest 与「draft 数 = 0」。
+② **版本号**：本地 = 最新 Release + 1；未发版写 `<号>-beta`，且**两份 README 停在最新 Release 号**；发版时**先把版本收成正式号再构建**（否则 `prepare_release` 的闸会拒：exe 自称 beta 会让用户自更新无限提示，v1.0.19 事故）。
+③ **附件只推两个且不带版本号**（exe + assets-bundle.zip）；draft 阶段按 tag 查会 404 ⇒ 用 **release id** 核对 digest；改过 `frontend\` 必须先 `node node_modules/vite/bin/vite.js build`；构建前把 `dist\deps-bundle.zip` 挪到 `_tmp\dist-keep\`。
+④ **交付形态**：「全弄好一起打包再让我测」；给硬指标（文件大小/修改时间/sha256）；改动多的版本给编号手测清单 `TESTING.md`（新增接末尾、老编号不动）；公告只发大事。
+⑤ 快照落 `D:\zmdmod\_snapshot_<标签>-<时间戳>\`（不进 git），`push.py` 先快照、失败就不推。
+⑥ 发版正文**只取本版小节**（全文会带上旧版本）。
+
+`关键词：["发布流程","build_release","prepare_release","upload_release_assets","draft 按 id 核对","版本号收正式号","TESTING.md","快照","assets-bundle","Release notes 本版小节"]`
+
+<!-- topic · 话题（一件事的前因后果） -->
+### 让组件下载「快、可观测、不假包」，并发版 v1.4.12
+*2026-11-07 18:16*
+
+起因：用户三连问——「更新依赖最开始为什么这么慢，在干什么」「速度为什么掉到 4k」「会显示 9.513806651037655 B/s」。
+
+查证：只读实测证明本地阶段合计 <1 s（scan_library 0.8s、asset_report 0.1s），那 41 秒全在 `_resolve_builtin_asset → github.releases_latest → _release_via_web`（两次 fastnet.fetch + 试镜像探测），而这段原来**一行日志都没有**；速度 4 KB/s 是真慢（镜像 0.13 MB/s 仍开 32 连接、分块读超时反复重试），9.51…B/s 是 `humanSize()` 对 <1KB 直接拼浮点。
+
+处置：① probe 顺带取回前 64 字节 + Content-Type，新增 `validate_payload` 在探测期判死假包；② 工作文件消失时作废分块记录；③ 修日志矛盾（抢块池措辞、线程数只报最终值）；④ 阶段计时日志；⑤ humanSize 取整；⑥ 商城哨兵改 post-flush + 兜底重挂。
+
+镜像：两批共 31 个候选实测，gh.monlor.com 0.49 MB/s 最快并入表首位（原表只有 gh.nxnow/ghproxy/gh-proxy），一批候选被识别为返回 text/html 的假包。
+
+结果：本机全量 1453 passed / 3 分 10 秒；v1.4.12 已发布（exe sha256 0427ba7b…c135a6，assets-bundle sha256 02d15110…5c7377a），dist 与 modtest 哈希一致。注意 GitHub Actions 对近期 push 没有触发，发版门槛实际靠本机全量。
+
+`关键词：["更新依赖慢","假包","validate_payload","镜像实测","gh.monlor.com","4KB/s","9.51 B/s","商城无限滚动","v1.4.12","32 连接","阶段计时"]`
+
+<!-- topic · 话题（一件事的前因后果） -->
+### 把 MaaEnd 的 AGENTS.md 逐条对照本仓库，能移植的移植、不能移植的说明原因、冲突交用户决策
+*2026-11-07 18:16*
+
+起因（用户原话）：「你看看 maaend 的 agent.md，对比一下本项目的，我要你把 maaend 的能移植的都移植，不能移植的挨个说明原因，冲突的让我决策，注意不要把 agent.md 撑得臃肿」。
+
+做法：clone `MaaEnd/MaaEnd` 到 `_tmp/maaend-src`（129 行）；逐节对照本仓库 AGENTS.md。
+
+移植 6 类（都塞进现有表格/清单，不新增章节）：产出即合规（开头加一行）、信息不足时写【待补：…】不许编造日志/路径/行号、参数极简（用户没提的开关参数不加）、验证按需（本机 `run_tests.py --changed`，全量交 CI）、双端契约（面板 `MC_Panel<n>`：`core.inject_panel_lists` ↔ `reshade_addon/src/*.cpp`）、动作后回读验证 + 异常路径 + 临时文件放 `_tmp/`。顺带修了 AGENTS.md 与 CI 注释互相矛盾的一处（pytest 全绿 vs 本机只跑 --changed）。
+
+未移植（逐条说明原因）：Pipeline 低代码/Go Service/Cpp Algo/Custom Schema/720p 基准/interface.json 与 locales 国际化/文件夹名禁 `_` 开头（本仓库反过来用 `_tmp/`）/Prettier+markdownlint/OCR 文本/文档链接/项目概览。
+
+冲突 4 条（分支策略、AI 能否直接提 PR、测试严格度、格式化闸）已编号交用户，他回「冲突都不动即可」⇒ 全部维持现状。体积 151→162 行。
+
+`关键词：["MaaEnd","AGENTS.md","移植","产出即合规","信息不足标注","参数极简","验证按需","双端契约","冲突决策","不臃肿","CLAUDE.md"]`
+
+<!-- lesson · 经验教训（被纠正过的、踩过的坑） -->
+### 浮点数值直接上屏会出「9.513806651037655…
+*2026-11-07 14:53*
+
+浮点数值直接上屏会出「9.513806651037655 B/s」/「23.76781745624384%」——后端算浮点（EMA 速度/百分比）没错，**显示层必须格式化**。`frontend/src/lib/util.js` 的 `humanSize()` 是唯一格式化入口（DownloadsPage/DepsPage/UpdateBadge 都用它）：<1KB 要 toFixed(1)，1~10KB 保留一位小数，否则慢速时看不出还在动。
+
+`关键词：["humanSize","速度显示","浮点数","B/s","百分比","util.js","格式化","下载速度","EMA","前端"]`
+
+<!-- lesson · 经验教训（被纠正过的、踩过的坑） -->
+### Vue 的 `watch` 默认 flush:'pre'…
+*2026-11-07 14:53*
+
+Vue 的 `watch` 默认 flush:'pre'（DOM 更新前回调）：如果被观察的元素是 `v-if` 才渲染的（商城无限滚动的哨兵 `ref=sentinel`），首屏那次回调里 `sentinel.value` 还是 null，`IntersectionObserver` 就**没盯上任何节点**，滚到底再也不会触发加载。修法：`{ flush: 'post' }` + await nextTick 再 observe，并在 `loadMore` 的 finally 里兜底重新 observe。
+
+`关键词：["Vue watch","flush post","IntersectionObserver","无限滚动","哨兵","v-if","商城","StorePage","划不动","自动加载"]`
+
+<!-- lesson · 经验教训（被纠正过的、踩过的坑） -->
+### 「这个镜像能用」的判据不是 HTTP 200，而是**首…
+*2026-11-07 14:53*
+
+「这个镜像能用」的判据不是 HTTP 200，而是**首字节 + Content-Type**：一批 GitHub 代理对 Release 资产返回 200 + text/html 错误页，旧代码会当安装包下完、最后才 sha256 不符（白等十几秒）。修法：`fastnet.probe()` 在同一个 Range 请求里多取前 64 字节（原来是 1 字节），`validate_payload()` 按扩展名比对 PK 头/MZ 并拒绝 text/html，命中即判线路无效。
+
+`关键词：["probe","validate_payload","假包","Content-Type","首字节","sha256","镜像","白等","下载","fastnet"]`
+
+<!-- lesson · 经验教训（被纠正过的、踩过的坑） -->
+### 【推送/发版前「自己 git commit」这一步不能漏…
+*2026-11-07 18:15*
+
+【推送/发版前「自己 git commit」这一步不能漏 —— 否则「产物是新的、GitHub 上的源码是旧的」】（2026-10-04 发 v1.0.10、**2026-11-07 发 v1.4.12 又踩一次**）
+
+**现象**：`push.py` / `build_release.py` 跑完显示推送成功，但那次提交**只有 `docs/AI-记忆日志.md` 一个文件**（脚本自己写着 `1 file changed`）—— 本版的业务改动（2026-11-07 那 14 项：fastnet / api / runtime_deps / 前端 / 新测试 / 版本号）**根本没提交**，于是 GitHub main 还是旧代码，而发出去的 exe 是用本地新源码构建的。
+
+**根因**：`push.py` 只负责「提交记忆日志 + 同步结构树 + 推送」，`build_release.py` 第 [9/9] 步也会**自动 push main** —— 两个脚本都会「成功」，很容易以为完全没问题；业务改动的 commit 必须我自己做。
+
+**定式**：① 推之前先看 `git status --porcelain`，非 0 就先 `git add -A && git commit`；② 构建脚本自动 push 之后，**再核一次远端**（`git rev-parse origin/main` 与本地 HEAD、`gh api .../contents/version.py` 读真内容）；③ 收尾要求 `git status` 为空且远端 HEAD == 本地 HEAD。
+
+`关键词：["push.py 只提交记忆日志","build_release 自动 push","漏了 git commit","源码没推上去","远端源码与产物不一致","git status 非0先提交","验证远端 HEAD","发版收尾核对","v1.4.12 又踩"]`
+
+<!-- lesson · 经验教训（被纠正过的、踩过的坑） -->
+### 「本机全量测试要 15~25 分钟、必须交给 CI」这条…
+*2026-11-07 18:15*
+
+「本机全量测试要 15~25 分钟、必须交给 CI」这条已经过时：2026-11-07 实测 `python scripts/run_tests.py tests --serial` = **1453 passed / 49 subtests，3 分 10 秒**。而 GitHub Actions **对近期 push 完全不触发**（`gh run list` 只有 10-26 的 cancelled 历史，`enabled=true`）⇒ 发版门槛不能默认「推上去 CI 会兜底」，实际可信的是本机全量 + 反向验证。
+
+`关键词：["全量测试耗时","1453 passed","3分10秒","交给 CI 已过时","Actions 未触发","gh run list cancelled","发版门槛","本机全量","run_tests.py"]`
+
+<!-- fact · 事实（细碎的原子信息） -->
+### GitHub 镜像实测（2026-11-07 本机裸网，…
+*2026-11-07 18:15*
+
+GitHub 镜像实测（2026-11-07 本机裸网，真实 Release 资产前 3 MB / 8 秒窗口）：gh.monlor.com 0.49 MB/s（最快，已排默认表第一）、ghproxy.net 0.18–0.21、gh.nxnow.top 0.12、gh-proxy.com 0.04、直连 0.007。ghps.cc / ghproxy.cfd / ghproxy.link / gh-proxy.net / gh.tryxd.cn 对 Release 资产返回 **HTTP 200 + text/html**；ghproxy.cc / cf.ghproxy.cc / fast.ghproxy.cc / gh.zzbjb.com 证书不符；gh.ddlc.top 429；github.ur1.fun 402；ghproxy.homeboyc.cn 403；gh.xxooo.cf / ghproxy.0309.io / hub.gitmirror.com 域名没了。结论已写进 `fastnet.DEFAULT_LINES`（直连 → gh.monlor → ghproxy.net → gh.nxnow → gh-proxy.com）并随 v1.4.12 发布。
+
+`关键词：["镜像","gh.monlor.com","ghproxy.net","gh.nxnow.top","下载线路","DEFAULT_LINES","实测速度","假包","text/html","fastnet"]`
+
+<!-- fact · 事实（细碎的原子信息） -->
+### 「更新依赖」最开始那几十秒 = 在**查上游最新版本**…
+*2026-11-07 18:15*
+
+「更新依赖」最开始那几十秒 = 在**查上游最新版本**（`runtime_deps._resolve_builtin_asset` → `github.releases_latest` → `_release_via_web` 两次 fastnet.fetch，直连被掐时要逐条试镜像+探测）；前面本地阶段实测极快（scan_library 0.8s、asset_report 0.1s、load_manifest 0s）。v1.4.12 起已加阶段计时日志与「正在读取上游最新版本…（超过 2 秒回报用时）」。
+
+`关键词：["更新依赖","查最新版本","releases_latest","启动慢","阶段计时","_resolve_builtin_asset","镜像线路","日志","41秒","白等"]`
