@@ -6905,3 +6905,13 @@ v1.4.12 已发布（2026-11-07 14:51）：exe sha256 0427ba7b…c135a6、assets-
 「商城打开时到底刷没刷新」要给**可观测证据**：顶部增量刷新原来成功后一行日志都不写、失败/跳过被前端静默吞掉，界面上的「N 小时前更新」用的还是全量索引的 fetched_at ⇒ 用户只能得出结论「根本不会自动刷新」。修法三条：① 进页面就并行起 head_refresh（不要 `loadMore().finally(...)`）；② busy（全量索引在建）时自动排队重试，失败写进状态行与 launch.log；③ 状态行单独显示「顶部已检查（多久前）」（head_at/head_age），与全量索引时龄分开。
 
 `关键词：["商城索引","顶部增量刷新","head_refresh","head_age","静默失败","状态行","busy 重试","可观测","StorePage"]`
+
+<!-- 增量追加 2026-11-07 20:54 · 新增 1 条（历史条目一律保留）-->
+
+<!-- lesson · 经验教训（被纠正过的、踩过的坑） -->
+### 判断「实例在不在跑」**不能只看进程名**：源码方式启动…
+*2026-11-07 20:50*
+
+判断「实例在不在跑」**不能只看进程名**：源码方式启动（pythonw run.py）时进程是 pythonw.exe，`Get-Process -Name EndfieldModController` 会判成“没在跑”，随后替换 exe / 清目录就会撞占用。可靠判据是四条独立证据（任一条成立即算在跑）：① 可见窗口标题以 EndfieldModController 开头（exe/源码都一样）；② tasklist 里的同名 exe；③ `<数据根>\runtime\.mc.lock` 里 PID 活着**且**进程指纹（exe 路径+创建时间）对得上（只比 PID 会被复用骗）；④ 目标 exe 能否独占打开。已落成 `scripts\who_is_running.py`（`--json` 给 Agent 读，退出码 0/1）。
+
+`关键词：["实例在不在跑","who_is_running.py","进程名误判","pythonw 源码启动","mc.lock 指纹","exe 独占打开","替换 exe 前检查","PID 复用"]`
