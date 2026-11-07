@@ -2466,6 +2466,7 @@ class EndfieldModControllerApi:
             assert self._dep_task is not None
             from types import SimpleNamespace as _NS
             try:
+                launcher._append_log(self.config, "[组件] 一键更新：开始（先读依赖清单与 Mod 库）")
                 # 全局进度分母：**一开始就按"实际要处理的项数"算好，中途不再变动**。
                 # 用户 2026-10-01 反馈「从 0 开始最开始是共 11 项，然后 12 项搞好又变成 12 项」
                 # —— 原因是用"预估"当分母，而真实运行时会按"只装缺失的"过滤依赖项，
@@ -2501,6 +2502,24 @@ class EndfieldModControllerApi:
                 # 就得先知道哪个阶段最后少产出了条目（见完成分支的比对日志）。
                 _stage_mark = [0]
 
+                def _phase(label: str):
+                    """阶段计时（2026-11-07）：把「在做哪一步 / 用了多久」写进**用户看得到**的日志。
+
+                    用户报「更新依赖，为什么最开始一下这么慢，在干什么」—— 实测那 41 秒里
+                    `launch.log` 一行都没有：前面几幕（清单、随包资产）只写任务日志，而真正最慢的
+                    「查上游最新版」是网络请求、前面也没有"开始"提示。耗时步骤一律先报开始、
+                    完成再报秒数，别再让界面看起来像卡死。
+                    """
+                    started = time.time()
+                    launcher._append_log(self.config, f"[组件] {label}：开始")
+
+                    def done(extra: str = "") -> None:
+                        elapsed = time.time() - started
+                        tail = f"，{extra}" if extra else ""
+                        launcher._append_log(
+                            self.config, f"[组件] {label}：完成 用时 {elapsed:.1f}s{tail}")
+                    return done
+
                 def stage_done() -> None:
                     """一个阶段跑完：把"已完成项数"设为当前累计的结果条数。
 
@@ -2517,6 +2536,7 @@ class EndfieldModControllerApi:
                     task["log"].append(
                         f"阶段完成：新增 {added} 项，累计 {len(results)}/{task['total']} 项"
                     )
+                _phase_assets = _phase("随包 DLSS 运行库检查")
                 # ① 随包分发的 DLSS 运行库（压缩分卷）：离线可用，缺失/损坏才展开。
                 #    放在最前 —— 后面的 DLSS5 组件与游戏目录补齐都可能用到它。
                 try:
@@ -2546,7 +2566,9 @@ class EndfieldModControllerApi:
                             ))
                 except Exception as exc:  # noqa: BLE001
                     results.append(_NS(key="nvngx", status="失败", message=str(exc)))
+                _phase_assets()
                 stage_done()
+                _phase_builtin = _phase("内置组件（XXMI / Libs / EFMI）")
                 if self.config.use_builtin_runtime:
                     if dry_run:
                         results.extend(runtime_deps.dry_run_results(self.config))
@@ -2572,7 +2594,9 @@ class EndfieldModControllerApi:
                                 version=item.version,
                                 path=item.path,
                             ))
+                _phase_builtin()
                 stage_done()
+                _phase_dlss5 = _phase("DLSS5 组件")
                 # ② DLSS5 组件：有公开上游的那几个（ReShade 底座 / DLSS5-Feeder / iMMERSE shader）
                 try:
                     if dry_run:
@@ -2594,7 +2618,9 @@ class EndfieldModControllerApi:
                             ))
                 except Exception as exc:  # noqa: BLE001
                     results.append(_NS(key="dlss5", status="失败", message=str(exc)))
+                _phase_dlss5()
                 stage_done()
+                _phase_deps = _phase("依赖清单")
                 # 复用开头已算好的清单（分母就是按它定的，别再重复算一遍）
                 manifest = manifest_all
                 combined = combined_specs
@@ -2606,7 +2632,9 @@ class EndfieldModControllerApi:
                     progress=progress,
                     byte_progress=byte_progress,
                 ))
+                _phase_deps()
                 stage_done()
+                _phase_extras = _phase("乳摇 / Poser")
                 # 乳摇插件（第三方工具）也走同一个更新流程，不再单列按钮
                 try:
                     from types import SimpleNamespace
@@ -2682,6 +2710,7 @@ class EndfieldModControllerApi:
                     from types import SimpleNamespace as _NS
 
                     results.append(_NS(key="secondary_motion", status="跳过", message=str(exc)))
+                _phase_extras()
                 # 完成：**把分子分母对齐到实际完成项数**，保证"100%"和"N/N 项"一定一致。
                 # ⚠️ 这里踩过两次、两个要求必须同时满足：
                 #   ① 过程中分母不许变（用户「从 0 开始最开始是共 11 项，然后 12 项搞好又变成

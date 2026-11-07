@@ -11,8 +11,8 @@ description:
   en: >
       The jiggle-physics plugin: report installed version and proxy ownership, resolve which upstream build to use, inject or remove its dll, keep its manager settings in sync, and launch its manager UI from the controller.
       
-revision: 89bc0c73458ae7cf701d5c51691a28cfbebc2135
-updated_at: "2026-11-07T05:15:40.230Z"
+revision: bf4fd078330843729d79451ed7aa1a080a39340a
+updated_at: "2026-11-07T06:45:10.119Z"
 fingerprint: 0b86e7484a2e989588a4c2ecc9b7086203e35deb82f419bc1ebc37139554ac88
 source:
   - path: "endfieldmodcontroller/secondary_motion.py"

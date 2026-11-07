@@ -308,17 +308,26 @@ DIRECT = Line("直连")
 # 先白试它一遍；而它抛的是 `getaddrinfo failed`，命中下面那段"网络/DNS 故障不计入失败
 # 记录"的豁免 ⇒ **永远不进冷却、永远排第一、永远重试**，日志里一秒内能刷十几遍
 # 「线路 gh.xmly.dev 失败」+「下载失败：所有线路都失败」。
-# 同时实测出可用线路（真实 Release 资产取前 1 MB）：
-#   gh.nxnow.top 0.39 MB/s ✓✓（新加，最快） / ghproxy.net 0.21 ✓ / gh-proxy.com 0.06 ✓
-#   其余候选（github.moeyy.xyz / gh.llkk.cc / ghgo.xyz / gh.ddlc.top / slink.ltd /
-#   cf.ghproxy.cc / ghproxy.1888866.xyz / gh.api.99988866.xyz / ghfast.top /
-#   mirror.ghproxy.com / ghproxy.cc / hub.gitmirror.com）本次全部不可用 ——
-#   不可用的**一律不进默认表**，只留"实测能跑"的和少数几个偶尔能用的候选，
-#   它们失败会被冷却、不会拖慢正常下载。
+# ★ 2026-11-07 全量复测（本机裸网、取真实 Release 资产的 3 MB 前缀，8 秒窗口）：
+#   gh.monlor.com   0.49 MB/s ✓✓（本次最快，新加进默认表）
+#   ghproxy.net     0.18–0.21 MB/s ✓
+#   gh.nxnow.top    0.12 MB/s ✓（2026-10 那次是 0.39，线路有波动）
+#   gh-proxy.com    0.04 MB/s ✓（能用但很慢，留作最后兜底）
+#   （同一时刻直连只有 0.007 MB/s —— 这就是为什么默认要用镜像）
+#
+# ⚠️ **2026-11-07 复测最值得记的一条：一批"看起来能用"的候选其实返回的是网页**
+#   （HTTP 200 + text/html）：ghps.cc / ghproxy.cfd / ghproxy.link / gh-proxy.net /
+#   gh.tryxd.cn —— 下载器原来会**当安装包一路下完、最后才 sha256 不符**（用户实测白等
+#   15 秒）。现在 `validate_payload()` 在探测那一步就看首字节/Content-Type，直接判死。
+#   另有：ghproxy.cc / cf.ghproxy.cc / fast.ghproxy.cc / gh.zzbjb.com 证书不符；
+#   gh.ddlc.top 429；github.ur1.fun 402；ghproxy.homeboyc.cn 403；
+#   gh.xxooo.cf / ghproxy.0309.io / hub.gitmirror.com / gh-proxy.top 域名没了。
+#   不可用的一律不进默认表 —— 它们只会白占一次尝试。
 DEFAULT_LINES: tuple[Line, ...] = (
     DIRECT,
-    Line("gh.nxnow.top", "https://gh.nxnow.top/"),
+    Line("gh.monlor.com", "https://gh.monlor.com/"),
     Line("ghproxy.net", "https://ghproxy.net/"),
+    Line("gh.nxnow.top", "https://gh.nxnow.top/"),
     Line("gh-proxy.com", "https://gh-proxy.com/"),
 )
 
@@ -455,27 +464,83 @@ def _open(url: str, *, headers: dict[str, str] | None = None, timeout: int = 30)
     return urllib.request.urlopen(request, timeout=timeout)
 
 
-def probe(url: str, *, timeout: int = 30) -> tuple[int, bool, str]:
-    """返回 (总大小, 是否支持 Range, 最终 URL)。"""
+def probe(url: str, *, timeout: int = 30) -> tuple[int, bool, str, bytes, str]:
+    """返回 (总大小, 是否支持 Range, 最终 URL, 首字节, Content-Type)。
+
+    ⚠️ 2026-11-07：**顺手把前 64 字节带回来**（原来只取 1 字节的 `Range: 0-0`），
+    让调用方在"开始下载"之前就能判断这条线路给的到底是不是真安装包 ——
+    用户实测过的假包现场：镜像对 Release 资产返回 HTML 错误页、HTTP 状态还是 200，
+    旧代码一路当 zip 下完、最后才 sha256 不符（白等十几秒）。多取的这 63 字节是同一个
+    请求里的，不增加任何网络往返。
+    """
     try:
-        with _open(url, headers={"Range": "bytes=0-0"}, timeout=timeout) as response:
+        with _open(url, headers={"Range": "bytes=0-63"}, timeout=timeout) as response:
             final = response.geturl()
             content_range = response.headers.get("Content-Range") or ""
             length = response.headers.get("Content-Length") or "0"
-            response.read()
+            ctype = (response.headers.get("Content-Type") or "").split(";")[0].strip()
+            head = response.read(64) or b""
         if content_range and "/" in content_range:
             total = int(content_range.rsplit("/", 1)[1])
-            return total, True, final
-        return int(length), False, final
+            return total, True, final, head, ctype
+        return int(length), False, final, head, ctype
     except (urllib.error.URLError, OSError, ValueError):
         pass
     try:
         with _open(url, timeout=timeout) as response:
             total = int(response.headers.get("Content-Length") or 0)
             ranges = (response.headers.get("Accept-Ranges") or "").lower() == "bytes"
-            return total, ranges, response.geturl()
+            ctype = (response.headers.get("Content-Type") or "").split(";")[0].strip()
+            head = response.read(64) or b""
+            return total, ranges, response.geturl(), head, ctype
     except (urllib.error.URLError, OSError, ValueError):
-        return 0, False, url
+        return 0, False, url, b"", ""
+
+
+# 各类型安装包的"首字节签名"，只用来回答一个朴素的问题：**这到底是不是个安装包**。
+_PAYLOAD_MAGIC: dict[str, tuple[bytes, ...]] = {
+    ".zip": (b"PK\x03\x04", b"PK\x05\x06"),
+    ".7z": (b"7z\xbc\xaf\x27\x1c",),
+    ".rar": (b"Rar!\x1a\x07\x00", b"Rar!\x1a\x07\x01\x00"),
+    ".exe": (b"MZ",),
+    ".dll": (b"MZ",),
+    ".addon64": (b"MZ",),
+    ".addon": (b"MZ",),
+}
+
+
+def _looks_like_html(head: bytes) -> bool:
+    text = (head or b"")[:64].lstrip().lower()
+    return text.startswith(b"<!doctype") or text.startswith(b"<html") or text.startswith(b"<")
+
+
+def validate_payload(head: bytes, content_type: str, name: str = "") -> tuple[bool, str]:
+    """这条线路返回的**是不是真安装包**？返回 `(可信, 原因)`。
+
+    ⚠️ 2026-11-07 实测动因（用户报「白等」）：一批镜像对 Release 资产返回
+    **HTTP 200 + text/html**（错误页 / 限流页 / 跳转页）。旧代码只问"下完了吗"，
+    于是把 HTML 当 zip 老老实实下完 ⇒ 最后 `sha256 校验失败` ⇒ 白等十几秒再换线；
+    HTML 恰好很小时连校验都可能糊过去，走到解压才炸。
+    现在在 **probe 阶段**（已经发出的那个请求）就用首字节 / Content-Type 判死，
+    而且这条线路会被记成坏线路，下次直接跳过。
+    """
+    ctype = (content_type or "").lower()
+    if ctype.startswith("text/html") or ctype.startswith("application/xhtml"):
+        return False, f"返回的是网页（Content-Type: {content_type}）"
+    if _looks_like_html(head):
+        return False, "返回的内容是 HTML（不是安装包）"
+    suffix = ""
+    low = (name or "").lower()
+    for ext in _PAYLOAD_MAGIC:
+        if low.endswith(ext):
+            suffix = ext
+            break
+    if suffix and head:
+        accepted = _PAYLOAD_MAGIC[suffix]
+        if not any(head.startswith(magic) for magic in accepted):
+            shown = " ".join(f"{b:02X}" for b in head[:4])
+            return False, f"内容不是 {suffix} 包（首字节 {shown}）"
+    return True, ""
 
 
 def fetch(
@@ -1002,9 +1067,21 @@ def _download_parallel(
                 if len(data) != end - begin + 1:
                     raise OSError(f"分块长度不符：{len(data)} != {end - begin + 1}")
                 # 每个线程自己开句柄 + seek，互不干扰
-                with open(dest, "r+b") as fh:
-                    fh.seek(begin)
-                    fh.write(data)
+                try:
+                    with open(dest, "r+b") as fh:
+                        fh.seek(begin)
+                        fh.write(data)
+                except FileNotFoundError as exc:
+                    # ⚠️ 2026-11-07 实测现场：日志里只有一句
+                    #   「线路 ghproxy.net 失败：No such file or directory: ...zip.mcdownload」
+                    # —— 工作文件在下载**过程中**消失了（杀软隔离这类会真删文件的行为，
+                    # 或上一轮失败清理与本轮重试撞车）。此时**分块记录必须一起作废**：
+                    # 那些"已完成"的块对应的字节已经不在文件里了，照旧续传就会写出一份
+                    # 内部是空洞、长度却正确的坏包（本项目踩过这个数据损坏级坑）。
+                    _clear_parts(dest)
+                    raise OSError(
+                        f"工作文件在下载过程中不见了（{dest.name}）—— "
+                        f"可能是杀软隔离或并发清理；已作废进度，换线/重试会从头下") from exc
                 with lock:
                     done_spans.add(span)
                     state["n"] += len(data)
@@ -1509,7 +1586,10 @@ def download(
     no_token = not _has_github_token()
     multi_alt = [line.apply(url) for line in lines[1:] if line is not DIRECT]
     if len(multi_alt) >= 1:
-        _log(log, "多线路动态抢块已启用（**不含直连**）： "
+        # ⚠️ 措辞必须精确（2026-11-07 用户被自己的日志绕晕过）：这里说的是
+        # **抢块池里有哪些镜像**，而直连仍会按顺序先做单连接尝试 —— 所以不能写
+        # 「已启用…不含直连」，紧接着又打一行「尝试线路：直连」，看起来自相矛盾。
+        _log(log, "备用镜像抢块池（**不含直连**，后面真开抢块时才会加入）： "
                   + "、".join(f"{line.name}" for line in lines[1:])
                   + "（谁空谁领，连挂两次的线路本次淘汰）")
 
@@ -1649,9 +1729,16 @@ def _attempt_line(
     started = time.time()
 
 
-    size, supports_range, final_url = probe(url, timeout=min(timeout, PROBE_TIMEOUT))
+    size, supports_range, final_url, head, content_type = probe(
+        url, timeout=min(timeout, PROBE_TIMEOUT))
     if not size:
         size = expected_size
+    # ★ 假包早判（2026-11-07）：镜像返回网页/错误页时**这一步就判死**，
+    #   不要等整包下完再让 sha256 来发现（用户实测那次白等了 15 秒）。
+    payload_ok, payload_why = validate_payload(head, content_type, dest.name)
+    if not payload_ok:
+        _log(log, f"这条线路给的不是安装包：{payload_why} → 直接判死、换下一条")
+        raise OSError(payload_why)
     _log(log, f"开始下载 {dest.name}"
              + (f"（{size / 1048576:.1f} MB）" if size else ""))
 
@@ -1713,6 +1800,13 @@ def _attempt_line(
         哈希完全不同也照样报成功）。现在把校验收口到落位之前，任何一条路径
         都无法绕过。
         """
+        # ⚠️ 2026-11-07：工作文件可能在收尾前被删（杀软隔离 / 并发清理）。
+        # 直接走 sha256_file 只会抛一个光秃秃的 ENOENT，看不出发生了什么。
+        if not work_path.is_file():
+            _clear_parts(work_path)
+            raise OSError(
+                f"工作文件在落位前不见了（{work_path.name}）—— 可能是杀软隔离或并发清理；"
+                f"本次重新下载")
         if expected_sha256:
             actual = sha256_file(work_path).lower()
             expected = norm_sha256(expected_sha256)
@@ -1845,16 +1939,16 @@ def _attempt_line(
         else:
             threads = recommended_threads(max(size - written, 1))
 
-        if 0 < report.probe_mbps < BOOST_FLOOR_MBPS:
-            # ⚠️ **别把线程数压太低**（2026-10-03 两组实测的教训）：
-            #   * 无 VPN：单连接 0.008 → 4 连接 0.034 → **16 连接 0.104**（13 倍）
-            #   * 开 VPN：单连接 0.129 → 4 连接 0.090（**反而慢**）→ **16 连接 0.641**（5 倍）
-            # 两次都是"4 条不够、16 条才吃满"。所以慢线路也直接给足 12 条起步
-            #（MAX_THREADS=20 是上限，块大小会按线程数自适应，不会切碎）。
-            threads = max(12, min(threads, MAX_THREADS))
-            _log(log, f"线路很慢（探测 {report.probe_mbps:.3f} MB/s）→ 仍用 {threads} 连接试"
-                      f"（实测慢线路上并发收益最大，且 4 条不够、要十几条才吃满），"
-                      f"试用窗口后按实测速度决定去留")
+        # ⚠️ **别把线程数压太低**（2026-10-03 两组实测的教训）：
+        #   * 无 VPN：单连接 0.008 → 4 连接 0.034 → **16 连接 0.104**（13 倍）
+        #   * 开 VPN：单连接 0.129 → 4 连接 0.090（**反而慢**）→ **16 连接 0.641**（5 倍）
+        # 两次都是"4 条不够、16 条才吃满"。所以慢线路也把线程数抬到 12 起步
+        #（MAX_THREADS 是上限，块大小会按线程数自适应，不会切碎）。
+        #
+        # ⚠️ 2026-11-07：这里原来**先打一行「仍用 12 连接试」**，而下面 ② 又把线程数
+        # 重新算成 recommended_threads(...)（实测打出 8）—— 用户看到"12 连接"紧跟
+        # "8 连接"两个数字，根本不知道到底几条。现在这里只调数值、不报数，
+        # 只在最终定下来之后打**一行**（见 ② 里那句）。
         # ★ **这一刻允不允许并发**（用户 2026-10-05 的规则，判据都在 `_parallel_gate` 里）：
         # 没有 token 的真实 GitHub 直连，只有慢到 `SLOW_MBPS` 以下才放行进抢块试用。
         gate, gate_note = _parallel_gate(url, report.probe_mbps, policy)
@@ -1885,6 +1979,9 @@ def _attempt_line(
         # 「应该动态，慢就并发，更慢就切回来」）—— 实测过 8 连接反而比单连接慢 24% 的情况，
         # 所以并发不是"开了就好"，得看这条线路吃不吃多连接。
         threads = recommended_threads(size - written)
+        # 极慢线路上别一上来就 20 条连接（保留原来那层收敛，只是挪到线程数**定下来之后**）
+        if 0 < report.probe_mbps < BOOST_FLOOR_MBPS:
+            threads = max(12, min(threads, MAX_THREADS))
         report.boosted = True
         report.threads = threads
         report.resumed_from = written

@@ -8,9 +8,18 @@ export function escapeHtml(value) {
 
 export function humanSize(bytes) {
   const n = Number(bytes) || 0;
+  if (!Number.isFinite(n) || n <= 0) return "0 B";
   if (n >= 1048576) return (n / 1048576).toFixed(1) + " MB";
-  if (n >= 1024) return (n / 1024).toFixed(0) + " KB";
-  return n + " B";
+  if (n >= 1024) {
+    // 10 KB 以下保留一位小数（2026-11-07）：原来整数截断，1.4 KB/s 会显示成 1 KB/s，
+    // 慢速时看不出还在不在动。
+    const kb = n / 1024;
+    return (kb >= 10 ? kb.toFixed(0) : kb.toFixed(1)) + " KB";
+  }
+  // ⚠️ 必须取整（2026-11-07 用户报「会显示 9.513806651037655 B/s」）：速度是浮点 EMA
+  // （fastnet._note_speed 的 old*0.6+instant*0.4），直接拼字符串会把一长串小数印到界面上，
+  // 与 2026-10-03 那次「23.76781745624384%」同属一类（后端算浮点、前端忘了格式化）。
+  return n.toFixed(1) + " B";
 }
 
 export function fmtTime(seconds) {

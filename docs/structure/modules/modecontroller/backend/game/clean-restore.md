@@ -11,8 +11,8 @@ description:
   en: >
       Make the game folder clean again without losing anything: move third-party files into a stamped backup (never delete), keep the original system module aside so it can be put back, list backups, and restore a backup on demand.
       
-revision: 89bc0c73458ae7cf701d5c51691a28cfbebc2135
-updated_at: "2026-11-07T05:15:40.228Z"
+revision: bf4fd078330843729d79451ed7aa1a080a39340a
+updated_at: "2026-11-07T06:45:10.117Z"
 fingerprint: 09f5e157c76c13bca84f645084de4c284fad4d0bc6f33fc352a257f9e49930dc
 source:
   - path: "endfieldmodcontroller/game_clean.py"

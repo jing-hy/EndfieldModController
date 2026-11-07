@@ -246,7 +246,17 @@ function watchSentinel() {
 }
 
 // 列表一变长就重新盯住哨兵（详情页切回来时哨兵是新渲染出来的，也得重新盯）+ 主动补填
-watch(() => items.value.length, () => { watchSentinel(); fillIfNeeded(); });
+// ⚠️⚠️ **必须 post-flush + 等一次 nextTick**（2026-11-07 用户报「滑到最底显示『往下滑自动加载』
+// 然后就划不动了」）：默认 flush='pre'，回调在 DOM 更新**之前**跑 —— 首屏第一页渲染出来那一刻
+// 哨兵节点还不存在（模板是 `v-if="items.length"`），于是 `watchSentinel()` 拿到 null、
+// 只执行了 disconnect()，**observer 从此没盯上任何节点**；如果首屏一页就铺满了视口
+// （`fillIfNeeded` 不需要补第二页），就再没有任何地方去 observe 它 ——
+// 用户滚到底部时 IntersectionObserver 一次都不会回调，列表也就不再往下加载。
+watch(() => items.value.length, async () => {
+  await nextTick();
+  watchSentinel();
+  fillIfNeeded();
+}, { flush: "post" });
 
 // ── 列表 ─────────────────────────────────────────────────────────────────────
 function options(nextPage) {
@@ -284,6 +294,8 @@ async function loadMore() {
   } finally {
     loading.value = false;
     loadingMore.value = false;
+    // 兜底重新盯哨兵：只靠上面的 watcher 会漏（首屏哨兵尚未渲染、或 reload 后节点被替换）
+    nextTick(() => { watchSentinel(); });
     if (headReloadPending) {
       headReloadPending = false;
       // 顶部刷新拿到了新条目，而这次列表是从旧索引读出来的 ⇒ 等它落地后重载一次

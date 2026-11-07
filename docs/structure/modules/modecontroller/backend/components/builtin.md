@@ -11,19 +11,19 @@ description:
   en: >
       Built-in components (XXMI / XXMI-Libs / EFMI / Endfield Poser): report, ensure, update. ⚠️ When “auto-update dependencies” is off and a local copy exists, **no network request is made at all** — before, only XXMI honoured that switch and the other three silently downloaded tens of MB during startup (measured: 54 s on Poser alone).
       
-revision: 89bc0c73458ae7cf701d5c51691a28cfbebc2135
-updated_at: "2026-11-07T05:15:40.221Z"
-fingerprint: e56777862cf010d3c993aec95ce9bcef45abca18dcc516bef14ad00a104acad1
+revision: bf4fd078330843729d79451ed7aa1a080a39340a
+updated_at: "2026-11-07T06:45:10.113Z"
+fingerprint: edd7cc4d3e140f3a85892cb08f07467ad6723972cce3885904a66d73daa3b48b
 source:
   - path: "endfieldmodcontroller/runtime_deps.py"
-    line: 64
-    end_line: 646
+    line: 65
+    end_line: 668
   - path: "endfieldmodcontroller/runtime_deps.py"
-    line: 302
-    end_line: 1901
+    line: 313
+    end_line: 1923
   - path: "endfieldmodcontroller/runtime_deps.py"
-    line: 460
-    end_line: 2340
+    line: 471
+    end_line: 2362
 apis:
   - protocol: rpc
     path: "runtime_deps.ensure_all"

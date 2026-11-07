@@ -13,6 +13,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -256,7 +257,17 @@ def _resolve_builtin_asset(config: AppConfig, key: str, repo: str, pattern: str,
         source, version, asset_name, digest = offline
         _note(config, f"{key}：使用离线依赖包里的 {asset_name}（不联网）")
         return (source, version, asset_name, digest)
-    return _latest_release_asset(repo, pattern, include_prerelease=include_prerelease)
+    # ⚠️⚠️ **这下面就是「更新依赖最开始那几十秒」**（2026-11-07 实测 41 秒）：查上游 release
+    # 走的是网页路线 + 自动换镜像线路，直连被掐时每筛一条线路都要探测，而**原来这里一行日志都没有**
+    # ⇒ 用户看到的是"点了没反应、界面一动不动"。现在先报"开始"，超过 2 秒再报实际用时。
+    started = time.time()
+    _note(config, f"{key}：正在读取上游最新版本…（网络慢时会停在这一步）")
+    try:
+        return _latest_release_asset(repo, pattern, include_prerelease=include_prerelease)
+    finally:
+        elapsed = time.time() - started
+        if elapsed >= 2.0:
+            _note(config, f"{key}：查最新版本用了 {elapsed:.1f}s")
 
 
 def _release_info(repo: str) -> dict:

@@ -38,6 +38,9 @@
 python -m pytest tests -q
 ```
 
+* 日常改动只需跑相关用例：`python scripts/run_tests.py --changed`（按 git diff 挑文件，几十秒）；
+  **全量交给 CI**（本机全量 15~25 分钟、文件 IO 密集，见 `.github/workflows/ci.yml` 顶部注释），
+  推上去跟进 Actions 结果；发版前再在本机跑一次全量。
 * 当前基线：**630 passed**（数字随版本增长）。
 * **修 bug 要配回归测试**，否则它迟早复发；测试文件顶部写清"这钉住的是什么现象/哪次实测"。
 * ⚠️ 不要在仓库根跑全量（`_tmp/` 会污染），始终 `python -m pytest tests -q`。
