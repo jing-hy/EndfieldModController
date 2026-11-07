@@ -6672,3 +6672,13 @@ v1.4.7 已发布（2026-10-19，Latest、非草稿/非预发布）：exe 35,145,
 新手引导第 2 步（2026-11-05 用户要求）= 切到「Mod 商城」页、高亮 #store-browse-box（StorePage.vue 顶部那张「Mod 商城」卡片），正文写清三种添加方式：① 拖 .zip/.7z/.rar 进窗口 ② 在本页商城点下载 ③ 去下载页粘贴网址（含香蕉网页面地址）。tests/test_frontend_tour_targets.py 静态钉住：每步 target id 必须真实存在，且第 2 步是商城、正文含这三种。
 
 `关键词：["新手引导","引导第2步","Mod商城","store-browse-box","三种添加方式","TOUR_STEPS","落点","高亮目标","StorePage","OnboardingTour","拖入","粘贴网址"]`
+
+<!-- 增量追加 2026-11-07 12:46 · 新增 1 条（历史条目一律保留）-->
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### v1.4.10 已于 2026-11-06 发布（Git…
+*2026-11-06 21:24*
+
+v1.4.10 已于 2026-11-06 发布（GitHub Latest）：main 与 tag 同为提交 89ad502；资产 EndfieldModController.exe 35,164,745 B sha256 dc4f3effa46ec1193630de93ba657c47b93bf058ac74494f862fecce2b6916a1、assets-bundle.zip 261,987,364 B sha256 68f0258e634c4c8bb5e4b5baae20cbd78e0c2792b3a51eb56442478144a7f117。版本号三处一致 1.4.10；组件版本表随版同步（XXMI-Libs v1.2.3 / EFMI v1.4.9 / jiggle_efmi 0.2.7）。发版流程：pytest → commit → build_release.py（内含 push.py 推 main，先快照）→ prepare_release.py → gh release create --notes-file（只取 RELEASE_NOTES.md 里本版那一节，整份会带上旧版本）。
+
+`关键词：["发版","v1.4.10","Release","Latest","tag","sha256","assets-bundle","prepare_release","build_release","push.py","版本号","组件版本表"]`
