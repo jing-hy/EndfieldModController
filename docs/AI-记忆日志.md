@@ -6700,3 +6700,45 @@ v1.4.10 已于 2026-11-06 发布（GitHub Latest）：main 与 tag 同为提交 
 【2026-11-07 商城显示修复的交付状态】Latest Release 仍是 v1.4.10（**本次未发版**，等用户明确说）。main = 89bc0c7（`fix(商城): 分类数字与列表同源 + 残缺索引不再让 Mod 消失` 的提交为 fe56966，其后是 push.py 自动的记忆日志/结构树提交）。本地版本 = **1.4.11-beta**（version.py + README.md + docs/README.detailed.md 三处一致）。构建产物 dist\EndfieldModController.exe = 35,176,330 B，sha256 `48f554b159956366f75437bdca33b1ee65ad6638e9038550cbffaa8f9ad2e6b2`，已同步 `D:\zmdmod\modtest\EndfieldModController.exe`（同 sha）。测试：全量 pytest 1430 passed；新增 `tests/test_modstore_counts.py`（9 条）钉住「分类数字==列表条数」「残缺刷新合并旧缓存」「状态行如实」。结构树已四步收尾（realign→refresh→validate 0 error→build+render），docs/structure 镜像已随 push 更新。
 
 `关键词：["1.4.11-beta","商城修复","main 89bc0c7","EndfieldModController.exe","sha256 48f554b1","modtest 同步","未发 Release","test_modstore_counts","结构树收尾","分类数字同源"]`
+
+<!-- 增量追加 2026-11-07 14:44 · 新增 5 条（历史条目一律保留）-->
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 【2026-11-07 v1.4.11 已发布】Late…
+*2026-11-07 13:35*
+
+【2026-11-07 v1.4.11 已发布】Latest Release = **v1.4.11**（非 draft/非预发布，已 Latest；tag v1.4.11 = main = d2692f2）。内容：商城分类数字与列表同源、索引残缺不再让 Mod 消失（重试+旧缓存按 id 合并+complete 标记+状态行如实+「刷新索引」入口）、索引**开机自动刷新**、商城页**顶部增量刷新**（打开一次 + 停留每 60 秒，只拉第 1 页 50 条并合并）。资产：EndfieldModController.exe 35,179,872 B sha256 `27415476d46ac559b3c6e06ec7c6356c7a9af3d259dc6d99bedc0876325eb645`；assets-bundle.zip 261,987,364 B sha256 `565a9a7a80a71e07cfe51428d6fdab37ef7854b5fc831709b3760347b2339529`（与 release digest 一致）。已同步 `D:\zmdmod\modtest\EndfieldModController.exe`（同 sha）。测试：全量 pytest **1439 passed**；新增 tests/test_modstore_counts.py（18 条）+ tests/conftest.py（全局桩掉预热线程，修「后台线程跨用例污染」）。⚠️ 新的版本规则：未发版时两份 README 停在最新 Release 号，build_release 按本地 git tag 校验。
+
+`关键词：["v1.4.11 已发布","Latest Release","main d2692f2","exe sha256 27415476","assets-bundle 565a9a7a","顶部增量刷新","开机自动刷新","tests/conftest.py","1439 passed","README 规则"]`
+
+<!-- lesson · 经验教训（被纠正过的、踩过的坑） -->
+### 用户 2026-11-07 纠正：「为什么现在 gith…
+*2026-11-07 13:35*
+
+用户 2026-11-07 纠正：「为什么现在 github 上的 readme 会写 1.4.11-beta 是最新版，都没推上去为什么要改」。规则改为：**未发版（version.py 带 -beta）时，两份 README 只写最新 Release 的号**（发版时才一起收成正式号）。build_release.py 的版本闸改为：本地是 beta ⇒ 期望 README = 本地 git tag 里最大的正式版号（离线可跑），不再是 version.py；正式号 ⇒ 仍要求三处一致。CONTRIBUTING/version.py 文档已同步。教训：README 是 GitHub 首页，展示的必须是**已经发出去**的版本。
+
+`关键词：["README 版本","1.4.11-beta","未发版不写 beta","build_release 版本闸","git tag 最新正式版","CONTRIBUTING 版本规则","GitHub 首页","发版才改 README"]`
+
+<!-- lesson · 经验教训（被纠正过的、踩过的坑） -->
+### 浮点数值直接上屏会出「9.513806651037655…
+*2026-11-07 14:30*
+
+浮点数值直接上屏会出「9.513806651037655 B/s」/「23.76781745624384%」——后端算浮点（EMA 速度/百分比）没错，**显示层必须格式化**。`frontend/src/lib/util.js` 的 `humanSize()` 是唯一格式化入口（DownloadsPage/DepsPage/UpdateBadge 都用它）：<1KB 要 toFixed(1)，1~10KB 保留一位小数，否则慢速时看不出还在动。
+
+`关键词：["humanSize","速度显示","浮点数","B/s","百分比","util.js","格式化","下载速度","EMA","前端"]`
+
+<!-- lesson · 经验教训（被纠正过的、踩过的坑） -->
+### Vue 的 `watch` 默认 flush:'pre'…
+*2026-11-07 14:30*
+
+Vue 的 `watch` 默认 flush:'pre'（DOM 更新前回调）：如果被观察的元素是 `v-if` 才渲染的（商城无限滚动的哨兵 `ref=sentinel`），首屏那次回调里 `sentinel.value` 还是 null，`IntersectionObserver` 就**没盯上任何节点**，滚到底再也不会触发加载。修法：`{ flush: 'post' }` + await nextTick 再 observe，并在 `loadMore` 的 finally 里兜底重新 observe。
+
+`关键词：["Vue watch","flush post","IntersectionObserver","无限滚动","哨兵","v-if","商城","StorePage","划不动","自动加载"]`
+
+<!-- fact · 事实（细碎的原子信息） -->
+### 「更新依赖」最开始那几十秒=在**查上游最新版本**（`…
+*2026-11-07 14:30*
+
+「更新依赖」最开始那几十秒=在**查上游最新版本**（`runtime_deps._resolve_builtin_asset` → `github.releases_latest` → `_release_via_web` 两次 fastnet.fetch，直连被掐要走镜像+探测）；前面本地阶段实测极快（scan_library 0.8s、asset_report 0.1s、load_manifest 0s）。已加阶段计时日志与「正在读取上游最新版本…」。
+
+`关键词：["更新依赖","41秒","releases_latest","查最新版本","启动慢","阶段计时","_resolve_builtin_asset","镜像线路","日志"]`
