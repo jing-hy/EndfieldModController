@@ -11,13 +11,13 @@ description:
   en: >
       Getting a dropped archive into the library: chunked receive for big files (so WebView2 does not choke on a huge base64 payload), one-shot receive for small ones, extract, adopt and identify, then report which character it landed on and whether the user must confirm.
       
-revision: 89ad502e368be7ee5b8c45c1a4d735e1870f43b9
-updated_at: "2026-11-07T04:43:41.662Z"
-fingerprint: 43275d255d70e23ea5822f87048fcf96695312ae473eb9e4d2e8649ba2981d89
+revision: f6f018e650111be669b39896b4a614a0d757c3a7
+updated_at: "2026-11-07T04:47:38.250Z"
+fingerprint: d4747ea6c02c00507de3113260fb95ed7a96c782001b24a0feb4fca2141804b4
 source:
   - path: "endfieldmodcontroller/api.py"
-    line: 8035
-    end_line: 14650
+    line: 8164
+    end_line: 14908
 apis:
   - protocol: rpc
     path: "import_mod_begin"

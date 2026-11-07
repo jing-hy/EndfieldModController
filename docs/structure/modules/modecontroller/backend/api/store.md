@@ -11,9 +11,9 @@ description:
   en: >
       js_api surface for the store flow and the download centre: listing, categories, detail, images, index refresh, batch scan and update-all, plus download task control. List and category counts share the local index; index refresh is a background task with an honest status line. Enqueues instead of navigating.
       
-revision: 89ad502e368be7ee5b8c45c1a4d735e1870f43b9
-updated_at: "2026-11-07T04:43:41.667Z"
-fingerprint: 43275d255d70e23ea5822f87048fcf96695312ae473eb9e4d2e8649ba2981d89
+revision: f6f018e650111be669b39896b4a614a0d757c3a7
+updated_at: "2026-11-07T04:47:38.254Z"
+fingerprint: d4747ea6c02c00507de3113260fb95ed7a96c782001b24a0feb4fca2141804b4
 source:
   - path: "endfieldmodcontroller/api.py"
 apis:

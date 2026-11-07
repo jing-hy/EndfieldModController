@@ -11,8 +11,8 @@ description:
   en: >
       Anonymous GameBanana apiv11 layer: listings, search, category tree, details, thumbnails and the full index. Three measured constraints shape it, plus field-versioned caches. Failed index pages are retried; incomplete results merge with the previous cache by id and are flagged complete=False, and category counts are derived from the same index so labels always match the list.
       
-revision: 89ad502e368be7ee5b8c45c1a4d735e1870f43b9
-updated_at: "2026-11-07T04:43:41.690Z"
+revision: f6f018e650111be669b39896b4a614a0d757c3a7
+updated_at: "2026-11-07T04:47:38.278Z"
 fingerprint: a9a76a13092b43971d7de7ef05f6baf37bb2edf34c299e7d65b4f6786482c26c
 source:
   - path: "endfieldmodcontroller/modstore.py"
