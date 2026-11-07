@@ -6885,3 +6885,23 @@ GitHub 镜像实测（2026-11-07 本机裸网，真实 Release 资产前 3 MB / 
 「更新依赖」最开始那几十秒 = 在**查上游最新版本**（`runtime_deps._resolve_builtin_asset` → `github.releases_latest` → `_release_via_web` 两次 fastnet.fetch，直连被掐时要逐条试镜像+探测）；前面本地阶段实测极快（scan_library 0.8s、asset_report 0.1s、load_manifest 0s）。v1.4.12 起已加阶段计时日志与「正在读取上游最新版本…（超过 2 秒回报用时）」。
 
 `关键词：["更新依赖","查最新版本","releases_latest","启动慢","阶段计时","_resolve_builtin_asset","镜像线路","日志","41秒","白等"]`
+
+<!-- 增量追加 2026-11-07 20:05 · 新增 2 条（历史条目一律保留）-->
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### v1.4.12 已发布（2026-11-07 14:51…
+*2026-11-07 19:54*
+
+v1.4.12 已发布（2026-11-07 14:51）：exe sha256 0427ba7b…c135a6、assets-bundle 02d15110…5c7377a，dist 与 modtest 哈希一致。
+**2026-11-07 晚起：GitHub Actions 停用** —— 用户取消了 run 并要求「所有写了相关的流程全部改掉，都用本地的」⇒ `.github/workflows/ci.yml` 改为**只在 workflow_dispatch 手动触发**（push/PR 不再起 run），AGENTS.md / CONTRIBUTING.md 同步改成「全量测试在本机跑：`python scripts/run_tests.py tests --serial`，1459 passed / 约 3 分 22 秒」。
+本地版本已由 1.4.12 推到 **1.4.13-beta**（未发版；两份 README 仍写 1.4.12）。main 已推到 3c47bd1。
+
+`关键词：["Actions 停用","ci.yml 手动触发","本机全量测试","1459 passed","1.4.13-beta","v1.4.12","sha256","push 不再起 run"]`
+
+<!-- lesson · 经验教训（被纠正过的、踩过的坑） -->
+### 「商城打开时到底刷没刷新」要给**可观测证据**：顶部增…
+*2026-11-07 19:54*
+
+「商城打开时到底刷没刷新」要给**可观测证据**：顶部增量刷新原来成功后一行日志都不写、失败/跳过被前端静默吞掉，界面上的「N 小时前更新」用的还是全量索引的 fetched_at ⇒ 用户只能得出结论「根本不会自动刷新」。修法三条：① 进页面就并行起 head_refresh（不要 `loadMore().finally(...)`）；② busy（全量索引在建）时自动排队重试，失败写进状态行与 launch.log；③ 状态行单独显示「顶部已检查（多久前）」（head_at/head_age），与全量索引时龄分开。
+
+`关键词：["商城索引","顶部增量刷新","head_refresh","head_age","静默失败","状态行","busy 重试","可观测","StorePage"]`
