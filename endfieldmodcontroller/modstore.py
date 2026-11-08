@@ -610,8 +610,13 @@ def detail(mod_id: int, *, timeout: int = REQUEST_TIMEOUT, cancel: Cancel = None
     files.sort(key=lambda row: row["added"], reverse=True)
 
     # ── 全部预览图（详情页要横向铺开，用户 2026-10-07：「预览图要更多」）────────
-    # 每条给三档：`full`=原图（灯箱）、`big`=800/530（大图）、`thumb`=530/220/100（列表）。
+    # 每条给四档：`full`=原图（灯箱）、`big`=800/530（大图）、
+    #            `preview`=530/800/220（详情页那一排横向预览，**不许用 100px**）、
+    #            `thumb`=530/220/100（列表卡片，实在没有才落到 100px）。
     # ⚠️ 各尺寸都可能缺（实测同一 Mod 的第 2、3 张截图只有 100px 那档）⇒ 逐级回退。
+    # ⚠️ 2026-11-08 用户实测：「详情页除了第一张以外都很模糊，点开又清晰」——
+    #    因为详情那一排原先用 `thumb`，而那些图只有 `100-90_` 那一档（100px 放大到 200px 宽）。
+    #    现在详情单独用 `preview`：530 → 800 → 220 → 原图，**永远不拿 100px 去撑大图**。
     images: list[dict] = []
     for image in ((data.get("_aPreviewMedia") or {}).get("_aImages") or []):
         if not isinstance(image, dict):
@@ -630,10 +635,20 @@ def detail(mod_id: int, *, timeout: int = REQUEST_TIMEOUT, cancel: Cancel = None
         images.append({
             "full": f"{base}/{str(image.get('_sFile')).strip()}",
             "big": _pick("_sFile800", "_sFile530", "_sFile"),
+            # 详情页那一排预览图：从 530 开始，往下也只到 220，最后才用原图兜底；
+            # 100px 那档**只给列表卡片**（放大到 200px 宽必然糊）。
+            "preview": _pick("_sFile530", "_sFile800", "_sFile220", "_sFile"),
             "thumb": _pick("_sFile530", "_sFile220", "_sFile100", "_sFile"),
         })
 
     item = normalize(data)
+    # ⚠️ 2026-11-08 用户实测：「详情页下载键都是灰的，点不了」。
+    # 根因：`Mod/ProfilePage` **不回 `_bHasFiles`**（实测 raw._bHasFiles = None），
+    # 而 `normalize()` 的 has_files 只读这个字段 ⇒ 详情页恒为 False ⇒ 前端
+    # `:disabled="!!queued[detail.id] || !detail.has_files"` 永远禁用按钮。
+    # 详情接口**本来就带着完整的 `_aFiles` 列表**（我们顺手还排了序），
+    # 所以这里直接按"有没有可下载文件"重新判一次，不再依赖那个可能缺失的布尔字段。
+    item["has_files"] = bool(files) or bool(item.get("has_files"))
     item.update({
         "description": _plain_text(data.get("_sText") or ""),
         "summary": str(data.get("_sDescription") or "").strip(),

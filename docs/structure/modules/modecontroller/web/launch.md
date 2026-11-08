@@ -11,8 +11,8 @@ description:
   en: >
       Launch page (Vue): one-click start button, six injection toggles sharing settings with the settings page, console log box. The jiggle-physics / Poser toggles apply-and-persist: the backend writes the result back into the config and returns it, so the switch cannot be bounced back by the old value.
       
-revision: 0d5ce7647bb3183c20bc6a6d74935298ff8fc9f2
-updated_at: "2026-11-07T11:53:09.829Z"
+revision: 98e1fd157ee785be02b700a7086f9d8f77b037de
+updated_at: "2026-11-08T02:13:35.849Z"
 fingerprint: 84d2f4e1be89f2272274198472263c42bb339687ea301d0fca8408c2e69a2f32
 source:
   - path: "frontend/src/pages/LaunchPage.vue"

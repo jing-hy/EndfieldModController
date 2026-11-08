@@ -371,7 +371,8 @@ async function openDetail(item) {
       // ⚠️ 2026-11-07：detail 的 images 只有 full/big/thumb 三档，**没有 thumb_big**
       // （列表卡片才有）。原来这里取 img.thumb_big || img.thumb ⇒ 预取的永远是缩略图，
       // 点开"大图"每次都要现下 —— 用户看到的就是"大图加载中"（第一张常常已经缓存所以能开）。
-      prepareImages((result.item.images || []).map((img) => img.big || img.full || img.thumb));
+      // 2026-11-08：优先预取 `preview`（530 档）—— 详情那一排就是用它，点开前也已经缓存。
+      prepareImages((result.item.images || []).map((img) => img.preview || img.big || img.full || img.thumb));
     } else {
       detail.value = { ...item, loading: false, error: (result && result.message) || "详情没取到" };
     }
@@ -654,8 +655,8 @@ onUnmounted(() => {
           <div v-for="(img, index) in detailImages" :key="index"
                class="shrink-0 rounded overflow-hidden cursor-pointer"
                style="width: 200px; aspect-ratio: 16 / 9; background: var(--surface-2); border: 1px solid var(--border)"
-               @click="openLightbox(img.big || img.full || img.thumb, img.thumb)">
-            <img v-if="imageSrc(img.thumb_big || img.thumb)" :src="imageSrc(img.thumb_big || img.thumb)"
+               @click="openLightbox(img.full || img.big || img.preview, img.preview || img.thumb)">
+            <img v-if="imageSrc(img.preview || img.thumb)" :src="imageSrc(img.preview || img.thumb)"
                  class="w-full h-full object-cover" alt="" />
             <div v-else class="w-full h-full flex items-center justify-center text-xs" style="color: var(--text-muted)">…</div>
           </div>

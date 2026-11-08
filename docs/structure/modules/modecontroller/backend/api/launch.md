@@ -11,19 +11,19 @@ description:
   en: >
       Everything that gets the game running: stage-and-prepare, the pre-launch preview payload (what will be staged, what risks were found), and the launch entries for the official GUI, the migoto loader and the game itself, plus force-close and the running-state probes.
       
-revision: 0d5ce7647bb3183c20bc6a6d74935298ff8fc9f2
-updated_at: "2026-11-07T11:53:09.753Z"
+revision: 98e1fd157ee785be02b700a7086f9d8f77b037de
+updated_at: "2026-11-08T02:13:35.795Z"
 fingerprint: e9b880b3f1d50cf0ee5ac737b642b283af5e5ab2b9a0ae0643578d00b5eb1524
 source:
   - path: "endfieldmodcontroller/api.py"
     line: 2917
-    end_line: 7086
+    end_line: 7108
   - path: "endfieldmodcontroller/api.py"
     line: 4099
-    end_line: 11774
+    end_line: 11796
   - path: "endfieldmodcontroller/api.py"
-    line: 5698
-    end_line: 15469
+    line: 5709
+    end_line: 15491
 apis:
   - protocol: rpc
     path: "prepare"

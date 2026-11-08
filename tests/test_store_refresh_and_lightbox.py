@@ -74,10 +74,14 @@ def test_backend_logs_head_refresh_result(monkeypatch) -> None:
 
 # ---------------------------------------------------------------- ② 灯箱大图
 def test_detail_prefetch_uses_big_not_thumb_big() -> None:
+    """detail 的 images 没有 thumb_big；预取必须用 preview/big（2026-11-08 起 preview 优先）。"""
     code = _text()
-    assert re.search(r"prepareImages\(\(result\.item\.images \|\| \[\]\)\.map\(\(img\) => img\.big", code), (
-        "detail 的 images 没有 thumb_big，预取必须用 img.big（否则每次点大图都要现下）"
+    assert re.search(r"prepareImages\(\(result\.item\.images \|\| \[\]\)\.map\(\(img\) => img\.preview", code), (
+        "预取要先用 preview（530 档）：详情那一排用它，点开灯箱时已经缓存好"
     )
+    # （注释里提到 thumb_big 是允许的——这里只钉"代码里不能再拿它当数据源"）
+    assert "imageSrc(img.thumb_big" not in code
+    assert "img.thumb_big || img.thumb)" not in code
 
 
 def test_lightbox_has_fallback_and_timeout_message() -> None:
@@ -85,6 +89,6 @@ def test_lightbox_has_fallback_and_timeout_message() -> None:
     assert "lightboxFallback" in text, "大图没到时要先用缩略图顶着（点开立刻有画面）"
     assert "lightboxSrc" in text, "灯箱渲染要走 lightboxSrc（大图 → 缩略图 → 空）"
     assert "这张大图取不回来" in text, "等太久要给一句实话，不能永远转「加载中」"
-    assert "openLightbox(img.big || img.full || img.thumb, img.thumb)" in text, (
-        "点击时要把缩略图一并传进去当兜底"
+    assert "openLightbox(img.full || img.big || img.preview, img.preview || img.thumb)" in text, (
+        "点开大图时要按 full → big → preview 取，并把 preview/thumb 作为兜底传进去"
     )

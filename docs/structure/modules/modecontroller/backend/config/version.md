@@ -11,9 +11,9 @@ description:
   en: >
       The one place the program's version number and repository coordinates live — so the updater, the release scripts and the UI all compare against the same string.
       
-revision: 0d5ce7647bb3183c20bc6a6d74935298ff8fc9f2
-updated_at: "2026-11-07T11:53:09.763Z"
-fingerprint: 64ba690c91b1b71662a603d84035cfd8d9e3b6a1e1f001001f5b8a3c739d67de
+revision: 98e1fd157ee785be02b700a7086f9d8f77b037de
+updated_at: "2026-11-08T02:13:35.803Z"
+fingerprint: 04604dab2c1fad9d16fe99638e79f6d82d8fd072958cef4788e54cb3e10fe78c
 source:
   - path: "endfieldmodcontroller/version.py"
     line: 2
