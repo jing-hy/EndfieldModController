@@ -11,9 +11,9 @@ description:
   en: >
       Anonymous GameBanana apiv11 layer: listings, search, category tree, details, thumbnails and the full index, with field-versioned caches. Three refresh modes: TTL full rebuild with page retries and merge-on-incomplete, incremental top refresh of the newest pages while the store page is open, and forced full rebuild; full and incremental share one read-modify-write lock. Category counts come from the same index as the list.
       
-revision: 98e1fd157ee785be02b700a7086f9d8f77b037de
-updated_at: "2026-11-08T02:13:35.824Z"
-fingerprint: 2371d39fae8010171d44352772aab86c9297dd15cf365d28e49c361fa56e7abb
+revision: 5ad99916cdff1745b2f88ff3fa46f4116ff95157
+updated_at: "2026-11-14T05:47:42.757Z"
+fingerprint: 274c66c3144e526e308b22042baf01f19ae1f89f89848b5fb64a9168048177cd
 source:
   - path: "endfieldmodcontroller/modstore.py"
 apis:

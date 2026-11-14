@@ -11,8 +11,8 @@ description:
   en: >
       Talk to GitHub without getting rate-limited or blocked: token resolution, a cached api_get, latest-commit probing, release lookup with a web-page fallback when the API is unreachable (common on this network), and asset sorting by version.
       
-revision: 98e1fd157ee785be02b700a7086f9d8f77b037de
-updated_at: "2026-11-08T02:13:35.800Z"
+revision: 5ad99916cdff1745b2f88ff3fa46f4116ff95157
+updated_at: "2026-11-14T05:47:42.735Z"
 fingerprint: 6666833252dc6be6492ce78b52b6135e8272fb981a2c36498876165736ce7de8
 source:
   - path: "endfieldmodcontroller/github.py"

@@ -11,8 +11,8 @@ description:
   en: >
       Mod repair (experimental): shifts every ps-tN (N<21) in the mod's .ini files up by one, backing the mod up first and keeping a rollback index. No external tool is used anymore.
       
-revision: 98e1fd157ee785be02b700a7086f9d8f77b037de
-updated_at: "2026-11-08T02:13:35.826Z"
+revision: 5ad99916cdff1745b2f88ff3fa46f4116ff95157
+updated_at: "2026-11-14T05:47:42.759Z"
 fingerprint: ae8508091c3b1d23f0ecad9cc40a2bbcc47796aebbd57b92a94e4082e5b4a053
 source:
   - path: "endfieldmodcontroller/modfix.py"

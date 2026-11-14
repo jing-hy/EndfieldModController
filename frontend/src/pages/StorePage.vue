@@ -99,28 +99,52 @@ async function prepareImages(urls) {
 // ── 后台下图的**轮询**：让图片"下好一张显一张" ─────────────────────────────────
 // 用户 2026-10-07：「拉到下面也慢」—— 根因是同步等**整批**下完才一起返回。现在后端只返回
 // 已经在本地的那几张、其余丢后台，这里就按 600ms 问一次"还没到位的那几张"。
-// 上限 60 轮（约 36 秒）—— 该域的图有时会彻底不通，不能让轮询一直转下去。
-const pendingImages2 = new Set();   // 注意：与上面的 pendingImages（攒批用）不是一回事
+//
+// ⚠️⚠️ 2026-11-14 修「详情页第一张图正常，后面的图不点进去就一直显示加载中，点进去又有了」：
+// 原来这里是**固定 60 轮（约 36 秒）一刀切**，到点就 clear() 走人 —— 而后端**不管前端还在不在问**
+// 都继续下。慢网下详情那几张原图（实测单张 0.5~1 MB、一张要十几到几十秒）来不及在 36 秒内下完
+// ⇒ 前端放弃之后再也不会问第二次，界面就永远停在"加载中"；等用户点开灯箱时才又调一次
+// prepareImages，那会儿后端早就下好了 ⇒ 表现成"点进去就有了"。
+// 现在改成**按进展**判：只要这段时间里还有新图到位就继续问；连续 PENDING_STALL_MS
+// 一点进展都没有才停，并且把"取不回来"如实摆到详情页上（带重试入口）。
+const PENDING_POLL_MS = 600;
+const PENDING_STALL_MS = 120 * 1000;   // 连续 2 分钟一张都没到位才认输
+const imagesStalled = ref(false);      // 有图迟迟不到：详情页据此给一句实话 + 重试入口
+const pendingImages2 = new Set();      // 注意：与上面的 pendingImages（攒批用）不是一回事
 let pendingTimer = null;
+
+function stopPending() {
+  if (pendingTimer) clearInterval(pendingTimer);
+  pendingTimer = null;
+}
 
 function watchPending(urls) {
   for (const url of urls) if (url) pendingImages2.add(url);
+  for (const url of [...pendingImages2]) if (thumbFiles.value[url]) pendingImages2.delete(url);
   if (pendingTimer || !pendingImages2.size) return;
-  let rounds = 0;
+  imagesStalled.value = false;
+  let lastCount = Object.keys(thumbFiles.value).length;
+  let lastProgressAt = Date.now();
   pendingTimer = setInterval(async () => {
-    rounds += 1;
-    const still = [...pendingImages2].filter((url) => !thumbFiles.value[url]);
-    for (const url of [...pendingImages2]) {
-      if (thumbFiles.value[url]) pendingImages2.delete(url);   // 到位了就摘掉
+    // 别的批次（比如列表滚出来的图）到位也算进展 —— 只要缓存还在长，就别急着放弃
+    const count = Object.keys(thumbFiles.value).length;
+    if (count !== lastCount) {
+      if (count > lastCount) {
+        lastProgressAt = Date.now();
+        imagesStalled.value = false;
+      }
+      lastCount = count;
     }
-    if (!still.length || rounds > 60) {
-      clearInterval(pendingTimer);
-      pendingTimer = null;
-      pendingImages2.clear();
+    for (const url of [...pendingImages2]) if (thumbFiles.value[url]) pendingImages2.delete(url);
+    if (!pendingImages2.size) { stopPending(); return; }
+    if (Date.now() - lastProgressAt > PENDING_STALL_MS) {
+      // 停下来，但**不清 pendingImages2**：详情页的「重试」还要拿它再问一次
+      imagesStalled.value = true;
+      stopPending();
       return;
     }
-    await prepareBatch(still);
-  }, 600);
+    await prepareBatch([...pendingImages2]);
+  }, PENDING_POLL_MS);
 }
 
 async function prepareBatch(urls) {
@@ -357,6 +381,26 @@ const detailImages = computed(() => {
   if (images.length) return images;
   return item.thumb ? [{ thumb: item.thumb, big: item.thumb, full: item.thumb }] : [];
 });
+
+// 详情那排图也走**同一条懒加载通道**（加 `data-thumb` 后被 IntersectionObserver 盯上）：
+// 每次进详情都是一次新的机会 —— 原来它们既没有 `data-thumb` 也不被观察，只靠 openDetail 里
+// 那一次预取，那一次慢了/失败了，界面上就永远没有第二次机会（2026-11-14 修）。
+watch(() => (detail.value ? `${detail.value.id}:${detailImages.value.length}` : ""), async () => {
+  await nextTick();
+  observeThumbs();
+}, { flush: "post" });
+
+// 详情页「图没取回来 · 重试」：把没到位的再问一次（后端缓存是共享的，问一次通常就出来了）
+function retryDetailImages() {
+  imagesStalled.value = false;
+  prepareImages(detailImages.value.map((img) => img.preview || img.thumb));
+}
+
+// 详情那排图到底画哪张：**preview 档到位就画它；没到位时，如果 thumb 已经在缓存里就先用它顶着**
+// （列表卡片下过的图本来就在本地，直接白拿 —— 不让 200px 的框一直空着/显示「加载中」）。
+function detailImgSrc(img) {
+  return imageSrc(img.preview) || imageSrc(img.thumb);
+}
 
 async function openDetail(item) {
   detail.value = { ...item, loading: true };
@@ -624,6 +668,7 @@ onMounted(() => {
 onUnmounted(() => {
   if (timer) clearInterval(timer);
   if (headTimer) { clearInterval(headTimer); headTimer = null; }
+  if (pendingTimer) stopPending();
   if (observer) { observer.disconnect(); observer = null; }
   if (sentinelObserver) { sentinelObserver.disconnect(); sentinelObserver = null; }
 });
@@ -653,12 +698,17 @@ onUnmounted(() => {
         <!-- 预览图：「预览图要更多」—— 多张横滚，点开灯箱看大图 -->
         <div v-if="detailImages.length" class="flex gap-2 overflow-x-auto pb-1">
           <div v-for="(img, index) in detailImages" :key="index"
+               :data-thumb="img.preview || img.thumb"
                class="shrink-0 rounded overflow-hidden cursor-pointer"
                style="width: 200px; aspect-ratio: 16 / 9; background: var(--surface-2); border: 1px solid var(--border)"
                @click="openLightbox(img.full || img.big || img.preview, img.preview || img.thumb)">
-            <img v-if="imageSrc(img.preview || img.thumb)" :src="imageSrc(img.preview || img.thumb)"
+            <img v-if="detailImgSrc(img)" :src="detailImgSrc(img)"
                  class="w-full h-full object-cover" alt="" />
-            <div v-else class="w-full h-full flex items-center justify-center text-xs" style="color: var(--text-muted)">…</div>
+            <div v-else class="w-full h-full flex items-center justify-center text-xs" style="color: var(--text-muted)">
+              <a v-if="imagesStalled" class="cursor-pointer" style="color: var(--accent)"
+                 @click.stop="retryDetailImages">图没取回来 · 重试</a>
+              <template v-else>加载中…</template>
+            </div>
           </div>
         </div>
 

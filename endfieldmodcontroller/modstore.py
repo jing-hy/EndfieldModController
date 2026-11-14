@@ -845,6 +845,17 @@ def _image_get(url: str, *, timeout: int = 20, attempts: int = 2) -> bytes:
     raise OSError(f"取图失败：{last}")
 
 
+#: **全局**同时连图片 CDN 的上限 —— 所有批次共用这一道闸门。
+#:
+#: ⚠️⚠️ 2026-11-14 用户实测：「详情页第一张图能正常加载，后面的图不点进去就一直显示加载中」。
+#: 拆开是两件事，这里负责第一件：**并发**。记忆里三次实测的结论是「6 路是甜点、
+#: 12 路会让整批全部失败」（服务端按同 IP 并发连接数限制），而原来这个上限是**每个批次各 6 路**
+#: —— 列表页的后台批次还没跑完时打开详情，就是 6 + 6 = 12 路，于是详情那几张原图
+#: （实测单张 0.5~1 MB）在慢网下反复失败。现在**进程内总量**恒 ≤ 6，批次之间排队而不互相打死。
+#: （前端那一侧的问题见 `frontend/src/pages/StorePage.vue` 里 `watchPending` 的注释。）
+IMAGE_CONCURRENCY = 6
+_IMAGE_SLOTS = threading.BoundedSemaphore(IMAGE_CONCURRENCY)
+
 #: 后台正在下载的图片（同一个 URL 不重复起任务）。
 _INFLIGHT: set[str] = set()
 _INFLIGHT_LOCK = threading.Lock()
@@ -865,7 +876,10 @@ def _fetch_image(config: Any, url: str, timeout: int,
     path = thumb_path(config, url)
     tmp = path.with_name(path.name + ".part")
     try:
-        blob = _image_get(url, timeout=timeout)
+        # 全局并发闸门（见 IMAGE_CONCURRENCY）：多批次叠加时在这里排队，
+        # 而不是一起去撞服务端的同 IP 并发限制。排队时间不计入单张超时。
+        with _IMAGE_SLOTS:
+            blob = _image_get(url, timeout=timeout)
         tmp.write_bytes(blob)
         os.replace(tmp, path)          # 原子落位
         return True

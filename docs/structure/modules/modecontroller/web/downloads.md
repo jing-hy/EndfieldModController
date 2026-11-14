@@ -11,8 +11,8 @@ description:
   en: >
       Download centre UI: a unified task list for mods and components with pause/resume/cancel/clear, plus progress and log box for component tasks.
       
-revision: 98e1fd157ee785be02b700a7086f9d8f77b037de
-updated_at: "2026-11-08T02:13:35.849Z"
+revision: 5ad99916cdff1745b2f88ff3fa46f4116ff95157
+updated_at: "2026-11-14T05:47:42.775Z"
 fingerprint: f0d6115d7c8961e09f6a22add98746c0b0c33353f30b079f006ad524160e005d
 source:
   - path: "frontend/src/pages/DownloadsPage.vue"

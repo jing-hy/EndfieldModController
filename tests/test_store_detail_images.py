@@ -73,7 +73,12 @@ def test_detail_preview_never_uses_the_100px_tier(monkeypatch) -> None:
 # ---------------------------------------------------------------- 前端：详情那一排用 preview
 def test_detail_row_uses_preview_tier() -> None:
     text = PAGE.read_text(encoding="utf-8")
-    assert "imageSrc(img.preview || img.thumb)" in text, "详情那一排必须用 preview（而不是可能只有 100px 的 thumb）"
+    # ⚠️ 2026-11-14：详情那一排的显示源收进了 detailImgSrc() —— preview **优先**，
+    # thumb 只是"本地缓存里已经有就先顶着"的兜底（不许反过来，否则又变成 100px 撑大图）。
+    assert "detailImgSrc(img)" in text, "详情那一排必须用 preview（而不是可能只有 100px 的 thumb）"
+    assert "return imageSrc(img.preview) || imageSrc(img.thumb);" in text, (
+        "detailImgSrc 必须 preview 优先，thumb 只在本地已有时兜底"
+    )
     # 详情那一排以前写的是 `imageSrc(img.thumb_big || img.thumb)` —— detail.images 里没有 thumb_big，
     # 等于永远退到 thumb。断言它已经不在（只允许出现在列表卡片的 listSrc 那条路上）。
     assert "imageSrc(img.thumb_big || img.thumb)" not in text

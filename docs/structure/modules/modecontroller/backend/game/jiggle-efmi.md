@@ -11,8 +11,8 @@ description:
   en: >
       EndfieldJiggle (touch-deformation mod) is now a plain assist mod in the library: auto-installed and pre-selected, staged into EFMI\Mods by the normal launch flow. Also carries content-level integrity checks and local re-pack repair.
       
-revision: 98e1fd157ee785be02b700a7086f9d8f77b037de
-updated_at: "2026-11-08T02:13:35.806Z"
+revision: 5ad99916cdff1745b2f88ff3fa46f4116ff95157
+updated_at: "2026-11-14T05:47:42.740Z"
 fingerprint: a30289a9ac4fc2db27756173a3374a597c6e66d447cb9e6d0f35f8c67ba1701a
 source:
   - path: "endfieldmodcontroller/efmi_jiggle.py"

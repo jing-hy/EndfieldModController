@@ -11,8 +11,8 @@ description:
   en: >
       Tests for fetching, installing and updating things: the dependency manifest and installer, built-in components, baseline repair, asset-fetch fallbacks, multi-line download bookkeeping, self-update including the stale-payload case, and the web fallback when the API is unreachable.
       
-revision: 98e1fd157ee785be02b700a7086f9d8f77b037de
-updated_at: "2026-11-08T02:13:35.837Z"
+revision: 5ad99916cdff1745b2f88ff3fa46f4116ff95157
+updated_at: "2026-11-14T05:47:42.764Z"
 fingerprint: d90ec9f08a275ba753a633feb50e619a6904ff7569452c1e50b922d126aeaf9f
 source:
   - path: "tests/test_dependencies.py"

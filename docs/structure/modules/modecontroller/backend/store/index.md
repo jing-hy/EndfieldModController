@@ -11,9 +11,9 @@ description:
   en: >
       In-app mod store data layer and download-task model: pulls listings, categories, details and images from GameBanana, and normalises download tasks into one shape for the UI and the queue. Consumes metadata and links only; never mirrors or redistributes files.
       
-revision: 98e1fd157ee785be02b700a7086f9d8f77b037de
-updated_at: "2026-11-08T02:13:35.825Z"
-fingerprint: 99a8968fd51002630c6dab641eab3ba649366dc5de8e2c8683e0da70143609c9
+revision: 5ad99916cdff1745b2f88ff3fa46f4116ff95157
+updated_at: "2026-11-14T05:47:42.757Z"
+fingerprint: b4d0c01ad3eeb5e45a33719529080633cf8c05f9b601c827491ae3d7303a11a8
 source:
   - path: "endfieldmodcontroller/modstore.py"
   - path: "endfieldmodcontroller/downloads.py"
