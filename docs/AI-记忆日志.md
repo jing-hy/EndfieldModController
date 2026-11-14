@@ -6915,3 +6915,173 @@ v1.4.12 已发布（2026-11-07 14:51）：exe sha256 0427ba7b…c135a6、assets-
 判断「实例在不在跑」**不能只看进程名**：源码方式启动（pythonw run.py）时进程是 pythonw.exe，`Get-Process -Name EndfieldModController` 会判成“没在跑”，随后替换 exe / 清目录就会撞占用。可靠判据是四条独立证据（任一条成立即算在跑）：① 可见窗口标题以 EndfieldModController 开头（exe/源码都一样）；② tasklist 里的同名 exe；③ `<数据根>\runtime\.mc.lock` 里 PID 活着**且**进程指纹（exe 路径+创建时间）对得上（只比 PID 会被复用骗）；④ 目标 exe 能否独占打开。已落成 `scripts\who_is_running.py`（`--json` 给 Agent 读，退出码 0/1）。
 
 `关键词：["实例在不在跑","who_is_running.py","进程名误判","pythonw 源码启动","mc.lock 指纹","exe 独占打开","替换 exe 前检查","PID 复用"]`
+
+<!-- 增量追加 2026-11-14 13:56 · 新增 16 条（历史条目一律保留）-->
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 【modecontroller 当前状态唯一真源】（20…
+*2026-11-08 13:48*
+
+【modecontroller 当前状态唯一真源】（2026-11-08 更新，**只维护这一条**）
+**Latest Release = v1.4.14**（Latest、非 draft/非预发布；遗留 draft = 0）：
+· `EndfieldModController.exe` 35,184,696 B · sha256 `337f66e9959ebaba54479f5ba48d0e9e3ffaceeea6023160cfb2f30c8a7b7c97`
+· `assets-bundle.zip` 261,987,364 B · sha256 `7b71bd700bc6ad6769109ca126b7d21bc39ad230a8cb40e8d79c9db7d04f65cc`
+`dist\`、`D:\zmdmod\modtest\` 与 Release 附件三方哈希一致。远端 main = 5ad9991（tag v1.4.14）；`version.py` 与两份 README 均为 1.4.14。
+**v1.4.14 内容**：商城详情页预览图改用 530 档（不再拿 100px 放大）、详情页下载键不再恒灰（详情接口缺 `_bHasFiles` 时按 `_aFiles` 兜底）、新增 `scripts\who_is_running.py` 实例判定。
+**测试与构建验证一律本机**：`python scripts\run_tests.py tests --serial`（1472 passed / 约 3~5 分钟，串行）。GitHub Actions 自 2026-11-07 起因用户取消了 run、并要求「所有写了相关的流程全部改掉，都用本地的」→ `.github/workflows/ci.yml` **只在 workflow_dispatch 手动触发**，push/PR 不再起 run。
+**离线依赖包**：`dist\deps-bundle.zip`（≈330 MB，不进 Release，QQ 群 1045239747 应急分发）；组件或随包 assets 一变就重打并同步 modtest。
+发布步骤见「发布流程」条；历史版本明细看 GitHub Releases 与 `RELEASE_NOTES.md`。
+
+`关键词：["当前状态","Latest Release","v1.4.14","sha256","assets-bundle","modtest","本机全量测试","1472 passed","Actions 手动触发","离线依赖包","version.py"]`
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 【modecontroller 发布流程 · 照抄即可】…
+*2026-11-08 13:55*
+
+【modecontroller 发布流程 · 照抄即可】（2026-11-08 更新）
+① 改代码 → 本机 `python scripts\run_tests.py tests --serial`（全量；一律串行；2026-11-08 实测 1472 passed / 约 3~5 分钟）→ **自己 `git add -A && git commit`**（⚠️ `build_release.py` 第 [9/9] 步与 `push.py` 都只提交「记忆日志」并自动 push main，业务改动不 commit 就会出现「exe 是新的、GitHub 源码是旧的」——2026-10-04 与 2026-11-07 各踩一次）→ `python scripts\build_release.py`（校验版本三处一致 + 组件版本表 `--strict` + 构建 exe + 同步 modtest + 自动 push main）→ `python scripts\prepare_release.py`（重建 assets-bundle，打印两个 sha256）→ `gh release create vX --repo jing-hy/EndfieldModController --draft --notes-file <本版小节>` → `python scripts\upload_release_assets.py --tag vX`（DoH 查真实 IP + curl 直连）→ `gh release edit vX --draft=false --latest` → 核对 digest 与「draft 数 = 0」。
+② **版本号**：本地 = 最新 Release + 1；未发版写 `<号>-beta`，且**两份 README 停在最新 Release 号**；发版时**先把版本收成正式号再构建**（否则 `prepare_release` 的闸会拒：exe 自称 beta 会让用户自更新无限提示，v1.0.19 事故）。
+③ **附件只推两个且不带版本号**（exe + assets-bundle.zip）；draft 阶段按 tag 查会 404 ⇒ 用 **release id** 核对 digest；改过 `frontend\` 必须先 `node node_modules/vite/bin/vite.js build`；构建前把 `dist\deps-bundle.zip` 挪到 `_tmp\dist-keep\`。
+④ **交付形态**：「全弄好一起打包再让我测」；给硬指标（文件大小/修改时间/sha256）；改动多的版本给编号手测清单 `TESTING.md`（新增接末尾、老编号不动）；公告只发大事。
+⑤ 快照落 `D:\zmdmod\_snapshot_<标签>-<时间戳>\`（不进 git），`push.py` 先快照、失败就不推。
+⑥ 发版正文**只取本版小节**（全文会带上旧版本）。发完主动说清「Release 由你定」。
+
+`关键词：["发布流程","build_release","prepare_release","upload_release_assets","先自己 commit","draft 按 id 核对","版本号收正式号","TESTING.md","assets-bundle","Release notes 本版小节","1472 passed"]`
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 【modecontroller 待办（2026-11-0…
+*2026-11-08 13:55*
+
+【modecontroller 待办（2026-11-08 更新）】
+① **issue #16（xingluo667）的 `0xC0000135` 真因仍未定案**（已排除显卡驱动 / VC++ / 注入未进进程 / 旧版 Streamline），等他回报。
+② **v1.4.14 的两条新修项等用户实测**：详情页预览图清晰度（TESTING 579）、详情页下载键可点（580）。
+③ MMD 播放测试（Poser 侧）与提弗洛斯运动数值三选一（sbm 侧）仍未做。
+④ modtest 的 `mod-backup` 混着工作区 ~8 GB 副本，是否清理待定。
+⑤ 组件版本变化（或随包 assets 里的 RabbitFX 变）必须重打 `deps-bundle.zip` 并同步 modtest。
+⑥ 商城「已安装」标记依赖 `download-info.json`（手工/整合包放进库的 Mod 不亮卡片 = 正确行为）。
+
+`关键词：["待办","issue 16","0xC0000135","TESTING 579 580","详情页实测","MMD 播放测试","mod-backup 8GB","deps-bundle 重打","商城已安装标记"]`
+
+<!-- topic · 话题（一件事的前因后果） -->
+### 让组件下载「快、可观测、不假包」，并发版 v1.4.12
+*2026-11-08 13:51*
+
+起因：用户三连问「更新依赖最开始为什么这么慢」「速度为什么掉到 4k」「会显示 9.513806651037655 B/s」。
+查证：只读实测本地阶段合计 <1 s（scan_library 0.8s、asset_report 0.1s），41 秒全在 `_resolve_builtin_asset → github.releases_latest → _release_via_web`（两次 fastnet.fetch + 逐条试镜像），而这段原来**一行日志都没有**；4 KB/s 是真慢（镜像 0.13 MB/s 仍开 32 连接、分块读超时反复重试）；9.51…B/s 是 `humanSize()` 对 <1KB 直接拼浮点。
+处置（随 v1.4.12 发布）：probe 顺带取前 64 字节 + Content-Type、新增 `validate_payload` 探测期判死假包；工作文件消失时作废分块记录；抢块池措辞与线程数日志修正；阶段计时日志；humanSize 取整。镜像：两批共 31 个候选实测，gh.monlor.com 0.49 MB/s 最快并入默认表首位。
+结果：全量 1472 passed（本机串行）；v1.4.12/13/14 相继发布，最新为 v1.4.14。
+
+`关键词：["更新依赖慢","假包","validate_payload","镜像实测","gh.monlor.com","4KB/s","9.51 B/s","32 连接","阶段计时","v1.4.12","probe 64 字节"]`
+
+<!-- topic · 话题（一件事的前因后果） -->
+### 把 MaaEnd 的 AGENTS.md 逐条对照本仓库，能移植的移植、不能移植的说明原因、冲突交用户决策
+*2026-11-08 13:51*
+
+起因（用户原话）：「你看看 maaend 的 agent.md，对比一下本项目的，我要你把 maaend 的能移植的都移植，不能移植的挨个说明原因，冲突的让我决策，注意不要把 agent.md 撑得臃肿」。
+做法：clone `MaaEnd/MaaEnd` 到 `_tmp/maaend-src`；逐节对照本仓库 AGENTS.md。移植 6 类（塞进现有表格/清单，不新增章节）：产出即合规、信息不足写【待补：…】不许编造、参数极简、验证按需（**后随 CI 停用改成「全量在本机跑」**）、双端契约（面板 `MC_Panel<n>`：`core.inject_panel_lists` ↔ `reshade_addon/src/*.cpp`）、动作后回读 + 异常路径 + 临时文件放 `_tmp/`。
+未移植（逐条说明原因）：Pipeline 低代码 / Go Service / Cpp Algo / Custom Schema / 720p 基准 / interface.json 与 locales / 文件夹名禁 `_` 开头（本仓库反过来用 `_tmp/`）/ Prettier+markdownlint / OCR 文本 / 文档链接 / 项目概览。
+冲突 4 条（分支策略、AI 能否直接提 PR、测试严格度、格式化闸）编号交用户，他回「冲突都不动即可」⇒ 全部维持现状。体积 151→162 行。
+
+`关键词：["MaaEnd","AGENTS.md","移植","产出即合规","信息不足标注","参数极简","全量在本机","双端契约","冲突不动","不臃肿","CLAUDE.md"]`
+
+<!-- topic · 话题（一件事的前因后果） -->
+### 把 Mod 商城的滚动、刷新、详情图与下载键逐项修到「符合直觉且可观测」
+*2026-11-08 13:52*
+
+起因：用户陆续报「商城全部页滑到底显示『往下滑自动加载』就划不动了」「进商城还是不会自动增量刷新索引」「详情页除第一张外的图都糊，点开又清晰」「详情页下载键都是灰的点不了」。
+
+① 无限滚动（v1.4.12）：列表长度 watcher 用默认 flush:'pre'，首屏哨兵（v-if 渲染）还不存在 ⇒ observer 没挂上，滚到底不再加载。改为 post-flush + nextTick，并在 loadMore 的 finally 兜底重挂。
+
+② 顶部增量刷新（v1.4.13）：原来 `loadMore().finally(refreshHead)`；成功不写日志、失败/busy 被静默吞掉；状态行的「N 小时前」是全量索引时龄 ⇒ 用户只看得出「没刷新」。改为进页面并行触发、busy 自动排队重试、成功/失败都写 launch.log，状态行新增「顶部已检查（多久前）」。
+
+③ 详情页预览图 + 下载键（v1.4.14）：站点对部分截图只给 100px 档，详情用 thumb 链（530/220/100）⇒ 100px 放大到 200px 变糊；灯箱用原图所以清晰。新增 `preview` 档（530→800→220→原图，不用 100px）；下载键恒灰是因为详情接口不回 `_bHasFiles`，改为按 `_aFiles` 兜底判 has_files。
+
+结果：三版连发（v1.4.12 / 1.4.13 / 1.4.14），全部本机测试 + 结构树收尾，Testing 追加 576-580 手测项。
+
+`关键词：["商城","无限滚动","顶部增量刷新","head_refresh","详情页","预览图模糊","preview 档","has_files","下载键灰","v1.4.12","v1.4.13","v1.4.14"]`
+
+<!-- topic · 话题（一件事的前因后果） -->
+### 测试与发布验证从「依赖 GitHub Actions」改为「全部本机」，并给实例判定一个可靠工具
+*2026-11-08 13:52*
+
+起因：用户 2026-11-07 说「GitHub 的 run 已经被我取消了，所有写了相关的流程全部改掉，都用本地的」；随后又说「我现在实例都已经关了，你自己检查一下，不要下次再误识别实例」。
+
+① CI 退场：`.github/workflows/ci.yml` 从 push/PR 触发改为**仅 `workflow_dispatch`**；AGENTS.md 的「AI 默认行为」表、§二② 自测、自查清单与 CONTRIBUTING 同步改成「本机 `run_tests.py tests --serial`」；实测量级从「15~25 分钟」修正为 **1472 passed / 约 3~5 分钟**。
+
+② 实例误判：我原先只看 `Get-Process -Name EndfieldModController`，而源码方式启动（pythonw run.py）进程名是 pythonw.exe ⇒ 「明明开着判成没开」。新增 `scripts\who_is_running.py`：四条独立证据（可见窗口标题 / 同名进程 / `.mc.lock` 的 PID+进程指纹 / exe 能否独占打开），`--json` 与退出码 0/1/2；陈旧锁（PID 已退出或被复用）不算「在跑」但说明原因。
+
+结果：随 v1.4.13 / v1.4.14 发布；新增测试 `test_who_is_running.py`（8 条）与文档说明。
+
+`关键词：["GitHub Actions 取消","ci.yml 仅手动","本机全量测试","run_tests.py --serial","who_is_running.py","实例误判","pythonw 源码启动","mc.lock 指纹","exe 独占打开","1472 passed"]`
+
+<!-- lesson · 经验教训（被纠正过的、踩过的坑） -->
+### 浮点数值直接上屏会出「9.513806651037655…
+*2026-11-08 10:44*
+
+浮点数值直接上屏会出「9.513806651037655 B/s」/「23.76781745624384%」——后端算浮点（EMA 速度/百分比）没错，**显示层必须格式化**。`frontend/src/lib/util.js` 的 `humanSize()` 是唯一格式化入口（DownloadsPage/DepsPage/UpdateBadge 都用它）：<1KB 要 toFixed(1)，1~10KB 保留一位小数，否则慢速时看不出还在动。
+
+`关键词：["humanSize","速度显示","浮点数","B/s","百分比","util.js","格式化","下载速度","EMA","前端"]`
+
+<!-- lesson · 经验教训（被纠正过的、踩过的坑） -->
+### Vue 的 `watch` 默认 flush:'pre'…
+*2026-11-08 10:44*
+
+Vue 的 `watch` 默认 flush:'pre'（DOM 更新前回调）：如果被观察的元素是 `v-if` 才渲染的（商城无限滚动的哨兵 `ref=sentinel`），首屏那次回调里 `sentinel.value` 还是 null，`IntersectionObserver` 就**没盯上任何节点**，滚到底再也不会触发加载。修法：`{ flush: 'post' }` + await nextTick 再 observe，并在 `loadMore` 的 finally 里兜底重新 observe。
+
+`关键词：["Vue watch","flush post","IntersectionObserver","无限滚动","哨兵","v-if","商城","StorePage","划不动","自动加载"]`
+
+<!-- lesson · 经验教训（被纠正过的、踩过的坑） -->
+### 「这个镜像能用」的判据不是 HTTP 200，而是**首…
+*2026-11-08 10:44*
+
+「这个镜像能用」的判据不是 HTTP 200，而是**首字节 + Content-Type**：一批 GitHub 代理对 Release 资产返回 200 + text/html 错误页，旧代码会当安装包下完、最后才 sha256 不符（白等十几秒）。修法：`fastnet.probe()` 在同一个 Range 请求里多取前 64 字节（原来是 1 字节），`validate_payload()` 按扩展名比对 PK 头/MZ 并拒绝 text/html，命中即判线路无效。
+
+`关键词：["probe","validate_payload","假包","Content-Type","首字节","sha256","镜像","白等","下载","fastnet"]`
+
+<!-- lesson · 经验教训（被纠正过的、踩过的坑） -->
+### 「商城打开时到底刷没刷新」要给**可观测证据**：顶部增…
+*2026-11-08 10:44*
+
+「商城打开时到底刷没刷新」要给**可观测证据**：顶部增量刷新原来成功后一行日志都不写、失败/跳过被前端静默吞掉，界面上的「N 小时前更新」用的还是全量索引的 fetched_at ⇒ 用户只能得出结论「根本不会自动刷新」。修法三条：① 进页面就并行起 head_refresh（不要 `loadMore().finally(...)`）；② busy（全量索引在建）时自动排队重试，失败写进状态行与 launch.log；③ 状态行单独显示「顶部已检查（多久前）」（head_at/head_age），与全量索引时龄分开。
+
+`关键词：["商城索引","顶部增量刷新","head_refresh","head_age","静默失败","状态行","busy 重试","可观测","StorePage"]`
+
+<!-- lesson · 经验教训（被纠正过的、踩过的坑） -->
+### 判断「实例在不在跑」**不能只看进程名**：源码方式启动…
+*2026-11-08 10:44*
+
+判断「实例在不在跑」**不能只看进程名**：源码方式启动（pythonw run.py）时进程是 pythonw.exe，`Get-Process -Name EndfieldModController` 会判成“没在跑”，随后替换 exe / 清目录就会撞占用。可靠判据是四条独立证据（任一条成立即算在跑）：① 可见窗口标题以 EndfieldModController 开头（exe/源码都一样）；② tasklist 里的同名 exe；③ `<数据根>\runtime\.mc.lock` 里 PID 活着**且**进程指纹（exe 路径+创建时间）对得上（只比 PID 会被复用骗）；④ 目标 exe 能否独占打开。已落成 `scripts\who_is_running.py`（`--json` 给 Agent 读，退出码 0/1）。
+
+`关键词：["实例在不在跑","who_is_running.py","进程名误判","pythonw 源码启动","mc.lock 指纹","exe 独占打开","替换 exe 前检查","PID 复用"]`
+
+<!-- lesson · 经验教训（被纠正过的、踩过的坑） -->
+### 「本机全量测试要 15~25 分钟、必须交给 CI」这条…
+*2026-11-08 13:49*
+
+「本机全量测试要 15~25 分钟、必须交给 CI」这条已彻底过时：2026-11-08 实测 `python scripts/run_tests.py tests --serial` = **1472 passed / 49 subtests，约 3~5 分钟**（串行；`-n 4` 并行反而更慢）。而且 GitHub Actions **已由用户取消 run、工作流改为仅 `workflow_dispatch` 手动触发**（push/PR 不再起 run，`gh run list` 只有旧 cancelled 历史）⇒ 发版门槛只能是本机全量 + 反向验证，「推上去 CI 兜底」这条路已经不存在。
+
+`关键词：["全量测试耗时","1472 passed","3~5 分钟","交给 CI 已过时","Actions 仅手动触发","workflow_dispatch","发版门槛","本机全量","run_tests.py"]`
+
+<!-- lesson · 经验教训（被纠正过的、踩过的坑） -->
+### 「图糊」和「按钮灰」都是**数据档位/字段没对齐**，不…
+*2026-11-08 13:49*
+
+「图糊」和「按钮灰」都是**数据档位/字段没对齐**，不是样式问题：① 图片按用途选档 —— 列表用 220/100、详情预览用 530（**绝不能把 100px 放大到 200px**）、灯箱用 800/原图；站点对部分截图只给 100px 档，必须给详情单独一个 `preview` 字段并在预取/灯箱里共用同一张（点开才能秒开）。② 前端「禁用态」依赖的布尔字段（如 `has_files`）必须由后端**按实际数据兜底**：详情接口不回 `_bHasFiles`，只读它就永远灰；接口里既然带完整 `_aFiles`，就按它重新判。
+
+`关键词：["预览图模糊","图片档位","preview 530","100px 放大","has_files","_bHasFiles","禁用态字段","详情页","灯箱","数据兜底"]`
+
+<!-- fact · 事实（细碎的原子信息） -->
+### 「更新依赖」最开始那几十秒 = 在**查上游最新版本**…
+*2026-11-08 10:44*
+
+「更新依赖」最开始那几十秒 = 在**查上游最新版本**（`runtime_deps._resolve_builtin_asset` → `github.releases_latest` → `_release_via_web` 两次 fastnet.fetch，直连被掐时要逐条试镜像+探测）；前面本地阶段实测极快（scan_library 0.8s、asset_report 0.1s、load_manifest 0s）。v1.4.12 起已加阶段计时日志与「正在读取上游最新版本…（超过 2 秒回报用时）」。
+
+`关键词：["更新依赖","查最新版本","releases_latest","启动慢","阶段计时","_resolve_builtin_asset","镜像线路","日志","41秒","白等"]`
+
+<!-- fact · 事实（细碎的原子信息） -->
+### GitHub 镜像实测（2026-11-07 本机裸网，…
+*2026-11-08 10:44*
+
+GitHub 镜像实测（2026-11-07 本机裸网，真实 Release 资产前 3 MB / 8 秒窗口）：gh.monlor.com 0.49 MB/s（最快，已排默认表第一）、ghproxy.net 0.18–0.21、gh.nxnow.top 0.12、gh-proxy.com 0.04、直连 0.007。ghps.cc / ghproxy.cfd / ghproxy.link / gh-proxy.net / gh.tryxd.cn 对 Release 资产返回 **HTTP 200 + text/html**；ghproxy.cc / cf.ghproxy.cc / fast.ghproxy.cc / gh.zzbjb.com 证书不符；gh.ddlc.top 429；github.ur1.fun 402；ghproxy.homeboyc.cn 403；gh.xxooo.cf / ghproxy.0309.io / hub.gitmirror.com 域名没了。结论已写进 `fastnet.DEFAULT_LINES`（直连 → gh.monlor → ghproxy.net → gh.nxnow → gh-proxy.com）并随 v1.4.12 发布。
+
+`关键词：["镜像","gh.monlor.com","ghproxy.net","gh.nxnow.top","下载线路","DEFAULT_LINES","实测速度","假包","text/html","fastnet"]`
