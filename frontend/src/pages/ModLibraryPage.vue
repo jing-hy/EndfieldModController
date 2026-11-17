@@ -238,7 +238,32 @@ async function toggleMod(mod) {
       if (!store.state.config || typeof store.state.config !== "object") store.state.config = {};
       store.state.config.selected_mods = applied;
     }
+    // ★ 开关**立刻同步到 EFMI 的 Mods 目录**（2026-11-16 用户反馈：「管理器能控制开关 mod，
+    //   但是不能把 mod 扔到 EF 的 mod 文件夹」「关闭 mod 我去看文件夹里他直接帮我把 mod 删了」）。
+    //   以前开关只写 `selected_mods`，文件纹丝不动 —— 用户去文件夹里看到"没变 / 变没了"都
+    //   与开关对不上。现在拨完开关**延迟 600ms 合并一次**再重铺（连点几下只铺最后一次），
+    //   后端走与「生成控制器」完全相同的 `prepare()` 那条路（指纹快路径，没变的 Mod 不重拷）。
+    scheduleApplyToStaging();
   } catch (e) { /* call 已弹窗 */ }
+}
+
+// ── 开关 → EFMI Mods 目录的同步（2026-11-16）────────────────────────────
+// 后端 `apply_selection` 会走 `prepare()` 重铺 staging 并回报"这次生效了几个 Mod"。
+// 合并式防抖：连拨几个开关只重铺一次；每次重铺递增 token，旧的返回晚到就不再弹提示。
+let applyTimer = null;
+let applyToken = 0;
+function scheduleApplyToStaging() {
+  const token = ++applyToken;
+  if (applyTimer) clearTimeout(applyTimer);
+  applyTimer = setTimeout(async () => {
+    applyTimer = null;
+    if (token !== applyToken) return;
+    try {
+      const r = await call("apply_selection");
+      if (token !== applyToken) return;          // 之后又拨过开关：这条结果已过时
+      if (r && r.message) showToast(String(r.message), r.ok === false ? "danger" : "success");
+    } catch (e) { /* call 已弹窗 */ }
+  }, 600);
 }
 
 const menuEl = ref(null);        // 菜单根节点：用来**实测**尺寸（不再靠估计高度）

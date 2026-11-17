@@ -12,7 +12,7 @@
   <a href="LICENSE"><img alt="GPL-3.0-or-later 许可" src="https://img.shields.io/github/license/jing-hy/EndfieldModController?label=License&amp;color=3DA639"></a>
 </p>
 
-<p>Windows 桌面程序，单文件 exe。当前版本 <b>1.4.15</b> —— <a href="https://github.com/jing-hy/EndfieldModController/releases">下载最新版</a></p>
+<p>Windows 桌面程序，单文件 exe。当前版本 <b>1.5.0</b> —— <a href="https://github.com/jing-hy/EndfieldModController/releases">下载最新版</a></p>
 
 <p>📖 安装步骤、目录结构、逐项排查 → <b><a href="docs/README.detailed.md">详细文档</a></b><br>
 🛠 想改代码 / 提 PR → <b><a href="CONTRIBUTING.md">维护者指南</a></b></p>
@@ -85,6 +85,12 @@
 - **启动页**：大号「一键启动」+ 各插件开关 + 运行日志。
 - **设置页**：注入开关、自检、组件更新、诊断包、游戏目录还原、路径与外观、维护操作等都在这里。
 - **摆姿 / MMD（可选）**：游戏运行时用它自带的页面摆姿势、放 MMD。
+
+### 给脚本 / AI 留的自动化通道
+
+程序开着的时候，脚本或 AI 可以**操作这个界面**：切换页面、点开关、给输入框赋值、滚列表。
+它走的是真实的界面交互（等同人手点一下），所以看到的变化就是真生效的状态；正常使用时不参与，
+程序一关就没了。用法与接口说明见 [详细文档 · UI 自动化](docs/ui-automation.md)。
 
 ### 游戏内统一面板
 

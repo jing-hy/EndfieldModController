@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "id": "modecontroller.backend.shell",
-  "updated_at": "2026-10-02T07:47:59.801Z",
+  "updated_at": "2026-11-17T15:59:53.553Z",
   "mode": "layers",
   "reading": {
     "zh": "两个入口：带窗口的那个（单实例互斥、尽早出加载页、绑定 js_api），以及给脚本与冒烟测试用的无界面那个。",
@@ -9,6 +9,7 @@
   },
   "order": [
     "modecontroller.backend.shell.main",
-    "modecontroller.backend.shell.cli"
+    "modecontroller.backend.shell.cli",
+    "modecontroller.backend.shell.ui-automation"
   ]
 }

@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 # EndfieldModController —— 详细文档
 
-当前版本 **1.4.15** ｜ [下载最新版](https://github.com/jing-hy/EndfieldModController/releases)
+当前版本 **1.5.0** ｜ [下载最新版](https://github.com/jing-hy/EndfieldModController/releases)
 
 > 这是详细版：安装、各页面用法、目录结构、逐项排查都在这里。
 > 只想快速上手的话看 **[简略版 README](../README.md)**；想改代码看 **[维护者指南](../CONTRIBUTING.md)**。
@@ -447,6 +447,22 @@ shader 文件清单、运行时组件清单（每个文件的字节数 + sha256 
 上列第三方组件**不适用**本项目的许可，其版权与许可条款归各自作者所有。免责声明同样见简略版。
 
 ---
+
+---
+
+## 十三·五、让脚本 / AI 操作界面（无障碍通道）
+
+程序启动后会在本机开一个只绑 `127.0.0.1` 的接口，**可以切换页面、点开关、拖动滑块、滚列表** ——
+给自动化脚本或 AI 用，正常使用时完全不参与。端口与 token 写在
+`<程序目录>\runtime\_state\ui_api.json`，程序退出时删除。
+
+```powershell
+python scripts\ui_ctl.py state            # 看当前页面与所有可点元素
+python scripts\ui_ctl.py tab settings     # 切到「设置」页
+python scripts\ui_ctl.py find 壁纸        # 按文字找元素
+```
+
+接口、动作、返回字段、限制与排错：**[ui-automation.md](ui-automation.md)**。
 
 ## 十四、想改代码？
 

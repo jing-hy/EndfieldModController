@@ -60,7 +60,27 @@ async function toggleMod(mod) {
     if (autoOff.length) {
       showToast(`壁纸是互斥的，已自动关掉：${autoOff.join("、")}`, "warn");
     }
+    // ★ 与「服装 Mod」页同一套（2026-11-16）：开关要**真的落到 EFMI 的 Mods 目录**，
+    //   否则用户拨了开关去文件夹里看，文件纹丝不动。
+    scheduleApplyToStaging();
   } catch (e) { /* call 已弹窗 */ }
+}
+
+// ── 开关 → EFMI Mods 目录（与 ModLibraryPage 同一份实现，2026-11-16）──────────
+let applyTimer = null;
+let applyToken = 0;
+function scheduleApplyToStaging() {
+  const token = ++applyToken;
+  if (applyTimer) clearTimeout(applyTimer);
+  applyTimer = setTimeout(async () => {
+    applyTimer = null;
+    if (token !== applyToken) return;
+    try {
+      const r = await call("apply_selection");
+      if (token !== applyToken) return;
+      if (r && r.message) showToast(String(r.message), r.ok === false ? "danger" : "success");
+    } catch (e) { /* call 已弹窗 */ }
+  }, 600);
 }
 
 // ⚠️ **常量必须在使用它的代码之前**（原来它定义在第 70 行，而上面的 toggleMod 里已经用了）

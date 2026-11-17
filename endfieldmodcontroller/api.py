@@ -200,6 +200,8 @@ class EndfieldModControllerApi:
 
             fastnet.set_policy(getattr(self.config, "download_boost", "auto"))
             fastnet.set_line_mode(getattr(self.config, "download_line", "auto"))
+            # GitHub 镜像源（2026-11-18）：""=自动 / "direct"=仅直连 / 某镜像域名=优先用它
+            fastnet.set_mirror(getattr(self.config, "download_mirror", ""))
             # 代理：VPN 只对浏览器生效时，程序这边得单独配（用户 2026-10-02 实测确认）
             fastnet.set_proxy(getattr(self.config, "download_proxy", ""))
             if fastnet.proxy_in_use():
@@ -224,6 +226,9 @@ class EndfieldModControllerApi:
         # Mod 备份仓的后台状态（去重：同一时刻只跑一个打包任务）
         self._modbackup_lock = threading.Lock()
         self._modbackup_running = False
+        # Mod 库开关 → 同步 EFMI Mods 目录（2026-11-16）：同一时刻只允许一次同步，
+        # 用户连点开关时后一次直接返回"还在同步"，别让两次 stage 互相踩。
+        self._apply_lock = threading.Lock()
         self._warm_up_thread: threading.Thread | None = None
         # 「本管理器」自己那条版本检查的后台闸门（2026-11-05）：首屏只读缓存缓存，
         # 过期时由下面这个后台线程去拉 —— **同一时刻只允许一个**。
@@ -2240,7 +2245,98 @@ class EndfieldModControllerApi:
             # 注意：这个键原先在同一个 dict 字面量里出现两次（371 行被 374 行静默覆盖），
             # staging 的结果永远看不到 —— 2026-10-01 拆成 activation_reshade_dir + reshade_dir。
             "reshade_dir": reshade_info.get("reshade_dir", ""),
+            # Mods 目录里**不是我们生成**的目录（用户手动放的）：一个都不动，只如实上报。
+            "kept_manual": list(result.get("kept_manual") or []),
+            # 因为 Mods 里已有同名/同 namespace 的手动目录而主动跳过、没有重复 stage 的 Mod。
+            "skipped_manual_conflict": list(result.get("skipped_manual_conflict") or []),
+            "staged": [str(m.get("name") or "") for m in (result.get("mods") or [])],
         }
+
+    def apply_selection(self) -> dict[str, Any]:
+        """把 Mod 库里的开关**立刻**同步进/出 EFMI 的 Mods 目录（2026-11-16 用户反馈）。
+
+        用户原话：「我下载 mod 不会自己放到 EFMI 的 mod 文件夹，只会在管理器的 mod 文件夹，
+        还要我手动放进 EFMI 的 mod 文件夹里才生效这正常吗」「管理器能控制开关 mod，
+        但是不能把 mod 扔到 EF 的 mod 文件夹」。
+
+        根因：卡片上的开关只改 `config.selected_mods`（一个 JSON 字段），真正把 Mod 铺进
+        `builtin/XXMI/EFMI/Mods` 的是 `activation.stage_and_prepare`，而它原先**只在一键启动 /
+        生成控制器 / 热重载**里跑 ⇒ 用户拨了开关、去 EFMI 的 Mods 目录看，文件纹丝不动；
+        反过来他在文件夹里看到"开关关了但 Mod 还在"，也是同一个原因。
+
+        现在：开关一拨就重铺 staging（复用 `prepare()`，与"生成控制器"完全同一条路，
+        不另造判据）。重铺走指纹快路径，只有真正新增/移除的 Mod 才会发生复制。
+
+        ⚠️ 游戏正在运行时，Windows 会锁住 Mods 里的文件 —— 此时仍会尝试重铺（失败的
+        单个 Mod 只记警告不打断），但**游戏进程已经加载完配置**，需要点「热重载」才生效，
+        所以这里把这句话直接放进返回值，前端原样显示。
+        """
+        lock = self._apply_lock
+        # ⚠️ 用 acquire(False) 而不是 acquire(blocking=False)：api.py 里"启动闸门"那条有测试
+        #    （tests/test_launch_dedup.py）数这个写法的出现次数，确保启动锁只有一把。
+        #    这里是一把完全无关的同步锁，不该被算进那个计数。
+        if not lock.acquire(False):
+            return {"ok": True, "busy": True,
+                    "message": "上一次同步还没结束，稍等一秒再拨开关"}
+        try:
+            result = self.prepare()
+            running = False
+            try:
+                running = bool(self.game_running().get("running"))
+            except Exception:  # noqa: BLE001 —— 判游戏在不在跑失败不能影响同步结果
+                running = False
+        finally:
+            lock.release()
+
+        staged = list(result.get("staged") or [])
+        kept = list(result.get("kept_manual") or [])
+        skipped = list(result.get("skipped_manual_conflict") or [])
+        parts: list[str] = []
+        if result.get("ok") is False:
+            parts.append(str(result.get("message") or "同步 EFMI 的 Mods 失败"))
+        else:
+            parts.append(f"已同步到 EFMI 的 Mods：本次生效 {len(staged)} 个 Mod")
+        if skipped:
+            parts.append(
+                "这些 Mod 在 Mods 里已有一份手动放的同名/同 namespace 目录，没有重复放置："
+                + "、".join(skipped))
+        if kept:
+            parts.append("Mods 里另有 " + str(len(kept)) + " 个手动放的目录，本程序不接管、也不动它们")
+        if running and result.get("ok") is not False:
+            parts.append("游戏正在运行：点「热重载」让它生效")
+        return {
+            "ok": result.get("ok") is not False,
+            "busy": False,
+            "staged": staged,
+            "kept_manual": kept,
+            "skipped_manual_conflict": skipped,
+            "game_running": running,
+            "message": "；".join(parts),
+        }
+
+    # ------------------------------------------------------------------
+    # 无障碍 / 自动化通道（2026-11-17 用户要求：允许 AI 操作界面）
+    # ------------------------------------------------------------------
+    # 这两个方法是**前端轮询用的桥**：后端 HTTP 服务把动作排进队列，前端每 300ms 取走、
+    # 在真实 DOM 上执行、再把结果回传。为什么要绕这一圈见 `ui_automation` 的模块说明
+    # （pywebview 的 evaluate_js 不能在 HTTP 工作线程里安全调用）。
+    def ui_automation_poll(self) -> dict[str, Any]:
+        """前端调：取走待执行的界面动作（没有就回空表）。"""
+        from . import ui_automation
+
+        return ui_automation.poll()
+
+    def ui_automation_result(self, command_id: str, payload: str) -> dict[str, Any]:
+        """前端调：把一条动作的执行结果回传（payload 是 JSON 字符串）。"""
+        from . import ui_automation
+
+        return ui_automation.submit_result(command_id, payload)
+
+    def ui_automation_status(self) -> dict[str, Any]:
+        """只读：通道有没有起来、地址是什么（不含 token）。"""
+        from . import ui_automation
+
+        return ui_automation.endpoint_info(self.config)
 
     # ------------------------------------------------------------------
     # dependencies
@@ -5924,6 +6020,18 @@ class EndfieldModControllerApi:
         namespace 特征（容忍改过名）；收编成功后会把手动目录从 Mods 移除，避免与随后
         stage 出的 ``MC_<角色>_<名字>`` 构成同角色成对（那会让游戏直接崩）。
         """
+        # ⚠️ **尊重「自动收编 XXMI 里的外来 Mod」开关**（2026-11-16 修）：
+        #    这个开关本来只在 launcher.launch() 里判过，而「生成控制器」/「一键启动前准备」/
+        #    「导入压缩包」都直接走本方法 ⇒ 用户把开关关掉后，点一次按钮它照样把 Mods 里的
+        #    外来目录复制进库并 rmtree 掉原目录（就是反馈里说的"关闭 mod 时把我的 mod 删了"）。
+        #    判据放在这个唯一的收编入口，所有调用方自动一致。
+        if not bool(getattr(self.config, "auto_adopt_manual_mods", True)):
+            launcher._append_log(
+                self.config,
+                "«自动收编 XXMI 里的外来 Mod» 已关闭：Mods 目录里的外来目录保持原样（不复制、不移动）")
+            return {"ok": True, "found": 0, "skipped": "switch_off",
+                    "imported": [], "matched": [], "selected_added": [],
+                    "actions": [], "warnings": []}
         from . import activation
 
         synced = activation.import_manual_mods(
@@ -6290,11 +6398,21 @@ class EndfieldModControllerApi:
         return {
             "policy": fastnet.get_policy(),
             "line_mode": fastnet.get_line_mode(),
+            # GitHub 镜像源：""=自动 / "direct"=仅直连 / 某域名=优先用它
+            "mirror": fastnet.get_mirror(),
+            # 界面直接照这个列表渲染单选（每项已带"最后实测速度/失败次数"）
+            "mirrors": fastnet.mirror_table(),
             "lines": fastnet.line_status(),
             "status": fastnet.status(),
         }
 
-    def set_download_settings(self, policy: str = "", line_mode: str = "") -> dict[str, Any]:
+    def set_download_settings(self, policy: str = "", line_mode: str = "",
+                              mirror: str | None = None) -> dict[str, Any]:
+        """改下载设置。`mirror` 传 `None` = 不改（空字符串是**有效值**，代表"自动"）。
+
+        ⚠️ `mirror` 不能像 policy/line_mode 那样写成"空就跳过"：镜像源里 `""` 本身就是
+        「自动」，用"空就跳过"会让用户**永远切不回自动**（选了某条镜像之后卡在那儿）。
+        """
         from . import fastnet
 
         if policy:
@@ -6303,15 +6421,23 @@ class EndfieldModControllerApi:
         if line_mode:
             fastnet.set_line_mode(line_mode)
             self.config.download_line = fastnet.get_line_mode()
+        if mirror is not None:
+            fastnet.set_mirror(mirror)
+            self.config.download_mirror = fastnet.get_mirror()
         try:
             self.config.save()
         except OSError:
             pass
         launcher._append_log(
             self.config,
-            f"下载设置: 加速={fastnet.get_policy()} 线路={fastnet.get_line_mode()}",
+            f"下载设置: 加速={fastnet.get_policy()} 线路={fastnet.get_line_mode()}"
+            f" 镜像源={fastnet.get_mirror() or '自动'}",
         )
         return self.get_download_settings()
+
+    def set_download_mirror(self, name: str = "") -> dict[str, Any]:
+        """界面单选「GitHub 镜像源」：直接落配置并立即生效（不用重启）。"""
+        return self.set_download_settings(mirror=str(name or ""))
 
     def clear_download_lines(self) -> dict[str, Any]:
         from . import fastnet
@@ -7082,11 +7208,18 @@ class EndfieldModControllerApi:
         # 全程不允许出现 cmd / 控制台黑窗（用户硬要求）：Popen 也要带 CREATE_NO_WINDOW。
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         if sys.platform.startswith("win"):
-            if target.is_dir():
-                os.startfile(str(target))  # type: ignore[attr-defined]
-            else:
-                subprocess.Popen(["explorer", "/select,", str(target)],
-                                 creationflags=creationflags)  # noqa: S603,S607
+            # ⚠️ 与 `diagnostics.open_path` 用**同一套**定位逻辑（2026-11-16）：
+            #    目录 = 直接进入它（旧写法对目录用 `/select,` 只会打开父目录并高亮，
+            #    用户看到的是"没跳过去"）；文件 = `explorer "/select,<路径>"`；
+            #    路径里含逗号时 `/select,` 会被切断，只能退回打开父目录并说明。
+            #    命令行里**不许**出现 cmd 黑窗 ⇒ Popen 一律带 CREATE_NO_WINDOW。
+            ok, note = diagnostics._reveal_target(target, creationflags)
+            if not ok:
+                return {"ok": False, "message": note}
+            result: dict[str, Any] = {"ok": True, "path": str(target)}
+            if note:
+                result["message"] = note
+            return result
         elif sys.platform == "darwin":
             subprocess.Popen(["open", str(target)], creationflags=creationflags)  # noqa: S603,S607
         else:

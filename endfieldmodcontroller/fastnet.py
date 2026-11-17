@@ -392,6 +392,74 @@ def get_line_mode() -> str:
         return str(_STATE.get("line_mode") or "auto")
 
 
+# ── 「GitHub 镜像源」：用户明确指定走哪一条（2026-11-18 用户要求）─────────
+#
+# 用户原话：「另外要加一下 github 镜像表」+ 截图（界面上「选择源」的单选列表：
+# 每项一个名字 + 地址、选中的打勾、旁边还有「测试连通性」）。
+# 语义：
+#   ""        = 自动（沿用原来的"直连优先，慢/断才换镜像"，镜像内部按实测速度排序）
+#   "direct"  = 只用直连
+#   "<host>"  = 优先用这条镜像（其余线路仍然兜底，免得那条也挂了就彻底下不动）
+# 注意它和 `line_mode` 不是一回事：line_mode 决定"要不要用镜像"，这里决定"用哪一条"。
+MIRROR_MODES = ("", "direct")
+
+
+def _known_mirror_names() -> list[str]:
+    return [line.name for line in DEFAULT_LINES[1:]]
+
+
+def set_mirror(name: str) -> None:
+    """选定镜像源；不认识的名字一律当"自动"（绝不因为一个脏值把下载搞停）。"""
+    value = str(name or "").strip()
+    if value not in MIRROR_MODES and value not in _known_mirror_names():
+        value = ""
+    with _STATE_LOCK:
+        _STATE["mirror"] = value
+
+
+def get_mirror() -> str:
+    with _STATE_LOCK:
+        return str(_STATE.get("mirror") or "")
+
+
+def mirror_table() -> list[dict[str, Any]]:
+    """界面用：内置镜像表 + 每条的实测情况（速度/是否被封锁）。
+
+    第一项是「自动」、第二项是「仅直连」，后面是每条真实镜像 —— 顺序固定，
+    界面照这个顺序渲染单选列表即可。
+    """
+    selected = get_mirror()
+    cache = _load_lines_cache()
+    rows: list[dict[str, Any]] = [
+        {"name": "", "label": "自动", "url": "", "selected": selected == "",
+         "hint": "直连优先，慢或不通时自动换镜像（推荐）"},
+        {"name": "direct", "label": "仅直连", "url": "", "selected": selected == "direct",
+         "hint": "不走任何镜像（有加速器时用）"},
+    ]
+    now = time.time()
+    for line in DEFAULT_LINES[1:]:
+        record = cache.get(line.name) or {}
+        mbps = float(record.get("mbps") or 0)
+        fails = int(record.get("fails") or 0)
+        hints: list[str] = []
+        if mbps > 0:
+            hints.append(f"{mbps:.2f} MB/s")
+        elif fails:
+            hints.append(f"失败 {fails} 次")
+        else:
+            hints.append("未测速")
+        if _DNS_DEAD.get(line.name, 0) > now:
+            hints.append("域名解析不了，已临时跳过")
+        rows.append({
+            "name": line.name,
+            "label": line.name,
+            "url": line.prefix,
+            "selected": selected == line.name,
+            "hint": " · ".join(hints),
+        })
+    return rows
+
+
 def status() -> dict[str, Any]:
     """界面用：加速是否正在进行、上一次的结果。"""
     with _STATE_LOCK:
@@ -1301,6 +1369,7 @@ def clear_line_cache() -> None:
 
 def line_status() -> list[dict[str, Any]]:
     cache = _load_lines_cache()
+    selected = get_mirror()
     rows: list[dict[str, Any]] = []
     for line in DEFAULT_LINES:
         entry = cache.get(line.name) or {}
@@ -1311,6 +1380,9 @@ def line_status() -> list[dict[str, Any]]:
             "fails": entry.get("fails", 0),
             "at": entry.get("at", 0),
             "blocked": _line_blocked(line.name, cache),
+            # 用户手选的镜像源（界面单选列表用它打勾）
+            "selected": (selected == "direct" and line.name == DIRECT.name)
+                        or selected == line.name,
         })
     return rows
 
@@ -1424,7 +1496,7 @@ def resolve_lines(url: str, mode: str) -> list[Line]:
     now = time.time()
     dns_ok = [line for line in mirrors if _DNS_DEAD.get(line.name, 0) <= now]
     if mode == "mirror":
-        return dns_ok or [DIRECT]
+        return _apply_preferred_mirror(dns_ok or [DIRECT], now)
     cache = _load_lines_cache()
     # 有成绩的按速度排前面；失败的临时跳过（**全被跳过时退回"没被 DNS 拉黑的那部分"**，
     # 不能因此不下 —— 但也绝不把解析不了域名的放回来）
@@ -1472,7 +1544,31 @@ def resolve_lines(url: str, mode: str) -> list[Line]:
     head = [] if (_line_blocked(DIRECT.name, cache) or direct_too_slow) else [DIRECT]
     # `fresh` 上面已经保证"全被冷却时退回 dns_ok"，所以这里直接拼即可；
     # 若 dns_ok 也是空的（镜像域名全解析不了），就只剩直连 —— 快速失败好过白试死域名。
-    return [*head, *fresh]
+    ordered = [*head, *fresh]
+    return _apply_preferred_mirror(ordered, now)
+
+
+def _apply_preferred_mirror(lines: list[Line], now: float) -> list[Line]:
+    """把用户**手选**的镜像源排到最前面（2026-11-18）。
+
+    - `""`（自动）⇒ 原样返回，沿用实测速度排序；
+    - `"direct"` ⇒ 只给直连（用户明确要走直连，别再拿镜像往下试）；
+    - 某个镜像名 ⇒ 它排第一个，**其余线路仍作兜底**（那条挂了也还能下完，
+      而不是让用户看到"选了 A 之后全废"）。
+    """
+    preferred = get_mirror()
+    if not preferred:
+        return lines
+    if preferred == "direct":
+        return [DIRECT]
+    wanted = next((line for line in DEFAULT_LINES[1:] if line.name == preferred), None)
+    if wanted is None:
+        return lines
+    if _DNS_DEAD.get(wanted.name, 0) > now:
+        _log(None, f"[线路] 你选的镜像 {wanted.name} 上次域名解析不了，这次先按兜底顺序试")
+        return lines
+    rest = [line for line in lines if line.name != wanted.name]
+    return [wanted, *rest]
 
 
 # ---------------------------------------------------------------------------

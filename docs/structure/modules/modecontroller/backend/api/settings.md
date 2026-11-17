@@ -11,19 +11,19 @@ description:
   en: >
       Every toggle and path the settings page touches: hotkey takeover, DLSS5 / component add-on / Poser switches, mod-backup switch and directory picker, download acceleration settings, path choosers and the open-in-explorer entries.
       
-revision: 5ad99916cdff1745b2f88ff3fa46f4116ff95157
-updated_at: "2026-11-14T05:47:42.732Z"
-fingerprint: e9b880b3f1d50cf0ee5ac737b642b283af5e5ab2b9a0ae0643578d00b5eb1524
+revision: 8bc32703d96b038ba06f91f7f4a5a9a7076791ac
+updated_at: "2026-11-17T16:18:39.087Z"
+fingerprint: dec7b43f248ee7b4af5bb1f516376b77c781761cd34d9948f3081365280ec985
 source:
   - path: "endfieldmodcontroller/api.py"
-    line: 450
-    end_line: 3239
+    line: 461
+    end_line: 3753
   - path: "endfieldmodcontroller/api.py"
-    line: 2758
-    end_line: 6583
+    line: 3015
+    end_line: 7205
   - path: "endfieldmodcontroller/api.py"
-    line: 4190
-    end_line: 11611
+    line: 4447
+    end_line: 12275
 apis:
   - protocol: rpc
     path: "set_hotkey_takeover"
@@ -56,10 +56,10 @@ apis:
     path: "get_download_settings"
     description:
       zh: >
-          读写下载加速设置。
+          读下载设置：加速、线路策略、GitHub 镜像表（每条带上次实测速度）。
           
       en: >
-          Read / write download acceleration settings.
+          Read download settings: boost, line mode, and the GitHub mirror table (each row with its last measured speed).
           
   - protocol: rpc
     path: "choose_path"
@@ -78,6 +78,15 @@ apis:
           
       en: >
           Open a path in Explorer (whitelisted roots, refuses to execute files).
+          
+  - protocol: rpc
+    path: "set_download_mirror"
+    description:
+      zh: >
+          选一条 GitHub 镜像源（空串=自动，direct=仅直连）；立即生效并落配置。
+          
+      en: >
+          Pick one GitHub mirror (empty = auto, direct = direct only); applies immediately and persists.
           
 deps:
   - kind: call

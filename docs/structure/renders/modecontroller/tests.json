@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "id": "modecontroller.tests",
-  "updated_at": "2026-11-06T13:05:21.372Z",
+  "updated_at": "2026-11-17T16:18:11.334Z",
   "mode": "layers",
   "reading": {
     "zh": "测试文件按「钉住哪件事」分组，顺序与程序实际运行一致：库 → 激活 → 配置（数据根自愈） → 启动 → DLSS5 → 崩溃 → 组件 → 运维，接着是前端的静态回归（菜单动作 / 组件导入 / 新手引导落点），最后是注入开关、单实例与面板注入链路（后者要编译器，没有就 skip）。全部离线：路径都打到临时目录，不碰你真实的游戏目录与 runtime。",
@@ -21,6 +21,8 @@
     "modecontroller.tests.frontend-tour",
     "modecontroller.tests.injection-switches",
     "modecontroller.tests.single-instance",
-    "modecontroller.tests.addon-hook"
+    "modecontroller.tests.addon-hook",
+    "modecontroller.tests.ui-automation",
+    "modecontroller.tests.download-mirror"
   ]
 }

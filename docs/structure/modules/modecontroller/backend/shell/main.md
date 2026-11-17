@@ -11,16 +11,16 @@ description:
   en: >
       Start the program: refuse a second instance, clean stale _MEI folders in temp, show a static splash before the backend is ready, hand control to pywebview. The single-instance test needs the PID alive AND (process fingerprint matched OR one of our windows on screen); otherwise the lock is stale and is taken over. A real running instance gets its window brought to the front; the lock is released on exit.
       
-revision: 5ad99916cdff1745b2f88ff3fa46f4116ff95157
-updated_at: "2026-11-14T05:47:42.757Z"
-fingerprint: e0ea87dcf3306f56c2866e6e31c135891ed05377a4861ee5a71c70a836069f37
+revision: 8bc32703d96b038ba06f91f7f4a5a9a7076791ac
+updated_at: "2026-11-17T16:18:39.113Z"
+fingerprint: 91b6a4956735b2f85995948ceb93e47f2a374879e80688eed42dc2e84389663d
 source:
   - path: "endfieldmodcontroller/app.py"
     line: 2
-    end_line: 1635
+    end_line: 1739
   - path: "endfieldmodcontroller/app.py"
-    line: 992
-    end_line: 1753
+    line: 1044
+    end_line: 1857
 apis:
   - protocol: rpc
     path: "app.main"

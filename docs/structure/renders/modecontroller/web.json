@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "id": "modecontroller.web",
-  "updated_at": "2026-10-02T07:48:00.002Z",
+  "updated_at": "2026-11-17T15:59:53.684Z",
   "mode": "groups",
   "reading": {
     "zh": "原生 JS、无框架、无构建 —— 一个 app.js 加上页面骨架与样式。按界面区域读：先是壳与通向 Python 的桥，再是 Mod 库页，然后是“把游戏跑起来”的那些，最后是压在所有东西上面的弹窗/日志/引导层。",
@@ -22,7 +22,8 @@
     "modecontroller.web.crash-poll",
     "modecontroller.web.dialogs",
     "modecontroller.web.log",
-    "modecontroller.web.tour"
+    "modecontroller.web.tour",
+    "modecontroller.web.ui-automation"
   ],
   "groups": [
     {
@@ -36,7 +37,8 @@
         "modecontroller.web.theme",
         "modecontroller.web.markup",
         "modecontroller.web.bridge",
-        "modecontroller.web.boot"
+        "modecontroller.web.boot",
+        "modecontroller.web.ui-automation"
       ]
     },
     {

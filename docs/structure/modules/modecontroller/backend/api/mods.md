@@ -11,16 +11,16 @@ description:
   en: >
       Browse and edit the library from the UI: rescan, fetch a mod's cover image, show its detail sheet, reassign its character or kind, remove it from the library, and list the characters the program knows plus those still waiting for confirmation.
       
-revision: 5ad99916cdff1745b2f88ff3fa46f4116ff95157
-updated_at: "2026-11-14T05:47:42.731Z"
-fingerprint: e9b880b3f1d50cf0ee5ac737b642b283af5e5ab2b9a0ae0643578d00b5eb1524
+revision: 8bc32703d96b038ba06f91f7f4a5a9a7076791ac
+updated_at: "2026-11-17T16:18:39.086Z"
+fingerprint: dec7b43f248ee7b4af5bb1f516376b77c781761cd34d9948f3081365280ec985
 source:
   - path: "endfieldmodcontroller/api.py"
-    line: 2860
-    end_line: 6917
+    line: 3117
+    end_line: 7560
   - path: "endfieldmodcontroller/api.py"
-    line: 4874
-    end_line: 15744
+    line: 5131
+    end_line: 16408
 apis:
   - protocol: rpc
     path: "scan"
@@ -75,5 +75,14 @@ apis:
           
       en: >
           Remove a mod from the library — the only path allowed to delete from it (moves to trash, recoverable).
+          
+  - protocol: rpc
+    path: "apply_selection"
+    description:
+      zh: >
+          把 Mod 库里的开关立刻同步进/出 EFMI 的 Mods 目录（复用 prepare；游戏在跑时提示用热重载）。
+          
+      en: >
+          Push the library switches into the EFMI Mods folder right away (reuses prepare; hints hot-reload while the game runs).
           
 ---

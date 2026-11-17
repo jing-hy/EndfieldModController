@@ -27,6 +27,34 @@ _MONITOR_THREAD: threading.Thread | None = None
 _MONITOR_STOP = threading.Event()
 
 
+def _reveal_target(target: Path, creationflags: int) -> tuple[bool, str]:
+    """在资源管理器里**定位**一个文件 / **进入**一个目录。返回 `(成功, 说明)`。
+
+    ⚠️⚠️ **这里踩过一个真实反馈**（2026-11-16）：「打开文件夹不会跳转到指定文件，
+    大部分情况会跳转」，截图里资源管理器停在「文档」。原因全在这几行里：
+    ① 旧写法是 `Popen(["explorer", "/select,", str(target)])` —— `/select,` 与路径被拆成
+       两个参数。explorer 对"分开的参数"解析不稳定：路径带空格 / 含逗号 / 窗口已存在时，
+       它会**忽略定位参数、退回默认的「文档」或「快速访问」**，用户看到的就是"没跳过去"。
+       正确写法是**一个参数**：`explorer "/select,<路径>"`。
+    ② 目录也走 `/select,` ⇒ 那是"打开父目录并高亮它"，不是**进入**它。用户点
+       「打开文件夹」的本意是进去看内容，结果停在上一级 = 又一个"没跳转"。
+    ③ 路径里含逗号时 `/select,` 会被提前切断（后面全丢掉）⇒ 只能退回打开父目录
+       并在说明里讲清楚，别静默失败。
+    """
+    text = str(target)
+    if target.is_dir():
+        os.startfile(text)  # type: ignore[attr-defined]  # 进入这个目录
+        return True, ""
+    if "," in text:
+        os.startfile(str(target.parent))  # type: ignore[attr-defined]
+        return True, "这个路径里有逗号，资源管理器没法直接选中它，已打开它所在的文件夹"
+    if not sys.platform.startswith("win"):
+        return False, f"当前平台不支持资源管理器定位：{text}"
+    subprocess.Popen(["explorer", f"/select,{text}"],
+                     creationflags=creationflags)  # noqa: S603,S607
+    return True, ""
+
+
 def open_path(config: Any, path: Path) -> dict[str, Any]:
     """在资源管理器里定位到指定文件/目录。
 
@@ -38,7 +66,8 @@ def open_path(config: Any, path: Path) -> dict[str, Any]:
     安全约束与 `api.open_path` 保持一致（那条路径 2026-10-01 加固过）：
       * 只允许打开本程序自己的目录（runtime / 配置目录 / Mod 库）与游戏目录；
       * **不直接运行可执行文件** —— Windows 上 `os.startfile` 对 exe/bat/lnk 是"执行"，
-        页面一旦被注入脚本就是任意代码执行；这里一律用 `explorer /select,` 定位。
+        页面一旦被注入脚本就是任意代码执行；这里一律走 `_reveal_target`
+        （文件用 `explorer "/select,<路径>"` 定位，目录直接进入，不执行任何文件）。
     """
     import subprocess
 
@@ -71,11 +100,15 @@ def open_path(config: Any, path: Path) -> dict[str, Any]:
 
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     try:
-        # 目录用 /select 也能定位（父目录里高亮该项）；文件则高亮文件本身
-        subprocess.Popen(["explorer", f"/select,{target}"], creationflags=creationflags)
+        ok, note = _reveal_target(target, creationflags)
     except OSError as exc:
         return {"ok": False, "message": f"打开失败: {exc}"}
-    return {"ok": True, "path": str(target)}
+    if not ok:
+        return {"ok": False, "message": note}
+    result: dict[str, Any] = {"ok": True, "path": str(target)}
+    if note:
+        result["message"] = note
+    return result
 
 
 def logs_dir(config: Any) -> Path:

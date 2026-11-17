@@ -692,12 +692,18 @@ window.addEventListener("pagehide", clearAnnounceTimers);
         先进界面
       </button>
     </div>
-    <aside class="w-52 shrink-0 flex flex-col border-r" style="background: var(--surface); border-color: var(--border)">
+    <!-- data-mc-current-tab：无障碍 / 自动化通道靠它回报"现在在哪个页面"
+         （2026-11-17 用户要求：允许 AI 操作界面）。 -->
+    <aside class="w-52 shrink-0 flex flex-col border-r"
+           :data-mc-current-tab="store.tab"
+           style="background: var(--surface); border-color: var(--border)">
       <div class="h-12 px-4 flex items-center text-sm font-semibold border-b" style="border-color: var(--border)">
         终末地 Mod 管理器
       </div>
       <nav class="flex-1 p-2 space-y-0.5">
+        <!-- data-mc-id 形如 tab:library：AI 用 GET /state 拿到它就能直接切换页面 -->
         <button v-for="t in tabs" :key="t.id" @click="goTab(t.id)"
+          :data-mc-id="'tab:' + t.id"
           class="w-full flex items-center gap-2.5 px-3 py-2 rounded text-left transition-colors"
           :style="store.tab === t.id
             ? { background: 'var(--accent-soft)', color: 'var(--accent)', fontWeight: 500 }

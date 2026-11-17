@@ -492,6 +492,26 @@ def main(argv: list[str] | None = None) -> int:
     except Exception:  # noqa: BLE001
         pass
 
+    # ── 本机无障碍 / 自动化通道（2026-11-17 用户要求：「能有个 api 或者命令行，
+    #    允许 ai 操作 ui，比如切换页面，点击开关，滑动这种」）──────────────
+    # 只绑 127.0.0.1 + 随机 token（写进 runtime/_state/ui_api.json，`scripts/ui_ctl.py` 读它）；
+    # 端口被占 / 起不来只写一条日志，**绝不能挡住用户开程序**。
+    try:
+        from . import launcher as _launcher_ui
+        from . import ui_automation
+
+        ui_automation.start(
+            api.config,
+            log=lambda message: _launcher_ui._append_log(api.config, message),
+        )
+    except Exception as exc:  # noqa: BLE001
+        try:
+            from . import launcher as _launcher_ui
+
+            _launcher_ui._append_log(api.config, f"WARN 无障碍通道没能启动（忽略）: {exc}")
+        except Exception:  # noqa: BLE001
+            pass
+
     # ⚠️⚠️ **关窗口不再做任何拦截**（2026-10-03 用户拍板：「**如果难搞就直接不要那个弹窗了**」）。
     #
     # 这个功能前后试了两版，**两版都会卡死**，所以按用户的话直接砍掉：
@@ -520,6 +540,12 @@ def main(argv: list[str] | None = None) -> int:
     webview.start()
     # 关闭窗口后必须真的退出：后台还可能有下载/监控类工作线程，
     # 用 os._exit 兜底，避免 pythonw 变成关不掉的僵尸进程（占着端口）。
+    try:
+        from . import ui_automation
+
+        ui_automation.stop()
+    except Exception:  # noqa: BLE001
+        pass
     try:
         api.shutdown()
     except Exception:  # noqa: BLE001

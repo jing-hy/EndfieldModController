@@ -50,6 +50,9 @@ const paths = computed(() => {
 // 与 `status`（当前策略/线路模式/是否正在并发加速/上次结果）。
 // 展示沿用现有 `Badge` 组件（tone: success/muted/warning/danger），与页面其余部分一致。
 const lineStatus = ref([]);
+// GitHub 镜像源单选列表（2026-11-18）：name="" 是「自动」，"direct" 是「仅直连」
+const mirrorList = ref([]);
+const mirrorSel = ref("");
 // 渲染 API 的告警文案（同 LaunchPage：vulkan/d3d12 ⇒ 服装 Mod 不生效）
 const renderApiText = computed(() => {
   const v = String((store.state.render_api || "")).toLowerCase();
@@ -89,7 +92,35 @@ async function loadDownloadStatus() {
     // 有速度的排前面（用户最关心"哪条线路能跑"）
     lines.sort((a, b) => (b.mbps - a.mbps) || (Number(a.blocked) - Number(b.blocked)));
     lineStatus.value = lines;
+    // ★ GitHub 镜像源（2026-11-18 用户要求「加一下 github 镜像表」）：照「选择源」那种
+    //   单选列表呈现 —— 每项一个名字 + 地址、选中的打勾、右边写上次实测的速度。
+    //   顺序由后端给定（自动 / 仅直连 / 各镜像），别在这里排，免得跟下载器实际优先顺序不一致。
+    mirrorList.value = (d.mirrors || []).map((m) => ({
+      name: String(m.name || ""),
+      label: String(m.label || m.name || "自动"),
+      url: String(m.url || ""),
+      hint: String(m.hint || ""),
+      selected: m.selected === true,
+    }));
+    const chosen = mirrorList.value.find((m) => m.selected);
+    mirrorSel.value = chosen ? chosen.name : "";
   } catch (e) { /* 拿不到就不显示，不影响设置页其它部分 */ }
+}
+
+async function pickMirror(name) {
+  const target = String(name == null ? "" : name);
+  if (target === mirrorSel.value) return;
+  const r = await run("set_download_mirror", target);
+  if (!r) return;
+  // 后端会回落成合法值（不认识的域名一律当"自动"），所以以**后端返回值**为准
+  const chosen = (r.mirrors || []).find((m) => m.selected);
+  mirrorSel.value = chosen ? String(chosen.name || "") : "";
+  if (target && !chosen) {
+    showToast("这个镜像源不认识，已经改回「自动」", "warn");
+  } else {
+    showToast(target ? `下载已改用镜像：${target}` : "下载已改回自动选线路", "success");
+  }
+  await loadDownloadStatus();
 }
 
 async function clearDownloadLines() {
@@ -740,6 +771,33 @@ useLogAutoScroll(probeBox, () => probeText);
       <SettingPath k="download_proxy" label="下载代理" placeholder="留空即自动（环境变量 → 系统代理 → 直连）" />
       <SettingSelect k="download_boost" label="下载加速" :options="DL_BOOST" />
       <SettingSelect k="download_line" label="下载线路" :options="DL_LINE" />
+      <!-- ★ GitHub 镜像源（2026-11-18 用户要求）：「加一下 github 镜像表」+ 界面照
+           「选择源」那种单选列表 —— 每项名字 + 地址、选中的打勾、右边是上次实测速度。
+           它和上面的「下载线路」不是一回事：那个决定**要不要**用镜像，这个决定**用哪条**。 -->
+      <div class="pt-2" role="radiogroup" aria-label="GitHub 镜像源">
+        <div class="text-xs mb-1" style="color: var(--text-muted)">
+          GitHub 镜像源（下载走哪一条；速度是上次实测，选「自动」就会自己挑快的）
+        </div>
+        <!-- ⚠️ 必须给 `role="radio"` + `aria-checked`（2026-11-18）：
+             ① 这是**无障碍**功能的一部分，读屏与自动化都靠它判断"选中了哪一条"；
+             ② 本程序的 UI 自动化通道（docs/ui-automation.md）靠 `aria-checked` 回传
+                `checked` 字段 —— 少了它，AI 只能看到 ● / ○ 这种字符，没法可靠断言状态。 -->
+        <button v-for="m in mirrorList" :key="m.name || 'auto'"
+                type="button" role="radio"
+                :aria-checked="mirrorSel === m.name ? 'true' : 'false'"
+                class="w-full flex items-center gap-2 px-2 py-1.5 rounded text-left text-sm"
+                :style="{ background: mirrorSel === m.name ? 'var(--accent-soft)' : 'transparent',
+                          color: mirrorSel === m.name ? 'var(--accent)' : 'var(--text-muted)' }"
+                @click="pickMirror(m.name)">
+          <span class="shrink-0" aria-hidden="true">{{ mirrorSel === m.name ? "●" : "○" }}</span>
+          <span class="shrink-0">{{ m.label }}</span>
+          <span v-if="m.url" class="shrink-0 text-xs opacity-70 truncate">{{ m.url }}</span>
+          <span class="ml-auto shrink-0 text-xs opacity-70">{{ m.hint }}</span>
+        </button>
+        <div v-if="!mirrorList.length" class="text-xs" style="color: var(--text-muted)">
+          （读不到镜像表 —— 稍后重试；不影响下载，下载器会按「自动」自己挑线路）
+        </div>
+      </div>
       <!-- ⚠️ **线路状况**（2026-10-03 修回归：0.9.5 有，换代后变成硬编码空数组）。
            作用：下载卡住时，这里是"哪条线路能跑、跑到多少"的唯一入口。
            展示沿用现有 Badge / Btn（size="sm"），与页面其余部分风格一致。 -->

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "id": "modecontroller.scripts",
-  "updated_at": "2026-10-02T08:38:45.757Z",
+  "updated_at": "2026-11-17T15:59:58.500Z",
   "mode": "groups",
   "reading": {
     "zh": "只在开发机用，**不进 exe**。设计上就是“一个脚本管一件事”：想知道 exe 怎么来的看构建组（面板注入链路的离线自测也在这里），要发版看发布组，程序里某张表要重生成看数据组。",
@@ -25,7 +25,8 @@
     "modecontroller.scripts.gen-hints",
     "modecontroller.scripts.make-demo",
     "modecontroller.scripts.self-check",
-    "modecontroller.scripts.setup-reshade"
+    "modecontroller.scripts.setup-reshade",
+    "modecontroller.scripts.ui-ctl"
   ],
   "groups": [
     {
@@ -79,7 +80,8 @@
       },
       "children": [
         "modecontroller.scripts.self-check",
-        "modecontroller.scripts.setup-reshade"
+        "modecontroller.scripts.setup-reshade",
+        "modecontroller.scripts.ui-ctl"
       ]
     }
   ]

@@ -873,7 +873,27 @@ def stage_and_prepare(
     fingerprints = _read_stage_fingerprints(staging_root)
     new_fingerprints: dict[str, str] = {}
     skipped_unchanged: list[str] = []
+    # ⚠️ **手动目录残留时绝不再 stage 同角色副本**（2026-11-16 修，用户报「时而能控制
+    #    时而不能控制 Mod」「EF 的 mod 文件夹莫名其妙变了」）。
+    #    链路：import_manual_mods 收编后会用 rmtree 把手动目录从 Mods 里搬走，但
+    #    **游戏正在运行时这些文件被占用** ⇒ 删除失败只记一条 warning，手动目录原地留着；
+    #    紧接着本次 stage 又生成一份 MC_<角色>_<名字> ⇒ EFMI 同时加载两个同角色 Mod，
+    #    变量与热键互相覆盖 ⇒ 面板操作"时灵时不灵"（真实诊断包里就有两组：
+    #    Si_Ink_Mist + MC_祀_Si_Ink_Mist、Tangtang_Lil_Undead + MC_汤汤_…）。
+    #    判据：与残留手动目录**同名或同 namespace**（_same_mod）的 Mod 一律跳过——
+    #    手动那份已经躺在 Mods 里生效，不需要也不该再补一份副本。
+    #    手动目录**不做任何移动/删除**（用户 2026-10-01 红线：宁可留着让他自己删）。
+    manual_paths = [staging_root / name for name in kept_manual]
+    skipped_manual_conflict: list[str] = []
     for mod in active_plan:
+        if manual_paths:
+            clash = next((p for p in manual_paths if _same_mod(mod.path, p)), None)
+            if clash is not None:
+                skipped_manual_conflict.append(mod.name)
+                _log(log,
+                     f"跳过 stage：{mod.name} 与 Mods 里手动放的「{clash.name}」是同一个 Mod"
+                     f"（再生成一份会让 EFMI 同时加载同角色两份，面板会时灵时不灵）")
+                continue
         dest = staging_root / f"MC_{mc_core.safe_name(mod.group)}_{mc_core.safe_name(mod.name)}"
         source_fp = _dir_fingerprint(mod.path)
         recorded = fingerprints.get(dest.name)
@@ -1026,4 +1046,7 @@ def stage_and_prepare(
         "user_ini_path": str(user_ini_path),
         # 手动放进 Mods（不是我们生成的）的目录 —— 我们**不删**，交给调用方提示/收编
         "kept_manual": kept_manual,
+        # 因为 Mods 里已经有一份同名/同 namespace 的手动目录而**主动跳过**的 Mod：
+        # 再 stage 一份会让 EFMI 同时加载同角色两份（2026-11-16）。
+        "skipped_manual_conflict": skipped_manual_conflict,
     }
