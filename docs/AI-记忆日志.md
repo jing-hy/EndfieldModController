@@ -7118,3 +7118,53 @@ GitHub 镜像实测（2026-11-07 本机裸网，真实 Release 资产前 3 MB / 
 【并发上限必须做在「真正发请求」那一层，且是进程级 —— 每批各开一份等于没有上限】2026-11-14：modstore 图片下载原来每个批次各 6 路（ThreadPoolExecutor），列表后台批次 + 详情批次叠加就是 12 路，而三次实测「12 路会让整批全部失败」（站点按同 IP 并发连接数限制，6 路是甜点）。修法：进程级 threading.BoundedSemaphore(6)，所有批次的 _fetch_image 都从这里领名额；排队时间不计入单张超时。
 
 `关键词：["并发上限","信号量","BoundedSemaphore","图片下载","批次叠加","12路","全部失败","服务端限制","进程级闸门","IMAGE_CONCURRENCY"]`
+
+<!-- 增量追加 2026-11-18 00:29 · 新增 5 条（历史条目一律保留）-->
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 【modecontroller 当前状态唯一真源】（20…
+*2026-11-14 15:28*
+
+【modecontroller 当前状态唯一真源】（2026-11-14 更新，**只维护这一条**）
+**Latest Release = v1.4.15**（Latest、非 draft/非预发布；tag 打在 main `8bc3270`）：
+· `EndfieldModController.exe` 35,661,586 B · sha256 `22cb79309c4c35e03cdf5f87ff23fe03b0ebc15a9d3c05d841b72340b60e2be1`
+· `assets-bundle.zip` 261,987,364 B · sha256 `824e126fa4f0183a514f5db0cb4d142b5867d1c5dc2aa61f69be4fa07bfa6d9a`
+`dist\`、`D:\zmdmod\modtest\` 与 Release 附件三方哈希一致；`version.py` 与两份 README 均为 1.4.15（刚发完版 ⇒ 正式号、不欠号）。
+**v1.4.15 内容**：商城详情页除第一张之外的预览图不再永远「加载中」—— 等图轮询改为按进展判（原来固定 60 轮≈36 秒就放弃，而后端继续下，于是界面永久停在加载中、点开灯箱才有），取不回来时给「重试」入口，详情那排图接入懒加载；后端图片下载加进程级 6 路闸门（原先每批各 6 路，列表+详情叠加 12 路会让整批全失败）。另把随包组件版本表同步上游：XXMI v2.4.9→v2.5.0、Poser 0.5.108→0.5.112。
+**测试与构建验证一律本机**：`python scripts\run_tests.py tests --serial`（1477 passed / 约 3.5 分钟，串行）。`.github/workflows/ci.yml` 只在 workflow_dispatch 手动触发。
+**离线依赖包**：`dist\deps-bundle.zip` 346,887,435 B（330.8 MB，不进 Release，QQ 群 1045239747 应急分发）· sha256 `6a49f97f05ae6a450d20b1ef2e80d6f66857c38ad516cbad1f333c8cd09358e7`（2026-11-14 重建：XXMI 2.5.0 / Poser 0.5.112，modtest 副本同哈希）；组件或随包 assets 一变就重打并同步 modtest。
+发布步骤见「发布流程」条；历史版本明细看 GitHub Releases 与 `RELEASE_NOTES.md`。
+
+`关键词：["当前状态","Latest Release","v1.4.15","sha256","assets-bundle","modtest","本机全量测试","1477 passed","组件版本表","version.py","商城详情"]`
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 无障碍/自动化通道（2026-11-17 用户要求「允许…
+*2026-11-18 00:28*
+
+无障碍/自动化通道（2026-11-17 用户要求「允许 ai 操作 ui」）：endfieldmodcontroller/ui_automation.py 起只绑 127.0.0.1 的 HTTP（/health、/state、/act），端口+token 写 runtime/_state/ui_api.json；命令入队、前端 frontend/src/lib/uiAutomation.js 每 300ms 轮询取走并在真实 DOM 执行（el.click / 原生 value setter + window.Event / scrollIntoView），结果回传；scripts/ui_ctl.py 是命令行客户端（state/find/tab/click/set/value/scroll/scroll-by）。不用 evaluate_js 是因为 pywebview 的 EdgeChromium 后端要求 UI/STA 线程，跨线程不保险。元素选择器：侧栏固定 data-mc-id="tab:<页>"，其余用 CSS 路径；镜像项用 role=radio + aria-checked。
+
+`关键词：["无障碍","UI自动化","ui_automation","ui_ctl","AI操作界面","evaluate_js不可用","轮询队列","ui_api.json","data-mc-id","click开关","切换页面","accessibility"]`
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 2026-11-18 构建正式版 1.5.0（versi…
+*2026-11-18 00:28*
+
+2026-11-18 构建正式版 1.5.0（version.py/README/detailed 三处一致）：dist\EndfieldModController.exe 35,681,375 B sha256=36952f3afca3bdd0b73d…，已同步 modtest。该版本含：Mod 开关同步 EFMI Mods、同角色双份防护、收编开关真正生效、打开文件夹定位修复、无障碍自动化通道、GitHub 镜像源单选表。**未 push、未发 Release**（build_release 带 --no-push；版本号按用户要求用 1.5.0，构建时 WARN「不是 Release+1」属预期）。
+
+`关键词：["1.5.0","构建产物","sha256","modtest","未发版","Release+1 WARN","dist","正式版","发版状态"]`
+
+<!-- lesson · 经验教训（被纠正过的、踩过的坑） -->
+### 群反馈「mod 开关时灵时不灵 / 关闭 mod 把 m…
+*2026-11-17 23:53*
+
+群反馈「mod 开关时灵时不灵 / 关闭 mod 把 mod 删了 / 下载的 mod 不进 EFMI Mods」的根因：① 卡片开关只写 config.selected_mods，不碰文件（stage 只在启动/生成控制器/热重载时跑）；② 收编手动 Mod 时游戏在跑、文件被占用，rmtree 失败只记 warning，随后又 stage 一份 MC_* 同角色副本 ⇒ EFMI 同时加载两份，变量/热键互相覆盖；③ auto_adopt_manual_mods 只在 launcher.launch 里判过，prepare_launch/生成控制器都直接调收编，开关形同虚设。修法：开关后 600ms 合并调 apply_selection→prepare；stage 时与残留手动目录同名/同 namespace 的 Mod 直接跳过；收编入口统一判开关。
+
+`关键词：["mod开关","staging","EFMI Mods","同角色双份","手动收编","auto_adopt_manual_mods","apply_selection","时灵时不灵","关闭mod被删","explorer /select","打开文件夹不跳转","面板控制"]`
+
+<!-- lesson · 经验教训（被纠正过的、踩过的坑） -->
+### GitHub 镜像源（config.download_m…
+*2026-11-18 00:28*
+
+GitHub 镜像源（config.download_mirror）三态：""=自动、"direct"=仅直连、某域名=优先用它（其余仍兜底）。参数里**空串是有效值**，api.set_download_settings 的 mirror 不能像 policy/line_mode 那样写成「空就跳过」，否则用户选了镜像后再也切不回自动。界面照「选择源」做 role=radio + aria-checked 单选列表，右侧显示上次实测速度。
+
+`关键词：["github镜像表","download_mirror","镜像源","空串有效值","切回自动","role=radio","aria-checked","fastnet","线路优先级","单选列表"]`
