@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """拖入压缩包导入的回归测试（2026-10-01）。
 
 对应三条用户要求：

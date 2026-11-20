@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
 # AGENTS.md
 
 本仓库给 AI 助手的说明是 **[AGENTS.md](AGENTS.md)** —— 请读那一份。

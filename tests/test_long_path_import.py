@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """钉住「Windows 长路径（>260）也能导入」—— issue #12 的修复。
 
 **issue 原文**：「mod无法解压」

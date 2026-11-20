@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """「程序被放在桌面运行」的处理（用户 2026-10-26）。
 
 两轮需求：

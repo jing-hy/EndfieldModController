@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 r"""**有没有控制器实例在跑？** —— 一个命令给出可核对的答案（2026-11-07）。
 
 为什么需要它：我（AI）以前判断"实例在不在"只跑

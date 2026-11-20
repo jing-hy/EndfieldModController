@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """「程序目录改名/搬走后自动跟上」的回归测试（2026-10-02 群反馈）。
 
 反馈原话：

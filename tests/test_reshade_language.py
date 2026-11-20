@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 # -*- coding: utf-8 -*-
 """初始化时把第一人称插件的界面语言配成中文 —— 回归测试。
 

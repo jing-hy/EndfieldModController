@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """自更新徽章的收尾判据（2026-10-16，反馈者报「更新不了」）。
 
 **事故**：后端在"已有下载任务在跑"时会**静默**把那个任务的进度当成自更新的结果回给界面

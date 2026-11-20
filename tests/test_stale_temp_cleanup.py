@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """把 PyInstaller onefile 留下的临时目录清干净（用户实测到弹窗
 `Warning / Failed to remove temporary directory: …\\Temp\\_MEI0002b002`）。
 

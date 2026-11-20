@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """依赖的「按需激活 + 去重 + 内外优先级」（用户 2026-10-02 要求）。
 
 用户原话：「加个去重，在设置里加个**内部 RabbitFX 优先，默认开**，开的话如果还有外部

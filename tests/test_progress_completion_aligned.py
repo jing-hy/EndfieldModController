@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """钉住「完成时进度条必须也在 100%」（2026-10-03 用户报的进度问题）。
 
 **症状**：「**动态显示安装完成，但是进度条才走了一半**」。

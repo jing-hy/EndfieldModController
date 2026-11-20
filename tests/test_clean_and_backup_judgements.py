@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """游戏目录净化判据 + 备份语义 + 「依赖清空并重新下载」的回归测试（v1.0.11）。
 
 三个坑各自都有具体现场：

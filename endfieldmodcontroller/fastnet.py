@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """极轻量的下载加速：**平时不用，慢/抖时才临时上，用完立刻放掉**。
 
 借鉴 [SteamTools / Watt Toolkit](https://github.com/BeyondDimension/SteamTools) 的思路，

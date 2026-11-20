@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // 日志框的"智能自动滚动"。
 //
 // 用户 2026-10-03 的两条要求：

@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
 # 给 AI 助手的说明
 
 本仓库是《明日方舟：终末地》Mod 管理器 **EndfieldModController** 的源码。

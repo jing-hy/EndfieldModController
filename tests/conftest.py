@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """全局测试桩：**别让被测进程留下后台线程**。
 
 `EndfieldModControllerApi.__init__` 会起一条预热线程（扫 Mod 库、等 `ui_ready`、

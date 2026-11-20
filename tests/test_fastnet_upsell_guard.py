@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """Steam++ / 加速器环境下的下载链路回归（2026-10-04 实测后加）。
 
 两条独立的事实（都是本机实测拿到的）：

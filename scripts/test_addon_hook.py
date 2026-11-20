@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """面板按键注入（vkey_inject）的离线自测。
 
     python scripts\\test_addon_hook.py

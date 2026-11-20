@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """记忆日志（`docs/AI-记忆日志.md`）的导出：**不能炸、不能漏、不能泄路径**。
 
 用户 2026-10-03 的要求链：「还有 dsh 的记忆也一起上传源码」→「每次传源码记忆都一起」

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """自更新「陈旧包」的回归测试。
 
 对应 2026-09-30 实测 bug：`runtime\\_update\\EndfieldModController.exe` 里躺着更早下载的

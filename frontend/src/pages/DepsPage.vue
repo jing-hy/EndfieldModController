@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup>
 // 依赖页（旧 #tab-dependencies）：组件状态 + 下载进度 + 日志 + 已装清单。
 // ⚠️ 日志框是**纯黑**的（.log-box 在 tokens.css 里，且 user-select: text 保证可复制）。

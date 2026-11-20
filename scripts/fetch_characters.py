@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """从官网拉最新角色名表（固化脚本，用户 2026-09-30 要求）。
 
 用法（在仓库根跑）：

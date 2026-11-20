@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """详情页「预览图糊」与「下载键灰掉」的两条回归（2026-11-08 实测报障）。
 
 用户原话：

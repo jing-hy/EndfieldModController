@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """Mod 商城：**分类数字必须与列表同源**、**残缺索引不许让 Mod 消失**（2026-11-07 修）。
 
 用户实测两条：

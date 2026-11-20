@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """商城「进页面不自动刷新」「大图一直加载中」的两条回归（2026-11-07 实测报障）。
 
 用户原话：

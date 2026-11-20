@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """镜像**假包**与**日志自相矛盾**的回归测试（2026-11-07 实测报障）。
 
 用户两条原话：

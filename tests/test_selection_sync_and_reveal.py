@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """2026-11-16 反馈：Mod 开关与 EFMI 的 Mods 目录对不上 + 「打开文件夹」不定位。
 
 用户原话（QQ 群）：

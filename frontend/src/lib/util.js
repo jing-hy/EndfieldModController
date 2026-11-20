@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // 工具函数：**照抄旧 app.js 的实现**（行为必须一致，别"顺手优化"）。
 export function escapeHtml(value) {
   return String(value == null ? "" : value)

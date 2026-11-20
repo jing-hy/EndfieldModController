@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """下载中心：把两套任务容器归一化成**同一份界面清单**。
 
 用户 2026-10-07 原话：「把下载从依赖里面抽出来，之前是所有下载跳转依赖的现在都跳转下载，

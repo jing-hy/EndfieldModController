@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """「详情页第一张图能看，后面的图不点进去就一直加载中，点进去又有了」（2026-11-14 修）。
 
 用户原话：「商城的详情页还是有点问题，会出现第一张图能正常加载，后面的图如果不点进去

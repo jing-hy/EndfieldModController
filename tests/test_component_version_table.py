@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """钉住两件事（2026-10-03 用户要求）：
 
 **① 随包版本表** —— 「那个一键启动检查更新**还是要加**，但是是**随包资源里配一张版本表**，

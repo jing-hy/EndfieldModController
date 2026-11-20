@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """「更新不了」的入口冲突回归（2026-10-16，反馈者诊断包 `diagnostics-20261015-233155`）。
 
 **现象**：反馈者只说「更新不了」。诊断包里的事实是：

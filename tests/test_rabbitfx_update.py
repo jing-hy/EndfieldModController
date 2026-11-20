@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """RabbitFX 内置升级 / 上游版本 / GameBanana 选文件（2026-10-18）。
 
 用户原话：「把内置的更新一下，https://gamebanana.com/mods/651557」，随后

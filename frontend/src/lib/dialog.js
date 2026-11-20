@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // 全局 Toast + 命令式弹窗（保持旧 app.js 的 API 与语义，调用方一字不改）。
 import { reactive } from "vue";
 

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """抓「前端脚本块里调用了未声明的名字」这类 bug（2026-10-04 加）。
 
 **为什么需要**：2026-10-04 的全项目审计一次就抓到 **6 处真事故**，全是这个形态 ——

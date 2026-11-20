@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """NR 自动开启：等第一人称插件的相机 hook 装好之后，替用户在游戏里按一次 NR 开关。
 
 ## 为什么要有它（2026-10-05 定案 + 用户要求「全自动」）

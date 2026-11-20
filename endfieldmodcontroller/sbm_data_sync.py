@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """从上游仓库拉取**乳摇（SBM / SecondaryMotion）的角色参数文件**，补进本地。
 
 用户需求（原话，2026-10-01）：「**在作者改之前，mod 管理器自行拉取新的参数文件**」。

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """实测「进度条往回跳」是否修好 —— 用**会中途失败重试**的慢速服务。
 
 **用户报**：「开 vpn 下载快，但是**为什么进度条老是往回跳**」。

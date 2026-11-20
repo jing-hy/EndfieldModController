@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """2026-10-01 两个真 bug 的回归测试（来自一份真实诊断包的分析结论）。
 
 **① DLSS5 preset 判据自相矛盾** —— 判据要求 `TechniqueSorting`/`EffectSorting` 里

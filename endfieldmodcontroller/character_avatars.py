@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """角色头像：把官网的角色图标下载到**本机缓存**，供「角色墙」布局显示。
 
 设计要点（都是被现实约束出来的）：

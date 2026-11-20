@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """EndfieldJiggle（触摸形变 Mod）迁进 Mod 库的回归（2026-10-19 用户要求）。
 
 用户原话：「触摸 mod 移出自带，加入自动识别进辅助 mod」——

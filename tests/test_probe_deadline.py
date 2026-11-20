@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """钉住「探测 deadline 必须在**完全没数据**时也生效」。
 
 **实测现场**（2026-10-03 用户：「怎么这么慢还在硬更」）：

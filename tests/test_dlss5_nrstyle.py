@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """`NRStyle=2` 的处理：**不搞一刀切**，只在"上次就是这套 Mod 组合崩的"时才改。
 
 用户 2026-10-02 原话：「nr风格2是不是电影啊，那个**我还要用，不要一刀切**，可以绑定进

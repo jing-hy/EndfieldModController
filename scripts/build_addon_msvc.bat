@@ -1,4 +1,4 @@
-@REM SPDX-License-Identifier: GPL-3.0-or-later
+@REM SPDX-License-Identifier: AGPL-3.0-only
 @echo off
 setlocal
 cd /d "%~dp0..\reshade_addon"

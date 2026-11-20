@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """用命令行操作 EndfieldModController 的界面（无障碍 / 自动化通道客户端）。
 
 用户需求（2026-11-17）：「需要一个无障碍功能，能有个 api 或者命令行，允许 ai 操作 ui，

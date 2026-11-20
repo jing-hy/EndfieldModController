@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """净化**不许**动 Poser 的设置与快捷键（2026-10-12，用户报「Poser 的快捷键会被复写」）。
 
 Poser 自带文档原文：`| 设置、快捷键 / 窗口布局 | plugin/poser_config.txt / plugin/poser_layout.ini |`。

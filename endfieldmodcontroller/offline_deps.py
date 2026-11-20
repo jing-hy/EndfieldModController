@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """**离线依赖包**：给连不上 GitHub 的机器一次性把"需要下载的东西"带过去。
 
 用户 2026-10-12 要求：「依赖页本来有一个导入随包 zip 的按钮，现在去掉，换成导入依赖包，

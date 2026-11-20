@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup>
 defineProps({ modelValue: [String, Number], placeholder: { type: String, default: "" }, rows: { type: Number, default: 0 } });
 const emit = defineEmits(["update:modelValue"]);

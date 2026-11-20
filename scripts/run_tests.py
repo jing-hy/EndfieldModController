@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """跑单元测试 —— 与构建脚本拆开的独立入口（**一律串行**）。
 
     python scripts/run_tests.py                    # 全量（tests/）

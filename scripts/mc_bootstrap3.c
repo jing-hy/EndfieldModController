@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 /*
  * mc_bootstrap3.c — 进程内桥（变体 B+：3DMigoto 先、ReShade 后）
  *

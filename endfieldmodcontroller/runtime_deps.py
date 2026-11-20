@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """Built-in runtime management for XXMI Launcher and the EFMI package.
 
 These are not regular 3DMigoto mods: they are the runtime that loads Mods.  The

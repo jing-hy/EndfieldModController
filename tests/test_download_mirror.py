@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """GitHub 镜像表 / 手选镜像源（2026-11-18 用户要求）。
 
 用户原话：「另外要加一下 github 镜像表」+ 一张界面上「选择源」单选列表的截图

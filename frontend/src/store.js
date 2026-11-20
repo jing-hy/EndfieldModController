@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // 全局状态：与后端 get_state() 的返回同构，页面组件只读它 + 调后端后刷新。
 import { reactive } from "vue";
 import { call } from "./lib/bridge.js";

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """Mod 修复（实验性）/ 回滚 / 移出库。
 
 修复规则（2026-10-19 用户要求，取代旧的"社区修复工具 -1"）：

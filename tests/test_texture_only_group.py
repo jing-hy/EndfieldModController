@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """钉住「贴图替换类」判据 —— 2026-10-03 用户要求的一个新分类。
 
 **用户原话**（针对库里的「弭弗饮料罐690308」）：

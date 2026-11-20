@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """写注入库之前必须先把 EFMI 的 loader 部署到位（2026-10-06）。
 
 **现场**（反馈者两次运行对照）：

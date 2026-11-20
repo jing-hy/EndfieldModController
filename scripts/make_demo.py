@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """Create a tiny demo library so the UI can be tested without real mods.
 
 ⚠️⚠️ **绝不许动仓库里的真实 `library\`**（2026-10-04 修）：

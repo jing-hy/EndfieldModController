@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """**只要有一个资产组没有来源，就必须去拉资产包**（2026-10-12，来自反馈者诊断包）。
 
 现场（`diagnostics-20261012-001019`，数据根 `D:\\liulanqixiazai`）：

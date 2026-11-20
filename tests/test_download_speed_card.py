@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """**「速度卡一直横线」的根因与修法**（2026-10-04，用户实测报障）。
 
 用户原话：「进度条只是刷新慢，**但速度卡是一直横线**」——两件事同一个原因：

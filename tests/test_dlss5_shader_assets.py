@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """DLSS5 的 shader / 贴图资产必须是**内容级**检查（2026-10-13，用户现场反馈）。
 
 用户原话：「这个软件注入的（贴图）文件夹有问题，但是在这个软件上却显示完整，

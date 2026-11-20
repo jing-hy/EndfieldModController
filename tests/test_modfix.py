@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """Mod 修复（ps-t+1）/ 回滚 / 移出库的离线单测。
 
 2026-10-19 用户定的新规则：把该 Mod 的 .ini 里所有 ps-tN（**N < 21**）整体 +1

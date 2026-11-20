@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """崩溃归因（Mod 冲突 vs 其它）与随包组件基线校验的离线单测。
 
 都是 2026-09-30 那轮加的东西：

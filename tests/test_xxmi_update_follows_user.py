@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """「更新要打到你指向的那份 XXMI」（2026-10-16 用户原话：「只要指向的 xxmi 就也包含更新」）。
 
 **背景**（反馈者诊断包 `diagnostics-20261015-233155`）：`xxmi_launcher` 指向 `D:\\XXMI` 时，

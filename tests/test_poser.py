@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """Endfield Poser 集成的离线单测。
 
 **不触网、不下载、不碰真实游戏目录**：全部在 tmp_path 里造假的游戏目录 / 安装包，

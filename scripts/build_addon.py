@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """编译统一控制面板（ReShade addon）。
 
     python scripts\\build_addon.py            # 有 MSVC 就用 MSVC，否则 mingw

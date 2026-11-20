@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """锁键（Mod 热键改写目标）**不能和面板协议键撞**。
 
 2026-10-03 用户实测：「按陈千语的时候壁纸也会跟着动」。

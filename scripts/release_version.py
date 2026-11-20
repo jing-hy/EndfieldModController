@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """版本号规则的可执行版本（用户 2026-10-02 澄清）。
 
 **规则**：版本号**只跟"最新 Release"比** ——

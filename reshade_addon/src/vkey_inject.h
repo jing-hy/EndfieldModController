@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // vkey_inject.h —— 进程内"虚拟按键"注入（不经 Windows 输入队列）
 //
 // 为什么需要它（2026-10-01 ~ 10-02 的排查结论，别再往回走）：

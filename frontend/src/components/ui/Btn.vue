@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup>
 // `ref` 到本组件拿到的是**组件实例**（不是 DOM），所以显式转发 `focus` ——
 // DialogHost 需要它把焦点放到安全项上（破坏性动作默认聚焦"取消"）。

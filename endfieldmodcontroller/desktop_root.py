@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """「程序被放在桌面运行」的检查与清理（用户 2026-10-26 要求）。
 
 用户原话：「如果第一次启动检查目录发现 exe 在桌面，先弹个弹窗，说明如果放桌面会导致

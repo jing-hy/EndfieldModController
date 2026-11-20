@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 import { createApp } from "vue";
 import App from "./App.vue";
 import "./styles/tokens.css";

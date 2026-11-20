@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """构建流程的唯一入口：静态检查 → 构建最新版 → 带版本号副本 → 伪旧版 → 归置旧版 → 同步测试目录。
 
 用法：

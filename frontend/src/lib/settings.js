@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // 集中管理所有设置项（启动页与设置页用的是**同一批注入开关**，旧版靠手工双向同步，
 // 这里天然共享同一份 reactive 状态）。
 //

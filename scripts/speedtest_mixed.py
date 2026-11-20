@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """混合 / 动态并发的对照实验：**单线路并发 vs 多线路等分 vs 多线路动态抢块**。
 
 **为什么要测**（两个互相矛盾的既有结论）：

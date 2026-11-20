@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """**实例判定**的回归：四条证据 + 陈旧锁不算"在跑"（2026-11-07）。
 
 为什么要有它：我曾用

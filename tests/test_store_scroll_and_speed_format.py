@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """三件「用户看得见却不该发生」的事，各自钉住（2026-11-07 实测报障）。
 
 用户原话：

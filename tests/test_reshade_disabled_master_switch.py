@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """总闸：「禁用所有 ReShade 注入」（2026-10-09 用户要求）。
 
 用户原话：「在注入开关最上边做一个和其他不一样一点、明显一点的，写禁用所有 reshade 注入，

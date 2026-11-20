@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
 # UI 自动化 / 无障碍通道
 
 让**脚本或 AI** 操作这个管理器的界面：切换页面、点开关、拖动滑块、滚列表。

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """新手引导的落点必须真实存在（2026-11-05 用户要求改第 2 步时补上的回归）。
 
 **为什么钉这条**：0.9.5 踩过一次 —— 引导第 2 步指向 `#mod-download-box`，而那代前端里

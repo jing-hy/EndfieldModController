@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """开关日志的文案必须**逐组件写全**（2026-10-07）。
 
 **为什么值得钉住**：原写法是

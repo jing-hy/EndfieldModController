@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """打一个**离线依赖包**（`deps-bundle.zip`）—— 给连不上 GitHub 的机器应急用。
 
 用户 2026-10-12 定的形态：

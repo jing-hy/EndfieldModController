@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """钉住「用户亲手点的更新必须真的更新」（2026-10-03 用户报的两个症状）。
 
 **症状**：「**一键更新没动态**」「**告诉我更新完了，但是一键启动又说没有**」。

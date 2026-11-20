@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
 # EndfieldModController —— 详细文档
 
 当前版本 **1.5.0** ｜ [下载最新版](https://github.com/jing-hy/EndfieldModController/releases)
@@ -442,7 +442,7 @@ shader 文件清单、运行时组件清单（每个文件的字节数 + sha256 
 > 这不是正规做法，不一定有用、也可能改坏：界面会先讲清楚并要求先确认「已用最新 RabbitFX
 > 且更新后依然损坏」，修复前一律整份备份、可回滚；**没有「一键修复所有」**。
 
-本项目自身为 **GPL-3.0-or-later**（GNU General Public License v3.0 或更高版本）许可，完整条款见 [LICENSE](../LICENSE)；各源文件头部均标注了 `SPDX-License-Identifier: GPL-3.0-or-later`。
+本项目自身为 **AGPL-3.0-only**（GNU Affero General Public License v3.0）许可，完整条款见 [LICENSE](../LICENSE)；各源文件头部均标注了 `SPDX-License-Identifier: AGPL-3.0-only`。
 
 上列第三方组件**不适用**本项目的许可，其版权与许可条款归各自作者所有。免责声明同样见简略版。
 

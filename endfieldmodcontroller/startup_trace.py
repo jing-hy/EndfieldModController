@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """启动时间线打点（2026-11-05）。
 
 为什么有这个东西：用户报「启动这么慢，出加载页面和在加载页面都很久」。光看代码只能猜，

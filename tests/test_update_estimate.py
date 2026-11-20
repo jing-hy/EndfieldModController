@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """一键更新的**预估项数必须等于实际要处理的项数**（进度条分母 = 实际项数）。
 
 2026-10-03 用户实测反馈：「一键更新完成：实际 14 项，预估 9 项（预估公式待校准）」

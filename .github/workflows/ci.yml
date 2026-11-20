@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 name: 测试与构建
 
 # ⚠️ **2026-11-07 起：不再依赖 GitHub Actions 跑测试**

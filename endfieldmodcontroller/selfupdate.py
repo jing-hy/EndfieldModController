@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """程序自我更新：对比 GitHub release 的版本号，可一键下载并在退出后替换自己。
 
 Windows 下**正在运行的 exe 无法覆盖自己**，所以流程是：

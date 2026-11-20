@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """热重载（`hot_reload`）的回归测试。
 
 对应 2026-10-04 用户要求：「加一个热重载，如果终末地在运行……点了热重载能包括改配置按 f10 等等」。

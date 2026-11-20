@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """EndfieldJiggle-EFMI（触摸形变 Mod）集成 —— **装进 Mod 库**（2026-10-19 起重做）。
 
 **它和乳摇 / Poser 不是一类东西**：那两个是"游戏目录 proxy + plugin DLL"注入型插件，

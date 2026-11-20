@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """本机 UI 无障碍 / 自动化通道（2026-11-17 用户要求）。
 
 用户原话：「我还想加个功能，需要一个无障碍功能，能有个 api 或者命令行，允许 ai 操作 ui，
