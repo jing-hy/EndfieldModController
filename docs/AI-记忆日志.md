@@ -7168,3 +7168,13 @@ GitHub 镜像实测（2026-11-07 本机裸网，真实 Release 资产前 3 MB / 
 GitHub 镜像源（config.download_mirror）三态：""=自动、"direct"=仅直连、某域名=优先用它（其余仍兜底）。参数里**空串是有效值**，api.set_download_settings 的 mirror 不能像 policy/line_mode 那样写成「空就跳过」，否则用户选了镜像后再也切不回自动。界面照「选择源」做 role=radio + aria-checked 单选列表，右侧显示上次实测速度。
 
 `关键词：["github镜像表","download_mirror","镜像源","空串有效值","切回自动","role=radio","aria-checked","fastnet","线路优先级","单选列表"]`
+
+<!-- 增量追加 2026-11-20 21:20 · 新增 1 条（历史条目一律保留）-->
+
+<!-- project · 项目记忆（结构 / 决策 / 部署 / 待办） -->
+### 2026-11-18 已发布正式版 v1.5.0：Rel…
+*2026-11-18 00:33*
+
+2026-11-18 已发布正式版 v1.5.0：Release 转正、latest=v1.5.0、遗留 draft=0、main=7815ea7 已推。附件只有两个且不带版本号：EndfieldModController.exe 35,681,375 B sha256=36952f3afca3bdd0b73dd…；assets-bundle.zip 261,987,364 B sha256=996956f54d2eaa49f797…（线上 digest 与本地一致）。本版含：Mod 开关同步 EFMI Mods、同角色双份防护、收编开关真正生效、打开文件夹定位修复、无障碍自动化通道、GitHub 镜像源单选表。注：build_release / prepare_release 会打 WARN「本地 1.5.0 不是 Release+1（应为 1.4.16）」—— 判据是版本号最后一段 +1，用户指定 1.5.0 属预期，不影响更新检测。
+
+`关键词：["1.5.0","v1.5.0","Release已发","latest","sha256","assets-bundle.zip","main 7815ea7","发版状态","Release+1 WARN","draft=0"]`
