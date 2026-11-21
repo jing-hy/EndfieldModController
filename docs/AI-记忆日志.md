@@ -7178,3 +7178,41 @@ GitHub 镜像源（config.download_mirror）三态：""=自动、"direct"=仅直
 2026-11-18 已发布正式版 v1.5.0：Release 转正、latest=v1.5.0、遗留 draft=0、main=7815ea7 已推。附件只有两个且不带版本号：EndfieldModController.exe 35,681,375 B sha256=36952f3afca3bdd0b73dd…；assets-bundle.zip 261,987,364 B sha256=996956f54d2eaa49f797…（线上 digest 与本地一致）。本版含：Mod 开关同步 EFMI Mods、同角色双份防护、收编开关真正生效、打开文件夹定位修复、无障碍自动化通道、GitHub 镜像源单选表。注：build_release / prepare_release 会打 WARN「本地 1.5.0 不是 Release+1（应为 1.4.16）」—— 判据是版本号最后一段 +1，用户指定 1.5.0 属预期，不影响更新检测。
 
 `关键词：["1.5.0","v1.5.0","Release已发","latest","sha256","assets-bundle.zip","main 7815ea7","发版状态","Release+1 WARN","draft=0"]`
+
+<!-- 增量追加 2026-11-21 14:29 · 新增 4 条（历史条目一律保留）-->
+
+<!-- rules · 设计原则 / 行为准则 -->
+### 【许可证红线（2026-11-20 更新：**modec…
+*2026-11-20 21:20*
+
+【许可证红线（2026-11-20 更新：**modecontroller 现在是 AGPL-3.0-only**，不是 GPL-3.0-or-later —— 用户明确「不要 or late」，SPDX 里不许出现 or-later）】
+**历史脉络**：2026-10-07 时本仓库是 MIT，JASM（Jorixon/Moonholder）是 GPL-3.0，所以「GPL 代码不能复制进来」；2026-10-12 本仓库 MIT → GPL-3.0-or-later；2026-11-20 → AGPL-3.0-only。
+**现在的边界**：① 并入 GPL-3.0 系代码只能在 AGPLv3 §13 允许的方向上做（GPLv3 作品可并入 AGPLv3 项目、整体按 AGPL 分发），**反过来不行**；拿不准就先读对方 LICENSE 原文或问作者，**别凭印象判**。② 并入任何人的代码**必须保留其版权与许可声明**（原作者 SPDX / LICENSE），不能抹掉出处。③ 更稳的做法仍然是「读思路、自己重写」。
+**AGPL 带来的额外义务**：若有人把本程序当作**网络服务**对外提供，必须向使用者提供源码 —— 这是 GPL 没有的一条，写文档/答疑时别再说成「GPL 那套」。
+**参考同类项目第一步不变**：先看它的 LICENSE，再做粘贴或改写决定。
+
+`关键词：["许可证红线","AGPL-3.0-only","不要or-later","GPL-3.0-or-later 历史","JASM 许可","SPDX 声明","保留版权声明","AGPL 网络服务义务","GPLv3 并入 AGPLv3 方向","读思路自己写","读 LICENSE 原文"]`
+
+<!-- topic · 话题（一件事的前因后果） -->
+### 把 ponytail 的做法挑合适的并进 AGENTS.md
+*2026-11-21 14:21*
+
+用户 2026-11-21 原话：「你看看本项目 agent.md 和 https://github.com/DietrichGebert/ponytail，把缺的部分试着合并进 agent」。ponytail 是「懒惰高级开发」提示词（MIT，核心是 ladder：不存在就不写→本仓库已有→标准库/平台→已装依赖→一行→最小实现）。沿用上次 MaaEnd 移植的先例（不新增章节、不撑肿），把 6 类并进现有表格/清单/#### 子块：① 修 bug 先 grep 全部调用方并修在共享代码；② 改签名先列 scope（调用方/测试/fixture/配置/导出）；③ 报告用 必须修/应该修/可选 三组 + 跨组编号 + 四段式；④ 阶梯子块（含「不许靠砍校验变短」、shortcut: 上限, 何时升级 注释与 grep 台账）；⑤ 非平凡新逻辑留一条会变红的测试；⑥ 交付末尾写跳过了什么/没检查什么/剩余风险。未移植：lite/full/ultra 档位、band/board 成本面板（Claude Code 专属）、ultra 的「质疑请求」（与合规优先提醒重复）。AGENTS.md 165→208 行，commit b651b87，未推。
+
+`关键词：["ponytail","AGENTS.md","移植","最小完整改动","阶梯","scope","调用方","报告形态","shortcut注释","MaaEnd先例","不撑肿"]`
+
+<!-- lesson · 经验教训（被纠正过的、踩过的坑） -->
+### 全仓库换许可（GPL-3.0-or-later → AG…
+*2026-11-20 21:20*
+
+全仓库换许可（GPL-3.0-or-later → AGPL-3.0-only）的可复用手法：① LICENSE 直接写 gnu.org 官方 txt 原文（https://www.gnu.org/licenses/agpl-3.0.txt，661 行），别手拼；② 用 `git ls-files` 遍历、只替换 `GPL-3.0-or-later` 这一个 token，就不会误伤上游的 `GPL-3.0-only`（efmi_jiggle/updates/build_deps_bundle 里的 Jiggle、Poser 声明）与 `AGPL-3.0`；③ **排除 docs/AI-记忆日志.md**（历史记录不能改写）；④ 顺手把「GNU General Public License v3.0 或更高版本」这类文字换成 Affero 版；⑤ 徽章走 shields.io/github/license，改 LICENSE 即自动跟随，只需改 alt 文本；⑥ 核验用 `gh api repos/<repo>/license --jq .license.spdx_id`（应返回 AGPL-3.0）+ 读远端 README 首行；⑦ 只推 main 不发 Release ⇒ 版本号不动（CONTRIBUTING 的软约束），push.py 的 WARN 可豁免但要说明。
+
+`关键词：["换许可手法","AGPL-3.0-only","官方 txt 全文","git ls-files 批量替换","只替换 or-later token","排除记忆日志","gnu.org agpl-3.0.txt","shields 自动跟随","gh api license spdx_id","只推main不改版本号"]`
+
+<!-- fact · 事实（细碎的原子信息） -->
+### **modecontroller 现许可 = AGPL-…
+*2026-11-20 21:20*
+
+**modecontroller 现许可 = AGPL-3.0-only**（2026-11-20 用户原话：「帮我把协议转agpl3.0」→ 随后澄清「不是，就是3.0，不要or late」）。落地：LICENSE 换成 gnu.org 官方 AGPL-3.0 全文（661 行）；355 个受版本控制文件的 `SPDX-License-Identifier: GPL-3.0-or-later` → `AGPL-3.0-only`；README 徽章/许可段、docs/README.detailed.md、frontend/package.json license、web/dist 与 web/index.html 同步。提交 `96b63b5`，`push.py` 推送后 main = `ed332db`；**未发 Release，版本号保持 1.5.0**（push.py 打了“应升 1.5.1”的 WARN，按 CONTRIBUTING「只推源码不改版本号」豁免）。核验：gh api .../license 返回 `AGPL-3.0 / GNU Affero General Public License v3.0`，远端 README 首行与徽章均已是 AGPL-3.0-only；全量测试 1511 passed。历史：2026-10-12 MIT → GPL-3.0-or-later（`ba5e366`/`b7d20ed`/`55d9384`）。
+
+`关键词：["AGPL-3.0-only","relicense","协议转AGPL","不要or-later","SPDX-License-Identifier","LICENSE 全文","shields 徽章","frontend package.json license","96b63b5","未发Release版本不变","gh api license 核验","GPL-3.0-or-later 历史"]`
