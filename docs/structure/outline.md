@@ -131,7 +131,7 @@
     - modecontroller.scripts.assets-bundle — 打包资产包 / Pack Assets Bundle — 把必须与 exe 并排的资产打成一个可上传的压缩包（shader、DLL、喂帧 addon、字体），这样新机器不必逐个下载就能恢复一整套运行时。 — [模块 1 · API 1]
     - modecontroller.scripts.build-addon — 构建面板 addon / Build the Panel Add-on — 从源码编译 ReShade add-on 并放到面板部署步骤预期的位置 —— 面板是原生代码，没法以 Python 脚本形式发布。 — [模块 1 · API 1]
     - modecontroller.scripts.build-exe — 构建 exe / Build the EXE — 用 PyInstaller 构建单文件 exe：一整套写死的参数（one-file、无控制台、内嵌 web 资源、管理员清单、内嵌 webview/clr/cr… — [模块 1 · API 1]
-    - modecontroller.scripts.build-release — 发布构建 / Release Build — 一条命令走完发布构建：按“最新 Release + 1”核对版本号、跑全量测试、重建 exe、再构一个伪旧版用于测更新、把产物归置进 _old、并同步测试目录。 — [模块 1 · API 1]
+    - modecontroller.scripts.build-release — 发布构建 / Release Build — 一条命令走完发布构建：按「最新 Release + 1」核对版本号、发版闸核对**随包组件版本表与离线依赖包（deps-bundle.zip）**（对不上就中止… — [模块 1 · API 1]
     - modecontroller.scripts.exe-entry — exe 入口 / EXE Entry Shim — exe 自己的入口脚本：几行胶水 —— 导入包的 main() 并调用它，让打包能工作且不会把 pywebview 导入两次。 — [模块 1 · API 1]
     - modecontroller.scripts.fetch-characters — 拉取角色表 / Fetch Character Table — 抓官网干员列表并生成随包的角色表 —— 新装的程序不必联网就已经认识所有角色。 — [模块 1 · API 1]
     - modecontroller.scripts.gen-hints — 生成热键词表 / Generate Hotkey Hints — 生成面板描述选项用的词表：从真实的 Mod ini 里挖变量命名规律，只留下真正有用的词。 — [模块 1 · API 1]

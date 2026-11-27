@@ -456,7 +456,9 @@ def check_component_version_table(args: list[str]) -> None:
 
     **联网**（几秒）。有差异就**中止构建**（这是"发版前检查"的本意，用户 2026-10-04
     要的就是这个）；离线/限流查不到时不算过期、不阻断（脚本本身不误报）。
-    确实要带着过期表发版，用 `--skip-version-table-check` 显式跳过。
+    同一次 --strict 还会核对**离线依赖包**（表 vs `dist/deps-bundle.zip` 里的 manifest）：
+    包是旧版同样中止（重打命令见脚本输出）。确实要带着过期表/旧离线包发版，
+    用 `--skip-version-table-check` 显式跳过。
     """
     if "--skip-version-table-check" in args:
         print("[组件版本表] 已按 --skip-version-table-check 跳过核对", flush=True)
@@ -477,8 +479,9 @@ def check_component_version_table(args: list[str]) -> None:
     for line in (result.stdout or "").strip().splitlines():
         print("  " + line, flush=True)
     if result.returncode != 0:
-        print("[组件版本表] ⚠ 有组件对不上 —— 请先更新 "
-              "`endfieldmodcontroller/component_versions.json` 再重跑；"
+        print("[组件版本表] ⚠ 有组件对不上 —— 常见两种原因，按上面那段提示处理："
+              "① 表过期 → 更新 `endfieldmodcontroller/component_versions.json`；"
+              "② 离线包过期 → 跑 `python scripts\\build_deps_bundle.py` 重打，再重跑本脚本；"
               "确实要跳过就加 `--skip-version-table-check`。**本轮构建已中止**。", flush=True)
         return False
     return True

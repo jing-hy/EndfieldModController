@@ -107,6 +107,15 @@ python scripts/memory_log.py     # 重新导出（push.py 也会自动跑）
 
 ---
 
+### 6. 离线依赖包（发版闸会核它）
+
+* `dist\deps-bundle.zip`（`python scripts\build_deps_bundle.py`）**不进 Release**，只走 QQ 群；
+  但它里面打的组件同样是"用户会装上的那一版"，表更新后不重打就会变成旧货。
+* `build_release.py` 带 `--strict` 跑 `scripts/check_component_versions.py`，第三道比对就是
+  **表 vs 离线包里的 manifest**：包比表旧 ⇒ `stale`、包比表新 ⇒ `ahead`，**直接中止构建**并给出
+  重打命令；本机根本没有离线包时只提示、不阻断（从没打过包的机器不该被拦）。
+* 表里更新了组件版本 ⇒ 先重打离线包再发版；确实要带着旧包发版，用 `--skip-version-table-check`。
+
 ## 三、提交与发布流程（照抄即可）
 
 ```bash

@@ -11,13 +11,17 @@ import importlib.util
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "check_component_versions.py"
+#: 默认指到不存在的路径：本文件的历史用例只测「表 vs 上游」「表 vs 随包资产」，
+#: 不该被本机 dist 里那份真实的离线包（可能本身已过期）牵动。第三道比对自己显式传路径。
+_NO_BUNDLE = SCRIPT.parent.parent / "_no_such_deps_bundle.zip"
 
 
-def _load():
+def _load(*, offline_bundle: Path | None = None):
     spec = importlib.util.spec_from_file_location("check_component_versions_under_test", SCRIPT)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
+    module.OFFLINE_BUNDLE = offline_bundle or _NO_BUNDLE
     return module
 
 
@@ -207,4 +211,124 @@ def test_rabbitfx_bundled_probe_reads_real_manifest():
     """探测本身要能真的读到随包资产（路径写错/文件被挪走时会红）。"""
     module = _load()
     assert module._bundled_version("rabbitfx"), "assets/rabbitfx/manifest.json 应当带 mod_version"
+
+# ── 第三道比对：表 vs 离线依赖包（2026-11-27 补）────────────────────────────
+# 起因（真实事故）：表已写 EFMI v1.5.1，而 dist/deps-bundle.zip 还是 11-14 打的、里面是 1.4.9。
+# 前两道（表 vs 上游、表 vs 随包资产）都发现不了 —— 离线包不随 Release，之前没人核它。
+OFFLINE_TABLE = {
+    "builtin": {
+        "XXMI": {"latest": "v2.5.0"},
+        "XXMI-Libs": {"latest": "v1.3.3"},
+        "EFMI": {"latest": "v1.5.1"},
+        "Poser": {"latest": "0.5.115"},
+    },
+    "external": {
+        "reshade": {"latest": "6.8.0"},
+        "jiggle_efmi": {"latest": "0.2.7"},
+    },
+}
+OFFLINE_DEPS_OK = {
+    "XXMI": {"version": "2.5.0"},
+    "XXMI-Libs": {"version": "1.3.3"},
+    "EFMI": {"version": "1.5.1"},
+    "Poser": {"version": "0.5.115"},
+    "ReShade": {"version": "6.8.0"},
+    "EndfieldJiggle": {"version": "0.2.7"},
+}
+
+
+def _make_bundle(tmp_path, deps):
+    import json
+    import zipfile
+
+    path = tmp_path / "deps-bundle.zip"
+    manifest = {"built_at": "2026-11-27T00:00:00", "deps": deps}
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False))
+    return path
+
+
+def test_offline_bundle_matching_table_is_ok(tmp_path):
+    module = _load()
+    bundle = _make_bundle(tmp_path, OFFLINE_DEPS_OK)
+
+    data = module.collect_offline_bundle(OFFLINE_TABLE, bundle_path=bundle)
+
+    assert data["problems"] == []
+    assert {row["status"] for row in data["rows"]} == {"ok"}
+    assert len(data["rows"]) == 6, "六个登记的组件都该参与比对"
+
+
+def test_offline_bundle_older_than_table_is_stale(tmp_path):
+    """离线包是旧版 ⇒ 必须拦住发版（v1.5.1 那次的真实事故）。"""
+    deps = dict(OFFLINE_DEPS_OK, EFMI={"version": "1.4.9"})
+    module = _load()
+    bundle = _make_bundle(tmp_path, deps)
+
+    data = module.collect_offline_bundle(OFFLINE_TABLE, bundle_path=bundle)
+
+    assert len(data["problems"]) == 1
+    row = data["problems"][0]
+    assert row["key"] == "EFMI" and row["status"] == "stale"
+    assert row["table"] == "v1.5.1" and row["bundle"] == "1.4.9"
+
+
+def test_offline_bundle_newer_than_table_is_flagged(tmp_path):
+    """包里比表新 = 表漏更新，同样要报（不能安静地留着）。"""
+    deps = dict(OFFLINE_DEPS_OK, Poser={"version": "0.5.120"})
+    module = _load()
+    bundle = _make_bundle(tmp_path, deps)
+
+    data = module.collect_offline_bundle(OFFLINE_TABLE, bundle_path=bundle)
+
+    assert data["problems"][0]["status"] == "ahead"
+    assert data["problems"][0]["key"] == "Poser"
+
+
+def test_offline_bundle_missing_component_is_reported(tmp_path):
+    deps = {k: v for k, v in OFFLINE_DEPS_OK.items() if k != "ReShade"}
+    module = _load()
+    bundle = _make_bundle(tmp_path, deps)
+
+    data = module.collect_offline_bundle(OFFLINE_TABLE, bundle_path=bundle)
+
+    assert data["problems"][0]["status"] == "missing"
+    assert data["problems"][0]["key"] == "reshade"
+
+
+def test_absent_offline_bundle_is_not_an_error(tmp_path):
+    """从没打过离线包的机器不该被这道拦下。"""
+    module = _load()
+
+    data = module.collect_offline_bundle(OFFLINE_TABLE, bundle_path=tmp_path / "none.zip")
+
+    assert data["problems"] == [] and data["rows"] == []
+    assert "从没打过离线包" in data["note"]
+
+
+def test_broken_offline_bundle_is_reported(tmp_path):
+    """坏包 / 读不出 manifest 要报警，不许静默通过。"""
+    path = tmp_path / "deps-bundle.zip"
+    path.write_bytes(b"not a zip")
+    module = _load()
+
+    data = module.collect_offline_bundle(OFFLINE_TABLE, bundle_path=path)
+
+    assert data["problems"][0]["status"] == "unreadable"
+    assert "读不出 manifest.json" in data["problems"][0]["reason"]
+
+
+def test_strict_fails_when_offline_bundle_is_stale(tmp_path, monkeypatch):
+    """发版闸：collect() 判不通过时，--strict 必须返回 1。"""
+    module = _load()
+    bundle = _make_bundle(tmp_path, dict(OFFLINE_DEPS_OK, EFMI={"version": "1.4.9"}))
+    offline = module.collect_offline_bundle(OFFLINE_TABLE, bundle_path=bundle)
+    monkeypatch.setattr(module, "collect", lambda **kwargs: {
+        "rows": [], "assets": [], "problems": [], "asset_problems": [],
+        "offline": offline, "offline_problems": offline["problems"], "errors": [],
+        "ok": bool(not offline["problems"]),
+    })
+
+    assert module.main(["--strict"]) == 1
+    assert module.main([]) == 0
 

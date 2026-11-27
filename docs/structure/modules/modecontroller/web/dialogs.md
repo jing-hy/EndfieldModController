@@ -11,8 +11,8 @@ description:
   en: >
       Imperative dialogs and toasts (Vue) keeping the legacy API so business code could move over unchanged.
       
-revision: 4467eb0705c4b5e7557d2c9d18f21d53778bd2de
-updated_at: "2026-11-27T14:08:48.116Z"
+revision: 937fe82bf051035b1e0468313d39b1279ef6f60a
+updated_at: "2026-11-27T14:47:15.299Z"
 fingerprint: cc5a6dac3002059c80f0441c50f3d9d898b30d72b1f3cb81708c844f65909835
 source:
   - path: "frontend/src/lib/dialog.js"

@@ -30,6 +30,18 @@ XXMI / XXMI-Libs / EFMI / Poser / reshade 是联网安装（或由 exe 内嵌）
 记成 `missing` 并中止构建；确实只想研究源码、手上没有资产包的机器可以显式加
 `--allow-missing-assets` 放过（状态记成 `absent`，仍会打印出来）。
 
+**2026-11-27 追加的第三道比对（表 vs 离线依赖包）**：
+离线包 `dist/deps-bundle.zip`（不随 Release，QQ 群应急分发）里打包的是**某一时刻的各组件原文**。
+它和随包资产一样会过气：v1.5.1 那次就出现过表已写 EFMI 1.5.1、离线包里还是 1.4.9，
+而发版流程只核对“表 vs 上游”“表 vs 随包资产”两道，发现不了。
+所以再比一次包内 `manifest.json` 的 `deps` 版本：
+  * 包比表旧  → `stale`：先 `python scripts\\build_deps_bundle.py` 重打，再发版；
+  * 包比表新  → `ahead`：表漏更新；
+  * 包在但缺组件 / 读不出 → `missing` / `unreadable`，同样报警；
+  * 本机根本没有离线包 → `absent`，只提示、不阻断（从没打过离线包的机器不该被拦）。
+只有两边都登记的组件参与（`OFFLINE_KEY_MAP`）；secondary_motion / rabbitfx 随
+assets-bundle，不在这里。
+
 用法：
     python scripts\\check_component_versions.py            # 只检查，永远 return 0
     python scripts\\check_component_versions.py --strict    # 有差异时 return 1（发版流程用）
@@ -41,6 +53,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -179,6 +192,88 @@ def collect_assets(table: dict[str, Any], *, allow_missing: bool = False) -> lis
     return rows
 
 
+# ---------------------------------------------------------------- 第三道：离线依赖包
+#: 离线包（`dist/deps-bundle.zip`，**不随 Release**、QQ 群应急分发）的 manifest 键 → 版本表键。
+#: 只登记两边都有的组件；secondary_motion / rabbitfx 随 assets-bundle，不在这里。
+OFFLINE_BUNDLE = ROOT / "dist" / "deps-bundle.zip"
+OFFLINE_KEY_MAP: dict[str, str] = {
+    "XXMI": "XXMI",
+    "XXMI-Libs": "XXMI-Libs",
+    "EFMI": "EFMI",
+    "Poser": "Poser",
+    "ReShade": "reshade",
+    "EndfieldJiggle": "jiggle_efmi",
+}
+
+
+def _table_row(table: dict[str, Any], key: str) -> dict[str, Any] | None:
+    """表里某个组件的行（先 builtin 后 external），没有就返回 None。"""
+    for section in ("builtin", "external"):
+        info = (table.get(section) or {}).get(key)
+        if isinstance(info, dict):
+            return info
+    return None
+
+
+def collect_offline_bundle(table: dict[str, Any], *, bundle_path: Path | None = None) -> dict[str, Any]:
+    """逐项比对「离线包里打的组件版本」与「表里的 latest」。
+
+    为什么需要这一道（2026-11-27）：离线包打包的是**某一时刻**的组件原文，
+    表更新了、包没重打时，用户拿离线包装上的是旧版（v1.5.1 就出现过：表写 EFMI 1.5.1，
+    包里还是 1.4.9）。只核对「表 vs 上游」「表 vs 随包资产」发现不了这种过气。
+
+    本机**没有**离线包（从没打过）不阻断 —— 那是正常状态，只给一行提示。
+    """
+    path = Path(bundle_path) if bundle_path is not None else OFFLINE_BUNDLE
+    if not path.is_file():
+        return {"bundle": str(path), "built_at": "", "rows": [], "problems": [],
+                "note": f"本机没有 {path.name}（从没打过离线包，跳过这道比对）"}
+    try:
+        with zipfile.ZipFile(path) as archive:
+            manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
+    except (OSError, KeyError, ValueError, zipfile.BadZipFile) as exc:
+        row = {
+            "key": "", "display": path.name, "table": "", "bundle": "",
+            "status": "unreadable",
+            "reason": f"{path.name} 读不出 manifest.json（{type(exc).__name__}: {exc}）",
+        }
+        return {"bundle": str(path), "built_at": "", "rows": [row], "problems": [row]}
+    deps = manifest.get("deps") if isinstance(manifest, dict) else None
+    if not isinstance(deps, dict):
+        deps = {}
+    rows: list[dict[str, Any]] = []
+    problems: list[dict[str, Any]] = []
+    for package_key, table_key in OFFLINE_KEY_MAP.items():
+        info = _table_row(table, table_key)
+        if info is None:
+            continue  # 表里没登记这个组件 ⇒ 不归这一道管
+        table_version = str(info.get("latest") or "").strip()
+        item = deps.get(package_key)
+        bundle_version = (str(item.get("version") or "").strip()
+                          if isinstance(item, dict) else "")
+        if not bundle_version:
+            status, reason = "missing", f"离线包里没有 {package_key}"
+        elif not table_version:
+            status, reason = "unknown", "表里没写版本"
+        else:
+            diff = _cmp_common(bundle_version, table_version)
+            status, reason = ("stale" if diff < 0 else "ahead" if diff > 0 else "ok"), ""
+        row = {
+            "key": table_key,
+            "display": str(info.get("display") or table_key),
+            "table": table_version,
+            "bundle": bundle_version,
+            "status": status,
+        }
+        if reason:
+            row["reason"] = reason
+        rows.append(row)
+        if status in ("stale", "ahead", "missing"):
+            problems.append(row)
+    built_at = str(manifest.get("built_at") or "") if isinstance(manifest, dict) else ""
+    return {"bundle": str(path), "built_at": built_at, "rows": rows, "problems": problems}
+
+
 def collect(*, allow_missing_assets: bool = False) -> dict[str, Any]:
     table = component_versions.load()
     if not table:
@@ -209,15 +304,19 @@ def collect(*, allow_missing_assets: bool = False) -> dict[str, Any]:
                 "reason": reason,
             })
     asset_rows = collect_assets(table, allow_missing=allow_missing_assets)
+    offline = collect_offline_bundle(table)
     problems = [row for row in rows if row["status"] in ("outdated", "ahead")]
     asset_problems = [row for row in asset_rows if row["status"] in ("stale", "asset_ahead", "missing")]
+    offline_problems = offline.get("problems") or []
     errors = [str(item) for item in (report.get("errors") or [])]
     return {
-        "ok": not problems and not asset_problems,
+        "ok": not problems and not asset_problems and not offline_problems,
         "rows": rows,
         "assets": asset_rows,
+        "offline": offline,
         "problems": problems,
         "asset_problems": asset_problems,
+        "offline_problems": offline_problems,
         "errors": errors,
     }
 
@@ -265,6 +364,23 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {asset_marks.get(row['status'], row['status']):<16} {row['display']:<12} "
                   f"表={row['table'] or '(空)':<10} 随包={row['bundled']}")
 
+    offline = data.get("offline") or {}
+    if offline.get("note"):
+        print("")
+        print(f"[组件版本表] {offline['note']}")
+    offline_rows = offline.get("rows") or []
+    if offline_rows:
+        print("")
+        print(f"[组件版本表] 表里的版本 vs 离线依赖包（{offline.get('bundle') or '?'}，"
+              f"生成于 {offline.get('built_at') or '?'}）：")
+        offline_marks = {"ok": "✓", "stale": "⚠ 离线包还是旧版", "ahead": "⚠ 离线包比表新",
+                         "missing": "⚠ 离线包里缺这个组件", "unreadable": "⚠ 离线包读不出",
+                         "unknown": "？ 缺版本号"}
+        for row in offline_rows:
+            print(f"  {offline_marks.get(row['status'], row['status']):<16} "
+                  f"{row['display']:<12} 表={row['table'] or '(空)':<10} "
+                  f"离线包={row['bundle'] or '(缺)'}")
+
     problems = data.get("problems") or []
     if problems:
         print("")
@@ -287,13 +403,26 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 print(f'    {row["display"]}：随包已是 {row["bundled"]}，表还写 {row["table"]}'
                       f'（{row["source"]}）⇒ 把表改成 {row["bundled"]}')
-    if not problems and not asset_problems:
+    offline_problems = data.get("offline_problems") or []
+    if offline_problems:
         print("")
-        print("✓ 表里所有组件都是上游最新；随包资产都在本机且与表一致（或有查不到的项，见上）")
+        print(f"⚠ 有 {len(offline_problems)} 项「表与离线依赖包核对不上」—— 先处理再发版：")
+        for row in offline_problems:
+            if row["status"] == "stale":
+                print(f"    {row['display']}：表写 {row['table']}，离线包只打了 {row['bundle']}"
+                      f" ⇒ 跑 `python scripts\\build_deps_bundle.py` 重打，或把表退回 {row['bundle']}")
+            elif row["status"] == "ahead":
+                print(f"    {row['display']}：离线包已是 {row['bundle']}，表还写 {row['table']}"
+                      f" ⇒ 把表改成 {row['bundle']}")
+            else:
+                print(f"    {row['display']}：{row.get('reason') or row['status']}")
+    if not problems and not asset_problems and not offline_problems:
+        print("")
+        print("✓ 表里所有组件都是上游最新；随包资产都在本机且与表一致；离线包（若有）与表一致")
     for message in data.get("errors") or []:
         print(f"  （联网提示：{message}）")
 
-    if args.strict and (problems or asset_problems):
+    if args.strict and (problems or asset_problems or offline_problems):
         return 1
     return 0
 
