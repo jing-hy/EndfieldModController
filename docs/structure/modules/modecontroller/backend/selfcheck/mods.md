@@ -11,9 +11,9 @@ description:
   en: >
       The mod-side checks: are the selected mods actually staged, is anything in the staging tree damaged (older versions deleted shader-assembly endif), do staged mods overwrite each other's resources, is the controller mod and its panel data present and consistent.
       
-revision: 8bc32703d96b038ba06f91f7f4a5a9a7076791ac
-updated_at: "2026-11-17T16:18:39.110Z"
-fingerprint: 494f5a6fe73f7e214b3ac18d664c8c3baf244894df82fa44c3809b74db7dac7e
+revision: 4467eb0705c4b5e7557d2c9d18f21d53778bd2de
+updated_at: "2026-11-27T14:08:48.098Z"
+fingerprint: 53c8fc3d0549762420e0cb6f429976794ca0fbb4105e282a9139f0bb306703bf
 source:
   - path: "endfieldmodcontroller/initialize.py"
     line: 4797

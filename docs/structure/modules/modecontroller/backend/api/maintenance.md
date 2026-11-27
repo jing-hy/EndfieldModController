@@ -3,27 +3,27 @@ uid: b1d0c009
 id: modecontroller.backend.api.maintenance
 parent: modecontroller.backend.api
 tags: [api, repair]
-name: {zh: "修复与回滚", en: "Repair & Rollback"}
+name: {zh: "完整性修复与配置回滚", en: "Integrity Repair & Config Rollback"}
 description:
   zh: >
-      修复类：完整性检查与修复、单个 Mod 的修复/回滚（含批量进度）、整份配置回滚，以及乳摇数据同步状态。
+      修复类：完整性检查与修复、整份配置回滚，以及乳摇数据同步状态。2026-11-27 起单个 Mod 的修复/回滚接口已随功能移除。
       
   en: >
-      Repairing things: the integrity check / repair pair, per-mod fix and rollback with bulk progress, the whole-config rollback entry, and the jiggle-physics data sync status.
+      Repairing things: the integrity check / repair pair, the whole-config rollback entry, and the jiggle-physics data sync status. Per-mod fix/rollback was removed on 2026-11-27.
       
-revision: 8bc32703d96b038ba06f91f7f4a5a9a7076791ac
-updated_at: "2026-11-17T16:18:39.085Z"
-fingerprint: dec7b43f248ee7b4af5bb1f516376b77c781761cd34d9948f3081365280ec985
+revision: 4467eb0705c4b5e7557d2c9d18f21d53778bd2de
+updated_at: "2026-11-27T14:08:48.073Z"
+fingerprint: 9948536cb9155c8f038b24d12fd44a19a774e7b12e31e8e6d34e51b7c0ef1ea7
 source:
   - path: "endfieldmodcontroller/api.py"
-    line: 4340
-    end_line: 12038
+    line: 4352
+    end_line: 12136
   - path: "endfieldmodcontroller/api.py"
-    line: 5116
-    end_line: 13162
+    line: 5128
+    end_line: 13260
   - path: "endfieldmodcontroller/api.py"
-    line: 9808
-    end_line: 16807
+    line: 9857
+    end_line: 16905
 apis:
   - protocol: rpc
     path: "check_integrity"
@@ -44,33 +44,6 @@ apis:
           Repair entry: re-runs the exact same chain as one-click launch.
           
   - protocol: rpc
-    path: "fix_mod"
-    description:
-      zh: >
-          修复单个 Mod 包（先备份、用外部工具、可回滚）。
-          
-      en: >
-          Repair one mod package (backup first, external tool, rollback available).
-          
-  - protocol: rpc
-    path: "rollback_mod"
-    description:
-      zh: >
-          把修过的 Mod 回滚到修复前的逐字节状态。
-          
-      en: >
-          Roll a repaired mod back to its pre-repair bytes.
-          
-  - protocol: rpc
-    path: "fix_all_mods"
-    description:
-      zh: >
-          批量修复，带进度轮询。
-          
-      en: >
-          Bulk repair with progress polling.
-          
-  - protocol: rpc
     path: "rollback"
     description:
       zh: >
@@ -85,5 +58,5 @@ deps:
     label: {zh: "跑自检链", en: "Runs the checks"}
   - kind: call
     to: modecontroller.backend.upkeep
-    label: {zh: "修 Mod 包", en: "Fixes mods"}
+    label: {zh: "移出库到回收区", en: "Trashes removed mods"}
 ---

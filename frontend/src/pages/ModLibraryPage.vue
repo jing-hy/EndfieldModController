@@ -279,8 +279,6 @@ async function openMenu(mod, event) {
   // ⚠️ 把 `kind` 一起存下来 —— 模板里判断「移到辅助/服装」要用它（模板作用域拿不到 mod）
   menu.value = {
     id: String(mod.id), name: mod.name, kind: String(mod.kind || ""), x: first.x, y: first.y,
-    // ⚠️ C4：回滚是否可用（后端按"有没有修复备份"算）
-    can_rollback: mod.can_rollback !== false,
   };
   await nextTick();
   const el = menuEl.value;
@@ -315,81 +313,12 @@ function closeMenu() { cancelMenuClose(); menu.value = null; }
 //   ③ 这里的 catch 原来是空的（注释说"call() 已经弹过窗"），但**本地异常**（典型：弹窗组件
 //      的 ref 还没挂上时的 `TypeError`）会被静默吞掉 —— 用户看到的同样是"点了没反应"。
 //      现在控制台留痕，并在界面上说一句。
-// 修复确认框里顺带显示本机 RabbitFX 的版本 —— 数据来自**已经在 store 里**的
-// `get_state().dependency_report.manifest.RabbitFX`，不为它多发一次网络请求。
-function rabbitfxNote() {
-  const manifest = (((store.state || {}).dependency_report) || {}).manifest || {};
-  const row = manifest.RabbitFX || {};
-  const version = String(row.version || "").trim();
-  if (row.present === false) return "（依赖页显示它还没就位，先去依赖页装上或更新它）";
-  if (version) return `（本机：${version}）`;
-  return "（版本号读不到，去依赖页确认一下是不是最新的）";
-}
 async function menuAct(act, mod = null) {
   const m = mod || menu.value;
   if (!m) return;
   closeMenu();
   try {
-    if (act === "fix") {
-      // ★ 2026-10-19 换掉旧的「跑外部工具」修复：现在做的是邪修 ——
-      //   把这个 Mod 的 ini 里所有 ps-tN（N < 21）改成 ps-t(N+1)，贴图槽位整体 +1。
-      //   接口约定：fix_mod(id) → { ok, already?, changed: [相对路径], replacements, message }；
-      //   `already === true` = 这个 Mod 之前已经 +1 过，再修就变 +2 ⇒ 二次确认后走
-      //   fix_mod(id, true) 强制再修一次。
-      //   旧版那个「修复工具在不在」的检查接口已从后端删除，这段检查随之去掉。
-      const first = await showModalDialog({
-        title: `按 ps-t+1 修复「${m.name}」？`,
-        message: [
-          "这是邪修办法：把 Mod 的 ini 里所有 ps-tN（N 小于 21）改成 ps-t(N+1)，也就是槽位整体 +1。",
-          "不一定有用；也可能把它改坏。",
-          "每个 Mod 修复前都会整份备份，可以用「⋯ → 回滚」还原。",
-          "",
-          "修复前请先确认这两件事：",
-          `① RabbitFX 已更新到最新${rabbitfxNote()}；`,
-          "② 更新 RabbitFX 之后，这个 Mod 依然不正常。",
-        ].join("\n"),
-        okText: "仍然按 ps-t+1 修复",
-        cancelText: "先去更新 RabbitFX",
-        focusCancel: true,
-      });
-      if (!first) return;
-      let r = await call("fix_mod", m.id);
-      // ⚠️ 「已经 +1 过」时后端返回的是 { ok: false, already: true, message }（不是成功）——
-      //    必须先判 already，否则会被当成"修复失败"直接弹错、永远到不了二次确认。
-      if (r && r.already === true) {
-        // 之前已经 +1 过：说清"再修会变 +2"，由用户自己决定
-        const again = await showModalDialog({
-          title: `「${m.name}」已经按 ps-t+1 修过一次`,
-          message: [
-            "这个 Mod 之前已经 +1 修复过，现在再修一次就是往上再叠一层：",
-            "槽位会从 +1 变成 +2，更容易把它改坏。",
-            "",
-            "修复前仍然会整份备份，真出问题可以用「⋯ → 回滚」还原。",
-          ].join("\n"),
-          okText: "仍然再 +1（会变成 +2）",
-          cancelText: "就停在 +1",
-          focusCancel: true,
-        });
-        if (!again) {
-          showToast(`「${m.name}」保持现在的 +1，这次没有再改`, "info");
-          return;
-        }
-        r = await call("fix_mod", m.id, true);
-      }
-      if (r && r.ok === false) { await showAlert("修复失败", r.message || "未知原因"); return; }
-      const hits = Number((r && r.replacements) || 0);
-      const files = Array.isArray(r && r.changed) ? r.changed.length : 0;
-      if (hits > 0) {
-        showToast(`「${m.name}」已按 ps-t+1 修复：替换 ${hits} 处 / 改动 ${files} 个文件`, "success");
-      } else {
-        // 一处都没匹配到也是正常结果（这个 Mod 本来就不用改槽位），不该报成失败
-        showToast(`「${m.name}」里没有找到 ps-tN（N<21）这种写法，没有改动`, "info");
-      }
-    } else if (act === "rollback") {
-      const r = await call("rollback_mod", m.id);
-      if (r && r.ok === false) await showAlert("回滚失败", r.message || "未知原因");
-      else showToast(`已回滚 ${m.name}`, "success");
-    } else if (act === "delete") {
+    if (act === "delete") {
       // 破坏性动作：默认聚焦安全项、按钮文字自解释（用户准则）
       const ok = await showModalDialog({
         // 标题直接说动作（评审：原标题"确认"、以及把 runtime\backups\mod-trash 这种内部路径
@@ -844,7 +773,7 @@ watch(() => store.demoCovers, (val) => {
                        0.9.5 用 `mouseenter` 打开（`app.js:635`），用户当年明确要求过
                        「**放上去就要出**」；换代后只剩 `@click`，要多点一次才出菜单。
                        现在两个都留着：鼠标移上去就展开，点击仍然有效（触屏/键盘用户）。 -->
-                  <button class="btn btn-mini shrink-0" title="更多：更改所属角色 / 修复 / 回滚 / 重命名 / 换预览图 / 移出库 / 彻底删除"
+                  <button class="btn btn-mini shrink-0" title="更多：更改所属角色 / 重命名 / 换预览图 / 移出库 / 彻底删除"
                           @mouseenter="openMenu(m, $event)" @click="openMenu(m, $event)" @mouseleave="scheduleMenuClose()">⋯</button>
                 </span>
               </span>
@@ -868,7 +797,6 @@ watch(() => store.demoCovers, (val) => {
          style="min-width: 176px; max-height: calc(100vh - 16px); overflow-y: auto"
          :style="{ left: menu.x + 'px', top: menu.y + 'px' }" @mouseenter="cancelMenuClose()" @mouseleave="scheduleMenuClose()">
       <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('character')">更改所属角色…</button>
-      <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('fix')">修复 Mod 文件</button>
       <!-- ⚠️ **不要再引用 `m`**（2026-10-03 修「点了更多页面就变纯白」）：
            `m` 只存在于 `menuAct()` 函数体内，**模板作用域里没有它** ——
            渲染这个浮层时会抛 `ReferenceError`，整页直接白掉。
@@ -878,12 +806,6 @@ watch(() => store.demoCovers, (val) => {
               @click="menuAct('toAssist')">移到「辅助 Mod」</button>
       <button v-else class="w-full text-left px-3 py-1.5 text-sm"
               @click="menuAct('toSkin')">移到「服装 Mod」</button>
-      <!-- ⚠️ **C4：回滚要按 `can_rollback` 置灰**（2026-10-03 补回归）：
-             0.9.5 里没备份过就是灰的（点了也没用），现在无论有没有备份都可点。 -->
-      <button class="w-full text-left px-3 py-1.5 text-sm" :disabled="!menu.can_rollback"
-              :style="menu.can_rollback ? '' : 'opacity:.45;cursor:not-allowed'"
-              :title="menu.can_rollback ? '' : '这个 Mod 还没有修复备份，没什么可回滚的'"
-              @click="menuAct('rollback')">回滚</button>
       <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('open')">打开所在目录</button>
       <div style="height:1px;background:var(--border)" class="my-1"></div>
       <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('rename')">重命名…</button>

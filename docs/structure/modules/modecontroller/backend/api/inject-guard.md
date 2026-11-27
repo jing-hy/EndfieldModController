@@ -11,16 +11,16 @@ description:
   en: >
       The anti-cheat / injection safety surface: enter and leave the elevated-anti-cheat safe mode, switch the d3d12 proxy mode on and off, audit / clean / restore what third-party files sit in the game folder, and report multi-instance status.
       
-revision: 8bc32703d96b038ba06f91f7f4a5a9a7076791ac
-updated_at: "2026-11-17T16:18:39.084Z"
-fingerprint: dec7b43f248ee7b4af5bb1f516376b77c781761cd34d9948f3081365280ec985
+revision: 4467eb0705c4b5e7557d2c9d18f21d53778bd2de
+updated_at: "2026-11-27T14:08:48.072Z"
+fingerprint: 9948536cb9155c8f038b24d12fd44a19a774e7b12e31e8e6d34e51b7c0ef1ea7
 source:
   - path: "endfieldmodcontroller/api.py"
-    line: 4473
-    end_line: 12436
+    line: 4485
+    end_line: 12534
   - path: "endfieldmodcontroller/api.py"
-    line: 9702
-    end_line: 16769
+    line: 9751
+    end_line: 16867
 apis:
   - protocol: rpc
     path: "enable_anti_cheat_safe_mode"

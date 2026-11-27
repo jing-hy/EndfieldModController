@@ -11,9 +11,9 @@ description:
   en: >
       Get a required file into place on demand: decompress multi-part payloads, fetch the assets bundle from the release, extract it, and verify — the path that repairs a runtime whose files were deleted or corrupted.
       
-revision: 8bc32703d96b038ba06f91f7f4a5a9a7076791ac
-updated_at: "2026-11-17T16:18:39.089Z"
-fingerprint: 571093f5dd765a9c43ebca8256cc4413b66b99b2ad64b613c995869b8254deb3
+revision: 4467eb0705c4b5e7557d2c9d18f21d53778bd2de
+updated_at: "2026-11-27T14:08:48.076Z"
+fingerprint: b161daec6e20dffc150c366cbfe887b095bfbda97fd0b0b2ca6bdb5ff2fa602c
 source:
   - path: "endfieldmodcontroller/runtime_assets.py"
     line: 872

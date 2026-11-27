@@ -11,9 +11,9 @@ description:
   en: >
       Fetch the official operator list and turn it into the bundled character table, so a fresh install already knows every character without a network round trip.
       
-revision: 8bc32703d96b038ba06f91f7f4a5a9a7076791ac
-updated_at: "2026-11-17T16:18:39.117Z"
-fingerprint: ce863baf65d299d995d71447616456ca56b6d625dcd6cb2da9a7cb45f7a267f4
+revision: 4467eb0705c4b5e7557d2c9d18f21d53778bd2de
+updated_at: "2026-11-27T14:08:48.105Z"
+fingerprint: a7cf5760e474f0098e77247e53987d36bb820a127af6eb0c4156d5b653b0509f
 source:
   - path: "scripts/fetch_characters.py"
     line: 2

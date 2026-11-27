@@ -1,5 +1,31 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 
+# v1.5.1
+
+本版移除了「修复损坏 Mod」功能，并把随包组件版本表同步到上游最新（适配《明日方舟：终末地》1.7）。
+
+## 一、「修复损坏 Mod」功能已移除
+
+* 移除范围：Mod 卡片「⋯」菜单里的「修复 Mod 文件」与「回滚」两项，连同确认弹窗、修复记录（mod.meta.json 的 ps_t_fix）与备份索引的后端逻辑。
+* 原因：该功能是按旧版游戏资源槽位编号把 ps-tN（N<21）整体 +1 的推测做法，本就不保证有效、也可能把 Mod 改坏；游戏更新到 1.7 后不再提供，避免继续误用。
+* 保留：Mod 库仍然只读；卡片「⋯」里的「移出 Mod 库」不变（移到 runtime\backups\mod-trash，可手动找回）。
+* 已经修复过的 Mod：修复动作本身写在 Mod 文件里，本版不会自动还原；需要复原时用 runtime\backups\modfix 里你自己那份备份手动覆盖，或重新导入该 Mod。
+
+## 二、随包组件版本表同步到上游
+
+* EFMI v1.4.9 → v1.5.1；XXMI-Libs v1.2.3 → v1.3.3；Endfield Poser 0.5.112 → 0.5.115。
+* 启动前的更新检查会据此提示可用新版；XXMI、ReShade、乳摇、RabbitFX、EndfieldJiggle 与上游一致，本版没有随包资产改动（assets-bundle 与上一版相同）。
+
+## 三、测试与文档
+
+* 本机全量测试 1502 passed（含 49 subtests）。
+* README / docs/README.detailed.md / TESTING.md / 结构树同步清理，TESTING.md 追加 599-600 条手测项。
+* 新增 tests/test_modlib.py（移出库 + 「修复功能已移除」的回归钉，做过反向验证），删除 tests/test_modfix.py 与 endfieldmodcontroller/modfix.py。
+
+## 四、没有变的
+
+游戏内行为、各开关默认值与联动、Mod 库只读红线，以及 v1.5.0 的全部改动保持不变。
+
 # v1.5.0
 
 本版包含一组 Mod 库与 EFMI 联动的修复、一个可被脚本或 AI 驱动界面的自动化通道，以及可选的 GitHub 镜像源。

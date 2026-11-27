@@ -11,9 +11,9 @@ description:
   en: >
       Our own in-game panel: where the add-on binary lives, which directories ReShade actually scans for add-ons, whether the panel can work at all, deploying / cleaning up the panel, installing its CJK font, retiring legacy copies. NOTE — since 2026-10-02 the panel no longer locks mod hotkeys: it sends each mod's **own original key** (see `modecontroller.addon.vkey-inject`), so `panel_info.txt`'s `takeover` field now means "are the original keys really locked" and stays 0.
       
-revision: 8bc32703d96b038ba06f91f7f4a5a9a7076791ac
-updated_at: "2026-11-17T16:18:39.094Z"
-fingerprint: b4a2fd261ddd5e4c3596ce261a082cc729315ea8d563720836116579e3f25bd3
+revision: 4467eb0705c4b5e7557d2c9d18f21d53778bd2de
+updated_at: "2026-11-27T14:08:48.083Z"
+fingerprint: f465442bdf9f228c6c9bbd2a0c5ec116519f6e8aa4a91b062f9e30e28d434e10
 source:
   - path: "endfieldmodcontroller/reshade_integration.py"
     line: 56

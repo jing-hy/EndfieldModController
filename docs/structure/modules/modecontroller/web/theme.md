@@ -11,9 +11,9 @@ description:
   en: >
       Design tokens and themes: light base with desaturated accent, six themes keeping their original names; the log box stays pure black and selectable.
       
-revision: 8bc32703d96b038ba06f91f7f4a5a9a7076791ac
-updated_at: "2026-11-17T16:18:39.136Z"
-fingerprint: ef935d02a70fa5cddc8ad390cae1c79aa84136e50c2ffe12c3debabc8a96bb22
+revision: 4467eb0705c4b5e7557d2c9d18f21d53778bd2de
+updated_at: "2026-11-27T14:08:48.120Z"
+fingerprint: d00f0712f0d390ef2149410fa53c8ff3078707564815c676744d0551d8c32b75
 source:
   - path: "frontend/src/styles/tokens.css"
     line: 227

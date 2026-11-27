@@ -11,12 +11,12 @@ description:
   en: >
       Pins the channel's invariants: localhost-only, token check, command round-trip, honest timeout when the frontend is silent, state file removed on shutdown, and the frontend half really being wired in.
       
-revision: 8bc32703d96b038ba06f91f7f4a5a9a7076791ac
-updated_at: "2026-11-17T16:18:39.133Z"
-fingerprint: 2db17bb5839ca268dd89bb1a81ac4a6d87f688b301e10e07c32090272b6710d2
+revision: 4467eb0705c4b5e7557d2c9d18f21d53778bd2de
+updated_at: "2026-11-27T14:08:48.114Z"
+fingerprint: b050a91a0b71ec0ff4ce407a7660d313692f86951945443746f13632b0bef63b
 source:
   - path: "tests/test_ui_automation.py"
-    line: 1
-    end_line: 214
+    line: 215
+    end_line: 642
 apis: []
 ---

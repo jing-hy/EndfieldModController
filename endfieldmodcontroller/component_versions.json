@@ -19,15 +19,15 @@
       "repo": "SpectrumQT/XXMI-Launcher"
     },
     "XXMI-Libs": {
-      "latest": "v1.2.3",
+      "latest": "v1.3.3",
       "repo": "SpectrumQT/XXMI-Libs-Package"
     },
     "EFMI": {
-      "latest": "v1.4.9",
+      "latest": "v1.5.1",
       "repo": "SpectrumQT/EFMI-Package"
     },
     "Poser": {
-      "latest": "0.5.112",
+      "latest": "0.5.115",
       "repo": "OedoSoldier/Endfield-Poser"
     }
   },

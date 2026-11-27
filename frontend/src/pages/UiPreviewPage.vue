@@ -35,7 +35,7 @@ const CONFLICT_GROUPS = [
     { id: "c2", name: "陈千语 长剑替换" },
   ] },
 ];
-const MENU = ["更换归属…", "修复", "回滚", "打开所在目录"];
+const MENU = ["更换所属角色…", "移到「辅助 Mod」", "打开所在目录"];
 </script>
 
 <template>
@@ -122,7 +122,7 @@ const MENU = ["更换归属…", "修复", "回滚", "打开所在目录"];
     <!-- ⑦ Toast 三种 -->
     <div v-if="which === 'toast'" class="space-y-3" style="max-width: 420px">
       <div v-for="t in [
-        { tone: 'success', text: '已修复「莱万汀 as 2B Nier」' },
+        { tone: 'success', text: '「莱万汀 as 2B Nier」已移出库' },
         { tone: 'warn', text: '「佩丽卡 OL 装」的角色归属不确定，可在它的「⋯」里更改所属角色' },
         { tone: 'danger', text: '导入失败：压缩包已损坏，请换一个文件重试' },
         { tone: 'info', text: '已开始 3 个下载任务（并行）' },

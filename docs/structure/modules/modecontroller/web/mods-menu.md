@@ -6,45 +6,27 @@ tags: [actions]
 name: {zh: "单 Mod 操作", en: "Per-Mod Actions"}
 description:
   zh: >
-      Mod 卡片「⋯」就地面板（Vue）：更换归属 / 修复 / 回滚 / 打开目录 / 移出库；移出库带确认框并说明可找回位置。 动作总入口 `menuAct(act, mod)` 同时服务两个入口：⋯ 菜单与卡片上的黄色标签，且本地异常不再被空 catch 吞掉。⚠️ “点了没反应”的**真因是 `<CharacterAssignDialog>` 没 import**（Vue 当未知元素 ⇒ 弹窗不渲染 + ref 拿到 DOM 元素 ⇒ `openFor is not a function`），现由 `tests/test_frontend_components.py` 钉住。
+      Mod 卡片「⋯」就地面板（Vue）：更改所属角色 / 移到辅助或服装 / 打开目录 / 重命名 / 换预览图 / 移出库 / 彻底删除；移出库带确认框并说明可找回位置。2026-11-27 起「修复 Mod 文件」「回滚」两项已随功能移除。 动作总入口 `menuAct(act, mod)` 同时服务两个入口：⋯ 菜单与卡片上的黄色标签，且本地异常不再被空 catch 吞掉。⚠️ “点了没反应”的**真因是 `<CharacterAssignDialog>` 没 import**（Vue 当未知元素 ⇒ 弹窗不渲染 + ref 拿到 DOM 元素 ⇒ `openFor is not a function`），现由 `tests/test_frontend_components.py` 钉住。
       
   en: >
-      Per-mod overflow menu (Vue): reassign character, fix, rollback, open folder, remove from library. The dispatcher accepts the mod either from the overflow menu or directly from the card's badge, and never swallows a local error silently. The assign dialog must be imported: an unresolved tag renders nothing and hands the code a DOM element.
+      Per-mod overflow menu (Vue): reassign character, move to assist/skin, open folder, rename, change cover, remove from library, permanently delete. The fix/rollback items were removed along with that feature on 2026-11-27. The dispatcher accepts the mod either from the overflow menu or directly from the card's badge, and never swallows a local error silently. The assign dialog must be imported: an unresolved tag renders nothing and hands the code a DOM element.
       
-revision: 8bc32703d96b038ba06f91f7f4a5a9a7076791ac
-updated_at: "2026-11-17T16:18:39.135Z"
-fingerprint: 5418d8212344bab171facab578a8525b51f7e1c532150950ad146b36a5e1831d
+revision: 4467eb0705c4b5e7557d2c9d18f21d53778bd2de
+updated_at: "2026-11-27T14:08:48.118Z"
+fingerprint: b68f0cf991f5d405cf269b18527062c0e0821dda964b558f65ae4834a6320c9a
 source:
   - path: "frontend/src/pages/ModLibraryPage.vue"
     line: 2
-    end_line: 1478
+    end_line: 1372
 apis:
   - protocol: rpc
     path: "web.openModMenu"
     description:
       zh: >
-          单个 Mod 的**就地菜单**（不是弹窗）：带状态行、不可用项置灰、碰到窗口边缘会自动改向。
+          单个 Mod 的**就地菜单**（不是弹窗）：碰到窗口边缘会自动改向。
           
       en: >
-          The in-place per-mod menu (not a modal): status line, greyed-out unavailable items, edge-aware placement.
-          
-  - protocol: rpc
-    path: "web.doFixMod"
-    description:
-      zh: >
-          修复一个 Mod（破坏性动作，先弹确认）。
-          
-      en: >
-          Repair one mod (with a destructive-action confirmation first).
-          
-  - protocol: rpc
-    path: "web.doRollbackMod"
-    description:
-      zh: >
-          把修过的 Mod 回滚。
-          
-      en: >
-          Roll a repaired mod back.
+          The in-place per-mod menu (not a modal): edge-aware placement.
           
   - protocol: rpc
     path: "web.doDeleteMod"
@@ -63,15 +45,6 @@ apis:
           
       en: >
           Reassign which character a mod belongs to — reachable both from the overflow menu and from the card's yellow badge.
-          
-  - protocol: rpc
-    path: "web.menuAct"
-    description:
-      zh: >
-          单 Mod 操作的总入口：先看传进来的那条 Mod（卡片标签路径），再看浮层里的 menu；本地异常不得静默吞掉。
-          
-      en: >
-          The single dispatcher for the per-mod menu: it looks up the mod from the argument first (card badge path) and the open menu second, and never swallows a local error silently.
           
 deps:
   - kind: call

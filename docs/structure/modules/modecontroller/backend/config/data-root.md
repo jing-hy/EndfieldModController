@@ -11,16 +11,16 @@ description:
   en: >
       Makes configured paths follow the program directory: remembers the previous data root, rewrites absolute paths that lived under an old root back to relative ones on load (with a conservative heuristic when there is no record: missing or empty-shell old root), normalizes every program-derived path before it is stored, makes "leave blank = automatic" actually work, and stops creating directories outside the current data root.
       
-revision: 8bc32703d96b038ba06f91f7f4a5a9a7076791ac
-updated_at: "2026-11-17T16:18:39.090Z"
-fingerprint: 56aa17ec35b387d49e2971722892a175c9071364914e9bb5fd5b6b9b4c6fd5a7
+revision: 4467eb0705c4b5e7557d2c9d18f21d53778bd2de
+updated_at: "2026-11-27T14:08:48.078Z"
+fingerprint: 5064361bcd1941ab3842575e5c094084c3fa150ee02dbfc1fcc2f7af9540a1a7
 source:
   - path: "endfieldmodcontroller/config.py"
     line: 157
-    end_line: 476
+    end_line: 486
   - path: "endfieldmodcontroller/config.py"
-    line: 1262
-    end_line: 1732
+    line: 1267
+    end_line: 1742
 apis:
   - protocol: rpc
     path: "config.store_path"

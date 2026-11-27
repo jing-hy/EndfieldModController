@@ -11,9 +11,9 @@ description:
   en: >
       Tests for the DLSS5 / ReShade side: the NRStyle report-only rule, preset generation without clobbering ReShade's own flags, feed auto-disable on native DLSS, game-dir and render-api detection, GPU generation defaults, and OptiScaler handling.
       
-revision: 8bc32703d96b038ba06f91f7f4a5a9a7076791ac
-updated_at: "2026-11-17T16:18:39.126Z"
-fingerprint: df7e8d6a6e453710da48546e320c61515311231f5c10b3943d036db2db3037a2
+revision: 4467eb0705c4b5e7557d2c9d18f21d53778bd2de
+updated_at: "2026-11-27T14:08:48.111Z"
+fingerprint: 9e0f220062017adbeb34c5038d85261adc6f96561a3b29e7709eb63cb6bc901b
 source:
   - path: "tests/test_dlss5_preset_and_game_dir.py"
     line: 2

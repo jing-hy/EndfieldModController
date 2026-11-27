@@ -11,9 +11,9 @@ description:
   en: >
       The repair front door: run the whole check chain, then report what was fixed, what still needs the user and what remains broken — the payload the repair button and the diagnostic summary both read.
       
-revision: 8bc32703d96b038ba06f91f7f4a5a9a7076791ac
-updated_at: "2026-11-17T16:18:39.110Z"
-fingerprint: bad4942ef9092edda4d87cd1eb5458843538b32488577a6c2006f074f492e7f1
+revision: 4467eb0705c4b5e7557d2c9d18f21d53778bd2de
+updated_at: "2026-11-27T14:08:48.098Z"
+fingerprint: 0477cab01c7cacb7569e42ad8490135636c97b377b84bb62dece469dfa010c84
 source:
   - path: "endfieldmodcontroller/integrity.py"
     line: 2

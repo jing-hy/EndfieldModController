@@ -11,9 +11,9 @@ description:
   en: >
       Disk safety primitives: hash a file the one agreed way, pick a unique sibling name, write bytes/text atomically through a temp file, and the library-overlap conflict test that decides whether an operation is allowed to touch a directory at all.
       
-revision: 8bc32703d96b038ba06f91f7f4a5a9a7076791ac
-updated_at: "2026-11-17T16:18:39.091Z"
-fingerprint: aad5dd440037a4f28c43779bc2223dbe01c001ca5cf5767ea0913a054b7c106f
+revision: 4467eb0705c4b5e7557d2c9d18f21d53778bd2de
+updated_at: "2026-11-27T14:08:48.078Z"
+fingerprint: a34bf8d397341b7c6b0db76ef902d7c0599848994427cb4f1a437aad9d2c79d8
 source:
   - path: "endfieldmodcontroller/fsutil.py"
     line: 49

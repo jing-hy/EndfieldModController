@@ -11,9 +11,9 @@ description:
   en: >
       Static front-end regression: every tour step's highlight target id must actually exist in the sources (the 0.9.5 dangling-anchor bug), and step 2 must point at the Mod Store while its copy covers all three ways to add a mod. vite build cannot catch this.
       
-revision: 8bc32703d96b038ba06f91f7f4a5a9a7076791ac
-updated_at: "2026-11-17T16:18:39.131Z"
-fingerprint: b56464bf79de8a106ece941c2afe4dcdb78e2106f37c802d9daa53824135982f
+revision: 4467eb0705c4b5e7557d2c9d18f21d53778bd2de
+updated_at: "2026-11-27T14:08:48.112Z"
+fingerprint: e0119c8f6b4e274b1b965cac7934f7400bc3bff7274aa2ded5f48caf35686e10
 source:
   - path: "tests/test_frontend_tour_targets.py"
     line: 86

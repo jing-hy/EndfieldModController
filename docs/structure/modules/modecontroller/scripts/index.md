@@ -11,9 +11,9 @@ description:
   en: >
       Engineering scripts under scripts/: build the single-file exe and the ReShade addon, pack bundled assets, take state snapshots, push to GitHub, prepare and upload release assets, check the version-number rule, fetch official character tables, generate pinyin aliases and hotkey hints, lint inis. Dev-machine only; not shipped in the exe.
       
-revision: 8bc32703d96b038ba06f91f7f4a5a9a7076791ac
-updated_at: "2026-11-17T16:18:39.118Z"
-fingerprint: ba191c17b35c75766056e0a57b1aea5558ad4d19f95ce29f96361dd4a03d2188
+revision: 4467eb0705c4b5e7557d2c9d18f21d53778bd2de
+updated_at: "2026-11-27T14:08:48.106Z"
+fingerprint: ffc34ac731b1852cc37801142149711af169cdc7e25fb16c48ae49aa2ac7cb07
 source:
   - path: "scripts/build_release.py"
   - path: "scripts/push.py"

@@ -11,12 +11,12 @@ description:
   en: >
       Pins the mirror table semantics: auto / direct-only / picked mirror, unknown names fall back to auto, dead domains are not forced first, and switching back to auto always works.
       
-revision: 8bc32703d96b038ba06f91f7f4a5a9a7076791ac
-updated_at: "2026-11-17T16:18:39.126Z"
-fingerprint: e4b3699eb39c67d42ad6366e0ea4b6e22494c963e9cad7d411eb0d642336474b
+revision: 4467eb0705c4b5e7557d2c9d18f21d53778bd2de
+updated_at: "2026-11-27T14:08:48.111Z"
+fingerprint: 1228365e25a64a1b070eed63b44333fd83e1816cf582cb950741e5e6cdb30c24
 source:
   - path: "tests/test_download_mirror.py"
-    line: 1
-    end_line: 129
+    line: 130
+    end_line: 387
 apis: []
 ---

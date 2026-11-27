@@ -11,9 +11,9 @@ description:
   en: >
       Assemble what a Release needs: verify the built artefacts, regenerate the assets bundle, list exactly which two files to upload and print the gh command — deliberately stopping short of uploading.
       
-revision: 8bc32703d96b038ba06f91f7f4a5a9a7076791ac
-updated_at: "2026-11-17T16:18:39.119Z"
-fingerprint: cfe4f61e3c9780467a038d28da0d63f1f8b01a99756baa69bbf36c4cb5dd812e
+revision: 4467eb0705c4b5e7557d2c9d18f21d53778bd2de
+updated_at: "2026-11-27T14:08:48.107Z"
+fingerprint: 1f73b6155bd90b76fc90e74cb98ff37faa3555c49deccac112dcb120f58f9d34
 source:
   - path: "scripts/prepare_release.py"
     line: 2

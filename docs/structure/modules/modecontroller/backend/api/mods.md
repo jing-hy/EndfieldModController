@@ -11,16 +11,16 @@ description:
   en: >
       Browse and edit the library from the UI: rescan, fetch a mod's cover image, show its detail sheet, reassign its character or kind, remove it from the library, and list the characters the program knows plus those still waiting for confirmation.
       
-revision: 8bc32703d96b038ba06f91f7f4a5a9a7076791ac
-updated_at: "2026-11-17T16:18:39.086Z"
-fingerprint: dec7b43f248ee7b4af5bb1f516376b77c781761cd34d9948f3081365280ec985
+revision: 4467eb0705c4b5e7557d2c9d18f21d53778bd2de
+updated_at: "2026-11-27T14:08:48.073Z"
+fingerprint: 9948536cb9155c8f038b24d12fd44a19a774e7b12e31e8e6d34e51b7c0ef1ea7
 source:
   - path: "endfieldmodcontroller/api.py"
-    line: 3117
-    end_line: 7560
+    line: 3185
+    end_line: 7658
   - path: "endfieldmodcontroller/api.py"
-    line: 5131
-    end_line: 16408
+    line: 5143
+    end_line: 16506
 apis:
   - protocol: rpc
     path: "scan"
@@ -39,15 +39,6 @@ apis:
           
       en: >
           Serve a mod's cover image to the card.
-          
-  - protocol: rpc
-    path: "mod_more_info"
-    description:
-      zh: >
-          单个 Mod 的详情（路径、动作、修复状态、能否回滚）。
-          
-      en: >
-          Detail sheet for one mod (paths, actions, fix state, rollback availability).
           
   - protocol: rpc
     path: "set_mod_character"

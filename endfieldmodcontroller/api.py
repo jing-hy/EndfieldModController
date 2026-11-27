@@ -671,33 +671,6 @@ class EndfieldModControllerApi:
         """
         self._mods_cache = None
         self._bump_mods_generation()   # 让"正在进行的那次扫描"的结果作废（见 `_mods`）
-        self._modfix_cache = {}
-
-    def _enrich_modfix_state(self, payload: list[dict[str, Any]], mods: list[Any]) -> None:
-        """给 Mod 列表补上「修复 / 可回滚」状态（卡片右下角「更多」菜单要用）。
-
-        按 mod_id 缓存：`is_fixed()` 要扫 ini，每次 get_state 都重扫会拖慢界面；
-        缓存随 `_invalidate_mods()` 一起清空。
-        """
-        from . import modfix
-
-        cache = getattr(self, "_modfix_cache", None)
-        if cache is None:
-            cache = {}
-            self._modfix_cache = cache
-        for item, mod in zip(payload, mods):
-            info = cache.get(mod.id)
-            if info is None:
-                try:
-                    fixed = bool(modfix.is_fixed(mod.path)["fixed"])
-                except OSError:
-                    fixed = False
-                info = {
-                    "fixed": fixed,
-                    "can_rollback": bool(modfix.list_backups(self.config, mod.id)),
-                }
-                cache[mod.id] = info
-            item.update(info)
 
     # 最近被前端调用过的 API 名（环形缓冲，只用于报错时给上下文）
     _recent_calls: list[str] = []
@@ -1795,7 +1768,6 @@ class EndfieldModControllerApi:
         diagnostics.log_event(self.config, "UI 调用 get_state()", category="ui")
         mods = self._mods()
         mods_payload = [m.to_dict(include_actions=False) for m in mods]
-        self._enrich_modfix_state(mods_payload, mods)
         # **不扫盘**：本方法跑在 GUI 线程上，扫盘会把窗口渲染一起冻住（详见
         # reshade_integration.detect_game_dir 的注释）。从零启动时这里返回 None，
         # 后台预热完成后前端会自动再刷一次，那时就能经 official_launcher 推断出来。
@@ -3519,10 +3491,8 @@ class EndfieldModControllerApi:
         return {"ok": True, "path": str(path), "lines": content[-max(1, int(lines)):], "message": ""}
 
     # ------------------------------------------------------------------
-    # Mod 修复 / 回滚 / 移出库（**实验性**）
-    #   2026-10-19：修复规则改成纯文本 —— 把该 Mod 的 `ps-tN`（N<21）整体 +1
-    #   （见 modfix.py 顶部说明）。不再有随包 exe，所以也不再需要 `modfix_status`。
-    #   约定：一律"先整份备份再动手"，并提供一键回滚；删除只是移出库（进回收区）。
+    # Mod 移出库（删除 ≠ 真删：只移到 runtime\backups\mod-trash，可手动找回）
+    #   2026-11-27：原先的「损坏 Mod 修复（ps-t+1）/ 回滚」已按用户要求完全移除。
     # ------------------------------------------------------------------
     def sbm_data_status(self) -> dict[str, Any]:
         """乳摇（SBM）角色参数现状：本地几个角色、来源是谁、上次检查补了什么。
@@ -3534,69 +3504,15 @@ class EndfieldModControllerApi:
 
         return sbm_data_sync.status(self.config)
 
-    def mod_more_info(self, mod_id: str) -> dict[str, Any]:
-        """「更多」菜单要显示的信息：修过没、能不能回滚。
-
-        ⚠️ 2026-10-19：修复改成**纯文本规则**（ps-tN 且 N<21 整体 +1），不再需要
-        随包 exe，所以这里不再返回 `tool` 字段。
-        """
-        from . import modfix
-
-        mod = next((m for m in self._mods() if m.id == mod_id), None)
-        if mod is None:
-            return {"ok": False, "message": "找不到这个 Mod（可能已被移出库，刷新一下）"}
-        state = modfix.is_fixed(mod.path)
-        backups = modfix.list_backups(self.config, mod_id)
-        return {
-            "ok": True, "id": mod_id, "name": mod.name,
-            "fixed": state["fixed"], "fixed_files": state["files"],
-            "fixed_record": state["record"] or {},
-            "can_rollback": bool(backups), "backup_count": len(backups),
-            "last_backup": str(backups[0].get("at_text") or "") if backups else "",
-            "rule": modfix.RULE_ID, "rule_version": modfix.RULE_VERSION,
-        }
-
-    def fix_mod(self, mod_id: str, force: bool = False) -> dict[str, Any]:
-        """修复一个 Mod：把所有 `ps-tN`（N<21）整体 +1（先整份备份，可回滚）。
-
-        用户 2026-10-19 要求：这是一条"邪修"规则，不一定有用、可能改坏 ⇒ 界面必须先
-        弹窗讲清楚；同一个 Mod 已经 +1 过时默认**不再动它**（`already=True`），
-        要再修一次必须显式传 `force=True`（前端会二次确认，因为再点会变成 +2）。
-        """
-        from . import modfix
-
-        mod = next((m for m in self._mods() if m.id == mod_id), None)
-        if mod is None:
-            return {"ok": False, "message": "找不到这个 Mod"}
-        launcher._append_log(self.config, f"修复 Mod（ps-t+1，实验性）: {mod.name}")
-        result = modfix.fix_mod(
-            self.config, mod.id, mod.path, force=bool(force),
-            log=lambda message: launcher._append_log(self.config, message),
-        )
-        self._invalidate_mods()
-        return result
-
-    def rollback_mod(self, mod_id: str) -> dict[str, Any]:
-        """一键回滚：用最近一次修复前的备份把这个 Mod 还原回去。"""
-        from . import modfix
-
-        launcher._append_log(self.config, f"回滚 Mod 修复: {mod_id}")
-        result = modfix.rollback_mod(
-            self.config, mod_id,
-            log=lambda message: launcher._append_log(self.config, message),
-        )
-        self._invalidate_mods()
-        return result
-
     def delete_mod(self, mod_id: str) -> dict[str, Any]:
         """把 Mod 移出库（进 `runtime\\backups\\mod-trash`，可手动找回），并从勾选里去掉。"""
-        from . import modfix
+        from . import modlib
 
         mod = next((m for m in self._mods() if m.id == mod_id), None)
         if mod is None:
             return {"ok": False, "message": "找不到这个 Mod"}
         launcher._append_log(self.config, f"移出 Mod 库: {mod.name}")
-        result = modfix.delete_mod(
+        result = modlib.delete_mod(
             self.config, mod.path,
             log=lambda message: launcher._append_log(self.config, message),
         )

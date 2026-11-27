@@ -132,7 +132,7 @@ watch(() => [list.value.length, store.demoCovers], () => { queueCovers(list.valu
 
 // 「⋯ 更多」：就地弹出的小菜单（用户准则：⋯ 要就地弹小菜单，不要弹窗）
 // ⚠️ 用户 2026-10-03：「还有辅助类 mod 没有更多按钮」—— 服装页早就有，辅助页一直没做，
-// 于是"更改归属 / 移到皮肤 / 修复 / 回滚 / 移出库"这些在辅助页全都够不着。
+// 于是"更改归属 / 移到皮肤 / 移出库"这些在辅助页全都够不着。
 const menu = ref(null);          // { id, name, x, y }
 const menuEl = ref(null);        // 菜单根节点：用来**实测**尺寸（不再靠估计高度）
 const assignRef = ref(null);     // 归属下拉（复用服装页那个两下拉的组件）
@@ -167,16 +167,6 @@ function scheduleMenuClose() {
 }
 function closeMenu() { cancelMenuClose(); menu.value = null; }
 
-// 修复确认框里顺带显示本机 RabbitFX 的版本 —— 用**已经在 store 里**的数据
-// （`get_state().dependency_report.manifest.RabbitFX`），不为它多发一次网络请求。
-function rabbitfxNote() {
-  const manifest = (((store.state || {}).dependency_report) || {}).manifest || {};
-  const row = manifest.RabbitFX || {};
-  const version = String(row.version || "").trim();
-  if (row.present === false) return "（依赖页显示它还没就位，先去依赖页装上或更新它）";
-  if (version) return `（本机：${version}）`;
-  return "（版本号读不到，去依赖页确认一下是不是最新的）";
-}
 async function menuAct(act) {
   const m = menu.value;
   if (!m) return;
@@ -197,62 +187,6 @@ async function menuAct(act) {
       const r = await call("set_mod_kind", m.id, "character");
       if (r && r.ok === false) await showAlert("移动失败", r.message || "未知原因");
       else showToast(`「${m.name}」已移到服装 Mod`, "success");
-    } else if (act === "fix") {
-      // ★ 2026-10-19：修复换成邪修版 —— 把这个 Mod 的 ini 里所有 ps-tN（N < 21）改成
-      //   ps-t(N+1)（槽位整体 +1）。接口：fix_mod(id) → { ok, already?, changed, replacements, message }；
-      //   `already === true` = 之前已经 +1 过，再修会变 +2 ⇒ 二次确认后走 fix_mod(id, true)。
-      const first = await showModalDialog({
-        title: `按 ps-t+1 修复「${m.name}」？`,
-        message: [
-          "这是邪修办法：把 Mod 的 ini 里所有 ps-tN（N 小于 21）改成 ps-t(N+1)，也就是槽位整体 +1。",
-          "不一定有用；也可能把它改坏。",
-          "每个 Mod 修复前都会整份备份，可以用「⋯ → 回滚」还原。",
-          "",
-          "修复前请先确认这两件事：",
-          `① RabbitFX 已更新到最新${rabbitfxNote()}；`,
-          "② 更新 RabbitFX 之后，这个 Mod 依然不正常。",
-        ].join("\n"),
-        okText: "仍然按 ps-t+1 修复",
-        cancelText: "先去更新 RabbitFX",
-        focusCancel: true,
-      });
-      if (!first) return;
-      let r = await call("fix_mod", m.id);
-      // ⚠️ 「已经 +1 过」时后端返回的是 { ok: false, already: true, message }（不是成功）——
-      //    必须先判 already，否则会被当成"修复失败"直接弹错、永远到不了二次确认。
-      if (r && r.already === true) {
-        // 之前已经 +1 过：说清"再修会变 +2"，由用户自己决定
-        const again = await showModalDialog({
-          title: `「${m.name}」已经按 ps-t+1 修过一次`,
-          message: [
-            "这个 Mod 之前已经 +1 修复过，现在再修一次就是往上再叠一层：",
-            "槽位会从 +1 变成 +2，更容易把它改坏。",
-            "",
-            "修复前仍然会整份备份，真出问题可以用「⋯ → 回滚」还原。",
-          ].join("\n"),
-          okText: "仍然再 +1（会变成 +2）",
-          cancelText: "就停在 +1",
-          focusCancel: true,
-        });
-        if (!again) {
-          showToast(`「${m.name}」保持现在的 +1，这次没有再改`, "info");
-          return;
-        }
-        r = await call("fix_mod", m.id, true);
-      }
-      if (r && r.ok === false) { await showAlert("修复失败", r.message || "未知原因"); return; }
-      const hits = Number((r && r.replacements) || 0);
-      const files = Array.isArray(r && r.changed) ? r.changed.length : 0;
-      if (hits > 0) {
-        showToast(`「${m.name}」已按 ps-t+1 修复：替换 ${hits} 处 / 改动 ${files} 个文件`, "success");
-      } else {
-        // 一处都没匹配到也是正常结果（这个 Mod 本来就不用改槽位），不该报成失败
-        showToast(`「${m.name}」里没有找到 ps-tN（N<21）这种写法，没有改动`, "info");
-      }
-    } else if (act === "rollback") {
-      const r = await call("rollback_mod", m.id);
-      if (r && r.ok === false) await showAlert("回滚失败", r.message || "未知原因");
-      else showToast(`已回滚 ${m.name}`, "success");
     } else if (act === "jiggle_update") {
       // 触摸 Mod（后端在 state 里给了 `is_touch`）：把 EndfieldJiggle 重铺成最新版。
       // 成功后走本函数末尾的 scan + refreshState（本文件既有的刷新方式）刷新列表。
@@ -407,7 +341,7 @@ async function openLib() {
               <span class="mt-auto flex items-center justify-between gap-2">
                 <Switch :model-value="selected.has(String(m.id))"
                         @update:model-value="() => toggleMod(m)" />
-                <button class="btn btn-mini shrink-0" title="更多：分类 / 移到服装 Mod / 修复 / 回滚 / 重命名 / 换预览图 / 移出库 / 彻底删除"
+                <button class="btn btn-mini shrink-0" title="更多：分类 / 移到服装 Mod / 重命名 / 换预览图 / 移出库 / 彻底删除"
                         @mouseenter="openMenu(m, $event)" @click="openMenu(m, $event)" @mouseleave="scheduleMenuClose()">⋯</button>
               </span>
             </span>
@@ -431,7 +365,7 @@ async function openLib() {
               <span class="switch-state">{{ selected.has(String(m.id)) ? "已启用" : "未启用" }}</span>
               <Switch :model-value="selected.has(String(m.id))"
                       @update:model-value="() => toggleMod(m)" />
-              <button class="btn btn-mini shrink-0" title="更多：分类 / 移到服装 Mod / 修复 / 回滚 / 重命名 / 换预览图 / 移出库 / 彻底删除"
+              <button class="btn btn-mini shrink-0" title="更多：分类 / 移到服装 Mod / 重命名 / 换预览图 / 移出库 / 彻底删除"
                       @mouseenter="openMenu(m, $event)" @click="openMenu(m, $event)" @mouseleave="scheduleMenuClose()">⋯</button>
             </span>
           </div>
@@ -448,8 +382,6 @@ async function openLib() {
          :style="{ left: menu.x + 'px', top: menu.y + 'px' }" @mouseenter="cancelMenuClose()" @mouseleave="scheduleMenuClose()">
       <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('character')">更改分类…</button>
       <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('toSkin')">移到「服装 Mod」</button>
-      <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('fix')">修复 Mod 文件</button>
-      <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('rollback')">回滚</button>
       <!-- 触摸 Mod（后端给 `is_touch: true`）才有这一项：把它重铺成最新版 -->
       <button v-if="menu.is_touch" class="w-full text-left px-3 py-1.5 text-sm"
               @click="menuAct('jiggle_update')">更新到最新版</button>

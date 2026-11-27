@@ -694,7 +694,7 @@ useLogAutoScroll(probeBox, () => probeText);
         <!-- ⚠️ **B14：全局「回滚/清理」**（2026-10-03 补回归）。
              0.9.5 的 `#rollback-btn` → `call('rollback')`：**删掉 staging（控制器产物）
              并恢复 d3dx_user.ini / XXMI 配置备份**。换代后这个按钮整个没了
-             （现前端 grep `call('rollback')` **0 命中**，只剩 Mod 级的 `rollback_mod`），
+             （现前端 `call('rollback')` 只命中这个按钮自己），
              而后端 `rollback` 一直在 —— 用户遇到"控制器产物把游戏搞乱了"时没有退路。 -->
         <Btn @click="globalRollback">回滚控制器产物</Btn>
       </div>

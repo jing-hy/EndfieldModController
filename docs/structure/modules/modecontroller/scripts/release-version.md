@@ -11,9 +11,9 @@ description:
   en: >
       Enforce the version rule: the local version must equal the latest GitHub Release plus one, and pushing source without publishing a Release must not bump it — checked from three entry points so it cannot drift.
       
-revision: 8bc32703d96b038ba06f91f7f4a5a9a7076791ac
-updated_at: "2026-11-17T16:18:39.120Z"
-fingerprint: dd01ec6b1d2d0a10ae6e3772090d98ce7e0e0c927a1180e3acb6d6d2a00f9c61
+revision: 4467eb0705c4b5e7557d2c9d18f21d53778bd2de
+updated_at: "2026-11-27T14:08:48.107Z"
+fingerprint: 3f58e2e907e36beab4ed9dc6db4c17c9ef3958af9f9aa8e7a7078b8621380fd0
 source:
   - path: "scripts/release_version.py"
     line: 2

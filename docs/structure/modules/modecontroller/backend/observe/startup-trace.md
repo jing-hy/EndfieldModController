@@ -11,9 +11,9 @@ description:
   en: >
       Records six marks along the startup chain (process creation, entering main, API construction, window creation, frontend bridge ready, first get_state return) and writes one human-readable line to the log. It exists to answer 'startup is slow, but which part?' — onefile extraction, window/WebView2 init, and the first state fetch have very different owners. Marking does no IO and log failures are silent.
       
-revision: 8bc32703d96b038ba06f91f7f4a5a9a7076791ac
-updated_at: "2026-11-17T16:18:39.108Z"
-fingerprint: 75bfaffa4ce2e5aae3020f0c7b9f4b24feb48e868758f4c35984d01d83a5aa08
+revision: 4467eb0705c4b5e7557d2c9d18f21d53778bd2de
+updated_at: "2026-11-27T14:08:48.096Z"
+fingerprint: 72ac52554edf435758343dd0f700415261d4ea603fd09d2b67e8a1f9835fb5ed
 source:
   - path: "endfieldmodcontroller/startup_trace.py"
     line: 121

@@ -11,9 +11,9 @@ description:
   en: >
       Store UI: category rail plus card grid, one compact toolbar. Category/character numbers and the header total come from the same index-derived counts returned by the list endpoint; on open the top of the index is refreshed incrementally and every 60s while staying; the status line shows index size, age and completeness with a refresh-index entry (the list reloads when a build finishes). 16:9 covers, viewport-only images, in-page detail, enqueue-instead-of-navigate downloads.
       
-revision: 8bc32703d96b038ba06f91f7f4a5a9a7076791ac
-updated_at: "2026-11-17T16:18:39.136Z"
-fingerprint: 7e1c40e22c478697c4a0d6ecbf63ea29782a3b598b91fc11b65049a49b0bcd64
+revision: 4467eb0705c4b5e7557d2c9d18f21d53778bd2de
+updated_at: "2026-11-27T14:08:48.119Z"
+fingerprint: ffbf3890e6271e193ae4497a1089b9b6825dc394c6cbdaeb247758ef7e34eba7
 source:
   - path: "frontend/src/pages/StorePage.vue"
 apis: []

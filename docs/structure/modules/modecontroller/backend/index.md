@@ -11,9 +11,9 @@ description:
   en: >
       The endfieldmodcontroller/ package: all business logic — config and paths, mod-library scanning, activation staging, one-click launch and injection maintenance, startup self-check, component download, game-dir cleaning, ReShade/Poser/jiggle integration, crash watch and diagnostics, self-update and announcements. The UI reaches it only through pywebview js_api.
       
-revision: 8bc32703d96b038ba06f91f7f4a5a9a7076791ac
-updated_at: "2026-11-17T16:18:39.095Z"
-fingerprint: a59cbe651d9402c9b412b0d4a038960db0b27d30d5d7c621459db9468d5a0f24
+revision: 4467eb0705c4b5e7557d2c9d18f21d53778bd2de
+updated_at: "2026-11-27T14:08:48.085Z"
+fingerprint: 293004f0a8adc5b2aa6eaa448c6fab58d9a24a0ec33317a3c27d163c5e5bc0a4
 source:
   - path: "endfieldmodcontroller/__init__.py"
   - path: "endfieldmodcontroller/app.py"

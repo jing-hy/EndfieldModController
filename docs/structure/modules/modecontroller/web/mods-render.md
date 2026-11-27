@@ -11,13 +11,13 @@ description:
   en: >
       Mod library page (Vue): skin-mod toggles, URL download card, and the grouped mod list with selection, mutual exclusion, lazy covers and the conflict dialog.
       
-revision: 8bc32703d96b038ba06f91f7f4a5a9a7076791ac
-updated_at: "2026-11-17T16:18:39.135Z"
-fingerprint: 5418d8212344bab171facab578a8525b51f7e1c532150950ad146b36a5e1831d
+revision: 4467eb0705c4b5e7557d2c9d18f21d53778bd2de
+updated_at: "2026-11-27T14:08:48.119Z"
+fingerprint: b68f0cf991f5d405cf269b18527062c0e0821dda964b558f65ae4834a6320c9a
 source:
   - path: "frontend/src/pages/ModLibraryPage.vue"
     line: 2
-    end_line: 1478
+    end_line: 1372
 apis:
   - protocol: rpc
     path: "web.renderMods"

@@ -11,16 +11,16 @@ description:
   en: >
       Produce the staged tree the game reads: clear the staging area safely, copy each selected mod under a MC_ prefix, sanitise its inis, optionally take over hotkeys, carry over default option states, write the controller mod, and leave a machine-readable list of what was staged.
       
-revision: 8bc32703d96b038ba06f91f7f4a5a9a7076791ac
-updated_at: "2026-11-17T16:18:39.082Z"
-fingerprint: 29b5533648bdaba8c2054c7234e25e2dc5108274e39c44eb43a180e2e2dd82c8
+revision: 4467eb0705c4b5e7557d2c9d18f21d53778bd2de
+updated_at: "2026-11-27T14:08:48.069Z"
+fingerprint: 518927801cbd3245ddd89278a488a10fa2a7d4b3131547488d0d8c1adac05c59
 source:
   - path: "endfieldmodcontroller/activation.py"
     line: 564
-    end_line: 1084
+    end_line: 1130
   - path: "endfieldmodcontroller/activation.py"
     line: 782
-    end_line: 1503
+    end_line: 1549
 apis:
   - protocol: rpc
     path: "stage_and_prepare"
