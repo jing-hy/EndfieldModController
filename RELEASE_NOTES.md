@@ -1,53 +1,37 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 
-# v1.6.4
-
-本版修掉「走 EMC 一键启动 ⇒ 游戏进不去」的**具体环节**，并让「使用内置 XXMI/EFMI」这个开关真正生效。
-
-## 一、游戏不再被绕进 Vulkan（崩在显卡驱动那层）
-
-* 现场链条：XXMI 的 EFMI importer 里带着 `launcher_folder = D:\Hypergryph Launcher` ⇒ XXMI 会先去启动**官方启动器**（`1.6.0\Games.exe`，命令行参数为空）⇒ 游戏由官方启动器拉起、**拿不到 `-force-d3d11`** ⇒ 走 Vulkan ⇒ 崩在 `nvoglv64!vk_gr2608GetInstanceProcAddr → NvPresent64!NVP_Init_Vulkan → vulkan-1!vkResetEvent`。
-* 判据：那台机器的三份崩溃日志里**都没有** `Forcing GfxDevice: Direct3D 11` 这一行，却都有 `Vulkan PSO: Invalid or outdated unity cache header`；而同一套注入在本机（走 `-force-d3d11`）能正常进。
-* 修法：启动前把 `launcher_folder` 清空 ⇒ XXMI 回到「直接启动 `Endfield.exe` + `-force-d3d11`」，与本机能进的那条路一致。EFMI 注入不受影响。
-
-## 二、「使用内置 XXMI/EFMI」按开关走
-
-* 以前这个开关**不参与运行期判据**：`xxmi_launcher` 字段里只要有外部路径（且文件在）就一直用外部，于是界面写着「内置」、实际跑的是 `D:\XXMI` + 外部 `D:\EFMI`。现在开关开着就**以内置为准**，内置没装才回落到字段里的外部路径。
-* 设置页据此把 **`XXMI Launcher`** 与 **`Staging Mods 目录`** 两项置灰（开关开着时由程序自管），不再让人填一个不生效的值。
-
-## 三、测试隔离
-
-* 修掉「测试会读到并写入真实内置 XXMI 配置」的问题（`builtin_runtime_dir` 是相对路径，测试没隔离它；本机 `.bak` 与 `game_folder` 曾被测试改成临时目录，已恢复）。两个测试文件加 fixture 把内置检测打掉。
-* 新增测试：`launcher_folder` 必须被清空、开关优先于外部字段、内置缺失时回落外部。
 # v1.6.3
 
-本版三件事：**把上一版"启动被拦/注入被拆"的行为全部撤回**、**修掉一个会永久破坏游戏原版文件的备份 bug**、**崩溃归因新增"显卡驱动层"这一档**（并按用户要求给诊断包加了判定依据）。
+本版修掉三件事：**Lite 版被 ReShade 校验拦住启动**、**一键启动把游戏绕进 Vulkan 然后崩**、**「使用内置 XXMI/EFMI」开关不生效**。
 
-## 一、撤回上一版的强制干预（用户口径：他之前都能正常用）
+## 一、Lite 版不再因为「ReShade DLL not found」被拦住
 
-* **启动不再因为"游戏目录的系统模块是 loader proxy"而被拦下**。上一版会检测到顶替就拒绝启动；现在这条整段删除 —— 顶替状态下不少机器一直用得正常，不该替用户拦路。
-* **乳摇保持原有的独立加载方式**（自己的 loader proxy），不再改成"由 XXMI 注入库加载 `sbm.dll`"；也不再在启动时自动把已铺的 proxy 还原成原版（那等于拆掉用户正在用的注入，连 Poser 共用的 loader 一起拆）。要拆只有用户自己点「清理游戏目录注入」时才算数。
-* **乳摇工具目录缺失时只跳过**：这一轮不铺，但**游戏目录里的文件一个都不动**（旧行为会顺手删 `plugin\sbm.dll` 并还原系统模块）。
+* 现场：Lite 用户点「一键启动」弹 `launch failed: ReShade DLL not found: runtime/dlss5/d3d12.dll`。
+* 根因：`AppConfig.validate()` 无条件校验 ReShade 底座，而 **Lite 版根本不含 ReShade**（一个底座都不注入），配置里 `reshade_dll` 又留着默认值 ⇒ 这条校验必然失败。这不是「文件缺了要补」，是「这一版不要它」。
+* 修法：Lite 版跳过这条校验（完整版照旧）。
 
-## 二、修掉「拿 System32 冒充游戏原版」的备份 bug
+## 二、游戏不再被绕进 Vulkan（崩在显卡驱动那层）
 
-`d3dcompiler_47.dll` / `vulkan-1.dll` 的**游戏自带**版本与 `System32` 里的同名文件并不是同一个文件：
+* 现场链条：XXMI 的 EFMI importer 带着 `launcher_folder = D:\Hypergryph Launcher` ⇒ XXMI 先去启动**官方启动器**（`1.6.0\Games.exe`，命令行参数为空）⇒ 游戏拿不到 `-force-d3d11` ⇒ 走 Vulkan ⇒ 崩在 `nvoglv64!vk_gr2608GetInstanceProcAddr → NvPresent64!NVP_Init_Vulkan → vulkan-1!vkResetEvent`。
+* 判据：那台机器三份崩溃日志里**都没有** `Forcing GfxDevice: Direct3D 11`，却都有 `Vulkan PSO: Invalid or outdated unity cache header`；同一套注入在本机（走 `-force-d3d11`）能正常进。
+* 修法：启动前清空 `launcher_folder` ⇒ XXMI 回到「直接启动 `Endfield.exe` + `-force-d3d11`」。
 
-| 文件 | 游戏原版 | System32 版 |
-| --- | --- | --- |
-| `d3dcompiler_47.dll` | 4,524,496 B（安装日 2026-01-24） | 4,669,440 B |
-| `vulkan-1.dll` | 831,488 B | 1,730,096 / 1,695,280 B |
+## 三、「使用内置 XXMI/EFMI」按开关走
 
-旧逻辑在 `.bak` 缺失时会从 `System32` 拷一份当"游戏原版"，于是 `.bak` 变成系统版 ⇒ 之后装 proxy 时见 `.bak` 已存在就不再备份本体 ⇒ **游戏自带那份被永久覆盖**，此后任何"还原"都还原不出游戏原本的文件。现在改为：**没有原版备份就不冒充**，保留现状并提示用官方启动器的「校验/修复游戏文件」恢复。
+* 以前这开关不参与运行期判据：`xxmi_launcher` 字段里只要有外部路径就一直用外部，于是界面写着「内置」、实际跑的是 `D:\XXMI` + 外部 `D:\EFMI`。现在开关开着就**以内置为准**，内置没装才回落到字段里的外部路径。
+* 设置页据此把 **XXMI Launcher** 与 **Staging Mods 目录** 置灰（开关开着时由程序自管），不再让人填一个不生效的值。
 
-## 三、崩溃归因新增「显卡驱动层」
+## 四、崩溃归因与诊断包
 
-* 新增判据：崩溃栈命中 `nvoglv64` / `NVP_Init_Vulkan` / `vkResetEvent` ⇒ 归为**显卡驱动的 Vulkan 初始化崩溃**。这类崩溃**不再**建议"清空依赖并重新下载"（重装治不了驱动，只会让人白折腾），改为提示：关掉 NVIDIA App 的「游戏内叠加层 / 游戏滤镜」、更新或回滚显卡驱动、用官方启动器校验游戏文件。
-* 诊断包新增 `graphics-stack.txt`：游戏目录 `d3dcompiler_47.dll` / `vulkan-1.dll` 及其 `.bak` 的大小、sha256、修改时间与**游戏原版**逐项对照；驱动目录里的 `NvPresent64.dll` / `nvoglv64.dll` / `nvapi64.dll` 路径与版本；崩溃时进程里加载的 NVIDIA 模块。**判"驱动问题还是文件问题"一次就能判清**，不用再来回要日志。
+* 崩溃栈命中 `nvoglv64` / `NVP_Init_Vulkan` / `vkResetEvent` ⇒ 归为**显卡驱动的 Vulkan 初始化崩溃**，不再建议「清空依赖并重新下载」（重装治不了驱动）。
+* 诊断包新增 `graphics-stack.txt`：游戏目录 `d3dcompiler_47.dll` / `vulkan-1.dll` 及其 `.bak` 的大小、sha256、时间与**游戏原版**逐项对照；驱动目录里的 `NvPresent64.dll` / `nvoglv64.dll` / `nvapi64.dll` 路径版本；进程里加载的 NVIDIA 模块。
 
-## 四、测试耗时（上一版内容，保留说明）
+## 五、其它
 
-全量从 **276.66 秒压到 119 秒**（1617 → 1620 条）：四条慢用例逐条定位为"测试真的在扫宿主机 / 真的在联网"，分别用产品侧扫描预算、测试打桩真实 IO 处理；「查上游最新版本」这类必须真校验的用例保留联网。
+* 撤回上一版（1.6.2）里「检测到系统模块是 loader proxy 就拦启动 / 自动还原 / 乳摇改走注入库」那套改动：SBM 保持独立 proxy 加载，工具目录缺失时只跳过、不动游戏目录。
+* 修掉「拿 System32 冒充游戏原版备份」的 bug（游戏原版 4,524,496 / 831,488 B vs System32 4,669,440 / 1,730,096 B）；缺备份就保留现状并提示用官方启动器校验。
+* 测试：全量 1623 条；Lite 校验新增两条回归测试；测试不再读写真实的 XXMI 配置。
+
 # v1.6.2
 
 本版是**启动与下载链路**的一次集中修复：不再在启动流程里下载、不再铺会崩的注入、下载进度不再虚高。

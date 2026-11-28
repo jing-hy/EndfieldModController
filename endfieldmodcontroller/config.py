@@ -1234,7 +1234,12 @@ class AppConfig:
             problems.append(f"3DMigoto loader not found: {self.migoto_loader}")
         if self.official_launcher and (self.official_launcher_path is None or not self.official_launcher_path.is_file()):
             problems.append(f"Official launcher not found: {self.official_launcher}")
-        if self.reshade_dll and (self.reshade_dll_path is None or not self.reshade_dll_path.is_file()):
+        # ★★ 2026-11-28（Lite 版实测：`launch failed: ReShade DLL not found: runtime/dlss5/d3d12.dll`）：
+        #   **Lite 版根本不含 ReShade**（`edition.is_lite()` ⇒ 一个底座都不注入），
+        #   可配置里 `reshade_dll` 往往还留着默认值 ⇒ 这条校验必然失败、直接把启动拦掉。
+        #   这不是"文件缺了要补"，是"这一版不要它" ⇒ 跳过。
+        if (not edition.is_lite() and self.reshade_dll
+                and (self.reshade_dll_path is None or not self.reshade_dll_path.is_file())):
             problems.append(f"ReShade DLL not found: {self.reshade_dll}")
         # **绝不允许 staging 与 Mod 库重叠**（用户 2026-10-01 硬规则：「任何情况都不要动
         # 用户的 mod 库」）。清理 staging 是无条件 rmtree，一旦两者相同/互相嵌套，

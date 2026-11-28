@@ -13,7 +13,7 @@
   <a href="LICENSE"><img alt="AGPL-3.0-only 许可" src="https://img.shields.io/github/license/jing-hy/EndfieldModController?label=License&amp;color=3DA639"></a>
 </p>
 
-<p>Windows 桌面程序，单文件 exe。当前版本 <b>1.6.4</b> —— <a href="https://github.com/jing-hy/EndfieldModController/releases">下载最新版</a></p>
+<p>Windows 桌面程序，单文件 exe。当前版本 <b>1.6.3</b> —— <a href="https://github.com/jing-hy/EndfieldModController/releases">下载最新版</a></p>
 
 <p>🌐 中文 | <a href="README.en.md">English</a></p>
 

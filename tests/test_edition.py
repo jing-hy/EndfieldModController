@@ -125,3 +125,32 @@ def test_self_update_works_with_both_assets_after_lite(monkeypatch) -> None:
     picked = selfupdate._pick_asset(release)
     assert picked is not None, "两版并存时 Lite 必须能选中自己的主程序包"
     assert picked["name"] == "EndfieldModController-Lite.exe"
+
+def test_lite_does_not_require_reshade_dll(tmp_path, monkeypatch):
+    """Lite 版**不该**因为 `reshade_dll` 找不到被拦启动（2026-11-28 实测）。
+
+    现场：Lite 用户点一键启动弹 `launch failed: ReShade DLL not found:
+    runtime/dlss5/d3d12.dll`。Lite 根本不含 ReShade（`edition.is_lite()` 一个底座都不注入），
+    可 config 里那串 `reshade_dll` 还留着默认值 ⇒ `AppConfig.validate()` 必然报这条 ⇒ 启动被拦。
+    这不是"文件缺了要补"，是"这一版不要它"。
+    """
+    from endfieldmodcontroller.config import AppConfig
+
+    monkeypatch.setenv("MC_EDITION", "lite")
+    edition.reset_cache()
+    cfg = AppConfig(runtime_dir=str(tmp_path / "runtime"),
+                    reshade_dll=str(tmp_path / "nope" / "d3d12.dll"))
+    problems = cfg.validate()
+    assert not any("ReShade DLL not found" in item for item in problems), problems
+
+
+def test_full_still_requires_reshade_dll(tmp_path, monkeypatch):
+    """完整版仍然要校验（别把这条判据一起删掉）。"""
+    from endfieldmodcontroller.config import AppConfig
+
+    monkeypatch.delenv("MC_EDITION", raising=False)
+    edition.reset_cache()
+    cfg = AppConfig(runtime_dir=str(tmp_path / "runtime"),
+                    reshade_dll=str(tmp_path / "nope" / "d3d12.dll"))
+    problems = cfg.validate()
+    assert any("ReShade DLL not found" in item for item in problems), problems
