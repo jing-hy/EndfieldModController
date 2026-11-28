@@ -1572,3 +1572,11 @@ VCRUNTIME140 / VCRUNTIME140_1），他那台是 **14.42.34438**、开发机是 *
 | --- | --- | --- |
 | 626 ★★ | 商城页把 R18 切到「显示」→ 切到别的标签再回来 → 重启程序 | 回来仍是「显示」；重启后仍是「显示」（写进 `config.json` 的 `mod_store_nsfw`；换数据根也跟随，localStorage 只做即时回填） |
 | 627 ★★ | 在 `alerts.json` 里加三条公告：普通 / `"edition": "full"` / `"edition": "lite"`；分别用完整版与轻量版启动 | 完整版用户只收到「普通 + full」，轻量版用户只收到「普通 + lite」；`critical` 预警同样按形态过滤 |
+
+## 2026-11-28 追加：exe 体积裁剪（头像改下载 / DLSS5 组走资产包）
+
+| # | 操作 | 预期结果 |
+| --- | --- | --- |
+| 628 ★★★ | 全新目录只放 exe，联网后进「角色墙」 | 顶部出现「角色立绘还没下载（N 张）」+「去下载」；**不点就不联网**（断网也照常显示已缓存的）；点「去下载」→ 跳到下载页并出现「角色立绘」任务，进度走到 100%；回角色墙头像全部出现；断网重启后仍然都在（`runtime\cache\characters\`） |
+| 629 ★★★ | 同一台机器**只放 exe**（不带 `assets\`）首次启动，等资产包自动下载完成 | exe 里已没有 `assets\dlss5\`；自检先拉 `assets-bundle.zip` 再展开三个 addon（面板汉化 / 第一人称 / NR 引擎），DLSS5 页签与 NR 正常 |
+| 630 ★★ | 对比本次构建与上一版的 exe | 完整版约 **22.8 MB**（原 35.8 MB），轻量版约 **22.6 MB**；两版体积差只剩自研面板（约 0.19 MB） || 631 ★★★ | 把 XXMI 装在 D:/XXMI、EFMI 装在 D:/EFMI（XXMI 的 importer_folder 指 D:/EFMI），设置里「使用内置运行环境」仍开着，点「一键启动」 | **不再**报 "launch failed: 完整性检查失败: XXMI Libraries / 3dmloader.dll; …; EFMI Core / main.ini; EFMI d3dx.ini"；日志里也**不再**出现「注入自检: 跳过 …\EFMI\d3d11.dll —— 它不在这个 XXMI 的目录里」；服装 Mod 正常注入 |

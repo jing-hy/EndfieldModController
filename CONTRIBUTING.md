@@ -109,11 +109,12 @@ python scripts/memory_log.py     # 重新导出（push.py 也会自动跑）
 
 ### 6. 离线依赖包（发版闸会核它）
 
-* `dist\deps-bundle.zip`（`python scripts\build_deps_bundle.py`）**不进 Release**，只走 QQ 群；
+* **两个包**：`dist\deps-bundle.zip`（完整版）+ `dist\deps-bundle-lite.zip`（轻量版），一条命令打齐：`python scripts\build_deps_bundle.py --all-editions`。**不进 Release**，只走 QQ 群；
+  包里打的组件同样是「用户会装上的那一版」，表更新后不重打就会变成旧货。
   但它里面打的组件同样是"用户会装上的那一版"，表更新后不重打就会变成旧货。
 * `build_release.py` 带 `--strict` 跑 `scripts/check_component_versions.py`，第三道比对就是
   **表 vs 离线包里的 manifest**：包比表旧 ⇒ `stale`、包比表新 ⇒ `ahead`，**直接中止构建**并给出
-  重打命令；本机根本没有离线包时只提示、不阻断（从没打过包的机器不该被拦）。
+  重打命令；**两版各核各的**（Lite 包本来就不打 ReShade 链路，核对时跳过那几项）；本机根本没有离线包时只提示、不阻断（从没打过包的机器不该被拦）。
 * 表里更新了组件版本 ⇒ 先重打离线包再发版；确实要带着旧包发版，用 `--skip-version-table-check`。
 
 ### 7. 两个版本形态（Universal / Lite）
@@ -254,7 +255,7 @@ gh api repos/jing-hy/EndfieldModController/releases --jq '[.[] | select(.draft==
 | `docs/AI-记忆日志.md` | `scripts/memory_log.py`（`push.py` 自动调用） | 记忆库导出的开发日志 |
 | `web/dist/index.html` | `frontend/` 里 `npm run build` | 前端单文件产物；**必须构建后再打包 exe**，否则改动不会进 exe |
 | `dist/*.exe`、`assets-bundle.zip` | `scripts/build_release.py` / `prepare_release.py` | 发布产物，不进 git |
-| `dist/deps-bundle.zip` | `scripts/build_deps_bundle.py` | **离线依赖包**（应急分发，**不进 Release**）；构建完会**自动放一份进 `modtest`**（用户 2026-10-14：「以后离线包也放 modtest」），`--skip-modtest` 可关 |
+| `dist/deps-bundle.zip`、`dist/deps-bundle-lite.zip` | `scripts/build_deps_bundle.py --all-editions` | **离线依赖包**（应急分发，**不进 Release**；**两版各一个**）；构建完会**自动放一份进 `modtest`**（用户 2026-10-14：「以后离线包也放 modtest」），`--skip-modtest` 可关 |
 
 > 改了 `frontend/` 下的任何东西之后：`cd frontend && npm run build`，再 `python scripts/build_exe.py`
 > （或直接 `build_release.py`），否则 exe 里还是旧界面。

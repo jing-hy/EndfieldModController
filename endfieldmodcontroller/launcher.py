@@ -1648,6 +1648,28 @@ def ensure_efmi_importer_folder(config: AppConfig, *,
     return result
 
 
+def _looks_like_efmi_home(folder: Path) -> bool:
+    """这个目录像不像一个**真实的 EFMI 运行目录**（而不是 Mod 库里恰好带同名 dll 的目录）。
+
+    ⚠️ 2026-11-28（诊断包 diagnostics-20261128-175808）：XXMI 的 importer_folder 允许
+       指向 XXMI 树**之外**的独立 EFMI 安装（用户现场：XXMI 在 D:/XXMI、EFMI 在 D:/EFMI，
+       importer_folder=D:/EFMI）。而 active_efmi_loader 里那条"loader 必须位于 XXMI
+       目录树内"的判据会把这份**真 loader** 跳过 —— 日志是
+       「注入自检: 跳过 D:/EFMI/d3d11.dll —— 它不在这个 XXMI 的目录里」，
+       后果是 EFMI 注入缺 d3d11.dll ⇒ 皮肤 Mod 不生效。
+
+       那条判据是当年为挡"importer 被误指到 Mod 库"加的（lzh18 现场，游戏
+       STATUS_DLL_NOT_FOUND）。两者用**结构**区分即可：真 EFMI 根带 Core/EFMI，
+       或 Mods/ 与 d3dx.ini 同时存在；而 Mod 库里散落的 dll 不会长成这样。
+    """
+    try:
+        if (folder / "Core" / "EFMI").is_dir():
+            return True
+        return (folder / "Mods").is_dir() and (folder / "d3dx.ini").is_file()
+    except OSError:
+        return False
+
+
 def active_efmi_loader(config: AppConfig) -> Path | None:
     """**当前生效那个 XXMI 自己的 EFMI loader（`d3d11.dll`）**在哪。
 
@@ -1715,7 +1737,9 @@ def active_efmi_loader(config: AppConfig) -> Path | None:
             inside = candidate.resolve().is_relative_to(root_resolved)
         except OSError:
             inside = False
-        if not inside:
+        # 树外的**独立 EFMI 安装**是合法布局（importer_folder 可以指到任意位置），
+        # 只要它长得像 EFMI 根就认；见 _looks_like_efmi_home 的注释。
+        if not inside and not _looks_like_efmi_home(candidate.parent):
             _append_log(
                 config,
                 f"注入自检: 跳过 {candidate} —— 它不在这个 XXMI 的目录里"

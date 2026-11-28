@@ -177,6 +177,10 @@ class EndfieldModControllerApi:
         # Mod 下载（粘贴网址 → 并行下载 → 自动解压入库）：任务表 + 一把入库锁
         # （下载并行、解压入库串行 —— 用户 2026-10-02 要求"并行多线程下载"）
         self._mod_dl: dict[str, Any] = {"done": True, "items": [], "cancel": False, "pause": False}
+        # 角色立绘下载任务（2026-11-28）：单例、由角色墙那个按钮显式触发，
+        # **不再随进角色墙自动联网**（用户：「不应该每次启动都连接」）。
+        self._avatar_task: dict[str, Any] | None = None
+        self._avatar_lock = threading.Lock()
         # **待办队列 + "worker 在不在跑"标记**（2026-10-07 加）。
         # 用户原话：「把下载从依赖里面抽出来……**下载可以后台进行，可以追加任务**，
         # 看商城不用下一个就跳转一次，但是要有动态」。
@@ -4967,9 +4971,12 @@ class EndfieldModControllerApi:
                 item["cover_data"] = self._cover_data_uri(item["cover"])
         mod_dl["items"] = items_ref
         counts = moddl.summarize(items_ref)
+        with self._avatar_lock:
+            avatar_task = dict(self._avatar_task) if self._avatar_task else None
         return downloads.snapshot(
             mod_dl=mod_dl,
             dep_task=self._dep_task,
+            avatar_task=avatar_task,
             downloads_dir=str(moddl.downloads_dir(self.config)),
             mod_counts=counts,
         )
@@ -4987,6 +4994,9 @@ class EndfieldModControllerApi:
         if dep.get("running"):
             active += 1
             speed += float(dep.get("speed_bps") or 0.0)
+        with self._avatar_lock:
+            if (self._avatar_task or {}).get("running"):
+                active += 1
         return {"ok": True, "active": active, "speed_bps": speed}
 
     def downloads_pause(self, task_id: str = "") -> dict[str, Any]:
@@ -5589,28 +5599,81 @@ class EndfieldModControllerApi:
                 "mods": owned,
             })
 
-        # 头像：**随包的优先**（用户 2026-10-07：「角色表和图直接随包」「是随 exe」），
-        # 随包里没有的（官网新角色）才走"官网直链 → 后台下载"这条路。
+        # 头像**不随包、也不在进页面时自动下载**（2026-11-28 用户：「不应该每次启动都连接」）：
+        # 这里只回"本地已经有哪几张"与"还缺几张"，缺的由角色墙顶部那个按钮触发一次
+        # **显式下载任务**（下载中心里可见、带进度、可看着它逐张下完）。
         for row in rows:
-            row["avatar"] = character_avatars.find_avatar(self.config, row["name"])
-        missing = [row["avatar_url"] for row in rows
-                   if not row["avatar"] and row["avatar_url"]]
-        prepared = character_avatars.ensure_avatars(
-            self.config, missing, background=True,
-            log=lambda line: launcher._append_log(self.config, line))
+            row["avatar"] = character_avatars.local_avatar(self.config, row["avatar_url"])
+        missing = sum(1 for row in rows if row["avatar_url"] and not row["avatar"])
         port = modstore._SERVER.ensure(modstore.thumb_root(self.config))
-        files = prepared.get("files") or {}
-        for row in rows:
-            if not row["avatar"]:
-                row["avatar"] = files.get(row["avatar_url"], "")
 
         return {
             "ok": True,
             "base": f"http://127.0.0.1:{port}" if port else "",
             "characters": rows,
             "other": {"count": len(other), "mods": other},
-            "pending": prepared.get("pending") or [],
+            "avatar_missing": missing,
+            "pending": [],          # 保留字段：前端据此轮询；现在下载是显式任务，不再自动补
         }
+
+    def character_avatar_status(self) -> dict[str, Any]:
+        """角色立绘下没下全（角色墙顶部那句提示用）。**只读本机，不联网。**"""
+        from . import character_avatars
+
+        try:
+            missing = len(character_avatars.missing_avatars(self.config))
+        except Exception as exc:  # noqa: BLE001 —— 角色表坏了不该让角色墙打不开
+            return {"ok": False, "message": f"读角色表失败：{exc}", "missing": 0, "running": False}
+        with self._avatar_lock:
+            running = bool((self._avatar_task or {}).get("running"))
+        return {"ok": True, "missing": missing, "running": running}
+
+    def download_character_avatars(self) -> dict[str, Any]:
+        """把缺的角色头像作为一个**显式下载任务**跑（下载页可见、带进度）。
+
+        用户 2026-11-28：「不应该每次启动都连接，可以如果没下载就在角色 mod 那页上面
+        提示一个角色立绘未下载并提供一个下载按钮到下载页去下载」。
+        """
+        from . import character_avatars
+
+        with self._avatar_lock:
+            if (self._avatar_task or {}).get("running"):
+                return {"ok": True, "started": False, "message": "角色立绘正在下载中"}
+            missing = character_avatars.missing_avatars(self.config)
+            if not missing:
+                return {"ok": True, "started": False, "message": "角色立绘已经全了"}
+            self._avatar_task = {
+                "running": True, "total": len(missing), "done": 0, "failed": 0,
+                "started_at": time.strftime("%Y-%m-%d %H:%M:%S"), "message": "",
+            }
+        launcher._append_log(self.config, f"角色立绘: 开始下载 {len(missing)} 张")
+
+        def progress(done: int, total: int) -> None:
+            with self._avatar_lock:
+                if self._avatar_task is not None:
+                    self._avatar_task["done"] = int(done)
+                    self._avatar_task["total"] = int(total)
+
+        def run() -> None:
+            message = ""
+            try:
+                result = character_avatars.download_avatars(
+                    self.config, missing, progress=progress,
+                    log=lambda line: launcher._append_log(self.config, line))
+                failed = len(result.get("failed") or [])
+                done = int(result.get("done") or 0)
+                message = f"完成 {done} 张" + (f"，{failed} 张失败（可再点一次重试）" if failed else "")
+            except Exception as exc:  # noqa: BLE001 —— 失败要如实回写，不让进度条永远转
+                message = f"下载失败：{exc}"
+            finally:
+                launcher._append_log(self.config, f"角色立绘: {message}")
+                with self._avatar_lock:
+                    if self._avatar_task is not None:
+                        self._avatar_task["running"] = False
+                        self._avatar_task["message"] = message
+
+        threading.Thread(target=run, daemon=True, name="mc-avatar-dl").start()
+        return {"ok": True, "started": True, "total": len(missing)}
 
     def character_sync_now(self) -> dict[str, Any]:
         """强制重抓一次官网角色表（顺带拿到最新的头像直链）—— 角色墙的「刷新」用。

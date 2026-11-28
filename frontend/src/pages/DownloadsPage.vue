@@ -49,7 +49,9 @@ const doneItems = computed(() => modItems.value.filter((it) => String(it.status 
 const pendingItems = computed(() => modItems.value.filter((it) => String(it.status || "") !== "已入库"));
 const hasDone = computed(() => doneItems.value.length > 0);
 const hasDeps = computed(() => !!depTask.value);
-const nothing = computed(() => !hasMods.value && !hasDeps.value);
+// 角色立绘下载（2026-11-28：从"进角色墙自动抓"改成用户点按钮才下）
+const avatarTask = computed(() => tasks.value.find((t) => t.kind === "avatars") || null);
+const nothing = computed(() => !hasMods.value && !hasDeps.value && !avatarTask.value);
 
 // 状态徽标色调 —— 与后端 `moddl.summarize()` 的口径对齐
 const TONES = {
@@ -310,6 +312,19 @@ useLogAutoScroll(logBox, () => logLines.value);
       </div>
     </Card>
 
+    <!-- 角色立绘下载（2026-11-28：用户点角色墙顶部那个按钮才会出现） -->
+    <Card v-if="avatarTask" :title="t('角色立绘')">
+      <template #badge>
+        <span class="text-xs" style="color: var(--text-muted)">
+          {{ avatarTask.finished || 0 }} / {{ avatarTask.total || 0 }}
+        </span>
+      </template>
+      <div v-if="avatarTask.message" class="text-sm mb-2" style="color: var(--text-muted)">
+        {{ avatarTask.message }}
+      </div>
+      <ProgressBar :value="avatarTask.percent || 0"
+                   :text="(avatarTask.finished || 0) + ' / ' + (avatarTask.total || 0)" />
+    </Card>
     <!-- 已下载：本次运行里下完并入库的（重启后清空；用户 2026-11-28 要求单独一张卡） -->
     <Card v-if="hasDone" :title="t('已下载')">
       <template #badge>

@@ -51,17 +51,29 @@ def test_administrator_sexes_are_matched_separately() -> None:
     assert core.match_character("管理员") == "女管理员"
 
 
-def test_administrator_avatars_are_indexed() -> None:
-    index = json.loads((Path(core.CHARACTERS_JSON).parent / "characters" / "index.json")
-                       .read_text(encoding="utf-8"))
-    avatars = index.get("avatars") or {}
-    assert avatars.get("女管理员") == "endministrator1.c391b13d.png"
-    assert avatars.get("男管理员") == "endministrator2.5ccb44a8.png"
-    folder = Path(core.CHARACTERS_JSON).parent / "characters"
-    assert (folder / avatars["女管理员"]).is_file()
-    assert (folder / avatars["男管理员"]).is_file()
+def test_administrator_avatars_come_from_official_links(tmp_path, monkeypatch) -> None:
+    """头像**不随包**（2026-11-28，用户：「角色立绘可以下载后从官方拉取」）。
+
+    钉两件事：
+      ① 随包表里两个管理员各有一条**不同的**官网直链 —— 冷启动没缓存时靠它去抓；
+      ② 本地不再有随包头像目录，而缓存里一旦有了同名文件，`ensure_avatars` 就能认出来。
+    """
+    rows = {str(item.get("name") or ""): item for item in _bundled().get("characters") or []}
+    female = str(rows["女管理员"].get("avatar") or "")
+    male = str(rows["男管理员"].get("avatar") or "")
+    assert female and male and female != male, "男女管理员各自的官网直链不能缺、也不能相同"
+
+    bundled = Path(core.CHARACTERS_JSON).parent / "characters"
+    assert not bundled.exists(), "头像不随包分发（exe 里不再有 characters/ 目录）"
+
     config = AppConfig()
-    assert character_avatars.find_avatar(config, "女管理员") == "endministrator1.c391b13d.png"
+    monkeypatch.setattr(character_avatars, "avatar_dir", lambda _config: tmp_path)
+    name = character_avatars.avatar_name(female)
+    assert name, "官网直链要能取出安全文件名"
+    (tmp_path / name).write_bytes(b"png")
+    prepared = character_avatars.ensure_avatars(config, [female])
+    assert prepared["files"] == {female: name}
+    assert prepared["pending"] == []
 
 
 def test_merge_keeps_administrators_apart() -> None:

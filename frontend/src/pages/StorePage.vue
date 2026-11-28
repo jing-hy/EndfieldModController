@@ -420,8 +420,31 @@ function detailImgSrc(img) {
 // 回来也不许把页面重新拉回详情（用户 2026-11-28：「应该保持加载但不要动页面」）。
 let detailSeq = 0;
 
+// 列表的滚动位置：从详情返回时要回到进入前那里，而不是回到顶部
+//（用户 2026-11-28：「从详情页出来应该回到进去时的位置而不是到顶」）。
+// 页面用的是 **window 滚动**（见 refreshHead 里的 window.scrollY），所以直接存 scrollY。
+let listScrollY = 0;
+
+function restoreListScroll() {
+  const target = listScrollY;
+  if (!target) return;
+  // ⚠️ 要重试几帧：列表卡片是 nextTick 之后才渲染出来的，页面高度得等它回来才够，
+  //    只滚一次会停在"详情那么高"的位置（表现就是又回到顶上了）。
+  let tries = 0;
+  const tick = () => {
+    window.scrollTo(0, target);
+    if (tries++ < 4 && Math.abs(window.scrollY - target) > 2) setTimeout(tick, 50);
+  };
+  tick();
+}
+
 async function openDetail(item) {
   const seq = ++detailSeq;
+  if (!detail.value) {
+    // 列表 → 详情：记住列表位置（返回时回到这里），详情本身从顶部看起
+    listScrollY = window.scrollY || 0;
+    window.scrollTo(0, 0);
+  }
   detail.value = { ...item, loading: true };
   detailLoading.value = true;
   // 先用列表已有的小图顶着，大图另外拉（详情要清晰，值得多等）
@@ -453,7 +476,7 @@ function closeDetail() {
   detail.value = null;
   closeLightbox();
   // 列表重新渲染出来 ⇒ 哨兵是新的 DOM，得重新盯上（否则从详情返回后就不再自动加载）
-  nextTick(() => { watchSentinel(); fillIfNeeded(); });
+  nextTick(() => { watchSentinel(); fillIfNeeded(); restoreListScroll(); });
 }
 
 function openLightbox(url, small = "") {

@@ -1,5 +1,38 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 
+# v1.6.1
+
+本版是**体积瘦身 + 两处启动/体验修复**的小更新。
+
+## 一、exe 体积减小约三分之一
+
+* 完整版 **35.8 MB → 24.0 MB**，轻量版 **34.1 MB → 23.8 MB**（单文件，解压后）。
+* 去掉了打包时连带收进来、实际用不到的东西：Pillow 的 AVIF 编解码（4.3 MB）、pywebview 顺带探测到的 twisted / setuptools / tornado / jinja2 等（约 2.5 MB）。
+* 角色头像与 DLSS5 组件包不再打进 exe：头像改为**第一次进角色墙时按需下载**（见第二节），DLSS5 组件与 DLSS 运行库一样走 `assets-bundle.zip`，首次启动自动拉取。
+* 功能一个没少；裁剪规则有测试钉住（`PIL._imaging` / `_webp` 与 webview 的三份平台 loader 都保留）。
+
+## 二、角色头像改成按需下载
+
+* 进角色墙**不再自动联网**：本地没有图时，页面顶部显示「角色立绘还没下载（N 张）」和「去下载」按钮。
+* 点按钮会在**下载页**建一个「角色立绘」任务（带进度），下完落到 `runtime\cache\characters\`，之后**离线也有**。
+* 头像并发从 4 提到 6，并接入与商城图片共用的 6 路全局闸门。
+
+## 三、修复：XXMI/EFMI 装在别处时「一键启动」被拦死
+
+* 现场：XXMI 在 `D:\XXMI`、EFMI 在 `D:\EFMI`（XXMI 的 importer 指向它），但设置里「使用内置运行环境」还开着
+  ⇒ 完整性检查去看**内置那份副本** ⇒ 报 `完整性检查失败: XXMI Libraries / 3dmloader.dll; …; EFMI Core / main.ini; EFMI d3dx.ini` ⇒ 启动被彻底拦死。
+* 现在检查**与运行期同源**：XXMI 根按实际使用的 launcher 推导，EFMI 用运行期那个目录；
+  loader 在 XXMI 目录之外、但目录结构像 EFMI 运行目录（有 `Core/EFMI` 或 `Mods` + `d3dx.ini`）时也认它。
+* Mod 库里恰好带同名 `d3d11.dll` 的情况仍然会被挡住（原有防护不变）。
+
+## 四、商城与界面
+
+* 从 Mod 详情返回商城，**回到进入前的位置**，不再跳回顶部。
+* 英文界面里完整版统一叫 **Universal**（与 README 一致）。
+
+## 五、构建
+
+* 离线依赖包现在**两版各一个**（`deps-bundle.zip` / `deps-bundle-lite.zip`），`build_deps_bundle.py --all-editions` 一条命令打齐；发版闸会分别核对两个包与组件版本表。
 # v1.6.0
 
 本版是**设置界面改版 + 轻量版（Lite）+ 商城/下载页修复**的一次大更新。

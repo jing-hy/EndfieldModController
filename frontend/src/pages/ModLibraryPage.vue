@@ -3,7 +3,7 @@
 // 服装 Mod页（旧 #tab-library）：三个分区卡片 —— 皮肤 Mod / 下载 Mod / Mod 列表。
 // 分组与过滤规则照抄旧 renderMods：按 conflict_group||group 分组，
 // 跳过 _deps 分组与 kind=dependency/tool/assist（那些由依赖页 / 辅助页管）。
-import { ref, computed, nextTick, onMounted, onUnmounted, watch } from "vue";
+import { ref, computed, nextTick, onMounted, onUnmounted, onActivated, watch } from "vue";
 import { t } from "../lib/i18n.js";
 import { call } from "../lib/bridge.js";
 import { store, refreshState } from "../store.js";
@@ -69,6 +69,8 @@ const selected = computed(
 // 头像由后端从官网抓、经本地只读服务直出。
 const characterView = computed(() => !!((settings || {}).library_character_view));
 const gallery = ref({ characters: [], base: "", other: { count: 0 } });
+//: 本地还没有的头像张数（后端只读本机，不联网）—— 顶部那条「未下载」提示用
+const avatarMissing = ref(0);
 const character = ref("");        // 点进去的那个角色（空 = 还在角色墙那一层）
 let avatarTimer = null;
 
@@ -81,12 +83,13 @@ async function loadGallery() {
       base: result.base || "",
       other: result.other || { count: 0 },
     };
+    avatarMissing.value = Number(result.avatar_missing || 0);
     pollAvatars(result.pending || []);
   } catch (e) { /* 拿不到就退化成占位块，不是错误 */ }
 }
 
-// 头像"后端后台抓 + 这里逐张问"（与商城图片同一套）：官网有快有慢，
-// 等整批会让整页空白，所以按 800ms 轮询、最多 40 轮。
+// 头像下载是**显式任务**（下载页可见）；这里只负责"下载完成后把新图刷进来"，
+// 所以按 400ms 轮询、最多 40 轮（2026-11-28 从 800s 提速，用户嫌逐张出现慢）。
 function pollAvatars(pending) {
   if (avatarTimer || !(pending || []).length) return;
   let rounds = 0;
@@ -106,8 +109,28 @@ function pollAvatars(pending) {
         }
       }
     } catch (e) { /* 忽略这次，下一轮再来 */ }
-  }, 800);
+  }, 400);
 }
+
+// 角色立绘改成**显式下载**（2026-11-28 用户：「不应该每次启动都连接……如果没下载就在
+// 角色 mod 那页上面提示一个角色立绘未下载并提供一个下载按钮到下载页去下载」）：
+// 点一下就建一个下载中心的「角色立绘」任务，然后切到下载页看进度。
+async function downloadAvatars() {
+  try {
+    const result = await call("download_character_avatars");
+    if (result && result.ok === false) {
+      showToast(String(result.message || t("下载失败")), "danger");
+      return;
+    }
+    if (result && result.started === false) {
+      showToast(String(result.message || t("角色立绘已经全了")), "info");
+    }
+    store.tab = "downloads";
+  } catch (e) { /* call 已经弹过错误窗 */ }
+}
+
+// 页面被 KeepAlive 保活：切回来时刷新一次（可能刚在下载页把头像下完）
+onActivated(() => { if (characterView.value) loadGallery(); });
 
 // ⚠️ 头像文件名在**每一行的 `c.avatar`** 上（后端直接给本地文件名），
 //    不是 `result.files` 那个映射 —— 2026-10-07 我错读成后者，表现就是"角色墙一个头像都没有"。
@@ -639,8 +662,14 @@ watch(() => store.demoCovers, (val) => {
 
       <!-- ① 角色墙（角色视图 + 还没点进去）-->
       <div v-if="characterView && !character" class="mt-3">
-      <!-- 角色表和头像都**随包**（用户要求"直接随包"），所以这里正常是**一闪而过**。
-           不再写"首次会从官网同步"——那会让人以为要联网等，而实际上本地就有。 -->
+      <!-- 角色表随 exe，**头像不随包**（2026-11-28）：进角色墙只用本地缓存的图，
+           缺的由下面这条提示 + 「去下载」按钮走下载中心的显式任务 —— 不在进页面时
+           偷偷联网（用户：「不应该每次启动都连接」）。 -->
+      <div v-if="avatarMissing > 0 && gallery.characters.length"
+           class="flex flex-wrap items-center gap-2 mb-2 text-sm" style="color: var(--warn)">
+        <span>{{ t("角色立绘还没下载") }}（{{ avatarMissing }} {{ t("张") }}）</span>
+        <Btn size="sm" @click="downloadAvatars">{{ t("去下载") }}</Btn>
+      </div>
       <div v-if="!gallery.characters.length" class="text-sm" style="color: var(--text-muted)">
         {{ t("正在读取角色表…") }}
       </div>

@@ -305,4 +305,10 @@ export default {
   "打不开下载目录": "Couldn't open the download folder",
   "打不开这个位置": "Couldn't open this location",
   "开始下载依赖组件…": "Starting dependency download…",
+  "角色立绘还没下载": "Character portraits are not downloaded",
+  "去下载": "Go to downloads",
+  "张": "images",
+  "角色立绘": "Character portraits",
+  "角色立绘已经全了": "All character portraits are already downloaded",
+  "正在按官网直链下载角色头像…": "Downloading character portraits from the official CDN…",
 };

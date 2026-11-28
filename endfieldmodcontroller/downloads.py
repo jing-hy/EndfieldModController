@@ -32,6 +32,8 @@ ACTIVE_STATUSES: tuple[str, ...] = ("等待中", "读取香蕉网信息", "下�
 #: 任务类型（界面用它的徽标与标题，控制按钮也按类型给）。
 KIND_MODS = "mods"
 KIND_DEPS = "deps"
+#: 角色立绘下载（用户显式点的那个任务；2026-11-28 从"进角色墙自动抓"改成"按钮触发"）
+KIND_AVATARS = "avatars"
 
 
 def is_active(item: dict) -> bool:
@@ -159,13 +161,58 @@ def normalize_dep_task(dep_task: dict | None) -> dict | None:
     }
 
 
+def normalize_avatar_task(task: dict | None) -> dict | None:
+    """角色立绘下载（用户显式点的那个任务）：单例、按"张数"给进度。
+
+    它没有暂停/终止 —— 几十张小图，一批几十秒就完了，为它再挂一套控制划不来；
+    与依赖任务同一口径：**不提供点了没反应的按钮**。
+    """
+    if not task:
+        return None
+    total = int(task.get("total") or 0)
+    done = int(task.get("done") or 0)
+    failed = int(task.get("failed") or 0)
+    running = bool(task.get("running"))
+    percent = round(done / total * 100.0, 1) if total else 0.0
+    if not running and total:
+        percent = 100.0
+    return {
+        "id": KIND_AVATARS,
+        "kind": KIND_AVATARS,
+        "title": "角色立绘",
+        "status": "下载中" if running else ("已完成" if total else "空闲"),
+        "running": running,
+        "done": not running,
+        "percent": percent,
+        "byte_percent": percent,
+        "done_bytes": 0,
+        "total_bytes": 0,
+        "speed_bps": 0.0,
+        "message": str(task.get("message") or ""),
+        "log": [],
+        "items": [],
+        "counts": {"imported": done, "failed": failed},
+        "total": total,
+        "finished": done,
+        "started_at": str(task.get("started_at") or ""),
+        "dir": "",
+        "controls": [],
+        "paused": False,
+        "stopped": False,
+    }
+
+
 def snapshot(*, mod_dl: dict | None = None, dep_task: dict | None = None,
+             avatar_task: dict | None = None,
              downloads_dir: Any = "", mod_counts: dict | None = None) -> dict:
     """给界面/徽标用的一份总览。"""
     tasks = [normalize_mod_task(mod_dl or {}, downloads_dir=downloads_dir, counts=mod_counts)]
     dep = normalize_dep_task(dep_task)
     if dep is not None and (dep["running"] or dep["total_bytes"] or dep["log"]):
         tasks.append(dep)
+    avatars = normalize_avatar_task(avatar_task)
+    if avatars is not None and (avatars["running"] or avatars["total"]):
+        tasks.append(avatars)
     active = [task for task in tasks if task["running"]]
     return {
         "ok": True,

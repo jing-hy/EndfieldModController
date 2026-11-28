@@ -65,6 +65,9 @@ def test_matching_version_is_ok(monkeypatch):
                         lambda: {"builtin": {"EFMI": {"latest": "v1.4.8"}}})
     monkeypatch.setattr(module.updates, "check_updates",
                         lambda *a, **k: {"builtin": {"EFMI": {"latest": "v1.4.8"}}, "errors": []})
+    # 与 _stub_both 同一理由：离线包那一道读本机 dist/，不该影响这条"表对上就算过"的用例
+    monkeypatch.setattr(module, "collect_offline_bundles",
+                        lambda table: {"bundles": {}, "problems": []})
 
     data = module.collect()
 
@@ -118,6 +121,10 @@ def _stub_both(monkeypatch, module, table, report, bundled):
     monkeypatch.setattr(module.component_versions, "load", lambda: table)
     monkeypatch.setattr(module.updates, "check_updates", lambda *a, **k: {**report, "errors": []})
     monkeypatch.setattr(module, "_probe_bundled", lambda key: (bundled, "" if bundled else "探测不到"))
+    # 2026-11-28：离线包那一道读的是**本机 dist/**，开发机上留着一个旧包就会让这些用例变红；
+    # 它们考的是"版本表比对"，与真实包无关 ⇒ 隔离掉（两版都算没有包）。
+    monkeypatch.setattr(module, "collect_offline_bundles",
+                        lambda table: {"bundles": {}, "problems": []})
 
 
 def test_bundled_asset_older_than_table_blocks_release(monkeypatch):
@@ -170,6 +177,8 @@ def test_component_without_bundled_asset_is_skipped(monkeypatch):
                         lambda: {"builtin": {"XXMI": {"latest": "v2.4.9"}}})
     monkeypatch.setattr(module.updates, "check_updates",
                         lambda *a, **k: {"builtin": {"XXMI": {"latest": "v2.4.9"}}, "errors": []})
+    monkeypatch.setattr(module, "collect_offline_bundles",
+                        lambda table: {"bundles": {}, "problems": []})
 
     data = module.collect()
 

@@ -568,6 +568,9 @@ def main(argv: list[str] | None = None) -> int:
                              f"轻量版 0 = 不补；显式写 0 也不补）")
     parser.add_argument("--skip-modtest", action="store_true",
                         help="不同步进测试目录（默认会放一份到 modtest）")
+    parser.add_argument("--all-editions", action="store_true",
+                        help="两版一起打（deps-bundle.zip + deps-bundle-lite.zip）——"
+                             "发版/群发默认就该两个都有")
     # 先把 stdout/stderr 切成 UTF-8 **再**解析参数：否则 `--help` 里的中文在 GBK 控制台上
     # 直接抛 UnicodeEncodeError（与 `build_assets_bundle.py` 同一处理）。
     for stream in (sys.stdout, sys.stderr):
@@ -581,9 +584,24 @@ def main(argv: list[str] | None = None) -> int:
     # 包名按形态定（完整版沿用历史名 `deps-bundle.zip`）。`--out` 显式给了就用它。
     out = Path(args.out) if args.out else DIST / BUNDLE_NAMES[args.edition]
     # 325 MB 那个下限是给**群里发完整版**定的；轻量版本来就小，补到 325 MB 反而难传 ⇒ 缺省不补。
-    min_mb = (args.min_size_mb if args.min_size_mb is not None
-              else (DEFAULT_MIN_SIZE_MB if args.edition == "full" else 0))
-    return build(out, download=not args.skip_download, min_mb=int(min_mb),
+    def _min_mb(edition: str) -> int:
+        if args.min_size_mb is not None:
+            return int(args.min_size_mb)
+        return DEFAULT_MIN_SIZE_MB if edition == "full" else 0
+
+    if args.all_editions:
+        # 2026-11-28 用户：「现在应该要构建两个离线包」⇒ 一条命令打齐两个形态
+        if args.out:
+            raise SystemExit("!! --all-editions 不能和 --out 同时用（两个包路径不同）")
+        rc = 0
+        for edition in EDITIONS:
+            _log(f"===== 打离线包：{edition} → {BUNDLE_NAMES[edition]} =====")
+            rc = build(DIST / BUNDLE_NAMES[edition], download=not args.skip_download,
+                       min_mb=_min_mb(edition), sync_modtest=not args.skip_modtest,
+                       edition=edition) or rc
+        return rc
+
+    return build(out, download=not args.skip_download, min_mb=_min_mb(args.edition),
                  sync_modtest=not args.skip_modtest, edition=args.edition)
 
 

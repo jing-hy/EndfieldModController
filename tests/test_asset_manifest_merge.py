@@ -111,10 +111,18 @@ def test_retire_is_quiet_when_new_entry_present(tmp_path, monkeypatch):
     assert not any("清单里**没有**新版" in line for line in logs), logs
 
 
-def test_exe_packs_the_addon_xz_files():
-    """★ 清单 + 四个 addon 的 `.xz` 必须真的打进 exe（否则合并也补不出文件）。"""
-    src = pathlib.Path(ra.__file__).resolve().parents[1] / "scripts" / "build_exe.py"
-    text = src.read_text(encoding="utf-8")
-    for name in ("assets/dlss5/manifest.json",
-                 "assets/dlss5/renodx-dlss5.addon64.xz"):
-        assert name in text, f"打包清单里没有 {name} —— 升级用户拿不到它"
+def test_dlss5_pack_ships_with_the_assets_bundle():
+    """★ DLSS5 组件包改随 assets-bundle.zip 分发（2026-11-28 体积裁剪）。
+
+    原来它被塞进 exe，图的是"换 exe 也能拿到新清单"；现在整组走资产包，
+    于是"升级用户拿得到"要靠下面两环，缺一环就回到"永远补不上"的老问题：
+      ① 资产包脚本**整目录**打包（含 assets/dlss5/*.xz，不是白名单挑）；
+      ② 缺组时 ensure_all 会 fetch_bundle（否则清单在、文件却永远没有）。
+    """
+    root = pathlib.Path(ra.__file__).resolve().parents[1]
+    bundle_src = (root / "scripts" / "build_assets_bundle.py").read_text(encoding="utf-8")
+    assert "ASSETS.rglob" in bundle_src, "资产包必须整目录打包，否则 dlss5 的 .xz 进不去"
+
+    source = pathlib.Path(ra.__file__).read_text(encoding="utf-8")
+    assert "missing_asset_groups(config)" in source, "缺组判据不能丢"
+    assert "fetch_bundle(" in source, "缺组时要真的去拉资产包"

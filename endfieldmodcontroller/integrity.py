@@ -47,19 +47,28 @@ def _first_existing(paths: list[Path]) -> Path | None:
 
 
 def xxmi_root(config: AppConfig) -> Path | None:
+    """XXMI 根目录 —— **必须与运行期真正拉起的那份同源**。
+
+    ⚠️ 2026-11-28 修（诊断包 diagnostics-20261128-175808）：这里原本第一句是
+       if config.use_builtin_runtime: return config.builtin_runtime_path / "XXMI"
+       于是"内置开关开着、但 xxmi_launcher 指向外部 XXMI"的机器上，完整性检查去看的是
+       **内置那份副本**（这台机器从来没下过它）：
+         Resources/Packages/XXMI/*.dll、EFMI/Core/EFMI/main.ini、EFMI/d3dx.ini 全都不在
+       ⇒ launch failed: 完整性检查失败: XXMI Libraries / 3dmloader.dll; …;
+          EFMI Core / main.ini; EFMI d3dx.ini ⇒ **一键启动被彻底拦死**（用户现场：
+          xxmi_launcher=D:/XXMI/Resources/Bin/XXMI Launcher.exe、staging=D:/EFMI/Mods、
+          use_builtin_runtime=true —— 而运行期用的正是那个外部 XXMI）。
+    判据要与运行期同源，顺序也与 AppConfig.efmi_dir 一致：**先按 launcher 上溯，再回退内置**。
+    """
+    launcher = config.xxmi_launcher_path
+    if launcher is not None and launcher.is_file():
+        parents = list(launcher.parents)[:3]
+        for candidate in parents:
+            if (candidate / "Resources" / "Bin").is_dir() or (candidate / "EFMI").is_dir():
+                return candidate
+        return parents[0] if parents and parents[0].is_dir() else launcher.parent
     if config.use_builtin_runtime:
         return config.builtin_runtime_path / "XXMI"
-    launcher = config.xxmi_launcher_path
-    if launcher is None or not launcher.is_file():
-        return None
-    candidates = [
-        launcher.parent.parent.parent,
-        launcher.parent.parent,
-        launcher.parent,
-    ]
-    for candidate in candidates:
-        if (candidate / "Resources" / "Bin").is_dir() or (candidate / "EFMI").is_dir():
-            return candidate
     return None
 
 
@@ -123,9 +132,16 @@ def check_integrity(config: AppConfig) -> dict:
         for name in ("3dmloader.dll", "d3d11.dll", "d3dcompiler_47.dll"):
             path = root / "Resources" / "Packages" / "XXMI" / name
             add(f"xxmi_libs_{name}", path, path.is_file(), f"XXMI Libraries / {name}")
-        efmi_root = root / "EFMI"
-        add("efmi_main", efmi_root / "Core" / "EFMI" / "main.ini", (efmi_root / "Core" / "EFMI" / "main.ini").is_file(), "EFMI Core / main.ini")
-        add("efmi_d3dx", efmi_root / "d3dx.ini", (efmi_root / "d3dx.ini").is_file(), "EFMI d3dx.ini")
+        # ⚠️ EFMI 不一定在 <XXMI>\EFMI（2026-11-28 修，同一份诊断包）：
+        #    XXMI 的 importer 配置里可以把它指到别处（用户现场 importer_folder=D:/EFMI，
+        #    于是 EFMI 在 D:\EFMI 而不是 D:\XXMI\EFMI）。运行期用的是 config.efmi_dir
+        #    （从 launcher 上溯找 EFMI 目录）—— 这里必须用**同一个**判据，
+        #    否则照旧误报「EFMI Core / main.ini、EFMI d3dx.ini 缺失」，启动被拦。
+        efmi_root = config.efmi_dir or (root / "EFMI")
+        efmi_main = efmi_root / "Core" / "EFMI" / "main.ini"
+        add("efmi_main", efmi_main, efmi_main.is_file(), "EFMI Core / main.ini")
+        efmi_d3dx = efmi_root / "d3dx.ini"
+        add("efmi_d3dx", efmi_d3dx, efmi_d3dx.is_file(), "EFMI d3dx.ini")
         # ⚠️⚠️ **这一项要认「实际会 stage 到哪」，而不是「内置那份装没装」**
         #（2026-10-03 反馈：`use_builtin_runtime=true` 但 `staging_mods_dir` 指向外部 XXMI
         #  ⇒ 检查内置路径永远 missing ⇒ `launch failed: 完整性检查失败: EFMI Mods directory`

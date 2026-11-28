@@ -40,7 +40,8 @@ def test_store_nsfw_mode_is_remembered() -> None:
 
 def test_downloads_page_has_a_done_card() -> None:
     page = _read("pages", "DownloadsPage.vue")
-    assert 'title="已下载"' in page
+    # 文案走 i18n（2026-11-28 起）：裸 `title="已下载"` 与 `:title="t('已下载')"` 都算对
+    assert 'title="已下载"' in page or ":title=\"t('已下载')\"" in page, "没有「已下载」卡片"
     assert "const doneItems" in page and "const pendingItems" in page
     assert 'v-for="(item, index) in pendingItems"' in page, "进行中列表应只显示未入库的"
     assert "已入库" in page

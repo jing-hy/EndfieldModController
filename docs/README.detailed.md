@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 # EndfieldModController —— 详细文档
 
-当前版本 **1.6.0** ｜ [下载最新版](https://github.com/jing-hy/EndfieldModController/releases)
+当前版本 **1.6.1** ｜ [下载最新版](https://github.com/jing-hy/EndfieldModController/releases)
 
 > 这是详细版：安装、各页面用法、目录结构、逐项排查都在这里。
 > 只想快速上手的话看 **[简略版 README](../README.md)**；想改代码看 **[维护者指南](../CONTRIBUTING.md)**。
@@ -372,6 +372,11 @@ Mod 库页点「下载 Mod」→ 弹窗里一个输入框，**一行一个 `http
 游戏目录缺 `d3dcompiler_47.dll` / `vulkan-1.dll`。
 **也不要同时开「部署新版 nvngx」。**
 
+**Q：角色墙的头像怎么是灰的？要不要联网？**
+头像是官方美术，**不随 exe 分发**，也**不会在你进页面时偷偷联网**。第一次进角色墙
+如果本地还没有图，页面顶部会出现一行「角色立绘还没下载（N 张）」和「去下载」按钮 ——
+点它就在**下载页**建一个「角色立绘」任务（带进度），下完落到 runtime\cache\characters\，
+之后**离线也一直显示**，不会再下第二次。
 **Q：第一次启动会很慢吗？**
 不会。窗口 1~3 秒内出现，而且**任何阶段都不会出现空白窗口**。
 费时间的只有首次下载安装那几个组件；后台遍历盘符找工具是在首屏出来**之后**才开始的，

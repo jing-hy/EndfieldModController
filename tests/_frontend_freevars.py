@@ -66,12 +66,20 @@ STORE_FUNCS: set[str] = set()
 
 
 def strip_noise(script: str) -> str:
-    """去掉注释与字符串字面量（否则注释里的 `get_state()`、CSS 的 `var(--x)` 全是误报）。"""
-    text = re.sub(r"/\*[\s\S]*?\*/", " ", script)
-    text = re.sub(r"(^|[^:'\"\\])//[^\n]*", r"\1 ", text, flags=re.M)
-    text = re.sub(r"`(?:\\.|[^`\\])*`", " `` ", text)
+    """去掉注释与字符串字面量（否则注释里的 `get_state()`、CSS 的 `var(--x)` 全是误报）。
+
+    ⚠️ **必须先剥字符串、再剥注释**（2026-11-28 修）：反过来的话，
+    `frontend/src/lib/i18n.js` 的注释里那句 `lib/i18n/en/*.js` 含一个 `/*`，
+    块注释正则就会从这里一路吞到下一个 `*/` —— 把 `t()` 与 `applyLang()` 的**声明**
+    整段当注释删掉，于是这两个函数被判成"未声明"，绿项目变红。
+    （剥注释时保留原换行数，报错行号才不会偏移。）
+    """
+    text = re.sub(r"`(?:\\.|[^`\\])*`", " `` ", script)
     text = re.sub(r"\"(?:\\.|[^\"\\\n])*\"", ' "" ', text)
     text = re.sub(r"'(?:\\.|[^'\\\n])*'", " '' ", text)
+    text = re.sub(r"(^|[^:'\"\\])//[^\n]*", r"\1 ", text, flags=re.M)
+    text = re.sub(r"/\*[\s\S]*?\*/",
+                  lambda m: "\n" * m.group(0).count("\n") or " ", text)
     return text
 
 

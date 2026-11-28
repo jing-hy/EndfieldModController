@@ -623,7 +623,7 @@ def check_component_version_table(args: list[str]) -> None:
     if result.returncode != 0:
         print("[组件版本表] ⚠ 有组件对不上 —— 常见两种原因，按上面那段提示处理："
               "① 表过期 → 更新 `endfieldmodcontroller/component_versions.json`；"
-              "② 离线包过期 → 跑 `python scripts\\build_deps_bundle.py` 重打，再重跑本脚本；"
+              "② 离线包过期 → 跑 `python scripts\\build_deps_bundle.py --all-editions` 重打，再重跑本脚本；"
               "确实要跳过就加 `--skip-version-table-check`。**本轮构建已中止**。", flush=True)
         return False
     return True

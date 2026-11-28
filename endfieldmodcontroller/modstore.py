@@ -746,10 +746,8 @@ class ThumbServer:
                 #    排查时最费时间的就是这种"两边都对、就是不在同一个地方"。
                 avatars = root.parent.parent / "characters"
                 avatars.mkdir(parents=True, exist_ok=True)
-                # **随包**头像（与 `characters.json` 同级、一起打进 exe）：用户 2026-10-07
-                # 「角色表和图直接随包」「是随 exe」⇒ 这里两个目录都查，随包的优先、
-                # 运行时缓存（官网新角色）兜底。
-                packed_avatars = Path(__file__).with_name("characters")
+                # 头像**不随包**（2026-11-28）：改由 `character_avatars` 从官网拉到
+                # `<cache>/characters/`，所以这里只服务这一个目录。
 
                 class _Handler(http.server.SimpleHTTPRequestHandler):
                     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -773,10 +771,7 @@ class ThumbServer:
                         #    `character_avatars._NAME_RE` 保持一致，两边都挡 `../`）
                         if re.fullmatch(r"[a-z0-9_]+(?:\.[0-9a-f]{6,})?\.(?:png|jpg|jpeg|webp)",
                                         name, re.I):
-                            for folder in (packed_avatars, avatars):
-                                if (folder / name).is_file():
-                                    return str(folder / name)
-                            return str(avatars / name)      # 真没有 ⇒ 404，符合预期
+                            return str(avatars / name)      # 没下好 ⇒ 404，符合预期
                         return str(root / "__forbidden__")
 
                 self._httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Handler)

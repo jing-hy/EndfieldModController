@@ -35,7 +35,7 @@ XXMI / XXMI-Libs / EFMI / Poser / reshade 是联网安装（或由 exe 内嵌）
 它和随包资产一样会过气：v1.5.1 那次就出现过表已写 EFMI 1.5.1、离线包里还是 1.4.9，
 而发版流程只核对“表 vs 上游”“表 vs 随包资产”两道，发现不了。
 所以再比一次包内 `manifest.json` 的 `deps` 版本：
-  * 包比表旧  → `stale`：先 `python scripts\\build_deps_bundle.py` 重打，再发版；
+  * 包比表旧  → `stale`：先 `python scripts\\build_deps_bundle.py --all-editions` 重打，再发版；
   * 包比表新  → `ahead`：表漏更新；
   * 包在但缺组件 / 读不出 → `missing` / `unreadable`，同样报警；
   * 本机根本没有离线包 → `absent`，只提示、不阻断（从没打过离线包的机器不该被拦）。
@@ -198,7 +198,15 @@ def collect_assets(table: dict[str, Any], *, allow_missing: bool = False) -> lis
 # ---------------------------------------------------------------- 第三道：离线依赖包
 #: 离线包（`dist/deps-bundle.zip`，**不随 Release**、QQ 群应急分发）的 manifest 键 → 版本表键。
 #: 只登记两边都有的组件；secondary_motion / rabbitfx 随 assets-bundle，不在这里。
-OFFLINE_BUNDLE = ROOT / "dist" / "deps-bundle.zip"
+OFFLINE_BUNDLES: dict[str, Path] = {
+    "full": ROOT / "dist" / "deps-bundle.zip",
+    "lite": ROOT / "dist" / "deps-bundle-lite.zip",
+}
+#: 兼容旧引用（单包形态）。
+OFFLINE_BUNDLE = OFFLINE_BUNDLES["full"]
+#: Lite 包里本来就没有的东西（与 build_deps_bundle.RESHADE_DEPS 同一批）—— 核对时跳过，
+#: 否则会把「Lite 不打 ReShade」误报成「离线包里缺这个组件」。
+OFFLINE_LITE_SKIP: frozenset[str] = frozenset({"ReShade", "DLSS5-Feeder", "iMMERSE"})
 OFFLINE_KEY_MAP: dict[str, str] = {
     "XXMI": "XXMI",
     "XXMI-Libs": "XXMI-Libs",
@@ -218,7 +226,8 @@ def _table_row(table: dict[str, Any], key: str) -> dict[str, Any] | None:
     return None
 
 
-def collect_offline_bundle(table: dict[str, Any], *, bundle_path: Path | None = None) -> dict[str, Any]:
+def collect_offline_bundle(table: dict[str, Any], *, bundle_path: Path | None = None,
+                           edition: str = "") -> dict[str, Any]:
     """逐项比对「离线包里打的组件版本」与「表里的 latest」。
 
     为什么需要这一道（2026-11-27）：离线包打包的是**某一时刻**的组件原文，
@@ -244,9 +253,13 @@ def collect_offline_bundle(table: dict[str, Any], *, bundle_path: Path | None = 
     deps = manifest.get("deps") if isinstance(manifest, dict) else None
     if not isinstance(deps, dict):
         deps = {}
+    # 包自己声明了形态（build_deps_bundle 写进 manifest）；读不到就按调用方给的算。
+    manifest_edition = str(manifest.get("edition") or edition or "full").strip().lower()
     rows: list[dict[str, Any]] = []
     problems: list[dict[str, Any]] = []
     for package_key, table_key in OFFLINE_KEY_MAP.items():
+        if manifest_edition == "lite" and package_key in OFFLINE_LITE_SKIP:
+            continue          # Lite 包本来就不打 ReShade 链路，别误报缺组件
         info = _table_row(table, table_key)
         if info is None:
             continue  # 表里没登记这个组件 ⇒ 不归这一道管
@@ -274,7 +287,27 @@ def collect_offline_bundle(table: dict[str, Any], *, bundle_path: Path | None = 
         if status in ("stale", "ahead", "missing"):
             problems.append(row)
     built_at = str(manifest.get("built_at") or "") if isinstance(manifest, dict) else ""
-    return {"bundle": str(path), "built_at": built_at, "rows": rows, "problems": problems}
+    return {"bundle": str(path), "built_at": built_at, "edition": manifest_edition,
+            "rows": rows, "problems": problems}
+
+
+def collect_offline_bundles(table: dict[str, Any]) -> dict[str, Any]:
+    """两版离线包各核一遍（2026-11-28 用户：「现在应该要构建两个离线包」）。
+
+    返回 {"bundles": {edition: result}, "problems": [...]}；每条问题带上 edition
+    与 bundle_name，打印/中止提示才能分清是哪个包过期。
+    """
+    bundles: dict[str, Any] = {}
+    problems: list[dict[str, Any]] = []
+    for edition, path in OFFLINE_BUNDLES.items():
+        result = collect_offline_bundle(table, bundle_path=path, edition=edition)
+        bundles[edition] = result
+        for row in result.get("problems") or []:
+            item = dict(row)
+            item["edition"] = edition
+            item["bundle_name"] = path.name
+            problems.append(item)
+    return {"bundles": bundles, "problems": problems}
 
 
 def compare_characters(local_payload: dict[str, Any],
@@ -363,10 +396,10 @@ def collect(*, allow_missing_assets: bool = False) -> dict[str, Any]:
                 "reason": reason,
             })
     asset_rows = collect_assets(table, allow_missing=allow_missing_assets)
-    offline = collect_offline_bundle(table)
+    offline_bundles = collect_offline_bundles(table)
     problems = [row for row in rows if row["status"] in ("outdated", "ahead")]
     asset_problems = [row for row in asset_rows if row["status"] in ("stale", "asset_ahead", "missing")]
-    offline_problems = offline.get("problems") or []
+    offline_problems = offline_bundles.get("problems") or []
     characters = collect_characters()
     character_problems = characters.get("problems") or []
     errors = [str(item) for item in (report.get("errors") or [])]
@@ -376,7 +409,8 @@ def collect(*, allow_missing_assets: bool = False) -> dict[str, Any]:
         "character_problems": character_problems,
         "rows": rows,
         "assets": asset_rows,
-        "offline": offline,
+        "offline": offline_bundles["bundles"].get("full") or {},
+        "offline_bundles": offline_bundles["bundles"],
         "problems": problems,
         "asset_problems": asset_problems,
         "offline_problems": offline_problems,
@@ -427,18 +461,23 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {asset_marks.get(row['status'], row['status']):<16} {row['display']:<12} "
                   f"表={row['table'] or '(空)':<10} 随包={row['bundled']}")
 
-    offline = data.get("offline") or {}
-    if offline.get("note"):
+    offline_bundles = data.get("offline_bundles") or {}
+    if not offline_bundles:
+        legacy = data.get("offline") or {}
+        offline_bundles = {"full": legacy} if legacy else {}
+    offline_marks = {"ok": "✓", "stale": "⚠ 离线包还是旧版", "ahead": "⚠ 离线包比表新",
+                     "missing": "⚠ 离线包里缺这个组件", "unreadable": "⚠ 离线包读不出",
+                     "unknown": "？ 缺版本号"}
+    for edition, offline in offline_bundles.items():
+        if offline.get("note"):
+            print("")
+            print(f"[组件版本表] {offline['note']}")
+        offline_rows = offline.get("rows") or []
+        if not offline_rows:
+            continue
         print("")
-        print(f"[组件版本表] {offline['note']}")
-    offline_rows = offline.get("rows") or []
-    if offline_rows:
-        print("")
-        print(f"[组件版本表] 表里的版本 vs 离线依赖包（{offline.get('bundle') or '?'}，"
+        print(f"[组件版本表] 表里的版本 vs 离线依赖包（{edition}：{offline.get('bundle') or '?'}，"
               f"生成于 {offline.get('built_at') or '?'}）：")
-        offline_marks = {"ok": "✓", "stale": "⚠ 离线包还是旧版", "ahead": "⚠ 离线包比表新",
-                         "missing": "⚠ 离线包里缺这个组件", "unreadable": "⚠ 离线包读不出",
-                         "unknown": "？ 缺版本号"}
         for row in offline_rows:
             print(f"  {offline_marks.get(row['status'], row['status']):<16} "
                   f"{row['display']:<12} 表={row['table'] or '(空)':<10} "
@@ -489,7 +528,7 @@ def main(argv: list[str] | None = None) -> int:
         for row in offline_problems:
             if row["status"] == "stale":
                 print(f"    {row['display']}：表写 {row['table']}，离线包只打了 {row['bundle']}"
-                      f" ⇒ 跑 `python scripts\\build_deps_bundle.py` 重打，或把表退回 {row['bundle']}")
+                      f" ⇒ 跑 `python scripts\\build_deps_bundle.py --all-editions` 重打，或把表退回 {row['bundle']}")
             elif row["status"] == "ahead":
                 print(f"    {row['display']}：离线包已是 {row['bundle']}，表还写 {row['table']}"
                       f" ⇒ 把表改成 {row['bundle']}")

@@ -47,7 +47,8 @@ def test_mod_library_page_shows_loading_instead_of_empty_state():
 
 def test_mod_library_page_hides_the_zero_count_before_state():
     text = _read("pages/ModLibraryPage.vue")
-    assert "v-else>正在读取 Mod 库…</template>" in text, (
+    # 文案走 i18n（2026-11-28 起），所以按"内容 + 分支位置"判，而不是裸中文
+    assert 'v-else>{{ t("正在读取 Mod 库…") }}</template>' in text, (
         "状态没到之前仍会显示『已发现 0 个 Mod』—— 0 会被读成『库是空的』"
     )
 
