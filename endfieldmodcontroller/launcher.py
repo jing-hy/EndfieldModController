@@ -2633,23 +2633,18 @@ def ensure_xxmi_game_folder(config: AppConfig, *, log: Callable[[str], None] | N
     # ★ 桌面快捷方式（2026-11-28 用户：「efmi 老是在桌面创建快捷方式」）。
     #   XXMI 的 `ModelImporterPackage.create_shortcut` 会按这个状态位给 EFMI 建一个
     #   「跳过启动器直接进游戏」的桌面快捷方式，而它的配置里**没有"不要创建"的开关**
-    #   —— 只有 `shortcut_deployed` 这个标记。我们的注入链路本来就走 XXMI 自己的
-    #   启动按钮，那个快捷方式对用户没用，所以这里把它固定成"已部署"，XXMI 就不会再建。
+    #   —— 只有 `shortcut_deployed` 这个标记。我们的注入链路走 XXMI 命令行直启
+    #   （`--nogui --xxmi EFMI`），那个快捷方式对用户没用，所以这里把它固定成"已部署"，XXMI 就不会再建。
     if importer.get("shortcut_deployed") is not True:
         importer["shortcut_deployed"] = True
         changed.append("Importers.EFMI.Importer.shortcut_deployed")
-    # ★★ 2026-11-28（诊断包 225854）：**清掉 `launcher_folder`** —— 它会让 XXMI 绕道官方启动器。
+    # ⚠️ 2026-11-29 用户：「清空加载器文件那个也去掉」—— 这里**不再清 `launcher_folder`**。
     #
-    #   现场：他那台 `launcher_folder = D:\Hypergryph Launcher`，XXMI 于是用
-    #   `StartMethod.NATIVE` 去启动 `1.6.0\Games.exe`（`cmd_args` 为空）⇒ 游戏由官方启动器
-    #   拉起、**拿不到 `-force-d3d11`** ⇒ 走 Vulkan。而他三份崩溃日志里都没有
-    #   `Forcing GfxDevice: Direct3D 11`（本机有那一行，所以本机不崩），崩溃栈是
-    #   `nvoglv64!vk_gr2608GetInstanceProcAddr → NvPresent64!NVP_Init_Vulkan → vulkan-1!vkResetEvent`。
-    #   清掉之后 XXMI 回到 `game_launch = DIRECT` + `d3d11_mode_cmd_args = -force-d3d11`，
-    #   与本机能正常进入的那条路完全一致。
-    if str(importer.get("launcher_folder") or "").strip():
-        importer["launcher_folder"] = ""
-        changed.append("Importers.EFMI.Importer.launcher_folder（改为直接启动游戏，走 -force-d3d11）")
+    #   实测（诊断包 20261129-002057 + 本机两轮对照）清空拦不住 XXMI：它每次启动都会自己
+    #   重新检测到 `D:\Hypergryph Launcher`，先弹一次「已找到官方启动器」等用户确认，
+    #   再把这一项写回配置 —— 除了每次多一个弹窗，启动路径没有任何变化。
+    #   现在游戏由「无界面直启」拉起（`build_launch_command` → `--nogui --xxmi EFMI`），
+    #   不需要再靠改这项配置去绕官方启动器。
     if not changed:
         return {"ok": True, "changed": False, "game_dir": str(game_dir),
                 "message": f"XXMI 已指向游戏目录（{game_dir.name}）"}
@@ -2965,15 +2960,17 @@ def build_launch_command(config: AppConfig, *, start_game: bool = False) -> list
     launcher = config.xxmi_launcher_path
     if launcher is None:
         raise LaunchError("XXMI Launcher path is not configured")
-    if not start_game:
-        # Opening XXMI without --xxmi only shows the launcher window.  Passing
-        # --xxmi EFMI makes XXMI start the game immediately, which is not what
-        # the one-click preparation flow promises.
-        return [str(launcher)]
     game_exe = config.game_exe_path
-    # Explicit "start game" keeps the normal XXMI window visible.  The
-    # headless --nogui form is still available through core.build_xxmi_launch_command.
-    return core.build_xxmi_launch_command(launcher, game_exe, nogui=False)
+    # 2026-11-29 用户拍板：「无界面启动 EFMI 更好，EMC 的启动换成这个方式」。
+    # 以前是一键启动只开 XXMI 窗口、再由用户在窗口里点 Start，实测代价是：
+    #   ① 走 GUI 启动时 XXMI 每次都会先弹「已找到官方启动器」等用户确认，再带起一个
+    #      新的 `Games.exe`（诊断包 20261129-002057：Games 00:20:26.250 → 游戏 00:20:26.455）；
+    #   ② 游戏最终由哪个启动源拉起不受我们控制 —— 被官方启动器抢先时进程里没有
+    #      `-force-d3d11`（`Player.log` 无 `Forcing GfxDevice: Direct3D 11`，走 Vulkan，
+    #      崩在 nvoglv64 / NvPresent64!NVP_Init_Vulkan）。
+    # `--nogui --xxmi EFMI <game>` 由 XXMI 一气呵成拉起游戏：不需要用户再点一次，
+    # 也不弹那个确认框。`start_game` 保留只为兼容既有调用（preview / launch_game 同一条命令）。
+    return core.build_xxmi_launch_command(launcher, game_exe, nogui=True)
 
 
 def launch_official_gui(config: AppConfig) -> dict[str, Any]:
@@ -3652,8 +3649,7 @@ def launch(
         _append_log(config, f"关闭官方启动器失败（继续）: {exc}")
     _append_log(config, f"launch command: {command}")
     _append_log(config, f"RESHADE_BASE_PATH_OVERRIDE={env.get('RESHADE_BASE_PATH_OVERRIDE')}")
-    if not start_game:
-        _append_log(config, "游戏未由 EndfieldModController 启动；请从 XXMI Launcher 手动启动游戏。")
+    _append_log(config, "以无界面方式拉起 XXMI 并直接启动游戏（--nogui --xxmi EFMI）")
 
     # 非管理员时**只记一条日志，不阻止启动**。
     # 原来这里写的是 `hasattr(os, "geteuid") and os.geteuid() != 0` —— 那是 Unix 专用，

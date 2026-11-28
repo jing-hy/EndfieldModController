@@ -1,5 +1,19 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 
+# v1.6.4
+
+本版只改启动这一条路：**一键启动不再开 XXMI 窗口等你点 Start，而是无界面直接把游戏拉起来**；上一版那条「清空 launcher_folder」实测无效，一并撤掉。
+
+## 一、一键启动改为无界面直启游戏
+
+* 现场（诊断包 20261129-002057）：XXMI 走 GUI 启动时**每次**都会先弹「已找到官方启动器」等用户确认，再拉起一个新的 `1.6.0\Games.exe`（命令行参数为空）⇒ 游戏有时被官方启动器抢先拉起、**拿不到 `-force-d3d11`** ⇒ 走 Vulkan ⇒ 崩在 `nvoglv64 → NvPresent64!NVP_Init_Vulkan → vulkan-1!vkResetEvent`（那次的 `Player.log` 里**没有** `Forcing GfxDevice: Direct3D 11`，却有 `Vulkan PSO: Invalid or outdated unity cache header`）。
+* 修法：一键启动不再只开 XXMI 窗口，而是直接 `XXMI Launcher.exe --nogui --xxmi EFMI <game>` —— 由 XXMI 一气呵成拉起游戏，用户不用再在 XXMI 里点一次，也不再弹那个确认框。
+
+## 二、不再清空 XXMI 的 `launcher_folder`
+
+* 上一版的「启动前清空 `launcher_folder`」实测拦不住 XXMI：它每次启动都会自己重新检测到 `D:\Hypergryph Launcher`、写回配置，除了每次多一个确认弹窗，启动路径没有任何变化。
+* 现在这一项**原样保留**用户配好的值（测试 `test_ensure_xxmi_game_folder_keeps_launcher_folder` 钉住）。
+
 # v1.6.3
 
 本版修掉三件事：**Lite 版被 ReShade 校验拦住启动**、**一键启动把游戏绕进 Vulkan 然后崩**、**「使用内置 XXMI/EFMI」开关不生效**。
@@ -10,11 +24,11 @@
 * 根因：`AppConfig.validate()` 无条件校验 ReShade 底座，而 **Lite 版根本不含 ReShade**（一个底座都不注入），配置里 `reshade_dll` 又留着默认值 ⇒ 这条校验必然失败。这不是「文件缺了要补」，是「这一版不要它」。
 * 修法：Lite 版跳过这条校验（完整版照旧）。
 
-## 二、游戏不再被绕进 Vulkan（崩在显卡驱动那层）
+## 二、一键启动改为「无界面直启游戏」，不再让 XXMI 绕道官方启动器
 
-* 现场链条：XXMI 的 EFMI importer 带着 `launcher_folder = D:\Hypergryph Launcher` ⇒ XXMI 先去启动**官方启动器**（`1.6.0\Games.exe`，命令行参数为空）⇒ 游戏拿不到 `-force-d3d11` ⇒ 走 Vulkan ⇒ 崩在 `nvoglv64!vk_gr2608GetInstanceProcAddr → NvPresent64!NVP_Init_Vulkan → vulkan-1!vkResetEvent`。
-* 判据：那台机器三份崩溃日志里**都没有** `Forcing GfxDevice: Direct3D 11`，却都有 `Vulkan PSO: Invalid or outdated unity cache header`；同一套注入在本机（走 `-force-d3d11`）能正常进。
-* 修法：启动前清空 `launcher_folder` ⇒ XXMI 回到「直接启动 `Endfield.exe` + `-force-d3d11`」。
+* 现场链条（诊断包 20261129-002057）：XXMI 走 GUI 启动时**每次**都会先弹「已找到官方启动器」等用户确认，再拉起一个新的 `1.6.0\Games.exe`（命令行参数为空）⇒ 游戏可能由官方启动器先拉起、**拿不到 `-force-d3d11`** ⇒ 走 Vulkan ⇒ 崩在 `nvoglv64 → NvPresent64!NVP_Init_Vulkan → vulkan-1!vkResetEvent`（那次的 `Player.log` 里**没有** `Forcing GfxDevice: Direct3D 11`，却有 `Vulkan PSO: Invalid or outdated unity cache header`）。
+* 修法：一键启动不再只开 XXMI 窗口，而是直接 `XXMI Launcher.exe --nogui --xxmi EFMI <game>` —— 由 XXMI 一气呵成拉起游戏，用户不用再在 XXMI 里点一次，也不再弹那个确认框。
+* 一并撤掉上一版「启动前清空 `launcher_folder`」：实测清空拦不住 XXMI（它每次都会重新检测到 `D:\Hypergryph Launcher` 并写回配置），除了每次启动多一个确认弹窗，启动路径没有任何变化。
 
 ## 三、「使用内置 XXMI/EFMI」按开关走
 

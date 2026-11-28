@@ -83,10 +83,18 @@ $cape = 0,1
             self.assertFalse((self.config.reshade_runtime_path / "Addons" / "endfieldmodcontroller.addon").is_file())
 
     def test_launch_preview_without_controller(self) -> None:
+        """一键启动的命令必须是**无界面直启游戏**（2026-11-29 用户拍板）。
+
+        以前断言的是 `[xxmi]` —— 只开窗口、由用户再点一次 Start。实测那条路会让
+        XXMI 先弹「已找到官方启动器」并带起一个新的 `Games.exe`，游戏可能被它抢先拉起
+        （进程里没有 `-force-d3d11`，走 Vulkan 崩在 NVIDIA 驱动层）。
+        """
         result = launcher.launch(self.config, dry_run=True)
-        self.assertEqual(result["command"], [str(self.config.xxmi_launcher_path)])
-        self.assertNotIn("--xxmi", result["command"])
-        self.assertNotIn("--nogui", result["command"])
+        self.assertEqual(
+            result["command"],
+            [str(self.config.xxmi_launcher_path), "--nogui", "--xxmi", "EFMI",
+             str(self.config.game_exe_path)],
+        )
 
     def test_launch_env_for_existing_reshade(self) -> None:
         env = launcher.build_launch_env(self.config, existing_reshade=True)
@@ -185,11 +193,11 @@ $cape = 0,1
         result = api.prepare([mod_id])
         self.assertGreaterEqual(result["action_count"], 1)
         preview = api.launch_preview()
-        self.assertEqual(preview["command"], [str(api.config.xxmi_launcher_path)])
-        self.assertNotIn("--xxmi", preview["command"])
-        self.assertNotIn("--nogui", preview["command"])
+        self.assertIn("--nogui", preview["command"])
+        self.assertIn("--xxmi", preview["command"])
+        # `start_game` 与一键启动走同一条命令（都是无界面直启游戏）
         preview_game = api.launch_preview(start_game=True)
-        self.assertNotIn("--nogui", preview_game["command"])
+        self.assertIn("--nogui", preview_game["command"])
         self.assertIn("--xxmi", preview_game["command"])
 
     def test_launch_aborts_when_builtin_components_missing(self) -> None:

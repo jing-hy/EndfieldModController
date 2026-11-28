@@ -324,13 +324,13 @@ def test_ensure_xxmi_game_folder_does_not_overwrite_user_game_exe(tmp_path, monk
 
     assert config.game_exe == r"D:\my\own\Endfield.exe"
 
-def test_ensure_xxmi_game_folder_clears_launcher_folder(tmp_path, monkeypatch):
-    r"""**清掉 `launcher_folder`**，否则 XXMI 会绕道官方启动器、游戏走 Vulkan 崩掉。
+def test_ensure_xxmi_game_folder_keeps_launcher_folder(tmp_path, monkeypatch):
+    r"""**不要动 `launcher_folder`**（2026-11-29 用户：「清空加载器文件那个也去掉」）。
 
-    现场（诊断包 225854）：`launcher_folder = D:\Hypergryph Launcher` ⇒ XXMI 用
-    `StartMethod.NATIVE` 去启动 `1.6.0\Games.exe`（cmd_args 为空）⇒ 游戏拿不到
-    `-force-d3d11` ⇒ 走 Vulkan ⇒ 崩在 `nvoglv64!vk_gr2608GetInstanceProcAddr`。
-    清掉后回到 `game_launch=DIRECT` + `d3d11_mode_cmd_args=-force-d3d11`。
+    以前这里会把它清空，想借此让 XXMI 别绕官方启动器。实测（诊断包 20261129-002057 +
+    本机两轮对照）清空拦不住：XXMI 每次启动都会自己重新检测到 `D:\Hypergryph Launcher`，
+    弹一次「已找到官方启动器」等用户确认，再把这一项写回 —— 只多了一个弹窗。
+    现在游戏由「无界面直启」（`--nogui --xxmi EFMI`）拉起，不靠这项配置。
     """
     xxmi, launcher_exe = _fake_xxmi(tmp_path, importers={
         "EFMI": {"Importer": {
@@ -348,7 +348,7 @@ def test_ensure_xxmi_game_folder_clears_launcher_folder(tmp_path, monkeypatch):
     assert state["ok"] is True, state
     data = json.loads((xxmi / "XXMI Launcher Config.json").read_text(encoding="utf-8"))
     importer = data["Importers"]["EFMI"]["Importer"]
-    assert importer.get("launcher_folder") in ("", None), "必须清空，否则又绕去官方启动器"
+    assert importer.get("launcher_folder") == r"D:\Hypergryph Launcher", "用户配好的启动器路径要原样保留"
 
 def test_use_builtin_runtime_wins_over_external_launcher_field(tmp_path, monkeypatch):
     r"""开关「使用内置 XXMI/EFMI」开着，就以内置为准 —— 别被字段里的外部路径顶掉。
