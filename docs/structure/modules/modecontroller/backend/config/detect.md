@@ -11,16 +11,16 @@ description:
   en: >
       Find things on a stranger's machine: the game directory (config, common install roots, drive scan), the XXMI launcher, a legacy migoto loader, the official launcher, the jiggle-physics install — each with a cached result so startup stays fast.
       
-revision: 702c5e42321f8e9b483e17ba55f39b5eed1fc548
-updated_at: "2026-11-28T16:50:56.988Z"
-fingerprint: adfbcf27300d0027eaf971941e9ee983647383047d33d0622bd15649c6f77c26
+revision: b124e58720a8b882c922f28505d3d1412c494693
+updated_at: "2026-11-28T17:22:47.823Z"
+fingerprint: 0c42274d50b983766b8d83d8406b2b8e7930565b3c2f43c0fa39599da885956f
 source:
   - path: "endfieldmodcontroller/config.py"
-    line: 1415
-    end_line: 2264
+    line: 1424
+    end_line: 2282
   - path: "endfieldmodcontroller/config.py"
-    line: 1501
-    end_line: 2438
+    line: 1510
+    end_line: 2456
 apis:
   - protocol: rpc
     path: "config.auto_detect_game_dir"

@@ -2960,17 +2960,19 @@ def build_launch_command(config: AppConfig, *, start_game: bool = False) -> list
     launcher = config.xxmi_launcher_path
     if launcher is None:
         raise LaunchError("XXMI Launcher path is not configured")
+    nogui = bool(getattr(config, "launch_nogui", False))
+    if not start_game and not nogui:
+        # 默认：只开 XXMI 窗口，由用户自己点 Start。
+        #
+        # ⚠️ 2026-11-29 回滚记录（v1.6.4 → v1.6.5）：v1.6.4 曾**无条件**改成
+        #   `--nogui --xxmi EFMI <game>`（无界面直启），用户实测**拉不起来终末地**。
+        #   本机对照实验定位到：`--nogui` 下 XXMI 仍会弹「性能提示」这类**模态框**，
+        #   而那时没有主窗口 ⇒ 用户看不见、也点不到 ⇒ 流程永远卡在"启动游戏之前"
+        #   （EMC 日志停在「进程监视启动」，之后没有「检测到游戏进程」）。
+        #   所以改成**开关**（`launch_nogui`，默认关）：默认走看得见的窗口方式。
+        return [str(launcher)]
     game_exe = config.game_exe_path
-    # 2026-11-29 用户拍板：「无界面启动 EFMI 更好，EMC 的启动换成这个方式」。
-    # 以前是一键启动只开 XXMI 窗口、再由用户在窗口里点 Start，实测代价是：
-    #   ① 走 GUI 启动时 XXMI 每次都会先弹「已找到官方启动器」等用户确认，再带起一个
-    #      新的 `Games.exe`（诊断包 20261129-002057：Games 00:20:26.250 → 游戏 00:20:26.455）；
-    #   ② 游戏最终由哪个启动源拉起不受我们控制 —— 被官方启动器抢先时进程里没有
-    #      `-force-d3d11`（`Player.log` 无 `Forcing GfxDevice: Direct3D 11`，走 Vulkan，
-    #      崩在 nvoglv64 / NvPresent64!NVP_Init_Vulkan）。
-    # `--nogui --xxmi EFMI <game>` 由 XXMI 一气呵成拉起游戏：不需要用户再点一次，
-    # 也不弹那个确认框。`start_game` 保留只为兼容既有调用（preview / launch_game 同一条命令）。
-    return core.build_xxmi_launch_command(launcher, game_exe, nogui=True)
+    return core.build_xxmi_launch_command(launcher, game_exe, nogui=nogui)
 
 
 def launch_official_gui(config: AppConfig) -> dict[str, Any]:
@@ -3649,7 +3651,8 @@ def launch(
         _append_log(config, f"关闭官方启动器失败（继续）: {exc}")
     _append_log(config, f"launch command: {command}")
     _append_log(config, f"RESHADE_BASE_PATH_OVERRIDE={env.get('RESHADE_BASE_PATH_OVERRIDE')}")
-    _append_log(config, "以无界面方式拉起 XXMI 并直接启动游戏（--nogui --xxmi EFMI）")
+    if not start_game:
+        _append_log(config, "游戏未由 EndfieldModController 启动；请从 XXMI Launcher 手动启动游戏。")
 
     # 非管理员时**只记一条日志，不阻止启动**。
     # 原来这里写的是 `hasattr(os, "geteuid") and os.geteuid() != 0` —— 那是 Unix 专用，

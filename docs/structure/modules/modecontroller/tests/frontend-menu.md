@@ -11,8 +11,8 @@ description:
   en: >
       Static regression for the front-end menu actions (the "change character assignment does nothing" report): every action name the template passes must have a branch in the handler, the handler's catch must not swallow errors, and the card badge must pass its own mod.
       
-revision: 702c5e42321f8e9b483e17ba55f39b5eed1fc548
-updated_at: "2026-11-28T16:50:57.019Z"
+revision: b124e58720a8b882c922f28505d3d1412c494693
+updated_at: "2026-11-28T17:22:47.852Z"
 fingerprint: 8872126dfca7e53ef495fefad6e1a57f95d6c7e0cc575a89989051ec4c8c9257
 source:
   - path: "tests/test_frontend_menu_actions.py"

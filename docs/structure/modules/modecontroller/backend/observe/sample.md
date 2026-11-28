@@ -11,8 +11,8 @@ description:
   en: >
       Sample the running game cheaply: working set, thread count, loaded modules outside system paths — appended as a timeline so a later crash bundle shows what changed before it, not just the final state.
       
-revision: 702c5e42321f8e9b483e17ba55f39b5eed1fc548
-updated_at: "2026-11-28T16:50:57.005Z"
+revision: b124e58720a8b882c922f28505d3d1412c494693
+updated_at: "2026-11-28T17:22:47.839Z"
 fingerprint: 99050db55888c707486326fd44636fd7f5c0892df1d0427df6700dffc471cd12
 source:
   - path: "endfieldmodcontroller/watchsample.py"

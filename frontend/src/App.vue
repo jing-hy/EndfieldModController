@@ -639,7 +639,7 @@ const TOUR_STEPS = [
     tab: "launch", target: "oneclick-launch-btn",
     title: "第三步：一键启动",
     body: "点这个「一键启动」：程序会补齐缺失组件、同步注入库、跑一遍初始化自检，\n"
-      + "然后以无界面方式让 XXMI 直接把游戏拉起来（不用再在 XXMI 里点 Start）。\n\n"
+      + "然后拉起 XXMI Launcher（不会自动进游戏，进游戏在 XXMI 里点 Start）。\n\n"
       + "第一次可能会提示「请再点一次一键启动」，看到后再点一次即可。",
   },
   {

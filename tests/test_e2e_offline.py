@@ -111,8 +111,9 @@ $hat = 0,1
 
         # Launch preview is built without executing anything.
         preview = api.launch_preview()
-        self.assertIn("--nogui", preview["command"])
-        self.assertIn("--xxmi", preview["command"])
+        self.assertEqual(preview["command"], [str(api.config.xxmi_launcher_path)])
+        self.assertNotIn("--xxmi", preview["command"])
+        self.assertNotIn("--nogui", preview["command"])
 
         # Rollback removes only the managed staging directory.
         rollback = api.rollback()

@@ -11,8 +11,8 @@ description:
   en: >
       The single source of truth for the Universal/Lite editions: Lite disables the whole ReShade chain at runtime (no downloads, no injection, no writes, forced game-dir cleaning) and routes every master-switch check through one helper; both editions share a data root, so ReShade config stays read-only in Lite.
       
-revision: 702c5e42321f8e9b483e17ba55f39b5eed1fc548
-updated_at: "2026-11-28T16:50:56.988Z"
+revision: b124e58720a8b882c922f28505d3d1412c494693
+updated_at: "2026-11-28T17:22:47.823Z"
 fingerprint: dd591fefc72f435264c087efcfccc98596e219fdaadd21d69236b31d9c465bb3
 source:
   - path: "endfieldmodcontroller/edition.py"

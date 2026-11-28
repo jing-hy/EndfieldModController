@@ -11,8 +11,8 @@ description:
   en: >
       The remote announcement channel: decode the contents response, normalise entries, drop expired ones, gate each entry by the local version (so an announcement for one version stops bothering everyone else), and run the safe-mode action a critical alert can demand.
       
-revision: 702c5e42321f8e9b483e17ba55f39b5eed1fc548
-updated_at: "2026-11-28T16:50:57.010Z"
+revision: b124e58720a8b882c922f28505d3d1412c494693
+updated_at: "2026-11-28T17:22:47.844Z"
 fingerprint: 61e4200c51fc3ae4d81a51771336215e914c075a1dfca97f280e9d86b226f1d7
 source:
   - path: "endfieldmodcontroller/alerts.py"

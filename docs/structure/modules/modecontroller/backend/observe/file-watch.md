@@ -11,16 +11,16 @@ description:
   en: >
       Keep an eye on the files the program depends on: if one keeps disappearing (antivirus, another tool), notice it, remember which ones were already acknowledged, and surface a suggestion to whitelist the folder instead of failing silently later.
       
-revision: 702c5e42321f8e9b483e17ba55f39b5eed1fc548
-updated_at: "2026-11-28T16:50:57.003Z"
-fingerprint: 47b81c33e1050dd8a9f960ae828a2fab141dfa07387a3244e5e399ee5278c0fc
+revision: b124e58720a8b882c922f28505d3d1412c494693
+updated_at: "2026-11-28T17:22:47.837Z"
+fingerprint: 75012be478331ecddfa426987a4925cc16a3d2ab309cd03f94b0d831e4e3ce81
 source:
   - path: "endfieldmodcontroller/filewatch.py"
     line: 50
-    end_line: 463
+    end_line: 529
   - path: "endfieldmodcontroller/filewatch.py"
-    line: 528
-    end_line: 877
+    line: 561
+    end_line: 943
 apis:
   - protocol: rpc
     path: "filewatch.scan"

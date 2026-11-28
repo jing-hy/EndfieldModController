@@ -11,8 +11,8 @@ description:
   en: >
       Watch a launched process so a quiet failure is not lost: poll it, capture its output tail, and on exit record the code and a post-mortem line — the reason a crashed helper does not just vanish.
       
-revision: 702c5e42321f8e9b483e17ba55f39b5eed1fc548
-updated_at: "2026-11-28T16:50:57.005Z"
+revision: b124e58720a8b882c922f28505d3d1412c494693
+updated_at: "2026-11-28T17:22:47.839Z"
 fingerprint: 5c23b9ac6bdf6ca67f26bb131914af620c41542b2b0bf8b9994dc85ce52f7ff3
 source:
   - path: "endfieldmodcontroller/diagnostics.py"

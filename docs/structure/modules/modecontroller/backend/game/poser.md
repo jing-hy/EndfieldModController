@@ -11,8 +11,8 @@ description:
   en: >
       The posing / MMD plugin: detect whether its payload is deployed and consistent with its install record, run its own deploy wizard when missing, enable/disable, remove, open its web UI — the program manages it but never reimplements it.
       
-revision: 702c5e42321f8e9b483e17ba55f39b5eed1fc548
-updated_at: "2026-11-28T16:50:56.993Z"
+revision: b124e58720a8b882c922f28505d3d1412c494693
+updated_at: "2026-11-28T17:22:47.828Z"
 fingerprint: 1899de8184111c94304a12496d00a8ac1f69e5e027a905e086dc340ea0106ec8
 source:
   - path: "endfieldmodcontroller/poser.py"

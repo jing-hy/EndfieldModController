@@ -11,8 +11,8 @@ description:
   en: >
       Local HTTP channel that queues UI commands (click / toggle / set value / scroll), has the frontend run them on the real DOM, and returns the result. Binds 127.0.0.1 only, guarded by a per-launch token; port and token live in runtime/_state/ui_api.json for the CLI client.
       
-revision: 702c5e42321f8e9b483e17ba55f39b5eed1fc548
-updated_at: "2026-11-28T16:50:57.009Z"
+revision: b124e58720a8b882c922f28505d3d1412c494693
+updated_at: "2026-11-28T17:22:47.843Z"
 fingerprint: 9f6706b26ebfbc553622ac8a91ec63695b379c7453091581b05c644e641818ba
 source:
   - path: "endfieldmodcontroller/ui_automation.py"

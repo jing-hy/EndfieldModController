@@ -11,8 +11,8 @@ description:
   en: >
       Our own ReShade add-on: renders `actions.tsv` into a mod panel where **every entry is a button**, and turns a click into "key down" for that mod's own original key (see `modecontroller.addon.vkey-inject`). Native code, shipped inside the exe (`assets/addon/`), deployed by the controller.
       
-revision: 702c5e42321f8e9b483e17ba55f39b5eed1fc548
-updated_at: "2026-11-28T16:50:56.977Z"
+revision: b124e58720a8b882c922f28505d3d1412c494693
+updated_at: "2026-11-28T17:22:47.813Z"
 fingerprint: 67534b502098f6b0064275c1deba775e973a1ba23cd51ad75fe36099770c8ceb
 source:
   - path: "reshade_addon/src/endfieldmodcontroller_addon.cpp"

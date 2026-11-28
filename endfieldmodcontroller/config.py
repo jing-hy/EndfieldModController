@@ -606,6 +606,15 @@ class AppConfig:
     # 要用的那一份重新铺好 —— 于是"清干净"与"功能还在"不再互斥。
     # 备份落在 `runtime\game_backup\<时间戳>\`，随时可一键还原。默认 True。
     clear_game_injections_on_launch: bool = True
+    # ⚠️ **一键启动用「无界面」方式拉游戏**（2026-11-29 用户要求做成开关，**默认关**）。
+    #
+    # 关（默认）：只打开 XXMI Launcher 窗口，由用户在里面点 Start —— 看得见界面，
+    #   也看得见 XXMI 自己弹的确认框（「已找到官方启动器」「性能提示」等）。
+    # 开：直接 `XXMI Launcher.exe --nogui --xxmi EFMI <game>`，少点一次 Start。
+    # ⚠️ 2026-11-29 实测：`--nogui` 下 XXMI **照样会弹模态框**（例如 Mods 里有
+    #   「无限资源槽触发器」类 Mod 时的「性能提示」），而那时没有主窗口、用户看不见，
+    #   启动就卡在那里（表现是「点了没反应 / 游戏起不来」）。所以默认关。
+    launch_nogui: bool = False
     # ⚠️ **自动把游戏目录 / 数据根加进 Windows Defender 白名单**（2026-10-04 用户要求，
     # **默认开**：原话是「3 默认开，在设置留个开关」）。
     #

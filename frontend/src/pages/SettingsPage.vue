@@ -858,6 +858,8 @@ useLogAutoScroll(probeBox, () => probeText);
         <SettingSwitch k="use_builtin_runtime" :label="t('使用内置 XXMI/EFMI')" />
         <SettingSwitch k="auto_update_dependencies" :label="t('启动前自动更新依赖')" />
         <SettingSwitch k="require_admin" :label="t('启动时请求管理员权限')" />
+        <SettingSwitch k="launch_nogui" :label="t('一键启动用无界面方式直接拉游戏（--nogui）')"
+          :hint="t('默认关。关着时点「一键启动」只打开 XXMI 窗口，由你在里面点 Start —— 看得见界面，也看得见 XXMI 自己弹的确认框。开着时直接以 --nogui 方式把游戏拉起来，少点一次。⚠️ 实测：开着时如果 Mods 里有「无限资源槽触发器」类 Mod，XXMI 仍会弹一个「性能提示」框，而那时没有主窗口、看不见，启动会卡在那里（表现为点了没反应）；遇到就关掉这个开关。')" />
         <SettingSwitch k="clear_game_injections_on_launch" :label="t('启动前清除游戏目录里的所有第三方注入（先备份）')"
           :hint="t('默认开。每次点「一键启动」时，先把游戏目录里原版不会有的注入痕迹全部移走 —— 不管是不是本程序装的（各种 proxy DLL、plugin 下的插件、3DMigoto 的 d3dx.ini / ShaderFixes、OptiScaler、ReShade 残留、被替换的 nvngx…），再把系统原版补回去；随后自检按你现在的开关把本程序要用的那一份重新铺好，所以功能不会因此失效。移走的东西整体备份在 runtime\\game_backup\\，随时可用「撤销清除」原样放回。游戏正在运行时自动跳过。')" />
         <SettingSwitch k="defender_exclusions_enabled" :label="t('自动把游戏目录 / 程序目录加进 Windows Defender 白名单')"

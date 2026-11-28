@@ -11,8 +11,8 @@ description:
   en: >
       Fetch archives: HTTP with retry and legacy fallback, a stable download cache so a slow connection never re-downloads the same file, GameBanana's latest-file lookup, and extraction via 7-Zip or the bundled Windows bsdtar depending on what the machine has.
       
-revision: 702c5e42321f8e9b483e17ba55f39b5eed1fc548
-updated_at: "2026-11-28T16:50:56.987Z"
+revision: b124e58720a8b882c922f28505d3d1412c494693
+updated_at: "2026-11-28T17:22:47.822Z"
 fingerprint: 3cb54df6d0131c1afa6c55e062999ee16c1aa39b35e3e404862b89c3675b531b
 source:
   - path: "endfieldmodcontroller/dependencies.py"

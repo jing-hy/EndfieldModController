@@ -59,6 +59,11 @@ class WatchedFile:
     #   "game"     = 游戏目录（自动探测；**探测不到就整项跳过**，见 `_path_for`）
     #   "system32" = `%SystemRoot%\System32`（loader proxy **真正去加载真 DLL** 的地方）
     base_kind: str = ""
+    # 这些开关**全部关闭**时，这个文件在本版本里本就不该存在 ⇒ 不监听。
+    # 2026-11-29 修误报：用户主动关掉 Poser/乳摇 后，启动前净化会把 plugin/poser.dll 等
+    # 搬走（备份在 game_backup），旧逻辑只判"文件在不在"，于是连续几次后弹
+    # 「有文件被反复删除」的冤案 —— 而这条提醒的价值全在"不误报"上。
+    enabled_attrs: tuple[str, ...] = ()
 
 
 # 被盯的文件：挑"体积大 / 容易被安全软件盯上 / 缺了就会明显出问题"的那些。
@@ -113,10 +118,12 @@ WATCHED: tuple[WatchedFile, ...] = (
         "xxmi/efmi-d3d11.dll", "xxmi", "XXMI/Resources/Packages/XXMI/d3d11.dll",
         "EFMI 的注入库 d3d11.dll",
         base_attr="builtin_runtime_path",
+        enabled_attrs=("efmi_injection",),
     ),
     WatchedFile(
         "sbm/sbm.dll", "sbm", "runtime/secondary_motion/SecondaryMotion/plugin/sbm.dll",
         "乳摇插件 sbm.dll",
+        enabled_attrs=("secondary_motion_injection",),
     ),
     # ── 游戏目录：注入链的**底座**（2026-10-04 加）─────────────────────────────
     # 为什么原来漏了：这套守护只盯 `runtime\` 里的组件，而**游戏目录里的两个 proxy
@@ -129,21 +136,26 @@ WATCHED: tuple[WatchedFile, ...] = (
         "game/d3dcompiler_47.dll", "game", "d3dcompiler_47.dll",
         "游戏目录的注入底座 d3dcompiler_47.dll（Poser / 乳摇靠它加载）",
         base_kind="game",
+        # 两个开关**都**关掉时它才不该在（任一开着都要盯）。
+        enabled_attrs=("poser_injection", "secondary_motion_injection"),
     ),
     WatchedFile(
         "game/vulkan-1.dll", "game", "vulkan-1.dll",
         "游戏目录的注入底座 vulkan-1.dll",
         base_kind="game",
+        enabled_attrs=("poser_injection", "secondary_motion_injection"),
     ),
     WatchedFile(
         "game/plugin/poser.dll", "plugin", "plugin/poser.dll",
         "游戏里的 Poser 插件 poser.dll",
         base_kind="game",
+        enabled_attrs=("poser_injection",),
     ),
     WatchedFile(
         "game/plugin/sbm.dll", "plugin", "plugin/sbm.dll",
         "游戏里的乳摇插件 sbm.dll",
         base_kind="game",
+        enabled_attrs=("secondary_motion_injection",),
     ),
     # ── System32 的转发目标（2026-10-04 加，这次事件暴露的盲区）──────────────────
     # proxy 是**硬编码去 `C:\Windows\System32\<同名>` 加载真 DLL** 的（字符串表里写着
@@ -170,9 +182,27 @@ WATCHED: tuple[WatchedFile, ...] = (
 _RESHADE_GROUPS = frozenset({"dlss5"})
 
 
-def _skipped(item: WatchedFile) -> bool:
-    """这个项在本版本里**不该被监听**吗（Lite 跳过 ReShade 那几项）。"""
-    return edition.is_lite() and item.group in _RESHADE_GROUPS
+def _skipped(config: AppConfig, item: WatchedFile) -> bool:
+    """这个项在当前版本 / 当前开关下**不该被监听**吗。
+
+    两类来源：
+
+    1. **版本**：Lite 不含 ReShade 链路 ⇒ `dlss5` 那一族永远不该出现；
+    2. **用户主动关掉的功能**（2026-11-29 修误报）：关掉 Poser 后启动前净化会把
+       plugin/poser.dll 搬走（备份在 game_backup），旧逻辑只判"文件在不在"，
+       连着几次就被判成"被杀毒删了"，还弹窗让用户加白名单 —— 冤案。
+       `enabled_attrs` 全为 False ⇒ 这个文件本来就不该在，直接不盯。
+    """
+    if item.group in _RESHADE_GROUPS:
+        if edition.is_lite():
+            return True
+        if not bool(getattr(config, "dlss5_injection", True)):
+            return True
+    if item.enabled_attrs and not any(
+        bool(getattr(config, attr, True)) for attr in item.enabled_attrs
+    ):
+        return True
+    return False
 
 
 def _root(config: AppConfig) -> Path:
@@ -190,8 +220,8 @@ def _path_for(config: AppConfig, item: WatchedFile) -> Path | None:
     它下一轮就会被算成"被删了一次"，再下一轮就弹一个纯属冤枉的窗。
     这个守护的全部价值都在"**不误报**"上，宁可这一轮不盯它。
     """
-    if _skipped(item):
-        return None                  # Lite 不含 ReShade 链路 ⇒ 这些路径不在本版本里（why）
+    if _skipped(config, item):
+        return None                  # 当前版本/开关下本就不该有它 ⇒ 不盯（why 见 _skipped）
     if item.base_kind == "system32":
         root = os.environ.get("SystemRoot") or r"C:\Windows"
         base = Path(root) / "System32"
@@ -415,7 +445,10 @@ def scan(config: AppConfig, *, log: Callable[[str], None] | None = None) -> dict
         for item in WATCHED:
             path = _path_for(config, item)
             if path is None:
-                continue                  # 本环境不适用 —— **一个计数都不动**（见 `_path_for`）
+                # 本环境不适用 / 功能已被用户主动关掉 —— **连历史计数一起清掉**。
+                # 否则用户重新打开开关时，旧计数会立刻变成一次"被杀毒删了"的冤案。
+                files.pop(item.key, None)
+                continue
             entry = _entry(state, item, path)
             if _present(path):
                 entry["present"] = int(entry.get("present") or 0) + 1
@@ -477,8 +510,8 @@ def status(config: AppConfig) -> dict[str, Any]:
     state = load_state(config)
     rows = []
     for item in WATCHED:
-        if _skipped(item):
-            continue                     # Lite 不盯 ReShade 那几项，也不必列为"不适用"
+        if _skipped(config, item):
+            continue                     # 本版本/本开关下不该有它 —— 也不必列为"不适用"
         entry = state["files"].get(item.key)
         if not isinstance(entry, dict):
             continue

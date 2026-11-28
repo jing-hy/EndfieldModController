@@ -11,8 +11,8 @@ description:
   en: >
       The one-command release build: verify the version rule against the latest Release, gate on the bundled component-version table **and the offline deps bundle** (an outdated bundle aborts the build with the fix command), rebuild the exe, build a fake-old-version copy for update testing, tidy artefacts into _old, and sync the test directory.
       
-revision: 702c5e42321f8e9b483e17ba55f39b5eed1fc548
-updated_at: "2026-11-28T16:50:57.012Z"
+revision: b124e58720a8b882c922f28505d3d1412c494693
+updated_at: "2026-11-28T17:22:47.846Z"
 fingerprint: a48432cfcd0d37eba6c566a7844f2d1c465a08e6783dcf7a152a75cbe751ab08
 source:
   - path: "scripts/build_release.py"
