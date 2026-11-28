@@ -11,8 +11,8 @@ description:
   en: >
       Exports the workspace memory database into a readable, diffable development log (`docs/AI-记忆日志.md`): the decisions and the traps — refreshed and committed by `push.py` on every push. The binary database itself is never uploaded, and home-directory paths are scrubbed.
       
-revision: 5b034875dd0ea08fcd1a78982c72969af5d72139
-updated_at: "2026-11-28T15:58:50.128Z"
+revision: acc360d0a14c16ea7116b9922b7383553e40a3a3
+updated_at: "2026-11-28T16:11:18.927Z"
 fingerprint: 98e59651d728eb65e63362f91fc5cb24001a9f36b93386853d469be7313a9720
 source:
   - path: "scripts/memory_log.py"
