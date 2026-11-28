@@ -44,7 +44,12 @@ SLOW_MBPS = 1.5
 # 先用这么多字节探一下单连接到底有多快
 PROBE_BYTES = 1 << 20
 # 小于这个体积不值得并发（小文件起线程的损耗大于收益）
-MIN_PARALLEL_BYTES = 4 << 20
+# ⚠️ 2026-11-28 用户要求「**应该默认抢块**」：阈值从 4 MB 降到 512 KB。
+#   实测现场（他的网络：直连约 0.028 MB/s、4 线路抢块约 1.7 MB/s）：
+#   `XXMI-Libs-Package` 3.4 MB 卡在旧阈值下**只走单连接**，122 秒才下完；
+#   同样内容走抢块约 30 秒。0.5 MB 以下的小包（EFMI 0.1 MB）照旧单连接 ——
+#   那点体积不值得为探测再多等一次。
+MIN_PARALLEL_BYTES = 512 << 10
 # 每块大小 / 最大线程数
 CHUNK_BYTES = 2 << 20
 # ── 照 PCL（ModNet.vb `TryBeginThread`）的分片策略（2026-10-03）──────────────
@@ -81,7 +86,10 @@ POLL_SECONDS = 1.0
 # 探测连接的超时（要短，坏线路要快速跳过；实测直连会直接超时 15s，白等太久）
 PROBE_TIMEOUT = 8
 # 探测阶段的时间上限：慢线路不能把探测拖成几十秒
-PROBE_SECONDS = 12
+# ⚠️ 2026-11-28 用户要求（同一条：「应该默认抢块」）：12 → 6 秒。
+#   每个包下载前都要先探一次单连接速度，12 秒在大包串行下载时就是纯等待；
+#   6 秒足够判出"直连慢、该换线路抢块"，判错也只是由后面的试用窗口兜回来。
+PROBE_SECONDS = 6
 # 探测速度低于此值就直接放弃这条线路（连并发都不值得起）
 # ⚠️⚠️ **这个阈值从 0.3 降到 0.02**（2026-10-03 实测修正）：
 # 0.3 是个**绝对**判据，它假设「低于 0.3 MB/s 就算死线」。可这台机器（开着 Steam++）
@@ -1056,9 +1064,12 @@ def _download_parallel(
 
     def fetch(span: tuple[int, int]) -> None:
         begin, end = span
-        _fetch_started = time.time()          # 用于估算"当下的实际速度"（自适应窗口）
         last_error: Exception | None = None
         for attempt in range(4):
+            # ⚠️ 每次重试都从零记「本轮读了多少 / 花了多久」—— 窗口与进度都只认这两个数
+            #    （见下面 `_live_mbps` 与失败分支的 `state["live"]` 扣减）。
+            attempt_started = time.time()
+            attempt_read = 0
             if cancel and cancel():
                 raise Cancelled("用户终止")
             # 换线路：第 1 次用**最快的**主线路，失败才轮到别的（连续失败的已淘汰）。
@@ -1080,8 +1091,14 @@ def _download_parallel(
                     # 这里按"这块多大 ÷ 已知速度"给窗口，拿不到速度就用下限兜底。
                     # 速度优先用"这块已经读了多少 / 花了多久"（更贴近当下），
                     # 没有就用调用方给的探测值 —— 两者都没有就落到窗口下限。
-                    _live_mbps = (state["live"] / 1048576) / max(time.time() - _fetch_started, 1e-6) \
-                        if state.get("live") else 0.0
+                    # ⚠️⚠️ 2026-11-28 修：这里原来用**全局** `state["live"]` 除以**本块**耗时 ——
+                    #   20 条并发线程时等于把别人的字节算进自己的速度，虚高几十倍 ⇒ 窗口被压到
+                    #   20 秒下限 ⇒ 慢/抖线路每块都「20s 没数据」超时、重试 4 次整单失败。
+                    #   用户现场正是：进度 994.9/994.9 MB 却报「分块 839504693-847655223
+                    #   重试 4 次仍失败：连接建立后 20s 内没有收到任何数据」。
+                    #   现在只认**本块本轮**读到的字节与耗时。
+                    _elapsed = max(time.time() - attempt_started, 1e-6)
+                    _live_mbps = _chunk_mbps(attempt_read, _elapsed)
                     _window = _stall_window(max(1, end - begin + 1),
                                             _live_mbps or float(expected_mbps or 0.0))
                     try:
@@ -1118,6 +1135,7 @@ def _download_parallel(
                             break
                         _waited = 0.0
                         buf.extend(chunk)
+                        attempt_read += len(chunk)
                         # ⚠️⚠️ **边下边报字节**（2026-10-03 修「进度条不动、速度横杠」）。
                         # 原来只在**整块下完**才 `progress()` 一次，而 912 MB 的包一块是
                         # 11.4 MB ⇒ 在 0.01 MB/s 的线路上要 **19 分钟**才报一次，
@@ -1173,9 +1191,11 @@ def _download_parallel(
                 with lock:
                     state["retries"] += 1
                     retry_no = state["retries"]
-                    # ⚠️ **不要把 live 清零**：`live` 是"已接收"的累计，清零会让上报回跳。
-                    # 进度由 `state["reported"]` 高水位保证单调；重试会重读同一段，
-                    # 那部分字节本来就已经算进 live 了，重复累加也不影响（有 size 上限）。
+                    # ⚠️⚠️ 2026-11-28 修「进度显示 994.9/994.9 MB，结果整单报失败」：
+                    #   这一块本轮读到但**没有落盘**的字节必须先扣回去 —— 否则重试会再读一遍，
+                    #   `n + live` 越滚越高、一路顶到 size（进度条满格），而块本身仍然没完成。
+                    #   扣减在锁内做，别的线程的 live 不受影响。
+                    _discard_unflushed(state, attempt_read)
                 # ⚠️ **失败必须可见**（原来这条路径一声不响：20 个连接全挂、日志里什么都没有，
                 # 用户只能看到"下载中但进度条不动"）。前几次记一条，避免刷屏。
                 if retry_no <= 6:
@@ -1260,6 +1280,31 @@ def _adaptive_read_size(mbps: float) -> int:
         return READ_CHUNK
     target = int(mbps * 1048576 * 1.5)
     return max(MIN_READ_CHUNK, min(READ_CHUNK, target))
+
+
+def _chunk_mbps(attempt_read: int, elapsed: float) -> float:
+    """**本块本轮**的实测速度（MB/s）；还没有可用的字节时返回 0。
+
+    ⚠️ 2026-11-28 修：以前内核里写的是
+        `(state["live"] / 1MB) / (now - 本块开始时间)`
+    —— `state["live"]` 是**全部线程**的累计字节，除以**本块**的耗时 ⇒ 20 条并发时
+    速度虚高几十倍 ⇒ 停顿窗口被压到 20 秒下限 ⇒ 慢线路上每块都"20s 没数据"超时，
+    重试 4 次后整单失败（用户现场：994.9/994.9 MB 却报分块重试失败）。
+    只认本块本轮的数字，别的线程的进度不参与这条判据。
+    """
+    if attempt_read <= 0 or elapsed <= 0:
+        return 0.0
+    return (attempt_read / 1048576) / elapsed
+
+
+def _discard_unflushed(state: dict, attempt_read: int) -> None:
+    """重试前把"本轮读到、但没落盘"的字节从 `live` 扣回去（**必须在锁内调用**）。
+
+    ⚠️ 2026-11-28 修：不扣的话重试会再读一遍同一段，`n + live` 越滚越高直到顶满 `size`
+    ⇒ 界面显示 994.9 MB / 994.9 MB，而那个块其实没下完，任务随后整单失败。
+    """
+    if attempt_read > 0:
+        state["live"] = max(0, int(state.get("live") or 0) - int(attempt_read))
 
 
 def _stall_window(piece_bytes: int, mbps: float) -> float:
@@ -1618,7 +1663,47 @@ def global_speed() -> float:
     return value if (time.time() - at) <= 3.0 else 0.0
 
 
-def download(
+_DOWNLOAD_LOCKS: dict[str, threading.Lock] = {}
+_DOWNLOAD_LOCKS_GUARD = threading.Lock()
+
+
+def _destination_lock(dest: Path) -> threading.Lock:
+    """每个目标文件一把进程内锁（大小写/相对路径不同也算同一个文件）。"""
+    try:
+        key = str(dest.resolve()).lower()
+    except OSError:
+        key = str(dest).lower()
+    with _DOWNLOAD_LOCKS_GUARD:
+        lock = _DOWNLOAD_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _DOWNLOAD_LOCKS[key] = lock
+        return lock
+
+
+def download(url: str, dest: Path, **kwargs: Any) -> "DownloadReport":
+    """下载一个文件（完整说明见 `_download_impl`）。
+
+    ★ 2026-11-28 加：**同一个目标文件的下载串行化**。用户日志实测（`changescreens_183.zip`
+    那次一键更新）：两个流程同时下 `ReShade_Setup_6.8.0_Addon.exe`，两者共用同一个
+    `…exe.mcdownload` 与 `.mcparts`，于是互相删/覆盖，分块报「工作文件在下载过程中不见了
+    （…mcdownload）」。拿不到锁就**明确拒绝**：两个任务共写一个分块临时文件可能写出
+    长度正确、内容却带空洞的坏包，这个风险比"这一份让别人下"严重得多。
+    （拒绝只在真正撞车时发生；上层重试时对方多半已经下完，直接命中缓存。）
+    """
+    target = Path(dest)
+    lock = _destination_lock(target)
+    if not lock.acquire(blocking=False):
+        raise OSError(
+            "同一个文件已经在另一个下载任务里了（避免两个任务共写同一个临时文件）—— "
+            "等它下完再试")
+    try:
+        return _download_impl(url, target, **kwargs)
+    finally:
+        lock.release()
+
+
+def _download_impl(
     url: str,
     dest: Path,
     *,

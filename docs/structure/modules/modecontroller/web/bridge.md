@@ -11,8 +11,8 @@ description:
   en: >
       The single pywebview bridge for the Vue frontend: call/waitForBridge/bridgeReady plus frontend error reporting.
       
-revision: c5e7502f33b821a8fbb9f32403d00f1d3540841b
-updated_at: "2026-11-28T10:16:58.151Z"
+revision: 55db4a68d2887afd4194c6e6b519ad091940608b
+updated_at: "2026-11-28T14:23:15.838Z"
 fingerprint: 251bd7e907a4dabcd43892f3af99c11560aee1dc0769e6144e74bd06552c8c0c
 source:
   - path: "frontend/src/lib/bridge.js"

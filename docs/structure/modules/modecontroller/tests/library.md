@@ -11,8 +11,8 @@ description:
   en: >
       Tests for the library layer: folder layout scanning, ini parsing, character matching and aliases, assist-mod detection, the "looks like a dependency" rule, pruning entries whose files vanished, and the guard that refuses to touch the library itself.
       
-revision: c5e7502f33b821a8fbb9f32403d00f1d3540841b
-updated_at: "2026-11-28T10:16:58.149Z"
+revision: 55db4a68d2887afd4194c6e6b519ad091940608b
+updated_at: "2026-11-28T14:23:15.837Z"
 fingerprint: 8854c84be2426cd3b0886b4b59d014db9de27320dc7c6b83fecd569a4e7ff6c0
 source:
   - path: "tests/test_core.py"

@@ -162,6 +162,84 @@ def _running_process_names(names: list[str]) -> list[str]:
     return running
 
 
+def _taskkill_image(name: str, *, timeout: float = 15) -> None:
+    """按映像名硬杀一个进程（`taskkill /F`）。失败静默 —— 调用方自己复核结果。
+
+    单独抽出来是为了**能被测试打桩**：单测里绝不许真的 `taskkill` 用户正在跑的程序。
+    """
+    try:
+        subprocess.run(
+            ["taskkill", "/F", "/IM", name],
+            capture_output=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            timeout=timeout,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+
+GRYPHLINK_LAUNCHER_IMAGE = "Games.exe"
+
+
+def _system_modules_hijacked(config: AppConfig) -> list[str]:
+    """游戏目录里被 loader proxy 顶替的**系统模块**（`d3dcompiler_47.dll` / `vulkan-1.dll`）。
+
+    2026-11-28（诊断包 diagnostics-20261128-220053）：这两位必须是**游戏原版**
+    （`docs/dev/可用状态配方.md` 的「游戏能进」基线）。被 Poser / 乳摇 的 loader proxy
+    顶替时游戏每次都在 25~33 秒后以 `0xC0000135` / `0xC0000005` 退出。
+    检查逻辑与 `initialize._check_system_modules_not_hijacked` 同源（都认
+    `reshade_integration.looks_like_loader_proxy`），这里只回答"是不是被顶替了"。
+    """
+    from . import secondary_motion
+
+    try:
+        game = reshade_integration.detect_game_dir(config)
+    except Exception:  # noqa: BLE001 —— 定位不到就不是这条的问题
+        return []
+    if game is None:
+        return []
+    hits: list[str] = []
+    for name in secondary_motion.PROXY_NAMES:
+        path = Path(game) / name
+        try:
+            if path.is_file() and reshade_integration.looks_like_loader_proxy(path):
+                hits.append(name)
+        except OSError:
+            continue
+    return hits
+
+
+def _stop_gryphlink_launcher(config: AppConfig) -> None:
+    """拉起 XXMI 之前先收掉**官方启动器**（`Games.exe`）。
+
+    ⚠️ 2026-11-28 用户实测的启动失败（XXMI Launcher Log.txt 原文）：
+        `Failed to stop already running GRYPHLINK launcher process Games.exe`
+    —— XXMI 在 `efmi_package.override_launch_context` 里会**自己先停它**
+    （psutil terminate + 等 5 秒），停不掉就直接抛异常、弹「EFMI 加载失败」。
+    它停不掉、我们（提权进程）能停，所以提前在这里收掉，别让用户对着报错框干瞪眼。
+
+    只收 `Games.exe` 这一个映像：游戏本体 `Endfield.exe` 有单独的净化逻辑，不在这里碰。
+    """
+    running = _running_process_names([GRYPHLINK_LAUNCHER_IMAGE])
+    if not running:
+        return
+    _append_log(
+        config,
+        f"官方启动器仍在运行（{GRYPHLINK_LAUNCHER_IMAGE}）—— XXMI 接管启动前必须先关掉它，现在结束它",
+    )
+    for name in running:
+        _taskkill_image(name)
+    time.sleep(0.5)
+    still = _running_process_names([GRYPHLINK_LAUNCHER_IMAGE])
+    if still:
+        raise LaunchError(
+            "官方启动器（Hypergryph Launcher / Games.exe）没能关掉。XXMI 接管启动前必须先关它，"
+            "否则会报 Failed to stop already running GRYPHLINK launcher process Games.exe。"
+            "请手动关掉启动器（连同托盘图标一起退出）后再点「一键启动」。"
+        )
+    _append_log(config, "已关闭官方启动器，继续启动流程")
+
+
 def _stop_locked_files_processes(config: AppConfig, *, include_game: bool = False) -> list[str]:
     """Kill stale loader/game processes before touching runtime files.
 
@@ -1514,11 +1592,18 @@ def _efmi_folder_is_sane(folder: Path, root: Path) -> bool:
     try:
         if not folder.is_dir():
             return False
-        if not folder.resolve().is_relative_to(root.resolve()):
-            return False
+        inside = folder.resolve().is_relative_to(root.resolve())
     except OSError:
         return False
-    return (folder / "d3d11.dll").is_file()
+    if inside:
+        return (folder / "d3d11.dll").is_file()
+    # ★★ 2026-11-28（诊断包 diagnostics-20261128-220053）：XXMI 允许 `importer_folder`
+    #   指向 XXMI 树**之外**的独立 EFMI 安装（用户现场 `D:\XXMI` + `D:\EFMI`，字段
+    #   `importer_folder=D:/EFMI`）。那种布局**是合法的**，不能再判成"指错了"——
+    #   否则每轮启动都去改它，日志反复出现「已尝试把 XXMI 的 EFMI 运行目录改回」。
+    #   用结构区分：真 EFMI 根带 `Core/EFMI`，或 `Mods/` + `d3dx.ini` 同时存在；
+    #   而「被误指到 Mod 库」那种现场里散落的同名 dll 不会长成这样。
+    return _looks_like_efmi_home(folder) and (folder / "d3d11.dll").is_file()
 
 
 def xxmi_foreign_loader(config: AppConfig) -> Path | None:
@@ -1820,14 +1905,29 @@ def dlss5_injection_targets(config: AppConfig) -> list[str]:
         #    **宁可少列一条**，也不要让两份 loader 撞在一起。
         _foreign = xxmi_foreign_loader(config)
         if _foreign is not None:
-            _append_log(
-                config,
-                f"注入自检: 不再叠加第二条 loader —— XXMI 自己会注入 {_foreign}"
-                f"（它在这个 XXMI 的目录之外），与注入库准备列的 {_efmi} 不是同一份；"
-                "两份 d3d11 loader 同时进进程会让游戏在创建 D3D11 设备时崩（0xC0000005）。"
-                "已尝试把 XXMI 的 EFMI 运行目录改回 …\\XXMI\\EFMI，"
-                "若这条日志反复出现说明那个配置文件改不动（检查只读/占用）"
-            )
+            # ★ 2026-11-28：先分**合法外部布局**与**真的指错了**。
+            #   `D:\XXMI` + `D:\EFMI`（importer_folder=SOME_ROOT/EFMI）是 XXMI 支持的正常分装，
+            #   这种时候就该让 XXMI 自己注入那一份、我们不重复列 —— 文案不能写成
+            #   「已尝试改回 XXMI\EFMI」，那会让人以为程序在乱动他的布局（诊断包 220053 现场）。
+            try:
+                _foreign_ok = _looks_like_efmi_home(Path(_foreign).parent)
+            except OSError:
+                _foreign_ok = False
+            if _foreign_ok:
+                _append_log(
+                    config,
+                    f"注入自检: XXMI 用的是**独立 EFMI 安装**（importer_folder 在 XXMI 目录之外：{_foreign.parent}），"
+                    f"由它自己注入那份 d3d11.dll；注入库不重复列（列两份会让游戏在创建 D3D11 设备时崩）"
+                )
+            else:
+                _append_log(
+                    config,
+                    f"注入自检: 不再叠加第二条 loader —— XXMI 自己会注入 {_foreign}"
+                    f"（它在这个 XXMI 的目录之外），与注入库准备列的 {_efmi} 不是同一份；"
+                    "两份 d3d11 loader 同时进进程会让游戏在创建 D3D11 设备时崩（0xC0000005）。"
+                    "已尝试把 XXMI 的 EFMI 运行目录改回 …\\XXMI\\EFMI，"
+                    "若这条日志反复出现说明那个配置文件改不动（检查只读/占用）"
+                )
         elif _efmi is not None and _efmi.is_file():
             targets.append(str(_efmi))
     # 乳摇：可选用「注入 sbm.dll」的方式（config.secondary_motion_dll 指向短路径下的
@@ -2558,6 +2658,14 @@ def ensure_xxmi_game_folder(config: AppConfig, *, log: Callable[[str], None] | N
     if "EFMI" not in enabled:
         launcher_block["enabled_importers"] = sorted({*enabled, "EFMI"})
         changed.append("Launcher.enabled_importers")
+    # ★ 桌面快捷方式（2026-11-28 用户：「efmi 老是在桌面创建快捷方式」）。
+    #   XXMI 的 `ModelImporterPackage.create_shortcut` 会按这个状态位给 EFMI 建一个
+    #   「跳过启动器直接进游戏」的桌面快捷方式，而它的配置里**没有"不要创建"的开关**
+    #   —— 只有 `shortcut_deployed` 这个标记。我们的注入链路本来就走 XXMI 自己的
+    #   启动按钮，那个快捷方式对用户没用，所以这里把它固定成"已部署"，XXMI 就不会再建。
+    if importer.get("shortcut_deployed") is not True:
+        importer["shortcut_deployed"] = True
+        changed.append("Importers.EFMI.Importer.shortcut_deployed")
     if not changed:
         return {"ok": True, "changed": False, "game_dir": str(game_dir),
                 "message": f"XXMI 已指向游戏目录（{game_dir.name}）"}
@@ -2963,6 +3071,14 @@ def launch_official_gui(config: AppConfig) -> dict[str, Any]:
     #   ① 兜住 Launcher 路径：留空/被删 → 找内置 → 没有就自动下载（用户明确要求）；
     #   ② 把 game_folder / active_importer / enabled_importers 再确认一次 ——
     #      顺序必须是「我们写 → 它启动 → 它保存」，反了就等于没写。
+    # ★ 0：先收掉官方启动器（2026-11-28）。XXMI 自己会去停它、停不掉就抛
+    #   `Failed to stop already running GRYPHLINK launcher process Games.exe`。
+    try:
+        _stop_gryphlink_launcher(config)
+    except LaunchError:
+        raise
+    except Exception as exc:  # noqa: BLE001 —— 收不掉也别把启动整个打断
+        _append_log(config, f"关闭官方启动器失败（继续）: {exc}")
     try:
         available = ensure_xxmi_available(config)
         if available.get("changed"):
@@ -3288,14 +3404,32 @@ def launch(
     if not dry_run:
         diagnostics.begin_launch(config, "xxmi", game_dir=game_dir)
     if config.use_builtin_runtime and not dry_run:
+        builtin_results: list[Any] = []
         try:
             set_launch_stage("正在检查随包组件与运行库…")
-            runtime_deps.ensure_all(
+            builtin_results = runtime_deps.ensure_all(
                 config,
                 progress=lambda current, total, key, status: _append_log(config, f"builtin {key}: {status}"),
             )
         except Exception as exc:  # noqa: BLE001
             _append_log(config, f"builtin runtime install failed: {exc}")
+        # ★ 缺内置组件 ⇒ **立刻停下**，把它交给「下载」页（2026-11-28 用户现场：
+        #   「一键启动要是要安装应该调到下载安装，而不是卡在那」）。
+        #   `ensure_all(force=False)` 现在遇到"本地没有"只报 update_available，不再下载；
+        #   但启动继续走下去只会撞上"找不到 XXMI Launcher"之类的半截失败 —— 所以这里
+        #   如实中止，让前端把用户送到「下载」页（那边有进度、速度、线路切换）。
+        #   Poser 是可选插件（required=False），缺它不拦启动。
+        blocking = {"XXMI", "XXMI-Libs", "EFMI"}
+        need_download = [r.key for r in builtin_results
+                         if str(getattr(r, "status", "")) == "update_available"
+                         and str(getattr(r, "key", "")) in blocking]
+        if need_download:
+            names = "、".join(need_download)
+            _append_log(config, f"缺少内置组件：{names} —— 已停止启动，请到「下载」页下载")
+            raise LaunchError(
+                f"缺少内置组件：{names}。已停止启动（不在启动流程里下载）—— "
+                f"到「下载」页点「下载并补齐组件」装好再启动。"
+            )
 
     dependency_updates: list[dict[str, Any]] = []
     if not dry_run:
@@ -3439,6 +3573,21 @@ def launch(
         # Lite 跳过：这一步写的就是 runtime\reshade\ReShade.ini（Lite 一个 ReShade 文件都不写）。
         if not lite:
             sync_effective_reshade_ini(config, log=lambda message: _append_log(config, message))
+        # ★★ 2026-11-28：**明知会崩就别往下拉起来**。
+        #   `initialize._check_system_modules_not_hijacked` 早就把"系统模块被 proxy 顶替"
+        #   写成自检项了，但它在界面上只是"待人工处理"，用户点启动照样撞上去
+        #   （诊断包 220053：同一台机器 20:21 / 20:23 / 21:11 连续三次 0xC0000005）。
+        #   同机对照：独立启动 EFMI 不走这条重铺路径，两个文件是原版，就能进游戏。
+        hijacked = _system_modules_hijacked(config)
+        if hijacked:
+            names = "、".join(hijacked)
+            _append_log(config, f"启动已中止：{names} 被 loader proxy 顶替（会顶掉游戏原版）")
+            raise LaunchError(
+                f"游戏目录的 {names} 被 Poser / 乳摇 的 loader proxy 顶替了 —— "
+                f"这个状态游戏会在启动约 30 秒后崩（实测 0xC0000135 / 0xC0000005），"
+                f"所以这次不启动。到设置页「清理游戏目录注入」还原原版，"
+                f"或把 Poser / 乳摇 的注入开关关掉后重试。"
+            )
 
     # ⚠ **2026-10-01 根因修复：EFMI 的 `skip_early_includes_load` 必须为 0。**
     #   EFMI 的 `d3dx.ini` 出厂默认是 `skip_early_includes_load = 1`（配套
@@ -3522,6 +3671,15 @@ def launch(
     if dry_run:
         return result
 
+    # ★ 拉起 XXMI 之前先收掉**官方启动器**（`Games.exe`）—— 2026-11-28 用户实测：
+    #   XXMI 自己会去停它，停不掉就抛 `Failed to stop already running GRYPHLINK
+    #   launcher process Games.exe` 并弹「EFMI 加载失败」。它停不掉、我们（提权进程）能停。
+    try:
+        _stop_gryphlink_launcher(config)
+    except LaunchError:
+        raise
+    except Exception as exc:  # noqa: BLE001 —— 收不掉也别把启动整个打断
+        _append_log(config, f"关闭官方启动器失败（继续）: {exc}")
     _append_log(config, f"launch command: {command}")
     _append_log(config, f"RESHADE_BASE_PATH_OVERRIDE={env.get('RESHADE_BASE_PATH_OVERRIDE')}")
     if not start_game:

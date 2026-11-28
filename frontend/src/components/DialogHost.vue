@@ -99,7 +99,12 @@ const renderedMessage = computed(() => {
 /** 弹窗里出现的第一个路径（有的话就给一个「打开文件夹」按钮）。 */
 const firstPath = computed(() => {
   const raw = String(uiState.dialog?.message ?? "");
-  const m = raw.match(/[A-Za-z]:\\[^\n<>"']+/);
+  // ⚠️ 这里原来用的是**贪婪**的 `[A-Za-z]:\\[^\n<>"']+` ⇒ 一行里的
+  //   `D:\…\runtime\launch.log info=365719 bytes mtime=… sha256=…` 会**整串**被当成路径，
+  //   点「打开文件夹」就把这一串丢给后端，报「路径不存在: … info=… sha256=…」
+  //   （2026-11-28 用户现场：文件明明在，却被告知路径不存在）。
+  //   现在与上面 `PATH_RE` 同一口径：遇到空白 / 标点就停。
+  const m = new RegExp(PATH_RE.source, "g").exec(raw);
   return m ? m[0].replace(/[.,;:，。；：)\]]+$/, "") : "";
 });
 
@@ -108,7 +113,9 @@ async function openPath(path) {
   const target = String(path || "").trim();
   if (!target) return;
   try {
-    const r = await call("open_path_in_explorer", target);
+    // `fallback_parent`：目标已经不在了（日志被清理 / 目录没生成）就打开最近的上级目录，
+    // 不再只丢一句「路径不存在」（与设置页「运行目录」同一套兜底）。
+    const r = await call("open_path_in_explorer", target, true);
     const { showToast } = await import("../lib/dialog.js");
     if (r && r.ok === false) showToast(String(r.message || t("打不开这个位置")), "danger");
   } catch (e) {

@@ -11,8 +11,8 @@ description:
   en: >
       Regression for the injection switches that toggle real install/uninstall state: a successful action must write the switch back into the config, a failure that did nothing must leave the config untouched and explain why, and the launch self-check must not reinstall what the user turned off.
       
-revision: c5e7502f33b821a8fbb9f32403d00f1d3540841b
-updated_at: "2026-11-28T10:16:58.146Z"
+revision: 55db4a68d2887afd4194c6e6b519ad091940608b
+updated_at: "2026-11-28T14:23:15.836Z"
 fingerprint: ce911df192bf61c9f3a65abbb7c7cb77957144f1a7d2898abbc39fcf21add2f5
 source:
   - path: "tests/test_injection_switches.py"

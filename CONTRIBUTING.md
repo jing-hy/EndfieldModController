@@ -34,15 +34,16 @@
 
 ## 二、提交前必须做的检查（一条都不能省）
 
-### 1. 跑测试（必须全绿）
+### 1. 跑测试（针对性日常跑；全量只在发版前）
 
 ```bash
 python -m pytest tests -q
 ```
 
-* 日常改动先用 `python scripts/run_tests.py --changed`（按 git diff 挑文件，几十秒）；
-  **交付/发版前在本机跑一次全量**：`python scripts/run_tests.py tests --serial`
-  （实测 1453 passed / 约 3 分 10 秒，一律串行）。
+* 日常改动用 `python scripts/run_tests.py --changed`（按 git diff 挑文件，几十秒）或直接跑相关测试文件；
+  **只在交付/发版前**在本机跑一次全量：`python scripts/run_tests.py tests --serial`
+  （2026-11-28 实测 1604 passed / 约 5 分钟，一律串行）。
+  > 用户 2026-11-28 拍板：「**全量测试只在 release 前做，正常就针对性测试**」。
 * ⚠️ **不再依赖 GitHub Actions**（2026-11-07 用户取消了 Actions 的 run，要求「全部本地跑」）：
   `.github/workflows/ci.yml` 现在只在手动触发时运行，push / PR 不会起 run。
 * 当前基线：**1453 passed**（数字随版本增长）。

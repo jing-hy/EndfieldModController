@@ -11,8 +11,8 @@ description:
   en: >
       A quick health probe for the development checkout: import every package module in turn so an import-time error is caught before it becomes a frozen-exe mystery.
       
-revision: c5e7502f33b821a8fbb9f32403d00f1d3540841b
-updated_at: "2026-11-28T10:16:58.136Z"
+revision: 55db4a68d2887afd4194c6e6b519ad091940608b
+updated_at: "2026-11-28T14:23:15.830Z"
 fingerprint: 03c382191f5be6d77ebdbbd6282ce27d9f9dacbc426a93a227ee9cc5c6fd128d
 source:
   - path: "scripts/self_check.py"

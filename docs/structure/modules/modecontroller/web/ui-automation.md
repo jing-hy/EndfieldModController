@@ -11,8 +11,8 @@ description:
   en: >
       Frontend half of the accessibility channel: snapshots interactive elements (with usable CSS selectors) and performs click / toggle / set value / scroll on the real DOM, polling the backend every 300ms. All errors are swallowed so a broken channel cannot hurt the UI.
       
-revision: c5e7502f33b821a8fbb9f32403d00f1d3540841b
-updated_at: "2026-11-28T10:16:58.155Z"
+revision: 55db4a68d2887afd4194c6e6b519ad091940608b
+updated_at: "2026-11-28T14:23:15.842Z"
 fingerprint: 146f8b09822b8e4e9d681a5987818599c7d93aa25fac5d9cbc66db36742daed7
 source:
   - path: "frontend/src/lib/uiAutomation.js"

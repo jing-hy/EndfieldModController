@@ -185,6 +185,124 @@ $cape = 0,1
         self.assertNotIn("--nogui", preview_game["command"])
         self.assertIn("--xxmi", preview_game["command"])
 
+    def test_launch_aborts_when_builtin_components_missing(self) -> None:
+        """缺内置组件时一键启动要**立刻停下并给出去下载的指引**（2026-11-28）。
+
+        用户原话：「一键启动要是要安装应该调到下载安装，而不是卡在那」。
+        后端这一道是兜底：`ensure_all` 现在只报 `update_available` 不下载，若启动流程继续
+        往下走，只会撞上"找不到 XXMI Launcher"之类的半截失败 —— 所以这里必须中止。
+        """
+        from endfieldmodcontroller import runtime_deps
+
+        original = runtime_deps.ensure_all
+        runtime_deps.ensure_all = lambda *args, **kwargs: [
+            runtime_deps.BuiltinResult("XXMI", "update_available", "本机还没有", "", str(self.root)),
+            runtime_deps.BuiltinResult("EFMI", "up_to_date", "present", "", str(self.root)),
+            runtime_deps.BuiltinResult("Poser", "update_available", "可选插件缺", "", str(self.root)),
+        ]
+        try:
+            with self.assertRaises(launcher.LaunchError) as ctx:
+                launcher.launch(self.config, dry_run=False)
+        finally:
+            runtime_deps.ensure_all = original
+        message = str(ctx.exception)
+        self.assertIn("XXMI", message)
+        self.assertIn("下载", message)
+        # Poser 是可选插件：缺它不许拦启动（否则关掉摆姿的人永远起不来）
+        self.assertNotIn("Poser", message)
+
+    def test_check_component_updates_rows(self) -> None:
+        """依赖页「检查状态（不下载）」必须能返回列表（2026-11-28 用户实测报障）。
+
+        原来内置段那行写的是 `_row(key, row, label=str(key))`，而 `_row` 的第三个形参叫
+        `default` ⇒ 只要 `updates.check_updates` 返回了内置段就**每次都抛**
+        `_row() got an unexpected keyword argument 'label'`（用户点一次就看到一次红字）。
+        """
+        from endfieldmodcontroller import dlss5_fetcher, updates
+
+        original = updates.check_updates
+        original_dlss5 = dlss5_fetcher.check_updates
+        updates.check_updates = lambda config, log=None: {
+            "builtin": {"XXMI": {"installed": True, "current": "v2.5.0"}}
+        }
+        dlss5_fetcher.check_updates = lambda config, log=None: {}
+        try:
+            api = EndfieldModControllerApi(self.config_path)
+            result = api.check_component_updates()
+        finally:
+            updates.check_updates = original
+            dlss5_fetcher.check_updates = original_dlss5
+        rows = result.get("components") or []
+        self.assertTrue(rows, "内置组件段必须能压成列表（前端按 components 渲染）")
+        self.assertEqual(rows[0]["key"], "XXMI")
+        self.assertEqual(rows[0]["display"], "XXMI")
+
+    def test_stop_gryphlink_launcher(self) -> None:
+        """官方启动器（`Games.exe`）要在拉起 XXMI 前被收掉（2026-11-28 用户实测报障）。
+
+        XXMI 自己也会停它，停不掉就抛 `Failed to stop already running GRYPHLINK launcher
+        process Games.exe` 并弹「EFMI 加载失败」。它停不掉、我们（提权进程）能停 ——
+        所以提前收掉；真收不掉就在这里明确报错，别让用户对着 XXMI 的报错框干等。
+        """
+        original_names = launcher._running_process_names
+        original_kill = launcher._taskkill_image
+        killed: list = []
+        launcher._taskkill_image = lambda name, **kwargs: killed.append(name)
+        try:
+            # ① 不在运行 ⇒ 一个 taskkill 都不发
+            launcher._running_process_names = lambda names: []
+            launcher._stop_gryphlink_launcher(self.config)
+            self.assertEqual(killed, [])
+
+            # ② 第一次在跑、收掉之后就没了 ⇒ 正常返回
+            state = {"n": 0}
+
+            def running_once(names):
+                state["n"] += 1
+                return ["Games.exe"] if state["n"] == 1 else []
+
+            launcher._running_process_names = running_once
+            killed.clear()
+            launcher._stop_gryphlink_launcher(self.config)
+            self.assertEqual(killed, ["Games.exe"])
+
+            # ③ 一直停不掉 ⇒ 明确报错（而不是让 XXMI 去撞那个失败）
+            launcher._running_process_names = lambda names: ["Games.exe"]
+            with self.assertRaises(launcher.LaunchError) as ctx:
+                launcher._stop_gryphlink_launcher(self.config)
+            self.assertIn("Games.exe", str(ctx.exception))
+        finally:
+            launcher._running_process_names = original_names
+            launcher._taskkill_image = original_kill
+
+    def test_xxmi_shortcut_marked_deployed(self) -> None:
+        """XXMI 的桌面快捷方式状态位要固定成"已部署"（2026-11-28 用户：老是在桌面创建）。
+
+        XXMI 的 `ModelImporterPackage.create_shortcut` 按 `shortcut_deployed` 决定建不建，
+        配置里没有别的开关（`shortcut_path` 只是它自己的记录）。我们的注入链路走 XXMI
+        自己的启动按钮，那个快捷方式对用户没用 —— 所以统一置成 true，别再建。
+        """
+        root = self.root / "xxmi2"
+        bin_dir = root / "Resources" / "Bin"
+        bin_dir.mkdir(parents=True)
+        (bin_dir / "XXMI Launcher.exe").write_bytes(b"")
+        cfg_path = root / "XXMI Launcher Config.json"
+        cfg_path.write_text(json.dumps({
+            "Importers": {"EFMI": {"Importer": {"shortcut_deployed": False}}},
+        }), encoding="utf-8")
+        cfg = AppConfig(
+            library_dir=str(self.library),
+            runtime_dir=str(self.runtime),
+            staging_mods_dir=str(self.staging),
+            xxmi_launcher=str(bin_dir / "XXMI Launcher.exe"),
+            game_exe=str(self.game),
+            dependency_manifest=str(Path(__file__).resolve().parents[1] / "dependencies.json"),
+        )
+        result = launcher.ensure_xxmi_game_folder(cfg)
+        self.assertTrue(result.get("ok"), result)
+        data = json.loads(cfg_path.read_text(encoding="utf-8"))
+        self.assertIs(data["Importers"]["EFMI"]["Importer"]["shortcut_deployed"], True)
+
 
 if __name__ == "__main__":
     unittest.main()

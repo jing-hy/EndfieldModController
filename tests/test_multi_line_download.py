@@ -66,7 +66,7 @@ def test_download_enables_multi_only_for_the_first_line() -> None:
     import inspect
     import re
 
-    src = inspect.getsource(fastnet.download)
+    src = inspect.getsource(fastnet._download_impl)
     assert re.search(r"alt_urls=multi_alt if index == 0", src), \
         "多线路候选只该给第一条线路的尝试"
     assert "multi_alt = [line.apply(url) for line in lines[1:]" in src, \

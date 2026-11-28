@@ -607,6 +607,23 @@ async function oneClick() {
   running.value = true;
   if (!(await preflightGate())) { running.value = false; return; }
 
+  // ★★ **内置组件本地根本没有 ⇒ 直接送到「下载」页，不进启动流程**（2026-11-28 用户现场：
+  //    点一键启动之后界面停在「正在启动…」十几分钟 —— 后端在启动流程里静默下了 58 MB 的 XXMI，
+  //    又接着去查 XXMI-Libs 的上游，而启动页没有下载进度可看。他的要求原话：
+  //    「**一键启动要是要安装应该调到下载安装，而不是卡在那**」。
+  //    判据是**本地的**（`first_run_state` 只读文件，不联网），所以这一步不会拖慢启动；
+  //    真正下载交给「下载」页（线路切换 / 实时进度 / 可暂停 / 失败重试都在那儿）。
+  //    Poser 是可选插件，不在 `missing_required` 里，缺它不拦启动。
+  try {
+    const fr = await call("first_run_state");
+    const missing = (fr && fr.missing_required) || [];
+    if (missing.length) {
+      goToDepsDownload(missing);
+      running.value = false;
+      return;
+    }
+  } catch (e) { /* 查不到就照常启动，绝不因为它挡住用户 */ }
+
   // ⚠️ **用「随包版本表」检查组件更新**（2026-10-03 用户：「那个一键启动检查更新**还是要加**，
   //    但是是**随包资源里配一张版本表**，每次比对那个表，然后**随管理器更新而更新**，
   //    对旧版本**没有这个表，如果表不存在就跳过**」）。
@@ -845,7 +862,6 @@ useLogAutoScroll(logBox, () => consoleLog.value);
     <div class="flex flex-wrap gap-2">
       <Btn @click="run('launch_secondary_motion')">{{ t("启动插件界面（乳摇管理器）") }}</Btn>
       <Btn @click="run('open_poser_web_ui')">{{ t("打开摆姿页（Poser）") }}</Btn>
-      <Btn @click="run('prepare_launch')">{{ t("生成控制器") }}</Btn>
       <Btn @click="checkIntegrity">{{ t("检查/修复完整性") }}</Btn>
       <Btn @click="run('audit_game_injections')">{{ t("检查游戏目录注入") }}</Btn>
       <span v-if="renderApi" class="text-xs self-center"

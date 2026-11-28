@@ -75,7 +75,7 @@ def test_download_tracks_speed_even_without_caller_progress() -> None:
     """★ 调用方**不传** progress 时也要采样（一键启动那条路就是这样）。"""
     import inspect
 
-    src = inspect.getsource(fastnet.download)
+    src = inspect.getsource(fastnet._download_impl)
     assert "def _tracked(done: int, total: int)" in src, "download 里要有速度采样的包装"
     assert "_note_speed(done, total)" in src, "包装里必须调用 _note_speed"
     assert "progress=_tracked" in src, "传给 _attempt_line 的应当是包装后的回调"

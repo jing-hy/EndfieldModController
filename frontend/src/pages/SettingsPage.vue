@@ -1134,7 +1134,7 @@ useLogAutoScroll(probeBox, () => probeText);
           <div class="flex items-center gap-2">
             <span class="w-32 shrink-0" style="color: var(--text-muted)">{{ t("控制器") }}</span>
             <Badge :tone="store.state.controller_ready ? 'success' : 'warn'">
-              {{ store.state.controller_ready ? t("已生成 controller.ini") : t("还没生成（点启动页「生成控制器」）") }}
+              {{ store.state.controller_ready ? t("已生成 controller.ini") : t("还没生成（点一次「一键启动」会自动生成）") }}
             </Badge>
           </div>
           <div class="flex items-center gap-2">

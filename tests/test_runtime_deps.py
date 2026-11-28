@@ -101,7 +101,10 @@ class RuntimeDepsTests(unittest.TestCase):
         runtime_deps._release_info = fake_release_info
         runtime_deps._asset_url = fake_asset_url
         try:
-            results = runtime_deps.ensure_all(self.config)
+            # ★ `force=True`：这是「用户在依赖页亲手点了下载」的语义（2026-11-28 起）。
+            #   一键启动那条路（`force=False`）遇到"本地没有"**只报告、不下载**，
+            #   由 test_missing_components_are_reported_not_downloaded 钉住。
+            results = runtime_deps.ensure_all(self.config, force=True)
         finally:
             runtime_deps._latest_release_asset = original_latest
             runtime_deps._download_extract = original_extract
@@ -163,6 +166,39 @@ class RuntimeDepsTests(unittest.TestCase):
         got = Path(self.config.staging_mods_dir)
         # 同一个目录在 Windows 下可能是长名/短名（ADMINI~1）、大小写也不同，比对结构
         self.assertEqual((got.name, got.parent.name, got.parent.parent.name), ("Mods", "EFMI", "my-xxmi"))
+
+    def test_missing_components_are_reported_not_downloaded(self) -> None:
+        """缺内置组件时**启动流程一条网络都不许发**（2026-11-28 用户现场）。
+
+        原话：「一键启动要是要安装应该调到下载安装，而不是卡在那」—— 他看到的是「正在启动…」
+        十几分钟不动，日志里是后端自己在下 58 MB 的 XXMI、接着又去查 XXMI-Libs 的上游。
+        现在这条路径（`force=False`）只报 `update_available`，下载归「下载」页（`force=True`）。
+        """
+        original_latest = runtime_deps._latest_release_asset
+        original_extract = runtime_deps._download_extract
+        original_release = runtime_deps._release_info
+
+        def boom(*args, **kwargs):
+            raise AssertionError("启动流程不该联网 / 下载")
+
+        runtime_deps._latest_release_asset = boom
+        runtime_deps._download_extract = boom
+        runtime_deps._release_info = boom
+        try:
+            results = runtime_deps.ensure_all(self.config)
+        finally:
+            runtime_deps._latest_release_asset = original_latest
+            runtime_deps._download_extract = original_extract
+            runtime_deps._release_info = original_release
+
+        by_key = {r.key: r for r in results}
+        for key in ("XXMI", "XXMI-Libs", "EFMI"):
+            self.assertEqual(by_key[key].status, "update_available", key)
+            self.assertIn("下载", by_key[key].message)
+        # 本地那份也确实没被"装出来"（否则上面那句只是嘴上说没下）
+        self.assertFalse(
+            (self.config.builtin_runtime_path / "XXMI" / "EFMI" / "Core" / "EFMI" / "main.ini").is_file()
+        )
 
 
 if __name__ == "__main__":

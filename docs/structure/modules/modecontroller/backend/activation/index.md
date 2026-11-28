@@ -11,8 +11,8 @@ description:
   en: >
       Turning a selection into what the game actually loads: resolve same-character exclusivity and on-demand dependencies, plan which copy of each dependency wins, copy selected mods into the EFMI Mods staging area, patch hotkeys, write controller artifacts, adopt hand-placed mods, and refuse to run whenever staging would overlap the user's library.
       
-revision: c5e7502f33b821a8fbb9f32403d00f1d3540841b
-updated_at: "2026-11-28T10:16:58.092Z"
+revision: 55db4a68d2887afd4194c6e6b519ad091940608b
+updated_at: "2026-11-28T14:23:15.790Z"
 fingerprint: 518927801cbd3245ddd89278a488a10fa2a7d4b3131547488d0d8c1adac05c59
 source:
   - path: "endfieldmodcontroller/activation.py"

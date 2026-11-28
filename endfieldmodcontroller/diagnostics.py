@@ -73,6 +73,23 @@ def _reveal_target(target: Path, creationflags: int) -> tuple[bool, str]:
     return True, ""
 
 
+_OPEN_PATH_TAIL = re.compile(r"\s+(?:info|sha256|mtime|bytes)\s*=")
+
+
+def _normalize_open_target(target: str) -> str:
+    r"""把「路径 + 日志字段尾巴」截成纯路径。
+
+    2026-11-28 用户现场：弹窗里的一整行被当成路径传进来 ——
+    `D:\…\runtime\launch.log info=365719 bytes mtime=2026-11-28T22:00:18 sha256=57c0…`
+    于是 `Path(...).exists()` 必然为假，用户看到「文件明明在、却说路径不存在」。
+    老前端（未升级的产物）仍会这么传，所以后端也收一道：只在遇到**已知日志字段名 + =**
+    时截断，正常路径里不会出现 ` info=` 这种东西。
+    """
+    text = str(target or "")
+    match = _OPEN_PATH_TAIL.search(text)
+    return (text[: match.start()] if match else text).strip()
+
+
 def open_path(config: Any, path: Path) -> dict[str, Any]:
     """在资源管理器里定位到指定文件/目录。
 

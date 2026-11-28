@@ -1170,6 +1170,8 @@ class EndfieldModControllerApi:
         """
         from . import diagnostics
 
+        # 老前端会把弹窗里的一整行当路径传进来（`…launch.log info=… sha256=…`），先截成纯路径。
+        target = diagnostics._normalize_open_target(target)
         result = diagnostics.open_path(self.config, Path(target))
         if result.get("ok") or not fallback_parent:
             return result
@@ -1729,10 +1731,17 @@ class EndfieldModControllerApi:
         except Exception:  # noqa: BLE001
             report = {}
         missing = [key for key, item in (report or {}).items() if not item.get("present")]
+        # ★ `required` 缺失（XXMI / XXMI-Libs / EFMI）—— 前端点「一键启动」前先看它：
+        #   有就直接跳到「下载」页（2026-11-28 用户要求「要安装应该调到下载安装」），
+        #   而不是把缺组件的启动请求丢给后端、让界面停在"正在启动…"里等下载。
+        #   Poser 是可选插件（required=False），不进这个清单。
+        missing_required = [key for key, item in (report or {}).items()
+                            if item.get("required") and not item.get("present")]
         controller_ready = (self.config.controller_dir / "controller.ini").is_file()
         return {
             "first_run": bool(missing) or not controller_ready,
             "missing_components": missing,
+            "missing_required": missing_required,
             # 用户 2026-10-01 要求：首次不要直接推"一键启动"，而是先问要不要引导。
             "onboarding_done": bool(getattr(self.config, "onboarding_done", False)),
         }
@@ -2800,8 +2809,15 @@ class EndfieldModControllerApi:
 
                     # ⚠️ 这里原是 `log=progress and None` —— `progress` 是函数（恒真），
                     # `and None` 让整个表达式**恒等于 None**，等于白写一句。语义就是"不传日志
-                    # 回调"（进度由 progress/byte_progress 两条通道上报）。改成显式 None。
-                    ureport = updates_mod.check_updates(self.config, log=None)
+                    #   回调"（进度由 progress/byte_progress 两条通道上报）。改成显式 None。
+                    # ⚠️⚠️ 2026-11-28 用户报「下载到最后会卡好久」：实测 21:20:39「乳摇 / Poser
+                    #   开始」→ 21:22:14 完成，**94.6 秒里任务日志一行都没有**（查上游版本 + 下
+                    #   乳摇/Poser 包全在同一步，网络慢时就是纯静默）。现在把这三步的日志接上。
+                    def _extras_log(message: str) -> None:
+                        self._dep_task["log"].append(str(message))
+
+                    _extras_log("[组件] 乳摇/Poser：正在检查上游版本…（网络慢时会停在这一步）")
+                    ureport = updates_mod.check_updates(self.config, log=_extras_log)
                     sm = ureport.get("secondary_motion") or {}
                     current = sm.get("current") or ""
                     latest = sm.get("latest") or ""
@@ -2818,7 +2834,8 @@ class EndfieldModControllerApi:
                                 message=(f"未安装 → {latest}" if need_install else f"{current} → {latest}"),
                             ))
                         else:
-                            outcome = updates_mod.update_secondary_motion(self.config, url=download_url)
+                            outcome = updates_mod.update_secondary_motion(
+                                self.config, url=download_url, log=_extras_log)
                             results.append(SimpleNamespace(
                                 key="secondary_motion",
                                 status=(("已安装" if need_install else "已更新")
@@ -2850,7 +2867,7 @@ class EndfieldModControllerApi:
                                 results.append(SimpleNamespace(key="poser", status="跳过",
                                                                message="启动页已关闭该组件"))
                             else:
-                                outcome = poser_mod.ensure_pack(self.config)
+                                outcome = poser_mod.ensure_pack(self.config, _extras_log)
                                 results.append(SimpleNamespace(
                                     key="poser",
                                     status="已安装" if outcome.get("ok") else "失败",
@@ -6840,7 +6857,10 @@ class EndfieldModControllerApi:
         if isinstance(builtin, dict):
             for key, row in builtin.items():
                 if isinstance(row, dict):
-                    rows.append(_row(key, row, label=str(key)))
+                    # ⚠️ 2026-11-28：这里原来写的是 `label=str(key)`，而 `_row` 的第三个形参叫
+                    #   `default` ⇒ 只要有内置组件段就必抛 TypeError，依赖页「检查状态（不下载）」
+                    #   每次都弹 `_row() got an unexpected keyword argument 'label'`（用户实测报障）。
+                    rows.append(_row(key, row, str(key)))
         return rows
 
     def check_component_updates(self) -> dict[str, Any]:

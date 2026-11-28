@@ -11,8 +11,8 @@ description:
   en: >
       Key injection that bypasses the Windows input queue: find EFMI's `d3d11.dll` → walk its **import table** and swap `GetAsyncKeyState` for our function (data only, no code patching; candidates are tried until one really imports that call) → a click marks that key as held for 180 ms, EFMI's next poll sees it and it releases itself. First read returns `0x8001`, later ones `0x8000`, so both polling styles fire once. Unload restores the table.
       
-revision: c5e7502f33b821a8fbb9f32403d00f1d3540841b
-updated_at: "2026-11-28T10:16:58.091Z"
+revision: 55db4a68d2887afd4194c6e6b519ad091940608b
+updated_at: "2026-11-28T14:23:15.790Z"
 fingerprint: b7c3308d6a7510637f261d0e9693ae965d386f84980c8a17315fbee8fb1f74ce
 source:
   - path: "reshade_addon/src/vkey_inject.h"

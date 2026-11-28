@@ -11,8 +11,8 @@ description:
   en: >
       Compile the fake EFMI and the host exe (reusing `scripts.build-addon`'s MSVC discovery), run it with `MODECONTROLLER_HOOK_MODULE` set, and print the 21 assertions verbatim. Exit code 0 = all pass, 1 = a case failed, 2 = no compiler available.
       
-revision: c5e7502f33b821a8fbb9f32403d00f1d3540841b
-updated_at: "2026-11-28T10:16:58.137Z"
+revision: 55db4a68d2887afd4194c6e6b519ad091940608b
+updated_at: "2026-11-28T14:23:15.830Z"
 fingerprint: c73a660094d826b5d52e9200bf9b324df0047484a633b7cab19a2f6e810c38fb
 source:
   - path: "scripts/test_addon_hook.py"

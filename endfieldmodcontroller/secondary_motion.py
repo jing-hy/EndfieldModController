@@ -357,6 +357,28 @@ def ensure_injection(config: AppConfig, log: Callable[[str], None] | None = None
     elif not settings_state.get("ok"):
         warnings.append(str(settings_state.get("message")))
 
+    # ★★ 2026-11-28（诊断包 diagnostics-20261128-220053）：**工具目录没有 ⇒ 一条注入都不铺**。
+    #
+    #   这套注入靠两个 loader proxy（`d3dcompiler_47.dll` / `vulkan-1.dll`）把 `plugin\sbm.dll`
+    #   带进游戏进程，而它们会**顶替游戏的两个系统模块**。工具目录缺失时，管理器 / 插件数据 /
+    #   更新源全都不完整 —— 现场正是「WARN 未找到乳摇工具目录」之后**照样铺了 proxy**，
+    #   游戏随后以 `0xC0000005` 起不来（同机对照：不走这条路的独立启动 EFMI 能进）。
+    #   所以这里直接跳过，并把自己以前铺过的撤掉（还原原版 + 删 `plugin\sbm.dll`）。
+    tool_dir = _tool_dir(config)
+    if tool_dir is None:
+        removed = remove_injection(config, log=log)
+        for action in removed.get("actions") or []:
+            actions.append(str(action))
+        for warning in removed.get("warnings") or []:
+            warnings.append(str(warning))
+        message = (
+            "没有找到乳摇工具目录 —— 已跳过乳摇注入并把以前铺过的撤掉（还原原版系统模块）。"
+            "这套注入靠 loader proxy 顶替 d3dcompiler_47.dll / vulkan-1.dll，工具不在时铺了只会让游戏起不来。"
+        )
+        _log(log, message)
+        return {"ok": True, "skipped": "no-tool-dir", "message": message,
+                "actions": actions, "warnings": warnings}
+
     candidates = _source_candidates(config)
     game = game_dir(config)
     if game is None:

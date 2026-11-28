@@ -17,7 +17,7 @@
 // ② **进度一律走字节口径**（`byte_percent`），拿不到才退回项数口径 ——
 //    项数口径下 138 MB 的资产包只算 1 项，进度条会长时间不动（用户 2026-10-03 报过
 //    「进度条不要一卡一卡的，应该跟着实际大小走」）。
-import { ref, computed, onMounted, onUnmounted } from "vue";
+import { ref, computed, onActivated, onMounted, onUnmounted } from "vue";
 import { call } from "../lib/bridge.js";
 import { t } from "../lib/i18n.js";
 import { store } from "../store.js";
@@ -180,12 +180,12 @@ async function startDeps(note = "") {
   await refresh();
 }
 
-onMounted(async () => {
-  await refresh();
-  timer = setInterval(refresh, 1000);
-  // 别的页面把我送过来时带的两面旗（两个消费端都在这儿 —— 依赖页不再管这些东西）：
-  //  * `autoStartModDownload`：Mod 下载那一步后端**已经在跑**了，接上轮询即可；
-  //  * `autoStartDeps`：组件/依赖下载要**由本页发起**（清空重下、完整性补齐、一键更新都走它）。
+// 别的页面把我送过来时带的两面旗（两个消费端都在这儿 —— 依赖页不再管这些东西）：
+//  * `autoStartModDownload`：Mod 下载那一步后端**已经在跑**了，接上轮询即可；
+//  * `autoStartDeps`：组件/依赖下载要**由本页发起**（清空重下、完整性补齐、一键更新都走它）。
+// ⚠️ 先清标志再动手：本函数会被 onMounted 与 onActivated 各调一次（首次进入两者都会触发），
+//   清标志在前 ⇒ 第二次什么都不做，不会重复起任务。
+async function consumeAutoStart() {
   if (store.autoStartModDownload) {
     store.autoStartModDownload = false;
     await refresh();
@@ -196,6 +196,20 @@ onMounted(async () => {
     store.autoStartDepsNote = "";
     await startDeps(note || t("开始下载依赖组件…"));
   }
+}
+
+onMounted(async () => {
+  await refresh();
+  timer = setInterval(refresh, 1000);
+  await consumeAutoStart();
+});
+// ⚠️⚠️ **KeepAlive 下 onMounted 只跑一次**（App.vue 2026-11-28 起用 `<KeepAlive>` 包页面）。
+// 依赖页「下载并补齐组件」、启动页完整性引导都是「设标志 + 切到本页」——
+// 本组件早就挂载过，`onMounted` 不会再触发 ⇒ 那些 `store.autoStartDeps` **永远没人消费**，
+// 用户看到的就是「跳到下载页了，但什么都没开始下载」（2026-11-28 实测）。
+// 所以标志消费放这里：每次切回本页都再看一眼。
+onActivated(async () => {
+  await consumeAutoStart();
 });
 onUnmounted(() => { if (timer) clearInterval(timer); });
 

@@ -11,9 +11,9 @@ description:
   en: >
       Settings page (Vue): six groups, top action row, runtime status and a detail probe panel.
       
-revision: c5e7502f33b821a8fbb9f32403d00f1d3540841b
-updated_at: "2026-11-28T10:16:58.151Z"
-fingerprint: fbf46fd6abe58c9969a196732ffed94a02d531d2145e730c8350d09d53261d8f
+revision: 55db4a68d2887afd4194c6e6b519ad091940608b
+updated_at: "2026-11-28T14:23:15.839Z"
+fingerprint: 3391d72cd891d327a8d90f258f7700d093b6435ed30a080b306e531ac7f7c3db
 source:
   - path: "frontend/src/pages/SettingsPage.vue"
     line: 2

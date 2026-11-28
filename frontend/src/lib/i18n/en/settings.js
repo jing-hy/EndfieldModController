@@ -303,7 +303,7 @@ export default {
   "，不需要重启程序；启动失败只会留一行日志，不影响界面。": "; no restart is needed. A failed start leaves one log line and does not affect the UI.",
   "控制器": "Controller",
   "已生成 controller.ini": "controller.ini generated",
-  "还没生成（点启动页「生成控制器」）": "Not generated yet (click Generate controller on the Launch page)",
+  "还没生成（点一次「一键启动」会自动生成）": "Not generated yet (one-click launch generates it automatically)",
   "渲染 API": "Render API",
   "ReShade 面板": "ReShade panel",
   "已就位": "Ready",

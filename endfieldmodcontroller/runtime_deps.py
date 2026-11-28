@@ -411,6 +411,34 @@ def _skip_online_check(
     return BuiltinResult(key, "up_to_date", "already current", local_version, str(path))
 
 
+def _needs_download(
+    config: AppConfig,
+    key: str,
+    detail: str,
+    path: Any,
+    progress: Progress = None,
+    index: int = 0,
+    *,
+    total: int = 3,
+) -> BuiltinResult:
+    """本地**根本没有**这份组件：如实报"要下载"，**绝不在启动流程里下**。
+
+    ⚠️ 2026-11-28 用户现场：一键启动卡在 `builtin XXMI-Libs: checking`、界面十几分钟一动不动。
+    日志里是**启动流程自己去下 58 MB 的 XXMI**（`XXMI: installed`）再接着查 XXMI-Libs 的上游。
+    他的要求：「**一键启动要是要安装应该调到下载安装，而不是卡在那**」。
+
+    所以职责这么分（与 `ensure_streamline` 的既有写法一致）：
+      * `force=True`（依赖页「下载并补齐组件」/「检查并补齐」）⇒ 真的下载；
+      * 启动流程（`force=False`）遇到"本地没有" ⇒ 只报 `update_available`，由前端把用户
+        送到「下载」页 —— 那边有线路切换、实时进度、可暂停、失败重试。
+    """
+    message = f"{key}：本机还没有（{detail}）—— 到「下载」页点「下载并补齐组件」才会下载"
+    _note(config, message)
+    if progress:
+        progress(index + 1, total, key, "update_available")
+    return BuiltinResult(key, "update_available", message, "", str(path))
+
+
 def _auto_update_enabled(config: AppConfig) -> bool:
     """用户有没有打开「自动更新依赖」。
 
@@ -466,6 +494,10 @@ def ensure_xxmi(config: AppConfig, progress: Progress = None, byte_progress: Byt
     marker = _read_marker(root)
     if progress:
         progress(0, 3, "XXMI", "checking")
+    # ★ 本地根本没有 ⇒ 只报告、不下载（2026-11-28：一键启动会自己下 58 MB 的 XXMI，
+    #   界面停在"正在启动…"看着像卡死）。下载归「下载」页，见 `_needs_download`。
+    if existing is None and not force:
+        return _needs_download(config, "XXMI", "XXMI Launcher.exe 不存在", root, progress, 0)
     # 关着自动更新 + 本地就位 ⇒ 不联网（2026-10-03：这是"一键启动 62 秒"的第一层原因）
     if existing is not None:
         skipped = _skip_online_check(config, "XXMI", marker, existing,
@@ -524,6 +556,10 @@ def ensure_xxmi_libs(config: AppConfig, progress: Progress = None, byte_progress
     marker = _read_marker(target)
     if progress:
         progress(0, 3, "XXMI-Libs", "checking")
+    # ★ 同一口径（2026-11-28）：启动流程不下载，只报告
+    if not d3d11.is_file() and not force:
+        return _needs_download(config, "XXMI-Libs", "Resources/Packages/XXMI/d3d11.dll 不存在",
+                               target, progress, 1)
     if d3d11.is_file():
         skipped = _skip_online_check(config, "XXMI-Libs", marker, target,
                                      marker.get("version") or "", progress, 1, force=force)
@@ -589,6 +625,10 @@ def ensure_efmi(config: AppConfig, progress: Progress = None, byte_progress: Byt
     marker = _read_marker(target)
     if progress:
         progress(0, 3, "EFMI", "checking")
+    # ★ 同一口径（2026-11-28）：启动流程不下载，只报告
+    if not core_ini.is_file() and not force:
+        return _needs_download(config, "EFMI", "Core/EFMI/main.ini 不存在",
+                               target, progress, 2)
     if core_ini.is_file():
         skipped = _skip_online_check(config, "EFMI", marker, target,
                                      marker.get("version") or "", progress, 2, force=force)
@@ -926,6 +966,9 @@ def ensure_poser(
     root = config.poser_path
     marker = _read_marker(root)
     present = (root / "plugin" / "poser.dll").is_file() or (root / "poser.dll").is_file()
+    # ★ 同一口径（2026-11-28）：启动流程不下载，只报告
+    if not present and not force:
+        return _needs_download(config, "Poser", "plugin/poser.dll 不存在", root, progress, 2)
     # ⚠️ **这条就是"一键启动慢 54 秒"的根**（2026-10-03 用户实测）：上游发了 0.5.2，
     # 而他关着「自动更新依赖」，这里却**照样在启动流程里静默下载整个安装包**
     # （日志：`23:37:05 builtin Poser: start` → `23:37:59 builtin Poser: installed`）。
