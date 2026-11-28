@@ -15,13 +15,23 @@
   ],
   "alerts": [
     {
+      "id": "2026-11-28-v1.6.0-two-editions",
+      "level": "info",
+      "title": "v1.6.0：新增轻量版 Lite —— 不用 ReShade 的人可以换更轻、更安全的版本",
+      "body": "这次更新把管理器拆成了**完整版**和**轻量版 Lite** 两个版本。核心一句话：**如果你不使用 ReShade 相关功能（DLSS5 神经渲染 / 第一人称 / 统一面板），可以换成 Lite 版 —— 更轻量、更安全、也更稳定。**\n\n**完整版（EndfieldModController.exe）**：和以前一样，DLSS5 神经渲染 + 第一人称 + 服装 Mod + 摇乳 + 摆姿。\n**轻量版（EndfieldModController-Lite.exe）**：完全不含 ReShade —— 不下载、不安装、不注入；游戏目录里已有的 ReShade 残留也会在启动时被移走（有备份、可还原）。只保留服装 Mod / 摇乳 / 摆姿 / 商城下载。\n\n两版**共用同一份配置与 Mod 库**，放同一个文件夹就能随时互换；换回完整版后，原来的 ReShade 设置原样恢复。从 1.5.1 升级：程序内「检查程序更新」或直接覆盖 exe 即可，Mod 库、备份与设置都不会动。\n\n另外这一版还重做了设置界面（浮窗 + 一页到底、语言可选 中文 / English、背景色与强调色分开选），并修了 Mod 商城、下载页与角色识别（1.7 新角色、男女管理员分开）的一批问题。\n\n⚠️ 提醒：如果你被游戏官方警告过（封禁 / 风控提示），请到 Issues 说一下 —— 什么时间、当时开了哪些功能、以什么方式被警告。汇总这些信息能帮后面的人避开风险。",
+      "title_en": "v1.6.0: a new Lite edition — lighter, safer and more stable if you don't use ReShade",
+      "body_en": "v1.6.0 splits the manager into two editions: **Universal** and **Lite**. In one sentence: **if you don't use the ReShade-side features (DLSS5 neural rendering, first-person view, the in-game panel), switch to Lite — it is lighter, safer and more stable.**\n\n**Universal (EndfieldModController.exe)**: unchanged — DLSS5 neural rendering + first person + outfit mods + jiggle + posing.\n**Lite (EndfieldModController-Lite.exe)**: no ReShade at all — nothing downloaded, installed or injected; any ReShade leftovers in the game folder are moved away on launch (backed up, restorable). Only outfit mods / jiggle / posing / store downloads remain.\n\nBoth editions share the same config and mod library; drop both exes in one folder to swap anytime. Switching back to Universal restores your ReShade settings untouched. Upgrading from 1.5.1: use \"Check for updates\" in the app or simply overwrite the exe — your library, backups and settings stay put.\n\nThis release also reworks Settings (an in-app dialog with one scrollable page, Chinese/English switch, separate background and accent colors) and fixes several issues in the Mod Store, Downloads and character detection (1.7 characters, male/female Endministrator).\n\n⚠️ Reminder: if the game has warned you (ban / risk-control notice), please report it on Issues — when it happened, which features were enabled, and how you were warned. Collecting this helps others avoid the risk.",
+      "url": "https://github.com/jing-hy/EndfieldModController/issues"
+    },
+    {
       "id": "2026-10-08-official-warning-wave",
       "level": "critical",
       "title": "多人反馈收到官方警告：建议先停用注入、暂避一下",
       "hold_seconds": 20,
       "until": "2026-10-20",
       "body": "最近两天，我们陆续收到多位用户反馈：**收到了官方的警告**。\n\n目前还不清楚触发条件，也不能确定是不是注入本身导致的，所以先按最保守的做法来 —— **建议你暂时停用全部注入，等查清之后再恢复**。\n\n点下面的「还原配置」就行（推荐）：它会关掉全部注入开关（DLSS5 神经渲染 / 皮肤 Mod / ShakingBreastManager / Endfield Poser），并把游戏目录里的第三方文件**备份移走**（只搬不删、随时能恢复）。\n\n**你的 Mod 库、配置、已导入的 Mod 一个都不会丢。**\n\n如果你也收到过警告，请到 Issues 说一声：大概时间、当时开了哪些插件、收到的是什么形式 —— 你的一条反馈可能帮很多人保住账号。",
-      "url": "https://github.com/jing-hy/EndfieldModController/issues"
+      "url": "https://github.com/jing-hy/EndfieldModController/issues",
+      "max_version": "1.5.1"
     },
     {
       "id": "v1.0.17-1.0.20-selfupdate-beta-loop",
@@ -47,7 +57,8 @@
       "title": "v0.7.0 起加入「异常状态预警」",
       "min_version": "0.7.0",
       "body": "从 v0.7.0 开始，管理器会检查作者发布的两类消息：\n\n· 公告（比如这一条）：启动时提示一次，看完即止，不影响任何操作。\n· 异常状态预警：万一出现大规模封号之类的情况，你点「一键启动」时会先强制停留几秒，再让你在「还原配置 / 保持配置但不启动 / 仍然启动」里选一个。其中「还原配置」会关掉全部注入并清理游戏目录（有备份、可恢复），让游戏先回到原版状态。\n\n**如果你在玩的时候遇到被警告、被处理，或者看到同类情况，请及时到 Issues 反馈** —— 说个大概时间、你开了哪些插件、有没有收到游戏内提示就行。\n\n你的一次反馈，可能帮很多人保住账号。",
-      "url": "https://github.com/jing-hy/EndfieldModController/issues"
+      "url": "https://github.com/jing-hy/EndfieldModController/issues",
+      "max_version": "1.5.1"
     },
     {
       "id": "2026-10-26-ban-wave-over-reshade-risk",
@@ -55,7 +66,8 @@
       "title": "封禁风波已过；但 ReShade 仍是风险最大的一项，非必要别开",
       "until": "2026-12-31",
       "body": "先说结论：前一阵的封禁风波已经过去了。\n\n从 10 月 8 日那条预警到现在，我们没有再收到任何新的「收到官方警告 / 账号被处理」的反馈。之前那条「建议暂时停用全部注入」的预警已经到期失效，你现在可以按平时的方式使用。\n\n但 ReShade（DLSS5 神经渲染那一套底座）的风险仍然明显高于其它几项：它换掉的是渲染管线里的核心 DLL，对这些注入来说是最深的一层。所以建议是：\n\n1. 非必要不要开 ReShade / DLSS5 神经渲染；只想要角色皮肤 Mod 的话，走 EFMI 那条路就够了；\n2. 确实要开，就尽量单独开、别和别的注入叠着上，这样出问题时容易判断是哪一环；\n3. 记得我们自己那条红线：只玩单机，不改数值、不碰联机。\n\n如果你之后又看到「被警告 / 被处理」的反馈，或者你自己遇上，请到 Issues 说一声：大概时间、当时开了哪些开关。你的一条反馈能帮很多人躲开。\n\n这条公告不锁启动，看完即记已读，不影响任何操作。",
-      "url": "https://github.com/jing-hy/EndfieldModController/issues"
+      "url": "https://github.com/jing-hy/EndfieldModController/issues",
+      "max_version": "1.5.1"
     }
   ]
 }
