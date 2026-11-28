@@ -11,8 +11,8 @@ description:
   en: >
       Produce a demo library and config so the whole UI can be exercised on a machine with no game installed — used to capture screenshots and to test the empty-state paths.
       
-revision: 710bd12535949f02967e1df525db653a98be673f
-updated_at: "2026-11-28T15:37:36.804Z"
+revision: 5b034875dd0ea08fcd1a78982c72969af5d72139
+updated_at: "2026-11-28T15:58:50.127Z"
 fingerprint: f9eb14726711f9b336760e078e358dbb98b237ca057d693903e0a300dc12b7c8
 source:
   - path: "scripts/make_demo.py"

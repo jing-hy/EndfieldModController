@@ -11,19 +11,19 @@ description:
   en: >
       The launch sequence itself: build the environment and command line, pick normal vs elevated spawn, wait for the XXMI GUI, then watch the game process; plus the preview path used before the user commits.
       
-revision: 710bd12535949f02967e1df525db653a98be673f
-updated_at: "2026-11-28T15:37:36.776Z"
-fingerprint: 8b52918c0df826375bcd7e5121c69a478bc896289d5de2a29d1e0cff349704d8
+revision: 5b034875dd0ea08fcd1a78982c72969af5d72139
+updated_at: "2026-11-28T15:58:50.111Z"
+fingerprint: d13f304007971f4624bf1045f2a68c3ba48bac5050d3e00fe6b851831c7ed28a
 source:
   - path: "endfieldmodcontroller/launcher.py"
-    line: 4488
-    end_line: 7907
+    line: 4443
+    end_line: 7817
   - path: "endfieldmodcontroller/launcher.py"
-    line: 4825
-    end_line: 8188
+    line: 4780
+    end_line: 8098
   - path: "endfieldmodcontroller/launcher.py"
-    line: 4920
-    end_line: 8416
+    line: 4875
+    end_line: 8326
 apis:
   - protocol: rpc
     path: "launcher.launch"

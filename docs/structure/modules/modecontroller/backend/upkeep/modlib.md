@@ -11,8 +11,8 @@ description:
   en: >
       Moves user-removed mods from the library into runtime\backups\mod-trash (never a real delete, recoverable by hand). Since 2026-11-27 it no longer contains any mod-repair or rollback logic.
       
-revision: 710bd12535949f02967e1df525db653a98be673f
-updated_at: "2026-11-28T15:37:36.800Z"
+revision: 5b034875dd0ea08fcd1a78982c72969af5d72139
+updated_at: "2026-11-28T15:58:50.126Z"
 fingerprint: 07a0ba0c9b94190b8498d469e737883452aae54b8cd286a7e5f84ec68de58ac9
 source:
   - path: "endfieldmodcontroller/modlib.py"

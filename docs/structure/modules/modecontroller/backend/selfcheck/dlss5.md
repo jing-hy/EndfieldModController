@@ -11,19 +11,19 @@ description:
   en: >
       Everything DLSS5 needs verified before it can show a frame: the dlss5 folder, the shader set, the preset (and not nuking ReShade's own activation flags), GPU generation support, third-party NGX interception, whether the NR path bound last run, feeder redundancy, and the NRStyle report-only rule.
       
-revision: 710bd12535949f02967e1df525db653a98be673f
-updated_at: "2026-11-28T15:37:36.793Z"
+revision: 5b034875dd0ea08fcd1a78982c72969af5d72139
+updated_at: "2026-11-28T15:58:50.121Z"
 fingerprint: 76b2f761d9ea49316814f86ba891173986a92c8dae86ee0749287163f8a88d4a
 source:
   - path: "endfieldmodcontroller/initialize.py"
     line: 886
-    end_line: 3671
+    end_line: 3653
   - path: "endfieldmodcontroller/initialize.py"
     line: 1450
-    end_line: 7481
+    end_line: 7463
   - path: "endfieldmodcontroller/initialize.py"
-    line: 4709
-    end_line: 8100
+    line: 4700
+    end_line: 8082
 apis:
   - protocol: rpc
     path: "dlss5_dir"

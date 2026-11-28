@@ -11,19 +11,19 @@ description:
   en: >
       The loader that actually injects: assemble the runtime beside the game, tell d3dx which loader target to use, and start the multi-loader exe — including detecting and migrating the legacy framework layout.
       
-revision: 710bd12535949f02967e1df525db653a98be673f
-updated_at: "2026-11-28T15:37:36.779Z"
-fingerprint: 8b52918c0df826375bcd7e5121c69a478bc896289d5de2a29d1e0cff349704d8
+revision: 5b034875dd0ea08fcd1a78982c72969af5d72139
+updated_at: "2026-11-28T15:58:50.112Z"
+fingerprint: d13f304007971f4624bf1045f2a68c3ba48bac5050d3e00fe6b851831c7ed28a
 source:
   - path: "endfieldmodcontroller/launcher.py"
     line: 57
     end_line: 141
   - path: "endfieldmodcontroller/launcher.py"
-    line: 4456
-    end_line: 7865
+    line: 4411
+    end_line: 7775
   - path: "endfieldmodcontroller/launcher.py"
-    line: 5117
-    end_line: 8485
+    line: 5072
+    end_line: 8395
 apis:
   - protocol: rpc
     path: "launcher.ensure_migoto_runtime"

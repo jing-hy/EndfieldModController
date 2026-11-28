@@ -11,8 +11,8 @@ description:
   en: >
       When the data root is the Desktop folder, relocate the executable at the earliest point of startup: create D:\EndfieldModController (falling back to C:), copy the exe, create a desktop shortcut, restart from the new location and exit the old instance — so config.json / runtime / assets never pile up on the desktop. If the move fails it reports why; library (the user's mod store) is never deleted.
       
-revision: 710bd12535949f02967e1df525db653a98be673f
-updated_at: "2026-11-28T15:37:36.785Z"
+revision: 5b034875dd0ea08fcd1a78982c72969af5d72139
+updated_at: "2026-11-28T15:58:50.117Z"
 fingerprint: e7bb2bcad4582accc6d9ed2caa3b12c4412e9a5b5b65f72ce5c781c9c007cffa
 source:
   - path: "endfieldmodcontroller/desktop_root.py"
