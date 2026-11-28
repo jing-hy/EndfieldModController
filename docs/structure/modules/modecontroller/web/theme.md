@@ -11,13 +11,13 @@ description:
   en: >
       Design tokens and themes: light base with desaturated accent, six themes keeping their original names; the log box stays pure black and selectable.
       
-revision: 7d3751c3a9deb8ef56ad274079af27fe51475597
-updated_at: "2026-11-28T06:33:44.922Z"
+revision: c5e7502f33b821a8fbb9f32403d00f1d3540841b
+updated_at: "2026-11-28T10:16:58.154Z"
 fingerprint: 1c7b6d82683670c229a19ed8179b0c349b04c2c2ecce6a6711311237b9b49fd1
 source:
   - path: "frontend/src/styles/tokens.css"
-    line: 227
-    end_line: 642
+    line: 200
+    end_line: 588
 apis:
   - protocol: rpc
     path: "web.applyTheme"

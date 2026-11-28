@@ -11,16 +11,16 @@ description:
   en: >
       Make the EFMI framework itself work: declare the core global keys it expects, make sure its early includes are loaded (a wrong setting here means mods silently never appear), keep legacy costume sections working and turn on its debug log on request.
       
-revision: 7d3751c3a9deb8ef56ad274079af27fe51475597
-updated_at: "2026-11-28T06:33:44.878Z"
+revision: c5e7502f33b821a8fbb9f32403d00f1d3540841b
+updated_at: "2026-11-28T10:16:58.113Z"
 fingerprint: f65976b157bbe7d39e170c830940a92d367a07f73dd4e9eca8c82d1da48cf81f
 source:
   - path: "endfieldmodcontroller/launcher.py"
-    line: 4266
-    end_line: 6779
+    line: 4334
+    end_line: 6915
   - path: "endfieldmodcontroller/launcher.py"
-    line: 4359
-    end_line: 6950
+    line: 4427
+    end_line: 7086
 apis:
   - protocol: rpc
     path: "ensure_efmi_library_globals"

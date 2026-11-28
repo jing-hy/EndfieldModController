@@ -11,19 +11,19 @@ description:
   en: >
       The DLSS5 sub-components (ReShade base, the feed add-on, iMMERSE): per-component markers, version comparison against upstream, asset picking from the release, and the installers that write files atomically beside the game.
       
-revision: 7d3751c3a9deb8ef56ad274079af27fe51475597
-updated_at: "2026-11-28T06:33:44.869Z"
+revision: c5e7502f33b821a8fbb9f32403d00f1d3540841b
+updated_at: "2026-11-28T10:16:58.100Z"
 fingerprint: 3b1c1d35581af4754ca3dae5406b46a90f17d7f7f7561cd284b8d34068ee7681
 source:
   - path: "endfieldmodcontroller/dlss5_fetcher.py"
     line: 51
-    end_line: 302
+    end_line: 314
   - path: "endfieldmodcontroller/dlss5_fetcher.py"
-    line: 225
-    end_line: 747
+    line: 231
+    end_line: 777
   - path: "endfieldmodcontroller/dlss5_fetcher.py"
-    line: 414
-    end_line: 1099
+    line: 420
+    end_line: 1129
 apis:
   - protocol: rpc
     path: "component_report"

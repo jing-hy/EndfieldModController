@@ -11,13 +11,13 @@ description:
   en: >
       Pack the assets that must sit beside the exe into one uploadable archive (shaders, DLLs, the feed add-on, fonts) so a fresh machine can restore a complete runtime without downloading each piece.
       
-revision: 7d3751c3a9deb8ef56ad274079af27fe51475597
-updated_at: "2026-11-28T06:33:44.899Z"
+revision: c5e7502f33b821a8fbb9f32403d00f1d3540841b
+updated_at: "2026-11-28T10:16:58.131Z"
 fingerprint: 78c604ce667961c54b43bb137749210cf9f4aaff911c3b84564173e5c0c4bbae
 source:
   - path: "scripts/build_assets_bundle.py"
     line: 2
-    end_line: 52
+    end_line: 150
 apis:
   - protocol: rpc
     path: "scripts.build_assets_bundle"

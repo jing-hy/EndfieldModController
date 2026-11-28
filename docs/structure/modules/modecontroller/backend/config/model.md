@@ -11,19 +11,19 @@ description:
   en: >
       The configuration object everything else reads: dozens of persisted fields (paths, switches, download policy, UI state), safe save with a broken-config quarantine, first-run GPU defaults, and the project-root / resource-root resolution that differs between source run and frozen exe. (Path self-healing after the program directory is renamed/moved, path normalization before saving, blank-field refill and the "never create directories outside the data root" guard live in `config.data-root`.)
       
-revision: 7d3751c3a9deb8ef56ad274079af27fe51475597
-updated_at: "2026-11-28T06:33:44.872Z"
+revision: c5e7502f33b821a8fbb9f32403d00f1d3540841b
+updated_at: "2026-11-28T10:16:58.104Z"
 fingerprint: bb81cfc7aa60d5f82eb177d0e6c92a897a53d296eae828027791039c100ae1e4
 source:
   - path: "endfieldmodcontroller/config.py"
-    line: 15
-    end_line: 203
+    line: 17
+    end_line: 215
   - path: "endfieldmodcontroller/config.py"
-    line: 328
-    end_line: 1631
+    line: 334
+    end_line: 1717
   - path: "endfieldmodcontroller/config.py"
-    line: 1330
-    end_line: 1768
+    line: 1373
+    end_line: 1854
 apis:
   - protocol: rpc
     path: "config.AppConfig"

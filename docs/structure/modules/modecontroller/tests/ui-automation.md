@@ -11,8 +11,8 @@ description:
   en: >
       Pins the channel's invariants: localhost-only, token check, command round-trip, honest timeout when the frontend is silent, state file removed on shutdown, and the frontend half really being wired in.
       
-revision: 7d3751c3a9deb8ef56ad274079af27fe51475597
-updated_at: "2026-11-28T06:33:44.916Z"
+revision: c5e7502f33b821a8fbb9f32403d00f1d3540841b
+updated_at: "2026-11-28T10:16:58.149Z"
 fingerprint: b050a91a0b71ec0ff4ce407a7660d313692f86951945443746f13632b0bef63b
 source:
   - path: "tests/test_ui_automation.py"

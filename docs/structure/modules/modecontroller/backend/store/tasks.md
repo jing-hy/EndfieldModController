@@ -11,9 +11,9 @@ description:
   en: >
       Normalises Mod downloads and component downloads into one task shape (status, progress, speed, log tail, cover) consumed by the downloads page and the sidebar badge. Pure shaping; performs no downloading.
       
-revision: 7d3751c3a9deb8ef56ad274079af27fe51475597
-updated_at: "2026-11-28T06:33:44.896Z"
-fingerprint: dfb3282d44041b1dd0a46b80ebeb1c0d0acd5ff9667d406227db335ab34d447d
+revision: c5e7502f33b821a8fbb9f32403d00f1d3540841b
+updated_at: "2026-11-28T10:16:58.129Z"
+fingerprint: 4503d50ecceb74eeb357ab8fefab3c7e3aad705ca920fd1fb98499173ee5ad43
 source:
   - path: "endfieldmodcontroller/downloads.py"
 apis: []

@@ -9,7 +9,7 @@
         "repository": "https://github.com/jing-hy/EndfieldModController"
       }
     ],
-    "compiled_at": "2026-11-28T06:33:57.355Z",
+    "compiled_at": "2026-11-28T10:17:15.767Z",
     "stats": {
       "tree_count": 1,
       "module_count": 181,
@@ -81,8 +81,8 @@
           "path": "reshade_addon/src/vkey_inject.h"
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.860Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.090Z",
       "fingerprint": "67534b502098f6b0064275c1deba775e973a1ba23cd51ad75fe36099770c8ceb",
       "deps": [
         {
@@ -129,8 +129,8 @@
           "end_line": 2176
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.860Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.090Z",
       "fingerprint": "7e4bf6c06c90452fe5ed8659515576ff632a5e9b16c977dad375db10648d06ec",
       "apis": [
         {
@@ -220,8 +220,8 @@
           "end_line": 71
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.861Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.091Z",
       "fingerprint": "f6f8d9f16107b70d3bae4d76b9ea6b1409c6257c67334e635ab6b182c9c32010",
       "apis": [
         {
@@ -277,8 +277,8 @@
           "end_line": 1307
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.861Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.091Z",
       "fingerprint": "b7c3308d6a7510637f261d0e9693ae965d386f84980c8a17315fbee8fb1f74ce",
       "apis": [
         {
@@ -357,9 +357,9 @@
           "path": "endfieldmodcontroller/api.py"
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.877Z",
-      "fingerprint": "e46aa628867141fd0f89645e22d6c8005cf31bdce95dd668ff06166168029fce",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.111Z",
+      "fingerprint": "ba6ba5591b444e2bb1769b8187fefc4328ea22b8bd5679e647adef103ee8b968",
       "aggregate": {
         "descendant_count": 118,
         "own_api_count": 0,
@@ -390,8 +390,8 @@
           "path": "endfieldmodcontroller/activation.py"
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.861Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.092Z",
       "fingerprint": "518927801cbd3245ddd89278a488a10fa2a7d4b3131547488d0d8c1adac05c59",
       "deps": [
         {
@@ -442,8 +442,8 @@
           "end_line": 1295
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.861Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.092Z",
       "fingerprint": "518927801cbd3245ddd89278a488a10fa2a7d4b3131547488d0d8c1adac05c59",
       "apis": [
         {
@@ -488,8 +488,8 @@
           "end_line": 665
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.862Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.092Z",
       "fingerprint": "518927801cbd3245ddd89278a488a10fa2a7d4b3131547488d0d8c1adac05c59",
       "apis": [
         {
@@ -559,8 +559,8 @@
           "end_line": 403
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.862Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.092Z",
       "fingerprint": "518927801cbd3245ddd89278a488a10fa2a7d4b3131547488d0d8c1adac05c59",
       "apis": [
         {
@@ -630,8 +630,8 @@
           "end_line": 522
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.862Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.093Z",
       "fingerprint": "518927801cbd3245ddd89278a488a10fa2a7d4b3131547488d0d8c1adac05c59",
       "apis": [
         {
@@ -701,8 +701,8 @@
           "end_line": 1549
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.862Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.093Z",
       "fingerprint": "518927801cbd3245ddd89278a488a10fa2a7d4b3131547488d0d8c1adac05c59",
       "apis": [
         {
@@ -784,9 +784,9 @@
           "path": "endfieldmodcontroller/api.py"
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.864Z",
-      "fingerprint": "a8beee663c03015e162cc608ced83e0519222b75d13c503401d68895127714fc",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.095Z",
+      "fingerprint": "6bb91744161e9eaa0b9c1bdb257cd2badd3b0874a48f855d8548cef0485c3916",
       "aggregate": {
         "descendant_count": 14,
         "own_api_count": 0,
@@ -816,23 +816,23 @@
       "source": [
         {
           "path": "endfieldmodcontroller/api.py",
-          "line": 3298,
-          "end_line": 7749
+          "line": 3390,
+          "end_line": 8249
         },
         {
           "path": "endfieldmodcontroller/api.py",
-          "line": 3478,
-          "end_line": 11619
+          "line": 3570,
+          "end_line": 12119
         },
         {
           "path": "endfieldmodcontroller/api.py",
-          "line": 9592,
-          "end_line": 16612
+          "line": 9842,
+          "end_line": 17112
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.863Z",
-      "fingerprint": "a8beee663c03015e162cc608ced83e0519222b75d13c503401d68895127714fc",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.094Z",
+      "fingerprint": "6bb91744161e9eaa0b9c1bdb257cd2badd3b0874a48f855d8548cef0485c3916",
       "apis": [
         {
           "protocol": "rpc",
@@ -921,8 +921,8 @@
       "source": [
         {
           "path": "endfieldmodcontroller/api.py",
-          "line": 8133,
-          "end_line": 15541
+          "line": 8383,
+          "end_line": 16041
         },
         {
           "path": "endfieldmodcontroller/moddl.py",
@@ -930,9 +930,9 @@
           "end_line": 1458
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.863Z",
-      "fingerprint": "9df542bcd649c7b12f05b46fa38c2475c5ce9441b50bda284e6138940332d8c0",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.094Z",
+      "fingerprint": "6b471d128403521263225e0ce9dfff5d1b3650b8bfaae435cfb0e4d99aa74396",
       "apis": [
         {
           "protocol": "rpc",
@@ -1002,13 +1002,13 @@
       "source": [
         {
           "path": "endfieldmodcontroller/api.py",
-          "line": 8826,
-          "end_line": 16232
+          "line": 9076,
+          "end_line": 16732
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.863Z",
-      "fingerprint": "a8beee663c03015e162cc608ced83e0519222b75d13c503401d68895127714fc",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.095Z",
+      "fingerprint": "6bb91744161e9eaa0b9c1bdb257cd2badd3b0874a48f855d8548cef0485c3916",
       "apis": [
         {
           "protocol": "rpc",
@@ -1096,18 +1096,18 @@
       "source": [
         {
           "path": "endfieldmodcontroller/api.py",
-          "line": 4401,
-          "end_line": 12366
+          "line": 4502,
+          "end_line": 12866
         },
         {
           "path": "endfieldmodcontroller/api.py",
-          "line": 9667,
-          "end_line": 16699
+          "line": 9917,
+          "end_line": 17199
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.864Z",
-      "fingerprint": "a8beee663c03015e162cc608ced83e0519222b75d13c503401d68895127714fc",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.096Z",
+      "fingerprint": "6bb91744161e9eaa0b9c1bdb257cd2badd3b0874a48f855d8548cef0485c3916",
       "apis": [
         {
           "protocol": "rpc",
@@ -1204,23 +1204,23 @@
       "source": [
         {
           "path": "endfieldmodcontroller/api.py",
-          "line": 3214,
-          "end_line": 7702
+          "line": 3306,
+          "end_line": 8202
         },
         {
           "path": "endfieldmodcontroller/api.py",
-          "line": 4284,
-          "end_line": 12390
+          "line": 4385,
+          "end_line": 12890
         },
         {
           "path": "endfieldmodcontroller/api.py",
-          "line": 5906,
-          "end_line": 16085
+          "line": 6062,
+          "end_line": 16585
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.865Z",
-      "fingerprint": "a8beee663c03015e162cc608ced83e0519222b75d13c503401d68895127714fc",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.096Z",
+      "fingerprint": "6bb91744161e9eaa0b9c1bdb257cd2badd3b0874a48f855d8548cef0485c3916",
       "apis": [
         {
           "protocol": "rpc",
@@ -1317,23 +1317,23 @@
       "source": [
         {
           "path": "endfieldmodcontroller/api.py",
-          "line": 857,
-          "end_line": 4217
+          "line": 868,
+          "end_line": 4419
         },
         {
           "path": "endfieldmodcontroller/api.py",
-          "line": 4164,
-          "end_line": 11800
+          "line": 4265,
+          "end_line": 12300
         },
         {
           "path": "endfieldmodcontroller/api.py",
-          "line": 9848,
-          "end_line": 16794
+          "line": 10098,
+          "end_line": 17294
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.865Z",
-      "fingerprint": "a8beee663c03015e162cc608ced83e0519222b75d13c503401d68895127714fc",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.096Z",
+      "fingerprint": "6bb91744161e9eaa0b9c1bdb257cd2badd3b0874a48f855d8548cef0485c3916",
       "apis": [
         {
           "protocol": "rpc",
@@ -1412,23 +1412,23 @@
       "source": [
         {
           "path": "endfieldmodcontroller/api.py",
-          "line": 4268,
-          "end_line": 11968
+          "line": 4369,
+          "end_line": 12468
         },
         {
           "path": "endfieldmodcontroller/api.py",
-          "line": 5044,
-          "end_line": 13092
+          "line": 5151,
+          "end_line": 13592
         },
         {
           "path": "endfieldmodcontroller/api.py",
-          "line": 9773,
-          "end_line": 16737
+          "line": 10023,
+          "end_line": 17237
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.865Z",
-      "fingerprint": "a8beee663c03015e162cc608ced83e0519222b75d13c503401d68895127714fc",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.097Z",
+      "fingerprint": "6bb91744161e9eaa0b9c1bdb257cd2badd3b0874a48f855d8548cef0485c3916",
       "apis": [
         {
           "protocol": "rpc",
@@ -1507,18 +1507,18 @@
       "source": [
         {
           "path": "endfieldmodcontroller/api.py",
-          "line": 3157,
-          "end_line": 7490
+          "line": 3249,
+          "end_line": 7990
         },
         {
           "path": "endfieldmodcontroller/api.py",
-          "line": 5059,
-          "end_line": 16338
+          "line": 5166,
+          "end_line": 16838
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.866Z",
-      "fingerprint": "a8beee663c03015e162cc608ced83e0519222b75d13c503401d68895127714fc",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.097Z",
+      "fingerprint": "6bb91744161e9eaa0b9c1bdb257cd2badd3b0874a48f855d8548cef0485c3916",
       "apis": [
         {
           "protocol": "rpc",
@@ -1604,13 +1604,13 @@
       "source": [
         {
           "path": "endfieldmodcontroller/api.py",
-          "line": 4717,
-          "end_line": 12836
+          "line": 4818,
+          "end_line": 13336
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.866Z",
-      "fingerprint": "a8beee663c03015e162cc608ced83e0519222b75d13c503401d68895127714fc",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.098Z",
+      "fingerprint": "6bb91744161e9eaa0b9c1bdb257cd2badd3b0874a48f855d8548cef0485c3916",
       "apis": [
         {
           "protocol": "rpc",
@@ -1698,13 +1698,13 @@
       "source": [
         {
           "path": "endfieldmodcontroller/api.py",
-          "line": 1355,
-          "end_line": 5214
+          "line": 1391,
+          "end_line": 5428
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.867Z",
-      "fingerprint": "a8beee663c03015e162cc608ced83e0519222b75d13c503401d68895127714fc",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.098Z",
+      "fingerprint": "6bb91744161e9eaa0b9c1bdb257cd2badd3b0874a48f855d8548cef0485c3916",
       "apis": [
         {
           "protocol": "rpc",
@@ -1810,23 +1810,23 @@
       "source": [
         {
           "path": "endfieldmodcontroller/api.py",
-          "line": 466,
-          "end_line": 3609
+          "line": 470,
+          "end_line": 3793
         },
         {
           "path": "endfieldmodcontroller/api.py",
-          "line": 3055,
-          "end_line": 7135
+          "line": 3147,
+          "end_line": 7635
         },
         {
           "path": "endfieldmodcontroller/api.py",
-          "line": 4375,
-          "end_line": 12205
+          "line": 4476,
+          "end_line": 12705
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.867Z",
-      "fingerprint": "a8beee663c03015e162cc608ced83e0519222b75d13c503401d68895127714fc",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.098Z",
+      "fingerprint": "6bb91744161e9eaa0b9c1bdb257cd2badd3b0874a48f855d8548cef0485c3916",
       "apis": [
         {
           "protocol": "rpc",
@@ -1931,18 +1931,18 @@
       "source": [
         {
           "path": "endfieldmodcontroller/api.py",
-          "line": 407,
-          "end_line": 851
+          "line": 411,
+          "end_line": 873
         },
         {
           "path": "endfieldmodcontroller/api.py",
-          "line": 2842,
-          "end_line": 7117
+          "line": 2931,
+          "end_line": 7617
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.867Z",
-      "fingerprint": "a8beee663c03015e162cc608ced83e0519222b75d13c503401d68895127714fc",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.099Z",
+      "fingerprint": "6bb91744161e9eaa0b9c1bdb257cd2badd3b0874a48f855d8548cef0485c3916",
       "apis": [
         {
           "protocol": "rpc",
@@ -2013,9 +2013,9 @@
           "path": "endfieldmodcontroller/api.py"
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.868Z",
-      "fingerprint": "a8beee663c03015e162cc608ced83e0519222b75d13c503401d68895127714fc",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.099Z",
+      "fingerprint": "6bb91744161e9eaa0b9c1bdb257cd2badd3b0874a48f855d8548cef0485c3916",
       "apis": [
         {
           "protocol": "rpc",
@@ -2193,18 +2193,18 @@
       "source": [
         {
           "path": "endfieldmodcontroller/api.py",
-          "line": 2900,
-          "end_line": 6258
+          "line": 2989,
+          "end_line": 6664
         },
         {
           "path": "endfieldmodcontroller/api.py",
-          "line": 9495,
-          "end_line": 16518
+          "line": 9745,
+          "end_line": 17018
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.868Z",
-      "fingerprint": "a8beee663c03015e162cc608ced83e0519222b75d13c503401d68895127714fc",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.099Z",
+      "fingerprint": "6bb91744161e9eaa0b9c1bdb257cd2badd3b0874a48f855d8548cef0485c3916",
       "apis": [
         {
           "protocol": "rpc",
@@ -2300,8 +2300,8 @@
           "path": "endfieldmodcontroller/runtime_assets.py"
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.870Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.102Z",
       "fingerprint": "287181cfc9b426b59e1a09d9f92e136eb51e2dfa5743667bec82c3eb4e3d2ac4",
       "aggregate": {
         "descendant_count": 9,
@@ -2331,17 +2331,17 @@
       "source": [
         {
           "path": "endfieldmodcontroller/runtime_assets.py",
-          "line": 86,
-          "end_line": 312
+          "line": 87,
+          "end_line": 320
         },
         {
           "path": "endfieldmodcontroller/runtime_assets.py",
-          "line": 213,
-          "end_line": 1932
+          "line": 217,
+          "end_line": 2024
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.869Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.100Z",
       "fingerprint": "51d6d9e6d1fed07c194197fef707a23710064b090f156ec06e4e8ef00c0c3b75",
       "apis": [
         {
@@ -2400,17 +2400,17 @@
       "source": [
         {
           "path": "endfieldmodcontroller/runtime_assets.py",
-          "line": 872,
-          "end_line": 2241
+          "line": 876,
+          "end_line": 2333
         },
         {
           "path": "endfieldmodcontroller/runtime_assets.py",
-          "line": 1238,
-          "end_line": 2698
+          "line": 1248,
+          "end_line": 2790
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.869Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.100Z",
       "fingerprint": "51d6d9e6d1fed07c194197fef707a23710064b090f156ec06e4e8ef00c0c3b75",
       "apis": [
         {
@@ -2494,8 +2494,8 @@
           "end_line": 2384
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.869Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.100Z",
       "fingerprint": "940445f2509a6584509508660f421aab24144627d2c5e478cee01546269b112b",
       "apis": [
         {
@@ -2546,21 +2546,21 @@
         {
           "path": "endfieldmodcontroller/dlss5_fetcher.py",
           "line": 51,
-          "end_line": 302
+          "end_line": 314
         },
         {
           "path": "endfieldmodcontroller/dlss5_fetcher.py",
-          "line": 225,
-          "end_line": 747
+          "line": 231,
+          "end_line": 777
         },
         {
           "path": "endfieldmodcontroller/dlss5_fetcher.py",
-          "line": 414,
-          "end_line": 1099
+          "line": 420,
+          "end_line": 1129
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.869Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.100Z",
       "fingerprint": "3b1c1d35581af4754ca3dae5406b46a90f17d7f7f7561cd284b8d34068ee7681",
       "apis": [
         {
@@ -2644,8 +2644,8 @@
           "end_line": 838
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.870Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.101Z",
       "fingerprint": "3cb54df6d0131c1afa6c55e062999ee16c1aa39b35e3e404862b89c3675b531b",
       "apis": [
         {
@@ -2729,8 +2729,8 @@
           "end_line": 4936
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.870Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.101Z",
       "fingerprint": "d91203dcfc55e5d32853346de920cc8096bccffe15e9dde6c8dc088458cf541c",
       "apis": [
         {
@@ -2803,8 +2803,8 @@
           "end_line": 520
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.870Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.101Z",
       "fingerprint": "87441ca526e5dfe7263b1f857d9facb82c61fba76d519994d0dda806e90c7903",
       "apis": [
         {
@@ -2872,8 +2872,8 @@
           "end_line": 1034
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.870Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.102Z",
       "fingerprint": "3cb54df6d0131c1afa6c55e062999ee16c1aa39b35e3e404862b89c3675b531b",
       "apis": [
         {
@@ -2957,8 +2957,8 @@
           "end_line": 1082
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.871Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.102Z",
       "fingerprint": "3cb54df6d0131c1afa6c55e062999ee16c1aa39b35e3e404862b89c3675b531b",
       "apis": [
         {
@@ -3025,9 +3025,9 @@
           "path": "endfieldmodcontroller/version.py"
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.872Z",
-      "fingerprint": "74e406229b9a9b95c9e6fd1062488e1de29f1bd0335a152a08fe8074e447fc27",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.104Z",
+      "fingerprint": "2e15ed4f2c786e67fe8279868ce28eb7bbbb4233f9e4fe1464e9f2f9f6f94524",
       "aggregate": {
         "descendant_count": 6,
         "own_api_count": 0,
@@ -3058,17 +3058,17 @@
       "source": [
         {
           "path": "endfieldmodcontroller/config.py",
-          "line": 157,
-          "end_line": 486
+          "line": 163,
+          "end_line": 540
         },
         {
           "path": "endfieldmodcontroller/config.py",
-          "line": 1267,
-          "end_line": 1742
+          "line": 1310,
+          "end_line": 1828
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.871Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.102Z",
       "fingerprint": "bb81cfc7aa60d5f82eb177d0e6c92a897a53d296eae828027791039c100ae1e4",
       "apis": [
         {
@@ -3136,17 +3136,17 @@
       "source": [
         {
           "path": "endfieldmodcontroller/config.py",
-          "line": 1356,
-          "end_line": 2146
+          "line": 1399,
+          "end_line": 2232
         },
         {
           "path": "endfieldmodcontroller/config.py",
-          "line": 1442,
-          "end_line": 2320
+          "line": 1485,
+          "end_line": 2406
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.871Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.103Z",
       "fingerprint": "bb81cfc7aa60d5f82eb177d0e6c92a897a53d296eae828027791039c100ae1e4",
       "apis": [
         {
@@ -3218,12 +3218,12 @@
       "source": [
         {
           "path": "endfieldmodcontroller/edition.py",
-          "line": 1,
-          "end_line": 88
+          "line": 89,
+          "end_line": 264
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.871Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.103Z",
       "fingerprint": "dd591fefc72f435264c087efcfccc98596e219fdaadd21d69236b31d9c465bb3",
       "apis": [
         {
@@ -3283,8 +3283,8 @@
           "end_line": 1160
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.871Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.103Z",
       "fingerprint": "a34bf8d397341b7c6b0db76ef902d7c0599848994427cb4f1a437aad9d2c79d8",
       "apis": [
         {
@@ -3343,22 +3343,22 @@
       "source": [
         {
           "path": "endfieldmodcontroller/config.py",
-          "line": 15,
-          "end_line": 203
+          "line": 17,
+          "end_line": 215
         },
         {
           "path": "endfieldmodcontroller/config.py",
-          "line": 328,
-          "end_line": 1631
+          "line": 334,
+          "end_line": 1717
         },
         {
           "path": "endfieldmodcontroller/config.py",
-          "line": 1330,
-          "end_line": 1768
+          "line": 1373,
+          "end_line": 1854
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.872Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.104Z",
       "fingerprint": "bb81cfc7aa60d5f82eb177d0e6c92a897a53d296eae828027791039c100ae1e4",
       "apis": [
         {
@@ -3421,9 +3421,9 @@
           "end_line": 200
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.872Z",
-      "fingerprint": "86f2e84d901caf862d770fae1bfd04dc04043b5492b855baf58212e2f6751e97",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.104Z",
+      "fingerprint": "f9ef0ee55ecb778808d5ce7bc98b283607cfe1b0e797faa63a3efbf4435442d3",
       "apis": [
         {
           "protocol": "rpc",
@@ -3475,8 +3475,8 @@
           "path": "endfieldmodcontroller/ini_lint.py"
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.873Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.105Z",
       "fingerprint": "dec860c273531e6490d1e080869610046a0c5b4304c17256e1d3fc54c9458989",
       "aggregate": {
         "descendant_count": 4,
@@ -3507,21 +3507,21 @@
         {
           "path": "endfieldmodcontroller/character_sync.py",
           "line": 58,
-          "end_line": 138
+          "end_line": 172
         },
         {
           "path": "endfieldmodcontroller/character_sync.py",
-          "line": 128,
-          "end_line": 308
+          "line": 143,
+          "end_line": 410
         },
         {
           "path": "endfieldmodcontroller/character_sync.py",
-          "line": 287,
-          "end_line": 418
+          "line": 338,
+          "end_line": 520
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.872Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.104Z",
       "fingerprint": "abb343d1fc6f44dd68d9c3132bb06024c8e5c265994679589a14ee542a6886dc",
       "apis": [
         {
@@ -3589,8 +3589,8 @@
           "end_line": 482
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.872Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.104Z",
       "fingerprint": "b1658757fe5e453d2c1e62d58ad68dfd13a79c319ddedbde2e2ab52fe60eed3c",
       "apis": [
         {
@@ -3658,8 +3658,8 @@
           "end_line": 582
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.873Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.105Z",
       "fingerprint": "d9c0db91e1e211b686c2623a3dd1e9629c69f738949cd878610793ea0bd19cb7",
       "apis": [
         {
@@ -3709,8 +3709,8 @@
           "end_line": 320
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.873Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.105Z",
       "fingerprint": "7004f655a9a1d82d89b47c2d1183b2db8ecd48030dc67e342f6aaa3704afaafe",
       "apis": [
         {
@@ -3780,8 +3780,8 @@
           "path": "endfieldmodcontroller/secondary_motion.py"
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.875Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.107Z",
       "fingerprint": "b5b4a937a0cb2fd346ea463f4d184b810c8ff720e2cc9bb3263cd49d41b64f0b",
       "aggregate": {
         "descendant_count": 11,
@@ -3811,17 +3811,17 @@
       "source": [
         {
           "path": "endfieldmodcontroller/game_clean.py",
-          "line": 102,
-          "end_line": 280
+          "line": 103,
+          "end_line": 282
         },
         {
           "path": "endfieldmodcontroller/game_clean.py",
-          "line": 205,
-          "end_line": 860
+          "line": 206,
+          "end_line": 866
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.874Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.106Z",
       "fingerprint": "5aedaa3b106c994d9f2306613b8a3702ac42cdda2a5d935fbccf439f5a62c511",
       "apis": [
         {
@@ -3871,17 +3871,17 @@
       "source": [
         {
           "path": "endfieldmodcontroller/game_clean.py",
-          "line": 540,
-          "end_line": 1317
+          "line": 541,
+          "end_line": 1323
         },
         {
           "path": "endfieldmodcontroller/game_clean.py",
-          "line": 586,
-          "end_line": 2401
+          "line": 587,
+          "end_line": 2407
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.874Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.106Z",
       "fingerprint": "5aedaa3b106c994d9f2306613b8a3702ac42cdda2a5d935fbccf439f5a62c511",
       "apis": [
         {
@@ -3951,22 +3951,22 @@
       "source": [
         {
           "path": "endfieldmodcontroller/reshade_integration.py",
-          "line": 795,
-          "end_line": 1527
+          "line": 807,
+          "end_line": 1551
         },
         {
           "path": "endfieldmodcontroller/reshade_integration.py",
-          "line": 921,
-          "end_line": 2017
+          "line": 933,
+          "end_line": 2041
         },
         {
           "path": "endfieldmodcontroller/reshade_integration.py",
-          "line": 2213,
-          "end_line": 3281
+          "line": 2225,
+          "end_line": 3305
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.874Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.106Z",
       "fingerprint": "0349ed6888285bb3f99b53390aa868f8ad657a9499de5d67c34e63214c7c3653",
       "apis": [
         {
@@ -4034,8 +4034,8 @@
           "end_line": 192
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.874Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.106Z",
       "fingerprint": "b6cbec448155bcff8bec81042a89a2e3f4b10bcd33d3d3bd295314fed852276c",
       "apis": [
         {
@@ -4085,17 +4085,17 @@
       "source": [
         {
           "path": "endfieldmodcontroller/reshade_integration.py",
-          "line": 2059,
-          "end_line": 3281
+          "line": 2071,
+          "end_line": 3305
         },
         {
           "path": "endfieldmodcontroller/reshade_integration.py",
-          "line": 2219,
-          "end_line": 3530
+          "line": 2231,
+          "end_line": 3554
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.875Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.108Z",
       "fingerprint": "0349ed6888285bb3f99b53390aa868f8ad657a9499de5d67c34e63214c7c3653",
       "apis": [
         {
@@ -4177,8 +4177,8 @@
           "end_line": 1278
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.875Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.109Z",
       "fingerprint": "027fdda44a839fd7f1d19a5acecfd5e3b939d76bc654ff92cf217b3ba334a501",
       "apis": [
         {
@@ -4263,8 +4263,8 @@
           "end_line": 2871
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.875Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.108Z",
       "fingerprint": "c1a8c8e5faa0b0a8a0f7ca2aa203fa83742783950f0fc6b8ed1ee2a08d2b178a",
       "apis": [
         {
@@ -4361,17 +4361,17 @@
       "source": [
         {
           "path": "endfieldmodcontroller/reshade_integration.py",
-          "line": 56,
-          "end_line": 315
+          "line": 57,
+          "end_line": 329
         },
         {
           "path": "endfieldmodcontroller/reshade_integration.py",
-          "line": 222,
-          "end_line": 1256
+          "line": 226,
+          "end_line": 1280
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.876Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.109Z",
       "fingerprint": "0349ed6888285bb3f99b53390aa868f8ad657a9499de5d67c34e63214c7c3653",
       "apis": [
         {
@@ -4444,8 +4444,8 @@
           "end_line": 1148
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.876Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.109Z",
       "fingerprint": "1899de8184111c94304a12496d00a8ac1f69e5e027a905e086dc340ea0106ec8",
       "apis": [
         {
@@ -4513,18 +4513,18 @@
       "source": [
         {
           "path": "endfieldmodcontroller/reshade_integration.py",
-          "line": 1127,
-          "end_line": 2330
+          "line": 1139,
+          "end_line": 2354
         },
         {
           "path": "endfieldmodcontroller/reshade_integration.py",
-          "line": 746,
-          "end_line": 1396
+          "line": 758,
+          "end_line": 1420
         },
         {
           "path": "endfieldmodcontroller/reshade_integration.py",
-          "line": 1404,
-          "end_line": 2516
+          "line": 1416,
+          "end_line": 2540
         },
         {
           "path": "endfieldmodcontroller/reshade.py",
@@ -4532,8 +4532,8 @@
           "end_line": 235
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.876Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.110Z",
       "fingerprint": "d827058e97015208517bea2cd8e8525a42a52e2a060e6bbfa1cf220a2459a8b0",
       "apis": [
         {
@@ -4603,22 +4603,22 @@
       "source": [
         {
           "path": "endfieldmodcontroller/reshade_integration.py",
-          "line": 1328,
-          "end_line": 2563
+          "line": 1340,
+          "end_line": 2587
         },
         {
           "path": "endfieldmodcontroller/reshade_integration.py",
-          "line": 1513,
-          "end_line": 2829
+          "line": 1525,
+          "end_line": 2853
         },
         {
           "path": "endfieldmodcontroller/reshade_integration.py",
-          "line": 1737,
-          "end_line": 3009
+          "line": 1749,
+          "end_line": 3033
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.876Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.110Z",
       "fingerprint": "0349ed6888285bb3f99b53390aa868f8ad657a9499de5d67c34e63214c7c3653",
       "apis": [
         {
@@ -4679,8 +4679,8 @@
           "path": "endfieldmodcontroller/launcher.py"
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.879Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.113Z",
       "fingerprint": "f65976b157bbe7d39e170c830940a92d367a07f73dd4e9eca8c82d1da48cf81f",
       "deps": [
         {
@@ -4721,17 +4721,17 @@
       "source": [
         {
           "path": "endfieldmodcontroller/launcher.py",
-          "line": 52,
-          "end_line": 70
+          "line": 53,
+          "end_line": 72
         },
         {
           "path": "endfieldmodcontroller/launcher.py",
-          "line": 2258,
-          "end_line": 4830
+          "line": 2303,
+          "end_line": 4966
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.877Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.112Z",
       "fingerprint": "f65976b157bbe7d39e170c830940a92d367a07f73dd4e9eca8c82d1da48cf81f",
       "apis": [
         {
@@ -4801,22 +4801,22 @@
       "source": [
         {
           "path": "endfieldmodcontroller/launcher.py",
-          "line": 3588,
-          "end_line": 6107
+          "line": 3656,
+          "end_line": 6243
         },
         {
           "path": "endfieldmodcontroller/launcher.py",
-          "line": 3925,
-          "end_line": 6388
+          "line": 3993,
+          "end_line": 6524
         },
         {
           "path": "endfieldmodcontroller/launcher.py",
-          "line": 4020,
-          "end_line": 6616
+          "line": 4088,
+          "end_line": 6752
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.877Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.112Z",
       "fingerprint": "f65976b157bbe7d39e170c830940a92d367a07f73dd4e9eca8c82d1da48cf81f",
       "apis": [
         {
@@ -4895,22 +4895,22 @@
       "source": [
         {
           "path": "endfieldmodcontroller/launcher.py",
-          "line": 250,
-          "end_line": 402
+          "line": 251,
+          "end_line": 404
         },
         {
           "path": "endfieldmodcontroller/launcher.py",
-          "line": 1089,
-          "end_line": 4176
+          "line": 1102,
+          "end_line": 4312
         },
         {
           "path": "endfieldmodcontroller/launcher.py",
-          "line": 2405,
-          "end_line": 5064
+          "line": 2450,
+          "end_line": 5200
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.878Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.112Z",
       "fingerprint": "f65976b157bbe7d39e170c830940a92d367a07f73dd4e9eca8c82d1da48cf81f",
       "apis": [
         {
@@ -4996,17 +4996,17 @@
       "source": [
         {
           "path": "endfieldmodcontroller/launcher.py",
-          "line": 4266,
-          "end_line": 6779
+          "line": 4334,
+          "end_line": 6915
         },
         {
           "path": "endfieldmodcontroller/launcher.py",
-          "line": 4359,
-          "end_line": 6950
+          "line": 4427,
+          "end_line": 7086
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.878Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.113Z",
       "fingerprint": "f65976b157bbe7d39e170c830940a92d367a07f73dd4e9eca8c82d1da48cf81f",
       "apis": [
         {
@@ -5065,27 +5065,27 @@
       "source": [
         {
           "path": "endfieldmodcontroller/launcher.py",
-          "line": 31,
-          "end_line": 53
+          "line": 32,
+          "end_line": 55
         },
         {
           "path": "endfieldmodcontroller/launcher.py",
-          "line": 341,
-          "end_line": 4116
+          "line": 342,
+          "end_line": 4252
         },
         {
           "path": "endfieldmodcontroller/launcher.py",
-          "line": 1978,
-          "end_line": 4657
+          "line": 2002,
+          "end_line": 4793
         },
         {
           "path": "endfieldmodcontroller/launcher.py",
-          "line": 3834,
-          "end_line": 6322
+          "line": 3902,
+          "end_line": 6458
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.878Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.113Z",
       "fingerprint": "f65976b157bbe7d39e170c830940a92d367a07f73dd4e9eca8c82d1da48cf81f",
       "apis": [
         {
@@ -5144,22 +5144,22 @@
       "source": [
         {
           "path": "endfieldmodcontroller/launcher.py",
-          "line": 138,
-          "end_line": 251
+          "line": 139,
+          "end_line": 253
         },
         {
           "path": "endfieldmodcontroller/launcher.py",
-          "line": 3224,
-          "end_line": 6033
+          "line": 3272,
+          "end_line": 6169
         },
         {
           "path": "endfieldmodcontroller/launcher.py",
-          "line": 3994,
-          "end_line": 6432
+          "line": 4062,
+          "end_line": 6568
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.878Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.113Z",
       "fingerprint": "f65976b157bbe7d39e170c830940a92d367a07f73dd4e9eca8c82d1da48cf81f",
       "apis": [
         {
@@ -5218,17 +5218,17 @@
       "source": [
         {
           "path": "endfieldmodcontroller/launcher.py",
-          "line": 2576,
-          "end_line": 5416
+          "line": 2621,
+          "end_line": 5552
         },
         {
           "path": "endfieldmodcontroller/launcher.py",
-          "line": 2786,
-          "end_line": 5847
+          "line": 2831,
+          "end_line": 5983
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.879Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.114Z",
       "fingerprint": "f65976b157bbe7d39e170c830940a92d367a07f73dd4e9eca8c82d1da48cf81f",
       "apis": [
         {
@@ -5298,22 +5298,22 @@
       "source": [
         {
           "path": "endfieldmodcontroller/launcher.py",
-          "line": 56,
-          "end_line": 139
+          "line": 57,
+          "end_line": 141
         },
         {
           "path": "endfieldmodcontroller/launcher.py",
-          "line": 3556,
-          "end_line": 6065
+          "line": 3624,
+          "end_line": 6201
         },
         {
           "path": "endfieldmodcontroller/launcher.py",
-          "line": 4217,
-          "end_line": 6685
+          "line": 4285,
+          "end_line": 6821
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.879Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.114Z",
       "fingerprint": "f65976b157bbe7d39e170c830940a92d367a07f73dd4e9eca8c82d1da48cf81f",
       "apis": [
         {
@@ -5364,12 +5364,12 @@
       "source": [
         {
           "path": "endfieldmodcontroller/launcher.py",
-          "line": 1298,
-          "end_line": 4429
+          "line": 1311,
+          "end_line": 4565
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.880Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.114Z",
       "fingerprint": "f65976b157bbe7d39e170c830940a92d367a07f73dd4e9eca8c82d1da48cf81f",
       "apis": [
         {
@@ -5422,8 +5422,8 @@
           "path": "endfieldmodcontroller/core.py"
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.882Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.116Z",
       "fingerprint": "f08da56ae44508d278998f3738ddb9b81293ce8714052a77b63f367259d40c0d",
       "deps": [
         {
@@ -5464,17 +5464,17 @@
       "source": [
         {
           "path": "endfieldmodcontroller/core.py",
-          "line": 1926,
-          "end_line": 4728
+          "line": 1945,
+          "end_line": 4766
         },
         {
           "path": "endfieldmodcontroller/core.py",
-          "line": 3518,
-          "end_line": 5258
+          "line": 3537,
+          "end_line": 5296
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.880Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.115Z",
       "fingerprint": "f08da56ae44508d278998f3738ddb9b81293ce8714052a77b63f367259d40c0d",
       "apis": [
         {
@@ -5535,12 +5535,12 @@
       "source": [
         {
           "path": "endfieldmodcontroller/core.py",
-          "line": 650,
-          "end_line": 1994
+          "line": 658,
+          "end_line": 2032
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.880Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.115Z",
       "fingerprint": "f08da56ae44508d278998f3738ddb9b81293ce8714052a77b63f367259d40c0d",
       "apis": [
         {
@@ -5608,27 +5608,27 @@
       "source": [
         {
           "path": "endfieldmodcontroller/core.py",
-          "line": 484,
-          "end_line": 700
+          "line": 488,
+          "end_line": 734
         },
         {
           "path": "endfieldmodcontroller/core.py",
-          "line": 584,
-          "end_line": 800
+          "line": 592,
+          "end_line": 834
         },
         {
           "path": "endfieldmodcontroller/core.py",
-          "line": 1068,
-          "end_line": 1994
+          "line": 1085,
+          "end_line": 2032
         },
         {
           "path": "endfieldmodcontroller/core.py",
-          "line": 1356,
-          "end_line": 2496
+          "line": 1373,
+          "end_line": 2534
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.881Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.115Z",
       "fingerprint": "f08da56ae44508d278998f3738ddb9b81293ce8714052a77b63f367259d40c0d",
       "apis": [
         {
@@ -5706,12 +5706,12 @@
       "source": [
         {
           "path": "endfieldmodcontroller/core.py",
-          "line": 3268,
-          "end_line": 5173
+          "line": 3287,
+          "end_line": 5211
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.881Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.115Z",
       "fingerprint": "f08da56ae44508d278998f3738ddb9b81293ce8714052a77b63f367259d40c0d",
       "apis": [
         {
@@ -5790,12 +5790,12 @@
       "source": [
         {
           "path": "endfieldmodcontroller/core.py",
-          "line": 3619,
-          "end_line": 5421
+          "line": 3638,
+          "end_line": 5459
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.881Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.116Z",
       "fingerprint": "f08da56ae44508d278998f3738ddb9b81293ce8714052a77b63f367259d40c0d",
       "apis": [
         {
@@ -5854,12 +5854,12 @@
       "source": [
         {
           "path": "endfieldmodcontroller/core.py",
-          "line": 3168,
-          "end_line": 5013
+          "line": 3187,
+          "end_line": 5051
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.881Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.116Z",
       "fingerprint": "f08da56ae44508d278998f3738ddb9b81293ce8714052a77b63f367259d40c0d",
       "apis": [
         {
@@ -5921,21 +5921,21 @@
         {
           "path": "endfieldmodcontroller/core.py",
           "line": 330,
-          "end_line": 642
+          "end_line": 658
         },
         {
           "path": "endfieldmodcontroller/core.py",
-          "line": 1911,
-          "end_line": 3879
+          "line": 1930,
+          "end_line": 3917
         },
         {
           "path": "endfieldmodcontroller/core.py",
-          "line": 2757,
-          "end_line": 4778
+          "line": 2776,
+          "end_line": 4816
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.882Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.116Z",
       "fingerprint": "f08da56ae44508d278998f3738ddb9b81293ce8714052a77b63f367259d40c0d",
       "apis": [
         {
@@ -6013,12 +6013,12 @@
       "source": [
         {
           "path": "endfieldmodcontroller/core.py",
-          "line": 2811,
-          "end_line": 4928
+          "line": 2830,
+          "end_line": 4966
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.882Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.117Z",
       "fingerprint": "f08da56ae44508d278998f3738ddb9b81293ce8714052a77b63f367259d40c0d",
       "apis": [
         {
@@ -6077,12 +6077,12 @@
       "source": [
         {
           "path": "endfieldmodcontroller/core.py",
-          "line": 3556,
-          "end_line": 5354
+          "line": 3575,
+          "end_line": 5392
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.882Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.117Z",
       "fingerprint": "f08da56ae44508d278998f3738ddb9b81293ce8714052a77b63f367259d40c0d",
       "apis": [
         {
@@ -6132,12 +6132,12 @@
       "source": [
         {
           "path": "endfieldmodcontroller/core.py",
-          "line": 3686,
-          "end_line": 5471
+          "line": 3705,
+          "end_line": 5509
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.883Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.117Z",
       "fingerprint": "f08da56ae44508d278998f3738ddb9b81293ce8714052a77b63f367259d40c0d",
       "apis": [
         {
@@ -6198,17 +6198,17 @@
       "source": [
         {
           "path": "endfieldmodcontroller/core.py",
-          "line": 1060,
-          "end_line": 1923
+          "line": 1077,
+          "end_line": 1961
         },
         {
           "path": "endfieldmodcontroller/core.py",
-          "line": 1481,
-          "end_line": 3838
+          "line": 1500,
+          "end_line": 3876
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.883Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.117Z",
       "fingerprint": "f08da56ae44508d278998f3738ddb9b81293ce8714052a77b63f367259d40c0d",
       "apis": [
         {
@@ -6287,12 +6287,12 @@
       "source": [
         {
           "path": "endfieldmodcontroller/core.py",
-          "line": 3438,
-          "end_line": 5291
+          "line": 3457,
+          "end_line": 5329
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.883Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.117Z",
       "fingerprint": "f08da56ae44508d278998f3738ddb9b81293ce8714052a77b63f367259d40c0d",
       "apis": [
         {
@@ -6352,11 +6352,11 @@
         {
           "path": "endfieldmodcontroller/core.py",
           "line": 221,
-          "end_line": 484
+          "end_line": 492
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.883Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.118Z",
       "fingerprint": "f08da56ae44508d278998f3738ddb9b81293ce8714052a77b63f367259d40c0d",
       "apis": [
         {
@@ -6433,8 +6433,8 @@
           "path": "endfieldmodcontroller/deviceinfo.py"
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.886Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.121Z",
       "fingerprint": "298b7d920a0673bddc5120b187ab6f9bcaf5e69b7155bc5a1c5357770e88a4a7",
       "aggregate": {
         "descendant_count": 17,
@@ -6464,17 +6464,17 @@
       "source": [
         {
           "path": "endfieldmodcontroller/crashwatch.py",
-          "line": 2846,
-          "end_line": 5697
+          "line": 2864,
+          "end_line": 5737
         },
         {
           "path": "endfieldmodcontroller/crashwatch.py",
-          "line": 3397,
-          "end_line": 5942
+          "line": 3417,
+          "end_line": 5982
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.883Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.118Z",
       "fingerprint": "9112e4a8695909130afe36250c9b5b986c41480fbad2baa07b8035ac11747cb4",
       "apis": [
         {
@@ -6544,22 +6544,22 @@
       "source": [
         {
           "path": "endfieldmodcontroller/crashwatch.py",
-          "line": 143,
-          "end_line": 3202
+          "line": 144,
+          "end_line": 3242
         },
         {
           "path": "endfieldmodcontroller/crashwatch.py",
-          "line": 1082,
-          "end_line": 3282
+          "line": 1089,
+          "end_line": 3322
         },
         {
           "path": "endfieldmodcontroller/crashwatch.py",
-          "line": 1027,
-          "end_line": 3202
+          "line": 1034,
+          "end_line": 3242
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.884Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.118Z",
       "fingerprint": "9112e4a8695909130afe36250c9b5b986c41480fbad2baa07b8035ac11747cb4",
       "apis": [
         {
@@ -6609,12 +6609,12 @@
       "source": [
         {
           "path": "endfieldmodcontroller/diagnostics.py",
-          "line": 4376,
-          "end_line": 9030
+          "line": 4479,
+          "end_line": 9236
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.884Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.119Z",
       "fingerprint": "78bdb7036548a0be5b84d4d56eb1fd5ab9c6c64a80601f22d74daa8500f15b1f",
       "apis": [
         {
@@ -6667,8 +6667,8 @@
           "path": "endfieldmodcontroller/desktop_root.py"
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.884Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.119Z",
       "fingerprint": "e7bb2bcad4582accc6d9ed2caa3b12c4412e9a5b5b65f72ce5c781c9c007cffa",
       "apis": [
         {
@@ -6754,8 +6754,8 @@
           "end_line": 691
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.884Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.119Z",
       "fingerprint": "8af80a163504813dd8f1bea7970ee4403e31fce901e48b3fed0dd7366474cd31",
       "apis": [
         {
@@ -6814,17 +6814,17 @@
       "source": [
         {
           "path": "endfieldmodcontroller/diagnostics.py",
-          "line": 4427,
-          "end_line": 9954
+          "line": 4530,
+          "end_line": 10160
         },
         {
           "path": "endfieldmodcontroller/diagnostics.py",
-          "line": 5430,
-          "end_line": 10020
+          "line": 5533,
+          "end_line": 10226
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.885Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.120Z",
       "fingerprint": "78bdb7036548a0be5b84d4d56eb1fd5ab9c6c64a80601f22d74daa8500f15b1f",
       "apis": [
         {
@@ -6865,22 +6865,22 @@
       "source": [
         {
           "path": "endfieldmodcontroller/crashwatch.py",
-          "line": 99,
-          "end_line": 160
+          "line": 100,
+          "end_line": 162
         },
         {
           "path": "endfieldmodcontroller/crashwatch.py",
-          "line": 1906,
-          "end_line": 5091
+          "line": 1913,
+          "end_line": 5131
         },
         {
           "path": "endfieldmodcontroller/crashwatch.py",
-          "line": 2775,
-          "end_line": 5322
+          "line": 2789,
+          "end_line": 5362
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.885Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.120Z",
       "fingerprint": "9112e4a8695909130afe36250c9b5b986c41480fbad2baa07b8035ac11747cb4",
       "apis": [
         {
@@ -6930,17 +6930,17 @@
       "source": [
         {
           "path": "endfieldmodcontroller/filewatch.py",
-          "line": 49,
-          "end_line": 437
+          "line": 50,
+          "end_line": 463
         },
         {
           "path": "endfieldmodcontroller/filewatch.py",
-          "line": 513,
-          "end_line": 847
+          "line": 528,
+          "end_line": 877
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.885Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.120Z",
       "fingerprint": "47b81c33e1050dd8a9f960ae828a2fab141dfa07387a3244e5e399ee5278c0fc",
       "apis": [
         {
@@ -7001,11 +7001,11 @@
         {
           "path": "endfieldmodcontroller/injecttrace.py",
           "line": 2,
-          "end_line": 286
+          "end_line": 306
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.886Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.121Z",
       "fingerprint": "28d125a528d7e121be8c628fec75c2c7e1d2dcbf5ddc32adba08886212791de2",
       "apis": [
         {
@@ -7071,8 +7071,8 @@
           "end_line": 392
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.886Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.121Z",
       "fingerprint": "9e43317f51b0c3362ad6458e8ed0a4b360518ae232ac45943eb2fb04fde2d757",
       "apis": [
         {
@@ -7122,22 +7122,22 @@
       "source": [
         {
           "path": "endfieldmodcontroller/diagnostics.py",
-          "line": 220,
-          "end_line": 412
+          "line": 238,
+          "end_line": 460
         },
         {
           "path": "endfieldmodcontroller/diagnostics.py",
-          "line": 312,
-          "end_line": 626
+          "line": 331,
+          "end_line": 674
         },
         {
           "path": "endfieldmodcontroller/diagnostics.py",
-          "line": 5467,
-          "end_line": 10072
+          "line": 5570,
+          "end_line": 10278
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.886Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.122Z",
       "fingerprint": "78bdb7036548a0be5b84d4d56eb1fd5ab9c6c64a80601f22d74daa8500f15b1f",
       "apis": [
         {
@@ -7196,12 +7196,12 @@
       "source": [
         {
           "path": "endfieldmodcontroller/crashwatch.py",
-          "line": 1174,
-          "end_line": 4842
+          "line": 1181,
+          "end_line": 4882
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.887Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.122Z",
       "fingerprint": "9112e4a8695909130afe36250c9b5b986c41480fbad2baa07b8035ac11747cb4",
       "apis": [
         {
@@ -7298,12 +7298,12 @@
       "source": [
         {
           "path": "endfieldmodcontroller/diagnostics.py",
-          "line": 516,
-          "end_line": 8908
+          "line": 540,
+          "end_line": 9114
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.887Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.122Z",
       "fingerprint": "78bdb7036548a0be5b84d4d56eb1fd5ab9c6c64a80601f22d74daa8500f15b1f",
       "apis": [
         {
@@ -7344,17 +7344,17 @@
       "source": [
         {
           "path": "endfieldmodcontroller/crashwatch.py",
-          "line": 2831,
-          "end_line": 5337
+          "line": 2849,
+          "end_line": 5377
         },
         {
           "path": "endfieldmodcontroller/crashwatch.py",
-          "line": 2912,
-          "end_line": 5487
+          "line": 2930,
+          "end_line": 5527
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.887Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.123Z",
       "fingerprint": "9112e4a8695909130afe36250c9b5b986c41480fbad2baa07b8035ac11747cb4",
       "apis": [
         {
@@ -7399,8 +7399,8 @@
           "end_line": 302
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.888Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.123Z",
       "fingerprint": "99050db55888c707486326fd44636fd7f5c0892df1d0427df6700dffc471cd12",
       "apis": [
         {
@@ -7455,8 +7455,8 @@
           "line": 121
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.888Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.123Z",
       "fingerprint": "72ac52554edf435758343dd0f700415261d4ea603fd09d2b67e8a1f9835fb5ed",
       "apis": [
         {
@@ -7533,17 +7533,17 @@
       "source": [
         {
           "path": "endfieldmodcontroller/crashwatch.py",
-          "line": 3603,
-          "end_line": 6001
+          "line": 3623,
+          "end_line": 6041
         },
         {
           "path": "endfieldmodcontroller/crashwatch.py",
-          "line": 3700,
-          "end_line": 6070
+          "line": 3720,
+          "end_line": 6110
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.888Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.124Z",
       "fingerprint": "9112e4a8695909130afe36250c9b5b986c41480fbad2baa07b8035ac11747cb4",
       "apis": [
         {
@@ -7618,9 +7618,9 @@
           "path": "endfieldmodcontroller/integrity.py"
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.889Z",
-      "fingerprint": "10349897b2ec3b23ad823a91f0af97f45dd738c0cdaef3a16f561c7d400d0e3a",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.125Z",
+      "fingerprint": "3b9432559cb86d9aa746f14c3fbfaef42fef216e76e70fac516a3753d042252e",
       "deps": [
         {
           "kind": "call",
@@ -7669,17 +7669,17 @@
       "source": [
         {
           "path": "endfieldmodcontroller/initialize.py",
-          "line": 312,
-          "end_line": 1385
+          "line": 313,
+          "end_line": 1387
         },
         {
           "path": "endfieldmodcontroller/initialize.py",
-          "line": 5101,
-          "end_line": 8441
+          "line": 5114,
+          "end_line": 8467
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.888Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.124Z",
       "fingerprint": "c7bfe5bdfea15a3f8eac6317d485f389d20833f975d3c574a8542cb15e99489e",
       "apis": [
         {
@@ -7729,22 +7729,22 @@
       "source": [
         {
           "path": "endfieldmodcontroller/initialize.py",
-          "line": 885,
-          "end_line": 3663
+          "line": 886,
+          "end_line": 3689
         },
         {
           "path": "endfieldmodcontroller/initialize.py",
-          "line": 1449,
-          "end_line": 7473
+          "line": 1450,
+          "end_line": 7499
         },
         {
           "path": "endfieldmodcontroller/initialize.py",
-          "line": 4705,
-          "end_line": 8092
+          "line": 4718,
+          "end_line": 8118
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.888Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.124Z",
       "fingerprint": "c7bfe5bdfea15a3f8eac6317d485f389d20833f975d3c574a8542cb15e99489e",
       "apis": [
         {
@@ -7824,12 +7824,12 @@
         {
           "path": "endfieldmodcontroller/integrity.py",
           "line": 2,
-          "end_line": 1024
+          "end_line": 1078
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.889Z",
-      "fingerprint": "3fa0cebe564cd102acd8cbc86222e697736ba44a3576773ec98e34b18867e3a2",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.125Z",
+      "fingerprint": "bf22c4530ef3c5869e619218b33ff486093edd77e0ed7cdd41e810e561240ca7",
       "apis": [
         {
           "protocol": "rpc",
@@ -7880,22 +7880,22 @@
       "source": [
         {
           "path": "endfieldmodcontroller/initialize.py",
-          "line": 4797,
-          "end_line": 8186
+          "line": 4810,
+          "end_line": 8212
         },
         {
           "path": "endfieldmodcontroller/initialize.py",
-          "line": 4991,
-          "end_line": 8359
+          "line": 5004,
+          "end_line": 8385
         },
         {
           "path": "endfieldmodcontroller/initialize.py",
-          "line": 5068,
-          "end_line": 8392
+          "line": 5081,
+          "end_line": 8418
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.889Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.126Z",
       "fingerprint": "c7bfe5bdfea15a3f8eac6317d485f389d20833f975d3c574a8542cb15e99489e",
       "apis": [
         {
@@ -7974,12 +7974,12 @@
       "source": [
         {
           "path": "endfieldmodcontroller/initialize.py",
-          "line": 3735,
-          "end_line": 7314
+          "line": 3748,
+          "end_line": 7340
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.890Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.126Z",
       "fingerprint": "c7bfe5bdfea15a3f8eac6317d485f389d20833f975d3c574a8542cb15e99489e",
       "apis": [
         {
@@ -8029,12 +8029,12 @@
       "source": [
         {
           "path": "endfieldmodcontroller/initialize.py",
-          "line": 4893,
-          "end_line": 8284
+          "line": 4906,
+          "end_line": 8310
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.891Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.126Z",
       "fingerprint": "c7bfe5bdfea15a3f8eac6317d485f389d20833f975d3c574a8542cb15e99489e",
       "apis": [
         {
@@ -8095,22 +8095,22 @@
       "source": [
         {
           "path": "endfieldmodcontroller/initialize.py",
-          "line": 458,
-          "end_line": 1891
+          "line": 459,
+          "end_line": 1893
         },
         {
           "path": "endfieldmodcontroller/initialize.py",
-          "line": 4145,
-          "end_line": 7998
+          "line": 4158,
+          "end_line": 8024
         },
         {
           "path": "endfieldmodcontroller/initialize.py",
-          "line": 4742,
-          "end_line": 8092
+          "line": 4755,
+          "end_line": 8118
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.892Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.127Z",
       "fingerprint": "c7bfe5bdfea15a3f8eac6317d485f389d20833f975d3c574a8542cb15e99489e",
       "apis": [
         {
@@ -8187,8 +8187,8 @@
           "path": "endfieldmodcontroller/cli.py"
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.894Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.128Z",
       "fingerprint": "348ac1ae7d9d0e51dd4ecc9298350391b2b4816a9f323f6027790c9e715be5e9",
       "deps": [
         {
@@ -8233,8 +8233,8 @@
           "end_line": 62
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.893Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.127Z",
       "fingerprint": "465e23ad6dd5883b4049bd377cfa04797da6b6c70a17c7ecd5a672929fc6f74d",
       "apis": [
         {
@@ -8276,16 +8276,16 @@
         {
           "path": "endfieldmodcontroller/app.py",
           "line": 2,
-          "end_line": 1791
+          "end_line": 1857
         },
         {
           "path": "endfieldmodcontroller/app.py",
-          "line": 1070,
-          "end_line": 1909
+          "line": 1103,
+          "end_line": 1975
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.894Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.128Z",
       "fingerprint": "cd797dc8b0f9333ee7fa5fbb7080b5333067d75855b3f327eec0c443816eda81",
       "apis": [
         {
@@ -8366,12 +8366,12 @@
       "source": [
         {
           "path": "endfieldmodcontroller/ui_automation.py",
-          "line": 279,
-          "end_line": 834
+          "line": 288,
+          "end_line": 852
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.895Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.128Z",
       "fingerprint": "9f6706b26ebfbc553622ac8a91ec63695b379c7453091581b05c644e641818ba",
       "apis": [
         {
@@ -8451,9 +8451,9 @@
           "path": "endfieldmodcontroller/downloads.py"
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.895Z",
-      "fingerprint": "8c205e5822cdb7305e326eff0a0daabe019384367c40d05ace77a0a4da2c3124",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.129Z",
+      "fingerprint": "9b910c52b09282bf1939444511c36b18200980a7c4a86a16baeb3dc7e61ec2a3",
       "aggregate": {
         "descendant_count": 2,
         "own_api_count": 0,
@@ -8486,9 +8486,9 @@
           "path": "endfieldmodcontroller/modstore.py"
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.895Z",
-      "fingerprint": "303c11b072495c28c211121ecc2b4e72542080ed5ae5f99af746b9518a69b26f",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.128Z",
+      "fingerprint": "c5abafd116139fc02e93cff2c7376fa794170e8cfa4fdc9864bb97d7476ac332",
       "apis": [
         {
           "protocol": "http",
@@ -8593,9 +8593,9 @@
           "path": "endfieldmodcontroller/downloads.py"
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.896Z",
-      "fingerprint": "dfb3282d44041b1dd0a46b80ebeb1c0d0acd5ff9667d406227db335ab34d447d",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.129Z",
+      "fingerprint": "4503d50ecceb74eeb357ab8fefab3c7e3aad705ca920fd1fb98499173ee5ad43",
       "aggregate": {
         "descendant_count": 0,
         "own_api_count": 0,
@@ -8633,8 +8633,8 @@
           "path": "endfieldmodcontroller/updates.py"
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.897Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.130Z",
       "fingerprint": "186e221bf69a964ab6d243e366539eae8bc57d99e9ebde6e2f53cc2857f89c4d",
       "aggregate": {
         "descendant_count": 5,
@@ -8664,22 +8664,22 @@
       "source": [
         {
           "path": "endfieldmodcontroller/alerts.py",
-          "line": 103,
-          "end_line": 228
+          "line": 107,
+          "end_line": 370
         },
         {
           "path": "endfieldmodcontroller/alerts.py",
-          "line": 223,
-          "end_line": 326
+          "line": 293,
+          "end_line": 478
         },
         {
           "path": "endfieldmodcontroller/alerts.py",
-          "line": 319,
-          "end_line": 434
+          "line": 395,
+          "end_line": 586
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.896Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.129Z",
       "fingerprint": "61e4200c51fc3ae4d81a51771336215e914c075a1dfca97f280e9d86b226f1d7",
       "apis": [
         {
@@ -8756,22 +8756,22 @@
       "source": [
         {
           "path": "endfieldmodcontroller/updates.py",
-          "line": 58,
-          "end_line": 161
+          "line": 63,
+          "end_line": 171
         },
         {
           "path": "endfieldmodcontroller/updates.py",
-          "line": 184,
-          "end_line": 1272
+          "line": 189,
+          "end_line": 1300
         },
         {
           "path": "endfieldmodcontroller/updates.py",
-          "line": 544,
-          "end_line": 1778
+          "line": 556,
+          "end_line": 1806
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.896Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.130Z",
       "fingerprint": "e96957448569ef2c72b87d54fde3298279986c45471b0e272d5de320071316c6",
       "apis": [
         {
@@ -8850,8 +8850,8 @@
           "end_line": 400
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.898Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.130Z",
       "fingerprint": "1f1047fece7d9e31fbd9488032a3cb31fde66687185b73dc82760f1f8728b46d",
       "apis": [
         {
@@ -8923,8 +8923,8 @@
           "line": 57
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.898Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.130Z",
       "fingerprint": "07a0ba0c9b94190b8498d469e737883452aae54b8cd286a7e5f84ec68de58ac9",
       "apis": [
         {
@@ -8965,22 +8965,22 @@
       "source": [
         {
           "path": "endfieldmodcontroller/selfupdate.py",
-          "line": 45,
-          "end_line": 381
+          "line": 46,
+          "end_line": 425
         },
         {
           "path": "endfieldmodcontroller/selfupdate.py",
-          "line": 248,
-          "end_line": 911
+          "line": 270,
+          "end_line": 1009
         },
         {
           "path": "endfieldmodcontroller/selfupdate.py",
-          "line": 636,
-          "end_line": 1172
+          "line": 685,
+          "end_line": 1270
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.898Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.131Z",
       "fingerprint": "a5ee41bb8663952a70284b22e889b1cc5bea505af97b375394233e6d757920fd",
       "apis": [
         {
@@ -9068,8 +9068,8 @@
           "path": "scripts/release_version.py"
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.902Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.134Z",
       "fingerprint": "f7c30c48bee9b670e7fcff0757c4e0306fdc26aa69b78abd7dde845e902952d8",
       "aggregate": {
         "descendant_count": 20,
@@ -9100,11 +9100,11 @@
         {
           "path": "scripts/build_assets_bundle.py",
           "line": 2,
-          "end_line": 52
+          "end_line": 150
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.899Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.131Z",
       "fingerprint": "78c604ce667961c54b43bb137749210cf9f4aaff911c3b84564173e5c0c4bbae",
       "apis": [
         {
@@ -9149,8 +9149,8 @@
           "end_line": 127
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.899Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.131Z",
       "fingerprint": "71e964bcb8e5ff8f6003c41fca2b7fd9df48af20a097a099640ccd194e2facf2",
       "apis": [
         {
@@ -9192,12 +9192,12 @@
         {
           "path": "scripts/build_exe.py",
           "line": 2,
-          "end_line": 204
+          "end_line": 1052
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.899Z",
-      "fingerprint": "d559674ebe3d359515e6121be315eace90de7548b0a39a60e796f9a277be2fe1",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.131Z",
+      "fingerprint": "b1a33937a8874f90b8a537825103ae8b79bd2e199de342e42f2e9746603db580",
       "apis": [
         {
           "protocol": "rpc",
@@ -9240,8 +9240,8 @@
           "line": 2
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.900Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.132Z",
       "fingerprint": "7259fbb84c256adfd6200e4dd93c02ea912b8ff784fb455d0ff5cf4b65bab1f5",
       "apis": [
         {
@@ -9297,8 +9297,8 @@
           "end_line": 17
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.900Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.132Z",
       "fingerprint": "0b4effd72537003b0148461f7616e567148f629e4a82460128c233b36f39d210",
       "apis": [
         {
@@ -9343,8 +9343,8 @@
           "end_line": 72
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.900Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.132Z",
       "fingerprint": "a7cf5760e474f0098e77247e53987d36bb820a127af6eb0c4156d5b653b0509f",
       "apis": [
         {
@@ -9400,8 +9400,8 @@
           "end_line": 127
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.901Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.133Z",
       "fingerprint": "c75127f94ddfa4c30e7c283486d0badadbc1cbb6df8c822380b581218fbf2540",
       "apis": [
         {
@@ -9457,8 +9457,8 @@
           "end_line": 147
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.901Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.133Z",
       "fingerprint": "8db019704f804ce71a690b5fbe0117890d6d1461ad571637d4eb05953940b932",
       "apis": [
         {
@@ -9503,8 +9503,8 @@
           "end_line": 262
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.902Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.134Z",
       "fingerprint": "f9eb14726711f9b336760e078e358dbb98b237ca057d693903e0a300dc12b7c8",
       "apis": [
         {
@@ -9550,8 +9550,8 @@
           "end_line": 1610
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.902Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.134Z",
       "fingerprint": "98e59651d728eb65e63362f91fc5cb24001a9f36b93386853d469be7313a9720",
       "aggregate": {
         "descendant_count": 0,
@@ -9585,8 +9585,8 @@
           "end_line": 323
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.903Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.135Z",
       "fingerprint": "2f80e30a5e518be9950d1d23eb920badb89fcef0a165793880e6dc18350877ed",
       "apis": [
         {
@@ -9628,11 +9628,11 @@
         {
           "path": "scripts/prepare_release.py",
           "line": 2,
-          "end_line": 214
+          "end_line": 428
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.903Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.135Z",
       "fingerprint": "88c3a496134aaeab56f27cddad286cab9309ec32357b0d992c20ab0684162fd7",
       "apis": [
         {
@@ -9688,8 +9688,8 @@
           "end_line": 793
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.903Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.135Z",
       "fingerprint": "413abf4358c1eebed1b0288e49f1ac5e2ef54c686335e803e9a8088189f88c7d",
       "apis": [
         {
@@ -9734,8 +9734,8 @@
           "end_line": 376
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.903Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.135Z",
       "fingerprint": "3f58e2e907e36beab4ed9dc6db4c17c9ef3958af9f9aa8e7a7078b8621380fd0",
       "apis": [
         {
@@ -9780,8 +9780,8 @@
           "end_line": 90
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.903Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.136Z",
       "fingerprint": "03c382191f5be6d77ebdbbd6282ce27d9f9dacbc426a93a227ee9cc5c6fd128d",
       "apis": [
         {
@@ -9826,8 +9826,8 @@
           "end_line": 22
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.904Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.136Z",
       "fingerprint": "cb180272d278b4edf7a8bd6bb5730c7de77d945e0583d8cae57267ef0cd83f76",
       "apis": [
         {
@@ -9872,8 +9872,8 @@
           "end_line": 318
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.904Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.136Z",
       "fingerprint": "bd4a8aed00d388e805d8bf0bc2c1fdb509c6fee8f9abbcc9ef75abd2c46c0ed4",
       "apis": [
         {
@@ -9920,8 +9920,8 @@
           "end_line": 290
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.904Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.137Z",
       "fingerprint": "c73a660094d826b5d52e9200bf9b324df0047484a633b7cab19a2f6e810c38fb",
       "apis": [
         {
@@ -9974,12 +9974,12 @@
       "source": [
         {
           "path": "scripts/ui_ctl.py",
-          "line": 175,
-          "end_line": 522
+          "line": 185,
+          "end_line": 542
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.905Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.137Z",
       "fingerprint": "e3143135416810e9866c9566d1c4538ded16fe3a920ca2eea9c814fb4bec4a10",
       "apis": [
         {
@@ -10032,11 +10032,11 @@
         {
           "path": "scripts/upload_release_assets.py",
           "line": 2,
-          "end_line": 208
+          "end_line": 298
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.905Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.137Z",
       "fingerprint": "638a42806b249cddc5b17b0de428d85f16d889cabdfe0e1cf96e56517f979db6",
       "apis": [
         {
@@ -10106,8 +10106,8 @@
           "path": "tests/test_risk_memory.py"
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.913Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.146Z",
       "fingerprint": "17f1d4b3b4e940b26dc9bf5b8ebdce54f5cbcc942325ff895ab390bc5c008f69",
       "aggregate": {
         "descendant_count": 16,
@@ -10156,8 +10156,8 @@
           "end_line": 141
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.906Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.139Z",
       "fingerprint": "f02cf1dab7ddc412fd373b2c15056699519b24c7fe98b612c6a78ff145a14a56",
       "aggregate": {
         "descendant_count": 0,
@@ -10192,8 +10192,8 @@
           "end_line": 128
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.907Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.139Z",
       "fingerprint": "2960266cb74ae4e94505324f8a19eca5379748645cafd8636da532d7ae1a3b76",
       "apis": [
         {
@@ -10264,8 +10264,8 @@
           "end_line": 96
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.908Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.140Z",
       "fingerprint": "cf7d94519f591b9d817c2be2d3ef18e62c0f5d5bc3b3566314ec61825f64ef7c",
       "aggregate": {
         "descendant_count": 0,
@@ -10298,8 +10298,8 @@
           "path": "tests/test_config_data_root_relocation.py"
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.909Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.141Z",
       "fingerprint": "a22e76d0d82ab82238f6bae8be5072ffc46540ff4eb45a60f4dac34c81377c73",
       "apis": [
         {
@@ -10359,8 +10359,8 @@
           "end_line": 51
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.910Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.142Z",
       "fingerprint": "ab8263f27f44256ecfefbb65ebaf63287d29a4a165e850a5793c3d7eb19474b4",
       "aggregate": {
         "descendant_count": 0,
@@ -10409,8 +10409,8 @@
           "end_line": 133
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.911Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.144Z",
       "fingerprint": "9e0f220062017adbeb34c5038d85261adc6f96561a3b29e7709eb63cb6bc901b",
       "aggregate": {
         "descendant_count": 0,
@@ -10444,8 +10444,8 @@
           "end_line": 387
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.911Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.144Z",
       "fingerprint": "1228365e25a64a1b070eed63b44333fd83e1816cf582cb950741e5e6cdb30c24",
       "aggregate": {
         "descendant_count": 0,
@@ -10480,8 +10480,8 @@
           "end_line": 784
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.911Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.144Z",
       "fingerprint": "5f50635ada39cc25ef362aee6293b5a299b5d64175876088776f078cd9034d4e",
       "aggregate": {
         "descendant_count": 0,
@@ -10516,8 +10516,8 @@
           "end_line": 532
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.912Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.145Z",
       "fingerprint": "8872126dfca7e53ef495fefad6e1a57f95d6c7e0cc575a89989051ec4c8c9257",
       "aggregate": {
         "descendant_count": 0,
@@ -10548,11 +10548,11 @@
       "source": [
         {
           "path": "tests/test_frontend_tour_targets.py",
-          "line": 86
+          "line": 101
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.912Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.145Z",
       "fingerprint": "f502d7b9a79caec3a648bc420632a02bbf4b1b1272c72d24f77701f815ac92f3",
       "aggregate": {
         "descendant_count": 0,
@@ -10586,8 +10586,8 @@
           "end_line": 2040
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.913Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.146Z",
       "fingerprint": "ce911df192bf61c9f3a65abbb7c7cb77957144f1a7d2898abbc39fcf21add2f5",
       "aggregate": {
         "descendant_count": 0,
@@ -10640,8 +10640,8 @@
           "line": 115
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.914Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.147Z",
       "fingerprint": "3c991249ecd74e5cf5cd10d367cc2cd2a6305fe89225d2d6a15f2f5e2bc5314f",
       "aggregate": {
         "descendant_count": 0,
@@ -10690,8 +10690,8 @@
           "end_line": 133
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.915Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.149Z",
       "fingerprint": "8854c84be2426cd3b0886b4b59d014db9de27320dc7c6b83fecd569a4e7ff6c0",
       "aggregate": {
         "descendant_count": 0,
@@ -10725,8 +10725,8 @@
           "end_line": 822
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.915Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.149Z",
       "fingerprint": "5bc1804876b0c020416c380154032766eb9cf80ac45ef5f9abd6de97fe2ed6e8",
       "aggregate": {
         "descendant_count": 0,
@@ -10760,8 +10760,8 @@
           "end_line": 642
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.916Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.149Z",
       "fingerprint": "b050a91a0b71ec0ff4ce407a7660d313692f86951945443746f13632b0bef63b",
       "aggregate": {
         "descendant_count": 0,
@@ -10813,8 +10813,8 @@
           "end_line": 214
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.917Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.151Z",
       "fingerprint": "267ed7f40e8bdbca2fd5876903eaf62bd1e4b5de66dabe1379f0c50bccceced9",
       "aggregate": {
         "descendant_count": 0,
@@ -10846,11 +10846,11 @@
         {
           "path": "frontend/src/App.vue",
           "line": 2,
-          "end_line": 1916
+          "end_line": 1984
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.920Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.153Z",
       "fingerprint": "0a19fc26c4476a78311af8bd894e1d6ce6382acbec02953168403e2b630f82e4",
       "deps": [
         {
@@ -10892,11 +10892,11 @@
         {
           "path": "frontend/index.html",
           "line": 1,
-          "end_line": 32
+          "end_line": 48
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.918Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.151Z",
       "fingerprint": "188f6837c09e8073f36bf40ab7ef7237e82911a58568df89a17b6716c3056f6e",
       "apis": [
         {
@@ -10959,8 +10959,8 @@
           "end_line": 110
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.918Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.151Z",
       "fingerprint": "251bd7e907a4dabcd43892f3af99c11560aee1dc0769e6144e74bd06552c8c0c",
       "apis": [
         {
@@ -11031,11 +11031,11 @@
         {
           "path": "frontend/src/pages/SettingsPage.vue",
           "line": 2,
-          "end_line": 1970
+          "end_line": 2650
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.919Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.151Z",
       "fingerprint": "fbf46fd6abe58c9969a196732ffed94a02d531d2145e730c8350d09d53261d8f",
       "apis": [
         {
@@ -11115,11 +11115,11 @@
         {
           "path": "frontend/src/App.vue",
           "line": 2,
-          "end_line": 1916
+          "end_line": 1984
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.919Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.152Z",
       "fingerprint": "0a19fc26c4476a78311af8bd894e1d6ce6382acbec02953168403e2b630f82e4",
       "apis": [
         {
@@ -11170,11 +11170,11 @@
         {
           "path": "frontend/src/pages/DepsPage.vue",
           "line": 2,
-          "end_line": 1490
+          "end_line": 1486
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.919Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.152Z",
       "fingerprint": "48ef005c41cb7f2108e0c2d9b3d77446489d3e9b28dcc6d0cd5a1653ae7e58b2",
       "apis": [
         {
@@ -11245,11 +11245,11 @@
         {
           "path": "frontend/src/lib/dialog.js",
           "line": 2,
-          "end_line": 200
+          "end_line": 202
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.919Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.152Z",
       "fingerprint": "846f79e3a0112d0a568ccffa1fb6ebd49e539f3281cd2fdba06521c56d2f2a97",
       "apis": [
         {
@@ -11340,9 +11340,9 @@
           "path": "frontend/src/pages/DownloadsPage.vue"
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.920Z",
-      "fingerprint": "ab748dc231b4b41fb9065efbfc9036437997bb4c9470a940aff6f096f376c6f3",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.152Z",
+      "fingerprint": "92e10d9dba3541cea3acd44450a7c91547e500f23ea08476e16d2f3dff104639",
       "deps": [
         {
           "kind": "call",
@@ -11383,11 +11383,11 @@
         {
           "path": "frontend/src/lib/importMod.js",
           "line": 2,
-          "end_line": 202
+          "end_line": 204
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.920Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.152Z",
       "fingerprint": "8f2d373805429f1474b0c574f5b28c471583b76c1f17f223c95817e1a02c423a",
       "apis": [
         {
@@ -11449,11 +11449,11 @@
         {
           "path": "frontend/src/pages/LaunchPage.vue",
           "line": 2,
-          "end_line": 1870
+          "end_line": 1898
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.920Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.153Z",
       "fingerprint": "3d5fc5122c42e4a78c9819b9257a6802661b27c291d9fce2b68c6a8e5fd80bf2",
       "apis": [
         {
@@ -11551,11 +11551,11 @@
         {
           "path": "frontend/src/pages/DepsPage.vue",
           "line": 2,
-          "end_line": 1490
+          "end_line": 1486
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.921Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.153Z",
       "fingerprint": "48ef005c41cb7f2108e0c2d9b3d77446489d3e9b28dcc6d0cd5a1653ae7e58b2",
       "apis": [
         {
@@ -11626,16 +11626,16 @@
         {
           "path": "frontend/src/App.vue",
           "line": 2,
-          "end_line": 1916
+          "end_line": 1984
         },
         {
           "path": "frontend/src/styles/tokens.css",
-          "line": 227,
-          "end_line": 642
+          "line": 200,
+          "end_line": 588
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.921Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.153Z",
       "fingerprint": "a14c7eedb62a750428c7ed57ccfb68a4a71a69db37bbcc2663bd7f1757f409b2",
       "apis": [
         {
@@ -11677,12 +11677,12 @@
         {
           "path": "frontend/src/pages/ModLibraryPage.vue",
           "line": 2,
-          "end_line": 1216
+          "end_line": 1282
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.921Z",
-      "fingerprint": "c8fedc882923dbaf5157e78acaddf4564ec07fb6527cf1d08e22f3c2b78a90e1",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.154Z",
+      "fingerprint": "6c6948dd1379cbfb6fb8558b40b95688911bfbc9857fe35b9acf1ab1befe8654",
       "apis": [
         {
           "protocol": "rpc",
@@ -11752,12 +11752,12 @@
         {
           "path": "frontend/src/pages/ModLibraryPage.vue",
           "line": 2,
-          "end_line": 1216
+          "end_line": 1282
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.922Z",
-      "fingerprint": "c8fedc882923dbaf5157e78acaddf4564ec07fb6527cf1d08e22f3c2b78a90e1",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.154Z",
+      "fingerprint": "6c6948dd1379cbfb6fb8558b40b95688911bfbc9857fe35b9acf1ab1befe8654",
       "apis": [
         {
           "protocol": "rpc",
@@ -11798,11 +11798,11 @@
         {
           "path": "frontend/src/store.js",
           "line": 2,
-          "end_line": 401
+          "end_line": 597
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.922Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.154Z",
       "fingerprint": "61fc5886a526687e5c7feed17e04077010f1f168adb2080fb47f70d70ce42c91",
       "apis": [
         {
@@ -11865,9 +11865,9 @@
           "path": "frontend/src/pages/StorePage.vue"
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.922Z",
-      "fingerprint": "bb8c1a081b950ac9b86b3c76e05b1f1507c1c42b788fb0f9fe10124e985e8a6f",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.154Z",
+      "fingerprint": "cc53ca5159915049a194487ad3e8f180ac73d6206dadfeac5e17d60ea93cbf9a",
       "deps": [
         {
           "kind": "call",
@@ -11907,12 +11907,12 @@
       "source": [
         {
           "path": "frontend/src/styles/tokens.css",
-          "line": 227,
-          "end_line": 642
+          "line": 200,
+          "end_line": 588
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.922Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.154Z",
       "fingerprint": "1c7b6d82683670c229a19ed8179b0c349b04c2c2ecce6a6711311237b9b49fd1",
       "apis": [
         {
@@ -11963,11 +11963,11 @@
         {
           "path": "frontend/src/App.vue",
           "line": 2,
-          "end_line": 1916
+          "end_line": 1984
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.923Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.154Z",
       "fingerprint": "0a19fc26c4476a78311af8bd894e1d6ce6382acbec02953168403e2b630f82e4",
       "apis": [
         {
@@ -12028,12 +12028,12 @@
       "source": [
         {
           "path": "frontend/src/lib/uiAutomation.js",
-          "line": 300,
-          "end_line": 894
+          "line": 302,
+          "end_line": 898
         }
       ],
-      "revision": "7d3751c3a9deb8ef56ad274079af27fe51475597",
-      "updated_at": "2026-11-28T06:33:44.923Z",
+      "revision": "c5e7502f33b821a8fbb9f32403d00f1d3540841b",
+      "updated_at": "2026-11-28T10:16:58.155Z",
       "fingerprint": "146f8b09822b8e4e9d681a5987818599c7d93aa25fac5d9cbc66db36742daed7",
       "apis": [
         {
