@@ -11,9 +11,9 @@ description:
   en: >
       Work out the facts before touching anything: find the real game directory (config, XXMI config, XXMI log), detect which render API the game uses, and detect an already-installed ReShade rather than fighting it.
       
-revision: 937fe82bf051035b1e0468313d39b1279ef6f60a
-updated_at: "2026-11-27T14:47:15.269Z"
-fingerprint: f465442bdf9f228c6c9bbd2a0c5ec116519f6e8aa4a91b062f9e30e28d434e10
+revision: 7d3751c3a9deb8ef56ad274079af27fe51475597
+updated_at: "2026-11-28T06:33:44.874Z"
+fingerprint: 0349ed6888285bb3f99b53390aa868f8ad657a9499de5d67c34e63214c7c3653
 source:
   - path: "endfieldmodcontroller/reshade_integration.py"
     line: 795

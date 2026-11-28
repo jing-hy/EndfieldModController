@@ -11,9 +11,9 @@ description:
   en: >
       Per-mod overflow menu (Vue): reassign character, move to assist/skin, open folder, rename, change cover, remove from library, permanently delete. The fix/rollback items were removed along with that feature on 2026-11-27. The dispatcher accepts the mod either from the overflow menu or directly from the card's badge, and never swallows a local error silently. The assign dialog must be imported: an unresolved tag renders nothing and hands the code a DOM element.
       
-revision: 937fe82bf051035b1e0468313d39b1279ef6f60a
-updated_at: "2026-11-27T14:47:15.301Z"
-fingerprint: b68f0cf991f5d405cf269b18527062c0e0821dda964b558f65ae4834a6320c9a
+revision: 7d3751c3a9deb8ef56ad274079af27fe51475597
+updated_at: "2026-11-28T06:33:44.921Z"
+fingerprint: c8fedc882923dbaf5157e78acaddf4564ec07fb6527cf1d08e22f3c2b78a90e1
 source:
   - path: "frontend/src/pages/ModLibraryPage.vue"
     line: 2

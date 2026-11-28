@@ -11,9 +11,9 @@ description:
   en: >
       Reads port and token from runtime/_state/ui_api.json and drives the UI from the shell: snapshot, find by label, switch tabs, toggle switches, set values, scroll.
       
-revision: 937fe82bf051035b1e0468313d39b1279ef6f60a
-updated_at: "2026-11-27T14:47:15.291Z"
-fingerprint: 6d5e2928b5c14120daecc59341cc970232976793c39799ba4b17e2f99c094879
+revision: 7d3751c3a9deb8ef56ad274079af27fe51475597
+updated_at: "2026-11-28T06:33:44.905Z"
+fingerprint: e3143135416810e9866c9566d1c4538ded16fe3a920ca2eea9c814fb4bec4a10
 source:
   - path: "scripts/ui_ctl.py"
     line: 175

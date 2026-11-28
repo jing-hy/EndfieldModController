@@ -4,12 +4,12 @@
 
 ## modecontroller（https://github.com/jing-hy/EndfieldModController）
 
-- modecontroller — EndfieldModController / EndfieldModController — 《明日方舟：终末地》的一站式 Mod 管理器：把 DLSS5 神经渲染、第一人称视角、服装 Mod（EFMI）、乳摇物理、摆姿与 MMD 播放统一到一次「一键启… — [模块 180 · API 411]
+- modecontroller — EndfieldModController / EndfieldModController — 《明日方舟：终末地》的一站式 Mod 管理器：把 DLSS5 神经渲染、第一人称视角、服装 Mod（EFMI）、乳摇物理、摆姿与 MMD 播放统一到一次「一键启… — [模块 181 · API 413]
   - modecontroller.addon — 游戏内面板（C++ add-on） / In-game Panel (C++ add-on) — 自研 ReShade add-on：把 `actions.tsv` 渲染成"**每一项就是一个按钮**"的 Mod 控制面板，并把按钮点击变成该 Mod 原键的… — [模块 4 · API 8]
     - modecontroller.addon.panel — 面板本体与清单渲染 / Panel UI & Action List — 面板本体：加载 `actions.tsv`（`hint` / `key_label` / `char_group` / `condition`）、按 **角色 … — [模块 1 · API 3]
     - modecontroller.addon.tests — 面板注入离线自测 / Offline Injection Self-test — 离线验证注入链路：造一个“假 EFMI”（**只通过导入表轮询 `GetAsyncKeyState`**，与真 EFMI 同一种读法）+ 一个宿主 exe，逐条… — [模块 1 · API 2]
     - modecontroller.addon.vkey-inject — 进程内按键注入 / In-Process Key Injection — 不经 Windows 输入队列的按键注入：找 EFMI 的 `d3d11.dll` → 遍历它的**导入表**把 `GetAsyncKeyState` 换成我们… — [模块 1 · API 3]
-  - modecontroller.backend — 后端 Python 包 / Backend Python Package — endfieldmodcontroller/ 包：管理器全部业务逻辑 —— 配置与路径、Mod 库扫描与识别、激活 staging、一键启动与注入库维护、启动自… — [模块 118 · API 337]
+  - modecontroller.backend — 后端 Python 包 / Backend Python Package — endfieldmodcontroller/ 包：管理器全部业务逻辑 —— 配置与路径、Mod 库扫描与识别、激活 staging、一键启动与注入库维护、启动自… — [模块 119 · API 339]
     - modecontroller.backend.activation — 激活与中转 / Activation & Staging — 把「勾选」变成「游戏真正加载的东西」：解同角色互斥与按需依赖，决定每份依赖用哪一份，把选中的 Mod 拷进 EFMI 的 Mods 中转区、处理热键、写控制器产… — [模块 6 · API 10]
       - modecontroller.backend.activation.guard — Mod 库安全护栏 / Library Safety Guard — “用户的 Mod 库一概不动”这道硬闸：当中转目录就是库、在库内部、或库的上级时，直接报错并拒绝执行 —— 因为曾经就是这种配置把一位用户的整库删光了。 — [模块 1 · API 1]
       - modecontroller.backend.activation.manual-import — 手动 Mod 收编 / Manual Mod Adoption — 收编用户直接丢进游戏 Mods 目录的 Mod：找出不是控制器生成的目录，靠 namespace 特征识别（改名也认得），搬进库，并只在能证明安全时才删掉原目录… — [模块 1 · API 2]
@@ -41,9 +41,10 @@
       - modecontroller.backend.components.github — GitHub 访问 / GitHub Access — 不被限流也不被墙地访问 GitHub：token 解析、带缓存的 api_get、最新提交探测、release 查询（API 不通时回退到网页解析 —— 这个网… — [模块 1 · API 3]
       - modecontroller.backend.components.install — 安装与批量更新 / Install & Batch Update — 把下回来的包放到该放的地方：校验安装目录名是否安全、从解压树安装、验收结果，并用带重试与进度回调（供界面轮询）的方式批量跑完整条。 — [模块 1 · API 3]
       - modecontroller.backend.components.manifest — 依赖清单 / Dependency Manifest — 运行时所需第三方件的清单：依赖描述数据类（url、sha256、安装目录、类型）、读可编辑的 dependencies.json，以及根据当前选中的 Mod 算… — [模块 1 · API 3]
-    - modecontroller.backend.config — 配置与路径 / Config & Paths — 配置模型与路径推导：AppConfig 数据类（库/运行/中转/游戏目录路径与几十个开关）、原子写与损坏配置隔离、老配置迁移，加上磁盘小工具（原子写、Mod 库… — [模块 6 · API 14]
+    - modecontroller.backend.config — 配置与路径 / Config & Paths — 配置模型与路径推导：AppConfig 数据类（库/运行/中转/游戏目录路径与几十个开关）、原子写与损坏配置隔离、老配置迁移，加上磁盘小工具（原子写、Mod 库… — [模块 7 · API 16]
       - modecontroller.backend.config.data-root — 数据根自愈 / Data-root Self-healing — 让配置里的路径**跟着程序目录走**：记住上次的运行目录（data_root），加载时把落在旧数据根下的绝对路径自动改回相对路径（老配置无记录时用保守启发式：路… — [模块 1 · API 4]
       - modecontroller.backend.config.detect — 路径自动探测 / Path Auto-Detection — 在别人机器上把东西找出来：游戏目录（配置、常见安装根、扫盘）、XXMI 启动器、旧版 migoto loader、官方启动器、乳胶物理安装位置 —— 每项都带缓… — [模块 1 · API 3]
+      - modecontroller.backend.config.edition — 版本形态 / Edition Profile — Universal / Lite 两种形态的唯一定义处：Lite 下运行期关闭整条 ReShade 链路（不下载、不注入、不写文件、强制净化游戏目录），并让所有… — [模块 1 · API 2]
       - modecontroller.backend.config.fsutil — 原子写与库护栏 / Atomic IO & Library Guard — 磁盘安全原语：用统一方式算文件哈希、取不冲突的兄弟名、经临时文件原子写字节/文本，以及“这个目录到底能不能碰”的 Mod 库重叠冲突判定。 — [模块 1 · API 3]
       - modecontroller.backend.config.model — 配置模型 / Config Model — 其他所有模块都读的配置对象：几十个持久字段（路径、开关、下载策略、界面状态）、带“损坏配置隔离”的安全落盘、首跑的显卡默认值，以及源码运行与打包 exe 两种形… — [模块 1 · API 3]
       - modecontroller.backend.config.version — 版本常量 / Version Constants — 程序版本号与仓库坐标的唯一定义处 —— 自更新、发布脚本与界面比对的都是同一个字符串。 — [模块 1 · API 1]

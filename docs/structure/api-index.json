@@ -108,6 +108,8 @@
   "rpc:downloads_pause": "modecontroller.backend.api.store",
   "rpc:downloads_resume": "modecontroller.backend.api.store",
   "rpc:downloads_snapshot": "modecontroller.backend.api.store",
+  "rpc:edition.current": "modecontroller.backend.config.edition",
+  "rpc:edition.effective_reshade_disabled": "modecontroller.backend.config.edition",
   "rpc:efmi_jiggle.ensure_in_library": "modecontroller.backend.game.jiggle-efmi",
   "rpc:efmi_jiggle.install_to_library": "modecontroller.backend.game.jiggle-efmi",
   "rpc:efmi_jiggle.repack_from_local": "modecontroller.backend.game.jiggle-efmi",

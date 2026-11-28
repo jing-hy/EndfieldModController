@@ -11,8 +11,8 @@ description:
   en: >
       Read the machine's own kernel-level events from the System log — bugchecks (1001), unexpected shutdowns (Kernel-Power 41 / EventLog 6008), WHEA hardware errors and who initiated a shutdown (User32 1074) — rendered as a diagnostic-report section with a timeline. Previously only the Application log was read, so nothing from the System side was ever captured.
       
-revision: 937fe82bf051035b1e0468313d39b1279ef6f60a
-updated_at: "2026-11-27T14:47:15.280Z"
+revision: 7d3751c3a9deb8ef56ad274079af27fe51475597
+updated_at: "2026-11-28T06:33:44.886Z"
 fingerprint: 9e43317f51b0c3362ad6458e8ed0a4b360518ae232ac45943eb2fb04fde2d757
 source:
   - path: "endfieldmodcontroller/kernel_instability.py"

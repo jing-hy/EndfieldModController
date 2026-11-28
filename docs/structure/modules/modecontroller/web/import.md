@@ -11,9 +11,9 @@ description:
   en: >
       Drag-and-drop import (Vue): 1 MB chunked upload, hint layer disappears on release, ownership hint after import.
       
-revision: 937fe82bf051035b1e0468313d39b1279ef6f60a
-updated_at: "2026-11-27T14:47:15.299Z"
-fingerprint: bcc5f7f4d12a40f2aaf079b37809c6391a04c03d713c26693e1f872c3174de17
+revision: 7d3751c3a9deb8ef56ad274079af27fe51475597
+updated_at: "2026-11-28T06:33:44.920Z"
+fingerprint: 8f2d373805429f1474b0c574f5b28c471583b76c1f17f223c95817e1a02c423a
 source:
   - path: "frontend/src/lib/importMod.js"
     line: 2

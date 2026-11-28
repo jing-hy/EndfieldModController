@@ -11,9 +11,9 @@ description:
   en: >
       Tests for upkeep and data: mod removal into trash (plus a regression pin that the repair feature is gone), library backup, the Poser plugin, character-table sync, jiggle-parameter sync, alert version gating, and the integrity check chain.
       
-revision: 937fe82bf051035b1e0468313d39b1279ef6f60a
-updated_at: "2026-11-27T14:47:15.297Z"
-fingerprint: 8234555e7a48f139c5d401f66c9aab0cdbf7311b178c3ba44a383d590978ceb7
+revision: 7d3751c3a9deb8ef56ad274079af27fe51475597
+updated_at: "2026-11-28T06:33:44.917Z"
+fingerprint: 267ed7f40e8bdbca2fd5876903eaf62bd1e4b5de66dabe1379f0c50bccceced9
 source:
   - path: "tests/test_modlib.py"
   - path: "tests/test_mod_backup.py"

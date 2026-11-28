@@ -11,9 +11,9 @@ description:
   en: >
       Frontend root (Vue): App.vue holds the sidebar layout, tab switching, notices, first-run dialog, drag-drop host and the global dialog/toast hosts.
       
-revision: 937fe82bf051035b1e0468313d39b1279ef6f60a
-updated_at: "2026-11-27T14:47:15.299Z"
-fingerprint: bd5e5f33cc028ab3c924424db1218c18a742b851da83bf8782bef1ff835d1a04
+revision: 7d3751c3a9deb8ef56ad274079af27fe51475597
+updated_at: "2026-11-28T06:33:44.920Z"
+fingerprint: 0a19fc26c4476a78311af8bd894e1d6ce6382acbec02953168403e2b630f82e4
 source:
   - path: "frontend/src/App.vue"
     line: 2

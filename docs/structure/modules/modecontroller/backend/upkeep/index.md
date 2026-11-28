@@ -11,9 +11,9 @@ description:
   en: >
       Keeping things healthy over time: trashing user-removed mods, mirroring the library, checking and applying program self-updates, and fetching remote announcements that can gate a launch.
       
-revision: 937fe82bf051035b1e0468313d39b1279ef6f60a
-updated_at: "2026-11-27T14:47:15.286Z"
-fingerprint: ec552a590a38601a519f00407ee69708cc52aa8552539e0230a4f12a632896b5
+revision: 7d3751c3a9deb8ef56ad274079af27fe51475597
+updated_at: "2026-11-28T06:33:44.897Z"
+fingerprint: 186e221bf69a964ab6d243e366539eae8bc57d99e9ebde6e2f53cc2857f89c4d
 source:
   - path: "endfieldmodcontroller/modlib.py"
   - path: "endfieldmodcontroller/modbackup.py"
