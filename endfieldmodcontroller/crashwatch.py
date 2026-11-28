@@ -1537,6 +1537,63 @@ def fault_modules(config: AppConfig, evidence: dict[str, Any]) -> list[str]:
     return out
 
 
+_GPU_DRIVER_VULKAN_MARKERS = ("nvoglv64", "NVP_Init_Vulkan", "vkResetEvent")
+
+
+def _crash_player_logs(config: AppConfig) -> list[Path]:
+    """崩溃现场最可能带栈的那几份 `Player.log`：崩溃转储目录里最新的几份 + 当前那份。"""
+    out: list[Path] = []
+    try:
+        root = _crash_root()
+    except Exception:  # noqa: BLE001
+        root = None
+    if root is not None and Path(root).is_dir():
+        try:
+            subs = sorted((p for p in Path(root).iterdir() if p.is_dir()),
+                          key=lambda p: p.stat().st_mtime, reverse=True)[:5]
+        except OSError:
+            subs = []
+        for sub in subs:
+            log = sub / "Player.log"
+            if log.is_file():
+                out.append(log)
+    try:
+        from . import diagnostics
+
+        out.extend(diagnostics.player_log_candidates(limit=2))
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
+
+def gpu_driver_vulkan_crash(config: AppConfig) -> str:
+    """这次崩溃是不是落在 **NVIDIA 驱动的 Vulkan 初始化**上？命中返回一句人话。
+
+    2026-11-28 实测栈（诊断包 diagnostics-20261128-225854，三次崩溃一字不差）：
+
+        nvoglv64!vk_gr2608GetInstanceProcAddr   ← NVIDIA 驱动的 GL/Vulkan 驱动 DLL
+        NvPresent64!NVP_Init_Vulkan             ← NVIDIA Present 的 Vulkan 初始化
+        vulkan-1!vkResetEvent
+        unityplayer → 0xC0000005
+
+    为什么要单认这条：`-force-d3d11` 起游戏（走 EFMI 必定 DX11）**正常不该出现 Vulkan 初始化**，
+    所以这既不是"注入 DLL 缺依赖"、也不是"组件配套坏了" —— 重装依赖治不了它；
+    而 WER 把故障模块记成 `unityplayer.dll`，既有的按模块名判据完全不命中、弹窗给不出建议。
+    """
+    for path in _crash_player_logs(config):
+        try:
+            if path.stat().st_size > 4 * 1024 * 1024:
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        hits = [mark for mark in _GPU_DRIVER_VULKAN_MARKERS if mark in text]
+        if len(hits) >= 2:
+            return ("崩溃栈命中 " + " / ".join(hits)
+                    + "（NVIDIA 驱动的 Vulkan 初始化，日志 " + path.name + "）")
+    return ""
+
+
 def crash_advice(config: AppConfig, evidence: dict[str, Any]) -> dict[str, Any]:
     """崩溃后给用户的下一步建议（**空 dict = 这次给不出具体建议**）。
 
@@ -1546,6 +1603,25 @@ def crash_advice(config: AppConfig, evidence: dict[str, Any]) -> dict[str, Any]:
     """
     if not is_crash(evidence):
         return {}
+    # ★★ 2026-11-28：**驱动层的 Vulkan 崩溃要单独说，且不要给"重装依赖"**。
+    #   `-force-d3d11` 起游戏却崩在 `nvoglv64` / `NVP_Init_Vulkan`，那是显卡驱动侧的事，
+    #   重装/清空依赖治不了，只会让人白折腾一轮（同一台机器三次崩溃栈完全一致）。
+    _driver_hint = gpu_driver_vulkan_crash(config)
+    if _driver_hint:
+        return {
+            "kind": "gpu_driver_vulkan",
+            "title": "这次崩溃在显卡驱动的 Vulkan 初始化，不是注入或组件的问题",
+            "action": "",          # 刻意不给"重装/清空"动作：重装治不了驱动
+            "message": (
+                _driver_hint + "\n\n"
+                "游戏是 `-force-d3d11` 起来的（走 EFMI 必定 DX11），**正常不该出现 Vulkan 初始化**，"
+                "所以这不是缺 DLL、也不是组件配套坏了 —— 清空依赖、重装管理器都不会修好它。\n\n"
+                "可以按这个顺序试：\n"
+                "① 关掉 NVIDIA App 里的「游戏内叠加层 / 游戏滤镜」（它会挂 present hook 并尝试 Vulkan）；\n"
+                "② 更新或回滚一版显卡驱动；\n"
+                "③ 用官方启动器「校验 / 修复游戏文件」，把 `d3dcompiler_47.dll` / `vulkan-1.dll` 恢复成游戏自带版本。"
+            ),
+        }
     hit = [m for m in fault_modules(config, evidence) if m in GRAPHICS_FAULT_MODULES]
     if not hit:
         return {}

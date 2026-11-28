@@ -11,8 +11,8 @@ description:
   en: >
       Sync the jiggle-physics parameter table with its upstream source: parse the published table, merge per character, write it to the places the plugin reads, and report whether the installed data is current.
       
-revision: fc554f9d7ee000bfbf7fb07d55f223390dff7a4e
-updated_at: "2026-11-28T14:59:05.736Z"
+revision: 710bd12535949f02967e1df525db653a98be673f
+updated_at: "2026-11-28T15:37:36.767Z"
 fingerprint: 7004f655a9a1d82d89b47c2d1183b2db8ecd48030dc67e342f6aaa3704afaafe
 source:
   - path: "endfieldmodcontroller/sbm_data_sync.py"

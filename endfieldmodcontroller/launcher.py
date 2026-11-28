@@ -181,34 +181,6 @@ def _taskkill_image(name: str, *, timeout: float = 15) -> None:
 GRYPHLINK_LAUNCHER_IMAGE = "Games.exe"
 
 
-def _system_modules_hijacked(config: AppConfig) -> list[str]:
-    """游戏目录里被 loader proxy 顶替的**系统模块**（`d3dcompiler_47.dll` / `vulkan-1.dll`）。
-
-    2026-11-28（诊断包 diagnostics-20261128-220053）：这两位必须是**游戏原版**
-    （`docs/dev/可用状态配方.md` 的「游戏能进」基线）。被 Poser / 乳摇 的 loader proxy
-    顶替时游戏每次都在 25~33 秒后以 `0xC0000135` / `0xC0000005` 退出。
-    检查逻辑与 `initialize._check_system_modules_not_hijacked` 同源（都认
-    `reshade_integration.looks_like_loader_proxy`），这里只回答"是不是被顶替了"。
-    """
-    from . import secondary_motion
-
-    try:
-        game = reshade_integration.detect_game_dir(config)
-    except Exception:  # noqa: BLE001 —— 定位不到就不是这条的问题
-        return []
-    if game is None:
-        return []
-    hits: list[str] = []
-    for name in secondary_motion.PROXY_NAMES:
-        path = Path(game) / name
-        try:
-            if path.is_file() and reshade_integration.looks_like_loader_proxy(path):
-                hits.append(name)
-        except OSError:
-            continue
-    return hits
-
-
 def _stop_gryphlink_launcher(config: AppConfig) -> None:
     """拉起 XXMI 之前先收掉**官方启动器**（`Games.exe`）。
 
@@ -3573,36 +3545,7 @@ def launch(
         # Lite 跳过：这一步写的就是 runtime\reshade\ReShade.ini（Lite 一个 ReShade 文件都不写）。
         if not lite:
             sync_effective_reshade_ini(config, log=lambda message: _append_log(config, message))
-        # ★★ 2026-11-28：**明知会崩就别往下拉起来**。
-        #   `initialize._check_system_modules_not_hijacked` 早就把"系统模块被 proxy 顶替"
-        #   写成自检项了，但它在界面上只是"待人工处理"，用户点启动照样撞上去
-        #   （诊断包 220053：同一台机器 20:21 / 20:23 / 21:11 连续三次 0xC0000005）。
-        #   同机对照：独立启动 EFMI 不走这条重铺路径，两个文件是原版，就能进游戏。
-        hijacked = _system_modules_hijacked(config)
-        if hijacked:
-            # ★★ 2026-11-28（用户要求「能不能自动做掉修复，不要依赖用户」）：
-            #    **先自己修**，别把"你去点清理/去关开关"丢回给用户。
-            #    `restore_system_modules` 会用 `.bak` 还原，缺 `.bak` 时从 System32 补一份原版。
-            names = "、".join(hijacked)
-            _append_log(config, f"检测到 {names} 被 loader proxy 顶替 —— 自动还原原版…")
-            try:
-                from . import secondary_motion
 
-                fixed = secondary_motion.restore_system_modules(
-                    config, log=lambda m: _append_log(config, str(m)))
-                for action in (fixed.get("actions") or []):
-                    _append_log(config, f"注入自检: {action}")
-            except Exception as exc:  # noqa: BLE001 —— 自动修复失败时下面还有兜底
-                _append_log(config, f"WARN 自动还原系统模块失败（继续检查）: {exc}")
-            hijacked = _system_modules_hijacked(config)
-            if hijacked:
-                still = "、".join(hijacked)
-                _append_log(config, f"启动已中止：{still} 仍是 loader proxy（自动还原没成功）")
-                raise LaunchError(
-                    f"游戏目录的 {still} 仍是 loader proxy（自动还原没成功：缺原版备份，或文件被占用）。"
-                    f"这个状态游戏会在启动约 30 秒后崩（实测 0xC0000135 / 0xC0000005）。"
-                    f"到设置页「清理游戏目录注入」可再试一次。"
-                )
 
     # ⚠ **2026-10-01 根因修复：EFMI 的 `skip_early_includes_load` 必须为 0。**
     #   EFMI 的 `d3dx.ini` 出厂默认是 `skip_early_includes_load = 1`（配套

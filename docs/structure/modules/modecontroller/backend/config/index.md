@@ -11,8 +11,8 @@ description:
   en: >
       Configuration model and path derivation: the AppConfig dataclass (library/runtime/staging/game paths, dozens of switches), atomic save with corruption quarantine, old-config migration, plus disk helpers (atomic writes, library-overlap guard) and the single source of version/repo constants.
       
-revision: fc554f9d7ee000bfbf7fb07d55f223390dff7a4e
-updated_at: "2026-11-28T14:59:05.734Z"
+revision: 710bd12535949f02967e1df525db653a98be673f
+updated_at: "2026-11-28T15:37:36.763Z"
 fingerprint: 32a2d14dfa93454d9dfc0fec66f65c383584a5a369d6e47bd9df762c6df4ea53
 source:
   - path: "endfieldmodcontroller/config.py"

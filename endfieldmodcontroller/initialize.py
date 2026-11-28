@@ -2758,7 +2758,6 @@ def _check_proxy_backups(config: AppConfig, report: Report, log: Callable[[str],
     if not proxies:
         return                       # 游戏目录里没有 loader proxy，这一项不适用
 
-    fixed: list[str] = []
     pending: list[str] = []
     for name in proxies:
         backup = Path(game) / f"{name}.bak"
@@ -2767,29 +2766,21 @@ def _check_proxy_backups(config: AppConfig, report: Report, log: Callable[[str],
                 continue
         except OSError:
             pass
-        try:
-            ensured = secondary_motion.ensure_proxy_backup(Path(game), name, log)
-        except Exception as exc:  # noqa: BLE001
-            report.add("game_dir:proxy_backup", False, f"补齐 {name}.bak 失败: {exc}", manual=True)
-            return
-        (fixed if ensured is not None else pending).append(name)
+        # ★ 2026-11-28：不再"从 System32 补齐" —— 系统版不是游戏原版（见
+        #   `ensure_proxy_backup` 的注释），补上去等于把假原版当备份。这里只判断、只报。
+        pending.append(name)
 
-    if fixed:
-        report.add(
-            "game_dir:proxy_backup", True,
-            f"已补齐 {len(fixed)} 个 loader proxy 的原版备份（{'、'.join(fixed)}）—— "
-            f"「还原游戏本体 / 停用注入」现在能安全执行",
-            fixed=True,
-        )
     if pending:
         report.add(
             "game_dir:proxy_backup", False,
-            f"{'、'.join(pending)} 没有原版备份、系统里也找不到同名原版 —— "
-            f"**先别点「还原游戏本体」或「停用注入」**（proxy 删掉就放不回原版，游戏会起不来）；"
-            f"确需还原请先手动复制一份该文件留着",
+            f"{chr(12289).join(pending)} 没有**游戏原版**备份（游戏目录里那份现在是 loader proxy）—— "
+            "**先别点「还原游戏本体」或「停用注入」**；要恢复游戏自带的那两份，用官方启动器的"
+            "「校验 / 修复游戏文件」。注意 System32 的同名文件**不是**游戏原版"
+            "（d3dcompiler_47 原版 4,524,496 B vs 系统版 4,669,440 B；"
+            "vulkan-1 原版 831,488 B vs 系统版 1,730,096 B）。",
             manual=True,
         )
-    if not fixed and not pending:
+    else:
         report.add("game_dir:proxy_backup", True,
                    f"{len(proxies)} 个 loader proxy 都有原版备份，可安全还原")
 

@@ -2853,6 +2853,112 @@ def _dlss5_dir_summary(config: Any, game_dir: Path | None) -> list[str]:
     return lines
 
 
+# 游戏**自带**的那两个系统模块的已知大小（2026-11-28 实测对照）。
+# 被 loader proxy 或 System32 版顶替后大小会变，而这正是"游戏起不来"的判据之一。
+GAME_ORIGINAL_MODULE_SIZES = {
+    "d3dcompiler_47.dll": 4_524_496,   # 游戏安装日 2026-01-24 那份；System32 版是 4,669,440
+    "vulkan-1.dll": 831_488,           # 游戏自带那份；System32 版是 1,730,096 / 1,695,280
+}
+
+
+def _file_facts(path: Path) -> str:
+    """一个文件的大小 / mtime / sha256（不存在返回 "不在"）。"""
+    try:
+        if not path.is_file():
+            return "不在"
+        info = path.stat()
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()[:16]
+        stamp = datetime.fromtimestamp(info.st_mtime).strftime("%Y-%m-%d %H:%M")
+        return f"{info.st_size:,} B  sha256:{digest}…  mtime={stamp}"
+    except OSError as exc:
+        return f"读取失败: {exc}"
+
+
+def graphics_stack_report(config: Any) -> list[str]:
+    """图形栈事实：游戏目录的系统模块、显卡驱动模块、进程里的 NVIDIA 组件。
+
+    2026-11-28 加（诊断包 diagnostics-20261128-225854）：那台机器的崩溃栈固定落在
+    `nvoglv64!vk_gr2608GetInstanceProcAddr → NvPresent64!NVP_Init_Vulkan → vulkan-1!vkResetEvent`，
+    而游戏是 `-force-d3d11` 起来的 —— 判"是驱动问题还是我们的文件问题"需要三样东西：
+    ① 游戏目录里 `d3dcompiler_47.dll` / `vulkan-1.dll` 与**游戏原版**的大小对照；
+    ② 驱动目录里 `NvPresent64.dll` / `nvoglv64.dll` 的路径与版本；
+    ③ 崩溃/运行进程里实际加载了哪些 NVIDIA 模块。缺了这些只能靠问用户。
+    """
+    from . import reshade_integration
+
+    lines = ["-- 图形栈事实（用来判断是驱动问题还是文件问题）--"]
+    try:
+        game_dir = reshade_integration.detect_game_dir(config)
+    except Exception:  # noqa: BLE001
+        game_dir = None
+    if game_dir is None:
+        lines.append("游戏目录: 未定位到")
+    else:
+        lines.append(f"游戏目录: {game_dir}")
+        for name, original in GAME_ORIGINAL_MODULE_SIZES.items():
+            path = Path(game_dir) / name
+            facts = _file_facts(path)
+            mark = ""
+            try:
+                if path.is_file() and path.stat().st_size == original:
+                    mark = "  ← 与游戏原版一致"
+                elif path.is_file():
+                    mark = f"  ← **与游戏原版不同**（原版 {original:,} B）"
+            except OSError:
+                pass
+            lines.append(f"  {name}: {facts}{mark}")
+            lines.append(f"  {name}.bak: {_file_facts(Path(game_dir) / (name + '.bak'))}")
+    # 显卡驱动模块：NvPresent64 / nvoglv64 就在驱动目录里（崩溃栈会点名它们）
+    lines.append("")
+    lines.append("驱动模块（System32 与 DriverStore 里的同名文件）：")
+    for name in ("NvPresent64.dll", "nvoglv64.dll", "nvapi64.dll", "vulkan-1.dll"):
+        lines.append(f"  System32\\{name}: {_file_facts(Path(os.environ.get('SystemRoot', r'C:\\Windows')) / 'System32' / name)}")
+    driver_store = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "DriverStore" / "FileRepository"
+    try:
+        hits = sorted(driver_store.glob("nv*/*NvPresent64.dll"))[:3]
+    except OSError:
+        hits = []
+    for path in hits:
+        lines.append(f"  DriverStore: {path}  {_file_facts(path)}")
+    if not hits:
+        lines.append("  DriverStore: 没有找到 NvPresent64.dll（可能没装 NVIDIA 驱动）")
+    # 正在跑的进程里有哪些 NVIDIA 模块（崩溃那一刻的现场最好，但采不到就采当下的）
+    lines.append("")
+    lines.append("当前进程里的 NVIDIA / Vulkan 模块：")
+    modules = _running_process_modules(("Endfield", "XXMI"))
+    if modules:
+        for row in modules:
+            lines.append(f"  {row}")
+    else:
+        lines.append("  （游戏 / XXMI 没在跑，采不到进程模块）")
+    return lines
+
+
+def _running_process_modules(images: tuple[str, ...], limit: int = 40) -> list[str]:
+    """用 tasklist 读指定进程当前加载的模块（只读；失败返回空）。"""
+    out: list[str] = []
+    for image in images:
+        try:
+            proc = subprocess.run(["tasklist", "/m", "/fi", f"IMAGENAME eq {image}.exe", "/fo", "csv", "/nh"],
+                                  capture_output=True, text=True, timeout=20,
+                                  creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except (OSError, subprocess.SubprocessError):
+            continue
+        for row in (proc.stdout or "").splitlines():
+            if not row.strip().startswith('"'):
+                continue
+            for token in row.split(","):
+                name = token.strip().strip('"')
+                low = name.lower()
+                if low.endswith(".dll") and ("nv" in low or "vulkan" in low or "vulkan" in low):
+                    entry = f"[{image}] {name}"
+                    if entry not in out:
+                        out.append(entry)
+            if len(out) >= limit:
+                return out
+    return out
+
+
 def _addon_log_summary(config: Any, game_dir: Path | None) -> list[str]:
     """面板 addon 自己的日志（`modecontroller.addon.log`）最后若干行 + 落点候选。
 
@@ -3170,6 +3276,19 @@ def create_diagnostic_bundle(
         if not unity_crashes:
             _manifest_add(manifest, arcname="unity-crash/", source="Unity 崩溃目录",
                           status="missing", note="没有 Unity 崩溃日志（**已查过**）")
+
+        # ⑥ 图形栈事实（2026-11-28）：判"驱动问题 vs 文件问题"。
+        #    那台机器的崩溃栈固定落在 nvoglv64 / NvPresent64!NVP_Init_Vulkan，
+        #    而游戏是 -force-d3d11 起来的 —— 这三样数据是唯一能一次判清的（否则只能问用户）。
+        try:
+            stack_lines = graphics_stack_report(config)
+            archive.writestr("graphics-stack.txt", "\n".join(stack_lines) + "\n")
+            _manifest_add(manifest, arcname="graphics-stack.txt",
+                          source="(游戏目录 + 驱动目录 + 进程模块)", status="ok",
+                          note="系统模块大小与游戏原版对照 / NvPresent64·nvoglv64 路径 / 进程里的 NVIDIA 模块")
+        except Exception as exc:  # noqa: BLE001
+            _manifest_add(manifest, arcname="graphics-stack.txt", source="(图形栈事实)",
+                          status="error", note=str(exc))
 
         # ⑤ XXMI 侧：脱敏配置 + 它自己的日志（注入参数与注入结果的一手记录）
         xxmi_text, xxmi_note = sanitized_xxmi_config(config)

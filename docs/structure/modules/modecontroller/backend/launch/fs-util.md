@@ -11,22 +11,22 @@ description:
   en: >
       Small but load-bearing helpers: copy only when content changed, atomic file/ini writes with unique backups, image-process probing, hotkey-takeover resolution, and the append-to-log sink used by every launch step.
       
-revision: fc554f9d7ee000bfbf7fb07d55f223390dff7a4e
-updated_at: "2026-11-28T14:59:05.740Z"
-fingerprint: 9c246c930949fd5474650274c14f7bcfbb9fbbd7f6e3357b7ba8f8d85b012462
+revision: 710bd12535949f02967e1df525db653a98be673f
+updated_at: "2026-11-28T15:37:36.777Z"
+fingerprint: 8b52918c0df826375bcd7e5121c69a478bc896289d5de2a29d1e0cff349704d8
 source:
   - path: "endfieldmodcontroller/launcher.py"
     line: 32
     end_line: 55
   - path: "endfieldmodcontroller/launcher.py"
-    line: 798
-    end_line: 6030
+    line: 770
+    end_line: 5916
   - path: "endfieldmodcontroller/launcher.py"
-    line: 2526
-    end_line: 6571
+    line: 2498
+    end_line: 6457
   - path: "endfieldmodcontroller/launcher.py"
-    line: 4791
-    end_line: 8236
+    line: 4734
+    end_line: 8122
 apis:
   - protocol: rpc
     path: "_copy_if_changed"

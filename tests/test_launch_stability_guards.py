@@ -37,21 +37,28 @@ def _config(tmp_path: Path, game: Path, **extra) -> AppConfig:
 
 
 def test_sbm_skips_injection_when_tool_dir_missing(tmp_path: Path) -> None:
-    """乳摇工具目录不存在 ⇒ 一条注入都不铺（也不装 sbm.dll）。"""
+    r"""乳摇工具目录不存在 ⇒ **只跳过**，游戏目录里的文件一个都不动。
+
+    2026-11-28 口径（用户：「sbm 本来就是独立加载的，应该保持独立加载」）：
+    乳摇走自己的 loader proxy；工具目录缺失时我们只是**这一轮不铺**，
+    绝不替用户拆掉已经铺着的那套 proxy（它可能是 Poser 的，两个组件共用同一个 loader），
+    也不删 `plugin\sbm.dll`。要拆只有用户点「清理游戏目录注入」才算数。
+    """
     game = tmp_path / "game"
     game.mkdir()
     # 造一个"以前铺过"的 proxy（小文件 + 标记串）
-    (game / "d3dcompiler_47.dll").write_bytes(b"[LOADER] started " + b"x" * 1024)
+    proxy_bytes = b"[LOADER] started " + b"x" * 1024
+    (game / "d3dcompiler_47.dll").write_bytes(proxy_bytes)
     cfg = _config(tmp_path, game,
                   secondary_motion_dir=str(tmp_path / "no-such-tool"),
                   secondary_motion_injection=True)
     result = secondary_motion.ensure_injection(cfg)
     assert result.get("ok") is True, result
     assert result.get("skipped") == "no-tool-dir", result
-    # 没铺新的 proxy：留下的（若有）必须是**原版**，不能还是 loader proxy
-    assert not reshade_integration.looks_like_loader_proxy(game / "vulkan-1.dll")
-    assert not reshade_integration.looks_like_loader_proxy(game / "d3dcompiler_47.dll")
-    # 也没装 plugin/sbm.dll
+    # 原有那份 proxy 原样不动（不拆、不还原、不覆盖）
+    assert (game / "d3dcompiler_47.dll").read_bytes() == proxy_bytes
+    # 也没新写 vulkan-1.dll / plugin\sbm.dll
+    assert not (game / "vulkan-1.dll").is_file()
     assert not (game / "plugin" / "sbm.dll").is_file()
 
 
@@ -78,21 +85,16 @@ def test_mod_library_lookalike_is_still_rejected(tmp_path: Path) -> None:
     (library / "d3d11.dll").write_bytes(b"mod dll")
     assert launcher._efmi_folder_is_sane(library, xxmi_root) is False
 
+def test_proxy_backup_never_fakes_game_original(tmp_path: Path) -> None:
+    """没有 `.bak` 且本体已是 proxy ⇒ 返回 None，**不拿 System32 冒充游戏原版**。
 
-def test_system_modules_hijacked_detected(tmp_path: Path) -> None:
-    """系统模块被 loader proxy 顶替时能被判出来（启动据此中止）。"""
+    2026-11-28 实测：`d3dcompiler_47.dll` 游戏原版 4,524,496 B / System32 版 4,669,440 B；
+    `vulkan-1.dll` 游戏原版 831,488 B / System32 版 1,730,096 B —— 根本不是同一个文件。
+    以前这里"缺 .bak 就从 System32 拷一份"，结果 `.bak` 变成系统版、之后"还原"永远
+    还原不出游戏原本那份（本机 `.bak` 现在就是这样）。
+    """
     game = tmp_path / "game"
     game.mkdir()
-    cfg = _config(tmp_path, game)
-    assert launcher._system_modules_hijacked(cfg) == []
-    (game / "vulkan-1.dll").write_bytes(b"[PROXY] plugins loaded via " + b"x" * 512)
-    assert launcher._system_modules_hijacked(cfg) == ["vulkan-1.dll"]
-
-
-def test_genuine_system_module_is_not_hijacked(tmp_path: Path) -> None:
-    """真原版（大文件、无标记串）不许被误判成 proxy。"""
-    game = tmp_path / "game"
-    game.mkdir()
-    cfg = _config(tmp_path, game)
-    (game / "d3dcompiler_47.dll").write_bytes(b"MZ" + b"\x00" * (300 * 1024))
-    assert launcher._system_modules_hijacked(cfg) == []
+    (game / "vulkan-1.dll").write_bytes(b"[LOADER] started " + b"x" * 1024)
+    assert secondary_motion.ensure_proxy_backup(game, "vulkan-1.dll") is None
+    assert not (game / "vulkan-1.dll.bak").is_file(), "不许凭空造一份假的游戏原版"

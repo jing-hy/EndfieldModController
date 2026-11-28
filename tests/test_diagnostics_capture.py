@@ -211,7 +211,14 @@ def _fake_system32(tmp_path: Path, name: str, *, size: int = 300_000) -> Path:
     return root
 
 
-def test_ensure_proxy_backup_copies_system_module(tmp_path: Path, monkeypatch):
+def test_ensure_proxy_backup_never_copies_system_module(tmp_path: Path, monkeypatch):
+    """**不许**拿 System32 的同名文件冒充"游戏原版"（2026-11-28 用户口径）。
+
+    实测两者不是同一个文件：`d3dcompiler_47.dll` 游戏原版 4,524,496 B / System32 4,669,440 B；
+    `vulkan-1.dll` 游戏原版 831,488 B / System32 1,730,096 B。旧逻辑在 `.bak` 缺失时从
+    System32 拷一份，于是 `.bak` 变系统版 ⇒ 之后装 proxy 时见 `.bak` 已存在就不再备份本体
+    ⇒ **游戏自带那份被永久覆盖**，此后"还原"永远还原不出游戏原本的文件。
+    """
     game = tmp_path / "game"
     game.mkdir()
     _write_proxy(game / "d3dcompiler_47.dll")
@@ -219,8 +226,8 @@ def test_ensure_proxy_backup_copies_system_module(tmp_path: Path, monkeypatch):
 
     backup = secondary_motion.ensure_proxy_backup(game, "d3dcompiler_47.dll", None)
 
-    assert backup is not None and backup.is_file()
-    assert backup.stat().st_size >= secondary_motion.PROXY_MAX_SIZE
+    assert backup is None, "没有游戏原版就返回 None，不要造一份假的"
+    assert not (game / "d3dcompiler_47.dll.bak").is_file()
 
 
 def test_remove_injection_keeps_proxy_when_no_backup_available(tmp_path: Path, monkeypatch):
@@ -237,22 +244,28 @@ def test_remove_injection_keeps_proxy_when_no_backup_available(tmp_path: Path, m
     assert result["warnings"]
 
 
-def test_remove_injection_restores_from_system32_when_backup_missing(tmp_path: Path, monkeypatch):
+def test_remove_injection_keeps_proxy_when_no_game_original(tmp_path: Path, monkeypatch):
+    """缺**游戏原版**时保留 proxy 不动，并如实报（不再拿 System32 版顶上）。"""
     config, game, _runtime = _make_config(tmp_path, staging=tmp_path / "Mods")
     (game / "plugin").mkdir(parents=True)
     proxy = game / "d3dcompiler_47.dll"
     _write_proxy(proxy)
     monkeypatch.setenv("SystemRoot", str(_fake_system32(tmp_path, "d3dcompiler_47.dll")))
 
-    secondary_motion.remove_injection(config, log=None)
+    result = secondary_motion.remove_injection(config, log=None)
 
-    assert proxy.is_file()
-    assert not secondary_motion._is_proxy(proxy), "应该已经换回系统原版，而不是留着 proxy"
-    assert (game / "d3dcompiler_47.dll.bak").is_file()
+    assert proxy.is_file(), "拿不到游戏原版就不许删 proxy（删了游戏起不来）"
+    assert secondary_motion._is_proxy(proxy), "也不许把系统版写进来冒充原版"
+    assert not (game / "d3dcompiler_47.dll.bak").is_file()
+    assert result["warnings"]
 
 
-def test_self_check_fixes_missing_proxy_backup(tmp_path: Path, monkeypatch):
-    """自检要**自动补** .bak（`fixed=True`），而不是把这种状态当"全绿"。"""
+def test_self_check_reports_missing_proxy_backup(tmp_path: Path, monkeypatch):
+    """缺游戏原版备份时自检要报出来（`ok=False`），并指向"用官方启动器校验文件"。
+
+    2026-11-28：不再"自动补 .bak" —— 市面上能拿到的只有 System32 的同名文件，
+    它不是游戏原版（大小都不同），补上去等于把假备份固化。
+    """
     config, game, _runtime = _make_config(tmp_path, staging=tmp_path / "Mods")
     (game / "plugin").mkdir(parents=True)
     _write_proxy(game / "d3dcompiler_47.dll")
@@ -265,10 +278,10 @@ def test_self_check_fixes_missing_proxy_backup(tmp_path: Path, monkeypatch):
     initialize._check_proxy_backups(config, report, None)
 
     checks = {item["key"]: item for item in report.to_dict()["checks"]}
-    assert checks["game_dir:proxy_backup"]["ok"] is True
-    assert checks["game_dir:proxy_backup"]["fixed"] is True
-    assert (game / "d3dcompiler_47.dll.bak").is_file()
-    assert (game / "vulkan-1.dll.bak").is_file()
+    assert checks["game_dir:proxy_backup"]["ok"] is False
+    assert "校验" in str(checks["game_dir:proxy_backup"].get("message") or "")
+    assert not (game / "d3dcompiler_47.dll.bak").is_file(), "不许造假的游戏原版"
+    assert not (game / "vulkan-1.dll.bak").is_file()
 
 
 def test_self_check_warns_when_backup_cannot_be_fixed(tmp_path: Path, monkeypatch):
