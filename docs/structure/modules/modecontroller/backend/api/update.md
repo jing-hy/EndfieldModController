@@ -11,16 +11,16 @@ description:
   en: >
       Self-update from the UI: is there a pending update, check GitHub, download the new exe, then apply it by writing a helper script and restarting (the trickiest part of the whole program).
       
-revision: 55db4a68d2887afd4194c6e6b519ad091940608b
-updated_at: "2026-11-28T14:23:15.798Z"
+revision: fc554f9d7ee000bfbf7fb07d55f223390dff7a4e
+updated_at: "2026-11-28T14:59:05.731Z"
 fingerprint: 1b7ec7d51ca05e96c185c5dc96dd06789596407dc57c436b6c8353238ab5882d
 source:
   - path: "endfieldmodcontroller/api.py"
-    line: 3100
-    end_line: 7034
+    line: 3117
+    end_line: 7074
   - path: "endfieldmodcontroller/api.py"
-    line: 9936
-    end_line: 17400
+    line: 9956
+    end_line: 17440
 apis:
   - protocol: rpc
     path: "check_app_update"

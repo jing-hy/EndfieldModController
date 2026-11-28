@@ -11,13 +11,13 @@ description:
   en: >
       Tests for the launch path: the api surface the UI calls, linting the generated controller ini, the unified hotkey panel protocol, one offline end-to-end run, and 'the first screen never hits the network' (it reads the update cache and lets background warm-up fetch — the 2026-11-05 slow-start fix). The suite that would catch a launch-time regression before a user does.
       
-revision: 55db4a68d2887afd4194c6e6b519ad091940608b
-updated_at: "2026-11-28T14:23:15.836Z"
+revision: fc554f9d7ee000bfbf7fb07d55f223390dff7a4e
+updated_at: "2026-11-28T14:59:05.779Z"
 fingerprint: 5f844780a900b3434f133c2c0af9ae3006f843600c5ee7183b9f61b0c5364012
 source:
   - path: "tests/test_launcher_api.py"
     line: 2
-    end_line: 1828
+    end_line: 2064
   - path: "tests/test_hotkey_panel.py"
     line: 2
     end_line: 2759

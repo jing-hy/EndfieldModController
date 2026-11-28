@@ -11,13 +11,13 @@ description:
   en: >
       Paste URLs on the library page to fetch mods. Up to 4 jobs run in parallel (each through fastnet); files land in `runtime\downloads\`, extractable ones are imported like drag-and-drop, the rest are reported as "manual extraction needed". GameBanana page URLs are resolved via apiv11 into the real file URL plus cover, author and version; unreachable pops a VPN hint. Downloads parallel, importing serial.
       
-revision: 55db4a68d2887afd4194c6e6b519ad091940608b
-updated_at: "2026-11-28T14:23:15.792Z"
+revision: fc554f9d7ee000bfbf7fb07d55f223390dff7a4e
+updated_at: "2026-11-28T14:59:05.726Z"
 fingerprint: 6dd9aaea8aed0e5270769d6a9ce4555077c648a9a4afaa73c596038bb2a9edbd
 source:
   - path: "endfieldmodcontroller/api.py"
-    line: 8574
-    end_line: 16423
+    line: 8594
+    end_line: 16463
   - path: "endfieldmodcontroller/moddl.py"
     line: 608
     end_line: 1458

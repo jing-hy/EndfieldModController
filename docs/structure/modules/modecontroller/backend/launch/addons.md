@@ -11,16 +11,16 @@ description:
   en: >
       The add-ons that ride along with the ReShade payload: our unified hotkey panel and the DLSS5 feed add-on — install, enable/disable, and report status; the feed one must switch itself off when the game already does DLSS natively.
       
-revision: 55db4a68d2887afd4194c6e6b519ad091940608b
-updated_at: "2026-11-28T14:23:15.809Z"
-fingerprint: 12293d7e5a8a207fda802912bb501f1276e5275244f04297da863dca8f807f43
+revision: fc554f9d7ee000bfbf7fb07d55f223390dff7a4e
+updated_at: "2026-11-28T14:59:05.739Z"
+fingerprint: 9c246c930949fd5474650274c14f7bcfbb9fbbd7f6e3357b7ba8f8d85b012462
 source:
   - path: "endfieldmodcontroller/launcher.py"
     line: 53
     end_line: 72
   - path: "endfieldmodcontroller/launcher.py"
-    line: 2743
-    end_line: 6398
+    line: 2851
+    end_line: 6744
 apis:
   - protocol: rpc
     path: "set_component_addons"

@@ -11,19 +11,19 @@ description:
   en: >
       Logs and bundles from the UI: read / clear the launch log, read the controller log, export a diagnostic bundle, and the frontend error sink that keeps UI crashes out of the void.
       
-revision: 55db4a68d2887afd4194c6e6b519ad091940608b
-updated_at: "2026-11-28T14:23:15.794Z"
+revision: fc554f9d7ee000bfbf7fb07d55f223390dff7a4e
+updated_at: "2026-11-28T14:59:05.727Z"
 fingerprint: 1b7ec7d51ca05e96c185c5dc96dd06789596407dc57c436b6c8353238ab5882d
 source:
   - path: "endfieldmodcontroller/api.py"
     line: 872
-    end_line: 4641
+    end_line: 4675
   - path: "endfieldmodcontroller/api.py"
-    line: 4376
-    end_line: 12682
+    line: 4393
+    end_line: 12722
   - path: "endfieldmodcontroller/api.py"
-    line: 10289
-    end_line: 17676
+    line: 10309
+    end_line: 17716
 apis:
   - protocol: rpc
     path: "read_launch_log"

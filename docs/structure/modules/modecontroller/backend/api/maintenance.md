@@ -11,19 +11,19 @@ description:
   en: >
       Repairing things: the integrity check / repair pair, the whole-config rollback entry, and the jiggle-physics data sync status. Per-mod fix/rollback was removed on 2026-11-27.
       
-revision: 55db4a68d2887afd4194c6e6b519ad091940608b
-updated_at: "2026-11-28T14:23:15.795Z"
+revision: fc554f9d7ee000bfbf7fb07d55f223390dff7a4e
+updated_at: "2026-11-28T14:59:05.728Z"
 fingerprint: 1b7ec7d51ca05e96c185c5dc96dd06789596407dc57c436b6c8353238ab5882d
 source:
   - path: "endfieldmodcontroller/api.py"
-    line: 4480
-    end_line: 12850
+    line: 4497
+    end_line: 12890
   - path: "endfieldmodcontroller/api.py"
-    line: 5268
-    end_line: 13974
+    line: 5285
+    end_line: 14014
   - path: "endfieldmodcontroller/api.py"
-    line: 10214
-    end_line: 17619
+    line: 10234
+    end_line: 17659
 apis:
   - protocol: rpc
     path: "check_integrity"

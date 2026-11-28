@@ -11,13 +11,13 @@ description:
   en: >
       XXMI signs its own settings with a user key; if that signature is absent or stale it regenerates the key and quietly wipes the injection list. Generating the key ourselves is what keeps our injections from being reset out from under us.
       
-revision: 55db4a68d2887afd4194c6e6b519ad091940608b
-updated_at: "2026-11-28T14:23:15.812Z"
-fingerprint: 12293d7e5a8a207fda802912bb501f1276e5275244f04297da863dca8f807f43
+revision: fc554f9d7ee000bfbf7fb07d55f223390dff7a4e
+updated_at: "2026-11-28T14:59:05.742Z"
+fingerprint: 9c246c930949fd5474650274c14f7bcfbb9fbbd7f6e3357b7ba8f8d85b012462
 source:
   - path: "endfieldmodcontroller/launcher.py"
-    line: 1696
-    end_line: 5997
+    line: 1781
+    end_line: 6343
 apis:
   - protocol: rpc
     path: "ensure_xxmi_signing_key"
