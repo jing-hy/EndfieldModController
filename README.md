@@ -35,6 +35,17 @@
 - **不折腾**：不改游戏本体、不内置 Mod、不改任何第三方组件；配置与数据就在 exe 旁边，整个文件夹拷走即可换机。
 - **两个版本**：**完整版**（DLSS5 + 第一人称 + 服装 Mod）与 **轻量版**（完全不含 ReShade，只保留服装 Mod / 摇乳 / 摆姿 / 商城下载），同目录可互换。
 
+## 选哪个版本？
+
+| 你的情况 | 选这个 |
+| --- | --- |
+| 想要 **DLSS5 神经渲染 / 超分**、第一人称视角、游戏内统一面板 | **完整版** `EndfieldModController.exe` |
+| 只玩**服装 Mod**（换装）+ 摇乳 + 摆姿 + 商城下载；不想让 ReShade 碰游戏 | **轻量版** `EndfieldModController-Lite.exe` |
+| 游戏一开就崩 / 收到反作弊警告 / 想先把 ReShade 这条链排除掉 | **轻量版**（完全不含 ReShade：不下载、不安装、不注入；游戏目录里已有的 ReShade 残留会被移走，有备份、可还原） |
+| 不确定选哪个 | 先用**完整版**；觉得 ReShade 那一套用不上，随时换轻量版 |
+
+两版**共用同一份数据根**（`config.json` / `runtime\` / `library\`）—— 两个 exe 放同一个目录里互换即可，Mod 库、备份、下载记录都不用重来。
+
 ## 第一次使用
 
 1. 到 [Release](https://github.com/jing-hy/EndfieldModController/releases) 下载 exe：`EndfieldModController.exe`（完整版）或 `EndfieldModController-Lite.exe`（轻量版）。

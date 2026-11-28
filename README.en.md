@@ -36,6 +36,17 @@ from scratch and <b>zero configuration to get started</b>.</p>
 - **Hands-off**: the game itself, mods and third-party components are never modified; config and data live next to the exe — copy the folder to move machines.
 - **Two editions**: **Universal** (DLSS5 + first-person + outfit mods) and **Lite** (no ReShade at all — outfit mods / jiggle / posing / store only); both can share one folder and be swapped anytime.
 
+## Which edition?
+
+| Your case | Pick |
+| --- | --- |
+| You want **DLSS5 neural rendering / super resolution**, first-person view, or the in-game unified panel | **Universal** `EndfieldModController.exe` |
+| You only use **outfit mods** (+ jiggle / posing / store downloads) and would rather keep ReShade out of the game | **Lite** `EndfieldModController-Lite.exe` |
+| The game crashes on launch, you got an anti-cheat warning, or you want to rule ReShade out first | **Lite** (no ReShade at all: never downloaded, installed or injected; ReShade leftovers already in the game folder are moved away with backups and can be restored) |
+| Not sure | Start with **Universal**; switch to Lite whenever you like |
+
+Both editions **share one data root** (`config.json` / `runtime\` / `library\`) — keep both exes in the same folder and swap freely; your mod library, backups and download history carry over.
+
 ## Getting started
 
 1. Download the exe from [Releases](https://github.com/jing-hy/EndfieldModController/releases): `EndfieldModController.exe` (Universal) or `EndfieldModController-Lite.exe` (Lite).
