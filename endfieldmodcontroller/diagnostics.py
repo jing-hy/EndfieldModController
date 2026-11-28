@@ -18,6 +18,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from . import edition
+
 _SESSION_ID = datetime.now().strftime("%Y%m%d-%H%M%S")
 _LOCK = threading.RLock()
 _MONITOR_LOCK = threading.Lock()
@@ -25,6 +27,22 @@ _MONITOR_THREAD: threading.Thread | None = None
 # 「请停下」信号：`stop_process_monitor()` 置位，`_monitor_process` 每轮检查一次。
 # 没有它的话，关窗口时那个最长 1800 秒的监视线程根本没法早点收工（见 stop_process_monitor）。
 _MONITOR_STOP = threading.Event()
+
+
+def _is_reshade_artifact(path: Path) -> bool:
+    """这个路径是否属于 ReShade / DLSS5 链路（Lite 的诊断包与快照不采这些）。
+
+    轻量版运行期没有这条链路，采进来的只会是别的工具留下的噪音；判断按"路径段 + 文件名"
+    做，宁可多跳过一个 ReShade 文件，也不把通用诊断（Player.log / 崩溃栈 / EFMI）挡掉。
+    """
+    text = str(path).replace("\\", "/").lower()
+    parts = [part for part in text.split("/") if part]
+    name = parts[-1] if parts else ""
+    if "reshade" in parts or "reshade" in name or "dlss5" in parts or "renodx" in name:
+        return True
+    if name in {"d3d12.dll", "dxgi.dll", "panel_info.txt", "actions.tsv", "user_ini_path.txt"}:
+        return True
+    return name.endswith((".addon", ".addon64", ".addon.log"))
 
 
 def _reveal_target(target: Path, creationflags: int) -> tuple[bool, str]:
@@ -267,6 +285,7 @@ def log_runtime_snapshot(config: Any, game_dir: Path | None = None) -> None:
     """Log the files that commonly decide whether injection works."""
     from . import reshade_integration
 
+    lite = edition.is_lite()
     try:
         runtime = Path(config.runtime_path)
         loader = config.migoto_loader_path
@@ -317,6 +336,9 @@ def log_runtime_snapshot(config: Any, game_dir: Path | None = None) -> None:
                 game_dir / "renodx-dlss.addon64",
                 game_dir / "renodx-dlss.addon64.endfieldmodcontroller.disabled",
             ])
+        if lite:
+            # 轻量版不含 ReShade：快照只列通用文件，不把 ReShade/DLSS5 的痕迹写进日志。
+            candidate_files = [p for p in candidate_files if not _is_reshade_artifact(p)]
         seen: set[str] = set()
         for path in candidate_files:
             key = str(path).lower()
@@ -354,14 +376,16 @@ def log_runtime_snapshot(config: Any, game_dir: Path | None = None) -> None:
                         original_present=item.get("original_present"),
                         backup=item.get("backup"),
                     )
-        if game_dir is not None and (game_dir / "ReShade.ini").is_file():
-            _log_ini_section(config, game_dir / "ReShade.ini", "ADDON")
-        if (loader_dir / "ReShade.ini").is_file():
-            _log_ini_section(config, loader_dir / "ReShade.ini", "ADDON")
-        if game_dir is not None and (game_dir / "user_ini_path.txt").is_file():
-            log_event(config, "游戏目录 user_ini_path.txt", category="snapshot", value=_read_text(game_dir / "user_ini_path.txt", 512).strip())
-        if (loader_dir / "user_ini_path.txt").is_file():
-            log_event(config, "loader user_ini_path.txt", category="snapshot", value=_read_text(loader_dir / "user_ini_path.txt", 512).strip())
+        if not lite:
+            # ReShade 的 ini / user_ini 都是 ReShade 链路的东西 —— 轻量版不采。
+            if game_dir is not None and (game_dir / "ReShade.ini").is_file():
+                _log_ini_section(config, game_dir / "ReShade.ini", "ADDON")
+            if (loader_dir / "ReShade.ini").is_file():
+                _log_ini_section(config, loader_dir / "ReShade.ini", "ADDON")
+            if game_dir is not None and (game_dir / "user_ini_path.txt").is_file():
+                log_event(config, "游戏目录 user_ini_path.txt", category="snapshot", value=_read_text(game_dir / "user_ini_path.txt", 512).strip())
+            if (loader_dir / "user_ini_path.txt").is_file():
+                log_event(config, "loader user_ini_path.txt", category="snapshot", value=_read_text(loader_dir / "user_ini_path.txt", 512).strip())
         if (loader_dir / "inject_order.txt").is_file():
             log_event(config, "inject_order.txt", category="snapshot", value=_read_text(loader_dir / "inject_order.txt", 512).strip())
         for image in ("Endfield.exe", "migoto_loader2.exe", "loader.exe", "XXMI Launcher.exe"):
@@ -651,6 +675,9 @@ def _capture_tail(
 
 
 def reshade_log_candidates(config: Any, game_dir: Path | None) -> list[tuple[str, Path]]:
+    # Lite 不含 ReShade：没有 ReShade.log 可采，也别去探它的目录。
+    if edition.is_lite():
+        return []
     """ReShade 日志的候选位置（带来源标签，全部返回、由采集层逐个记结果）。
 
     ⚠️ 为什么不能只看游戏目录（**issue #13 缺陷三**，2026-10-04 实测再次复现）：
@@ -1295,7 +1322,12 @@ def game_dir_inventory_text(config: Any, game_dir: Path | None, *, limit: int = 
     # 是"别的注入器可能占用的位置"，**正常游戏目录本来就没有** —— 对它们报"缺失"纯属噪音，
     # 会把真正要看的那两行淹掉（本机实测：一次刷出 5 行假警报）。
     required_loaders = {"d3dcompiler_47.dll", "vulkan-1.dll"}
+    # 轻量版不含 ReShade：不把 d3d12/dxgi 这些"ReShade 可能占用的位置"列进清单。
+    lite = edition.is_lite()
+    skip_proxy_names = {"d3d12.dll", "dxgi.dll"} if lite else set()
     for name in reshade_integration.LOADER_PROXY_MODULES:
+        if name.lower() in skip_proxy_names:
+            continue
         path = game / name
         parked = path.with_name(name + reshade_integration.LOADER_PROXY_DISABLED_SUFFIX)
         backup = path.with_name(name + ".bak")
@@ -1355,6 +1387,8 @@ def game_dir_inventory_text(config: Any, game_dir: Path | None, *, limit: int = 
     lines.append("")
     lines.append("== 游戏目录文件（顶层，按修改时间倒序；只列关键后缀）==")
     interesting = (".dll", ".exe", ".ini", ".log", ".addon64", ".json", ".txt", ".bak", ".disabled")
+    if lite:
+        interesting = tuple(item for item in interesting if item != ".addon64")
     try:
         files = [p for p in game.iterdir() if p.is_file() and p.suffix.lower() in interesting]
         files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
@@ -1568,16 +1602,19 @@ def _capture_postmortem(config: Any, game_dir: Path | None, reason: str,
     _record_trace_phase(config, "game-exited", pid, f"退出：{reason}")
 
     # ① ReShade 日志（多候选，文件名带来源标签，谁也不覆盖谁）
-    for label, source in _try_capture(config, "ReShade 候选路径", reshade_log_candidates, config, game_dir) or []:
-        arc = f"logs/ReShade-{label}-{stamp}.log"
-        _try_capture(config, arc, _capture_tail, source, target_dir / f"ReShade-{label}-{stamp}.log",
-                     lines=800, manifest=manifest, arcname=arc)
-    # 兼容旧名字 `ReShade-<stamp>.log`（issue #13 的反馈者按这个找过），仅在游戏目录那份存在时
-    game_reshade = (Path(game_dir) / "ReShade.log") if game_dir else None
-    if game_reshade is not None and game_reshade.is_file():
-        _try_capture(config, "ReShade-<stamp>", _capture_tail, game_reshade,
-                     target_dir / f"ReShade-{stamp}.log", lines=800,
-                     manifest=manifest, arcname=f"logs/ReShade-{stamp}.log")
+    #    轻量版不含 ReShade：候选函数在 Lite 下返回空，这里再包一层，避免"兼容旧名"那段
+    #    把游戏目录里的 ReShade.log 采进包。
+    if not edition.is_lite():
+        for label, source in _try_capture(config, "ReShade 候选路径", reshade_log_candidates, config, game_dir) or []:
+            arc = f"logs/ReShade-{label}-{stamp}.log"
+            _try_capture(config, arc, _capture_tail, source, target_dir / f"ReShade-{label}-{stamp}.log",
+                         lines=800, manifest=manifest, arcname=arc)
+        # 兼容旧名字 `ReShade-<stamp>.log`（issue #13 的反馈者按这个找过），仅在游戏目录那份存在时
+        game_reshade = (Path(game_dir) / "ReShade.log") if game_dir else None
+        if game_reshade is not None and game_reshade.is_file():
+            _try_capture(config, "ReShade-<stamp>", _capture_tail, game_reshade,
+                         target_dir / f"ReShade-{stamp}.log", lines=800,
+                         manifest=manifest, arcname=f"logs/ReShade-{stamp}.log")
 
     # ② EFMI / 3DMigoto 两侧的日志与 ini
     for label, source in _try_capture(config, "EFMI 日志候选", efmi_log_candidates, config) or []:
@@ -2546,6 +2583,9 @@ _RESHADE_HOST = re.compile(r"loaded from '([^']+)' into '([^']+)'")
 
 
 def addon_log_candidates(config: Any, game_dir: Path | None = None) -> list[tuple[str, Path]]:
+    # Lite 不含 ReShade 面板 ⇒ 没有 addon 日志可采。
+    if edition.is_lite():
+        return []
     """面板 addon 自己写的那份日志可能落在哪几处。
 
     ⚠️ **2026-10-04 修**：这里以前只有 `endfieldmodcontroller.addon.log` —— **文件名根本不对**。
@@ -2858,6 +2898,9 @@ def create_diagnostic_bundle(
         "EndfieldModController diagnostic bundle",
         f"created={datetime.now().isoformat(timespec='seconds')}",
         f"note={note}",
+        # 2026-11-28 用户要求：「确定一下反馈包会收集是否为 lite」——反馈者说是哪个版本，
+        # 排查才能先排掉"这个功能轻量版本来就没有"这一类。
+        f"edition={edition.current()}（{edition.label()}）",
         f"session_log={session_log_path(config)}",
         f"runtime={runtime}",
         f"loader={loader_dir}",
@@ -2868,12 +2911,14 @@ def create_diagnostic_bundle(
     # 起因：一台机器上游戏以 `0xC0000135` 极早期退出，而包里只能看出"它死得早"。
     summary.extend(_pe_deps_summary(config, game_path))
     summary.extend(_injection_trace_summary(config))
-    summary.extend(_nvngx_fingerprint(config))
+    if not edition.is_lite():
+        summary.extend(_nvngx_fingerprint(config))
     summary.extend(_xxmi_summary(config))
     # XXMI 自己的注入现场（启动参数 / work_dir / 每个 dll 的注入结果 / 它报的错）—— 2026-10-04 加
     summary.extend(_xxmi_injection_summary(config))
     summary.extend(_ngx_consumer_summary(game_path))
-    summary.extend(_nr_frames_summary(config))
+    if not edition.is_lite():
+        summary.extend(_nr_frames_summary(config))
     # 崩溃取证一页结论（2026-10-06 加，用户「你加判据，多加一点」）：
     # 各回答一个原本要人肉翻的问题 —— 异常是什么、自己退还是被强杀、崩在 addon 之前还是之后、
     # 当时的 NR 档位。实现与口径见 `crashwatch.crash_forensics`。
@@ -2887,29 +2932,36 @@ def create_diagnostic_bundle(
             summary.extend(f"  {line}" for line in forensics)
     except Exception as exc:  # noqa: BLE001
         summary.append(f"（崩溃取证生成失败：{exc}）")
-    summary.extend(_shader_summary(config))
+    if not edition.is_lite():
+        summary.extend(_shader_summary(config))
     # ⚠️ 2026-10-04 补的四段（用户原话：「你能不能一次加完」）。
     #    这四段全是"数据本来就在现场、只是没人解析/没人列"，不是新采集：
     #      * `_reshade_addon_summary` —— ReShade.log 里的 add-on 成功/失败行（本次事故的直接答案）；
     #      * `_addon_log_summary`     —— 面板 addon 自己的日志（加载失败时的"走到哪一步"）；
     #      * `_game_dir_reality_summary` —— "我们以为的游戏目录 vs 实际跑的"；
     #      * `_dlss5_dir_summary`     —— DLSS5/base 目录里到底有什么 + 同名 addon 重复检查。
-    summary.extend(_reshade_addon_summary(config, game_path))
-    summary.extend(_addon_log_summary(config, game_path))
+    if not edition.is_lite():
+        summary.extend(_reshade_addon_summary(config, game_path))
+        summary.extend(_addon_log_summary(config, game_path))
     summary.extend(_game_dir_reality_summary(config, game_path))
-    summary.extend(_dlss5_dir_summary(config, game_path))
+    if not edition.is_lite():
+        summary.extend(_dlss5_dir_summary(config, game_path))
     # 运行时组件清单（2026-10-02 加）：文件名 / 字节 / sha256 / 是否偏离随包基线。
     # 那天用户遇到"配套损坏 ⇒ 游戏启动几十秒后崩"，包里却没有这份清单，
     # 事后连"装的是哪一版组件"都回答不了（详见 runtime_assets.inventory_text）。
-    try:
-        from . import runtime_assets
+    inventory = ""
+    if not edition.is_lite():
+        try:
+            from . import runtime_assets
 
-        inventory = runtime_assets.inventory_text(config)
-    except Exception as exc:  # noqa: BLE001
-        inventory = f"（收集运行时清单失败：{exc}）"
-    summary.append("")
-    summary.append("-- 运行时组件清单（runtime\\dlss5）--")
-    summary.extend(inventory.splitlines())
+            inventory = runtime_assets.inventory_text(config)
+        except Exception as exc:  # noqa: BLE001
+            inventory = f"（收集运行时清单失败：{exc}）"
+        summary.append("")
+        summary.append("-- 运行时组件清单（runtime\\dlss5）--")
+        summary.extend(inventory.splitlines())
+    else:
+        inventory = "（轻量版不含 ReShade / DLSS5，跳过运行时组件清单）"
     # 设备型号 / 显卡与驱动（用户 2026-10-01 要求）：判断"是不是显卡不支持"就靠这段。
     try:
         from . import deviceinfo
@@ -2941,6 +2993,8 @@ def create_diagnostic_bundle(
                          #    于是"面板为什么没加载"的一手证据每次都整份 missing）
                          ADDON_LOG_NAME, "panel_info.txt",
                          "d3dx.ini", "d3dx_user.ini", "inject_order.txt", "version.txt", "app.info"):
+                if edition.is_lite() and _is_reshade_artifact(game_path / name):
+                    continue      # 轻量版不含 ReShade：ReShade.ini / addon 日志 / actions.tsv 等不进包
                 _zip_tracked(archive, game_path / name, f"game/{name}", manifest,
                              required=name in ("d3dx.ini", "d3dx_user.ini"))
             # ①a ReShade 日志的其它候选位置（**这就是 issue #13 缺陷三**：
@@ -3030,23 +3084,27 @@ def create_diagnostic_bundle(
             if source.is_file():
                 _zip_tracked(archive, source, f"addon-log/{label}-{ADDON_LOG_NAME}", manifest)
         listings: list[str] = []
-        for title, root in (
-            ("dlss5_dir（设置里的「DLSS5 / 第一人称目录」）", Path(config.dlss5_path)),
-            ("reshade_runtime（我们设的 RESHADE_BASE_PATH_OVERRIDE 目录）",
-             Path(config.reshade_runtime_path)),
-        ):
-            listings.append(f"===== {title} =====")
-            listings.extend(_try_capture(config, f"目录清单 {title}", dir_listing, config, root) or [])
-            listings.append("")
+        if not edition.is_lite():
+            # 轻量版不含 ReShade：不枚举 dlss5 / reshade 目录。
+            for title, root in (
+                ("dlss5_dir（设置里的「DLSS5 / 第一人称目录」）", Path(config.dlss5_path)),
+                ("reshade_runtime（我们设的 RESHADE_BASE_PATH_OVERRIDE 目录）",
+                 Path(config.reshade_runtime_path)),
+            ):
+                listings.append(f"===== {title} =====")
+                listings.extend(_try_capture(config, f"目录清单 {title}", dir_listing, config, root) or [])
+                listings.append("")
         if game_path is not None:
             listings.append("===== game_dir（我们以为的游戏目录）=====")
             listings.extend(_try_capture(config, "目录清单 game_dir", dir_listing,
                                          config, game_path) or [])
             listings.append("")
-        listings.append("===== 同名 addon 重复检查（`.addon` 与 `.addon64` 并存会被加载两次）=====")
-        dupes = _try_capture(config, "同名 addon 检查", addon_duplicate_report,
-                             [Path(config.dlss5_path), Path(config.reshade_runtime_path)]) or []
-        listings.extend(dupes or ["（没有发现同名并存）"])
+        if not edition.is_lite():
+            # 同名 addon 重复检查是 ReShade 侧的事（Lite 没有 addon 目录可查）。
+            listings.append("===== 同名 addon 重复检查（`.addon` 与 `.addon64` 并存会被加载两次）=====")
+            dupes = _try_capture(config, "同名 addon 检查", addon_duplicate_report,
+                                 [Path(config.dlss5_path), Path(config.reshade_runtime_path)]) or []
+            listings.extend(dupes or ["（没有发现同名并存）"])
         archive.writestr("dir-listings.txt", "\n".join(listings) + "\n")
         _manifest_add(manifest, arcname="dir-listings.txt",
                       source="(目录枚举：dlss5 目录 / ReShade override 目录 / 游戏目录)",
@@ -3373,3 +3431,48 @@ def log_efmi_state(config: Any, *, user_ini_path: Path | None = None, staging_ro
 
         _step("loader_debug", _read_loader_debug)
         _step("loader d3d11_log", _read_loader_d3d11)
+
+
+# ---------------------------------------------------------------
+# 运行日志自动清理（2026-11-28 用户要求：「自动清理运行日志」）
+# ---------------------------------------------------------------
+def auto_clear_logs(config: Any, *, force: bool = False,
+                    now: float | None = None) -> dict[str, Any]:
+    """清理 runtime\\logs 下超过保留天数的日志文件（启动时 / 「立即清理」共用）。
+
+    * 开关 auto_clear_logs=False 且非 force ⇒ 跳过（force 给「立即清理」按钮用）；
+    * 保留天数 log_retention_days：0 / 负数 ⇒ 不按时间清理；
+    * 只删**文件**，保留目录结构与最近 N 天的日志；logs 之外的东西一律不碰。
+    """
+    if not force and not bool(getattr(config, "auto_clear_logs", True)):
+        return {"ok": True, "skipped": "switch_off", "removed": []}
+    try:
+        days = int(getattr(config, "log_retention_days", 14) or 0)
+    except (TypeError, ValueError):
+        days = 14
+    if days <= 0:
+        return {"ok": True, "skipped": "no_limit", "removed": []}
+    root = logs_dir(config)
+    if not root.is_dir():
+        return {"ok": True, "skipped": "no_dir", "removed": []}
+    cutoff = (time.time() if now is None else float(now)) - days * 86400
+    removed: list[str] = []
+    errors: list[str] = []
+    for path in sorted(root.rglob("*")):
+        try:
+            if not path.is_file() or path.is_symlink():
+                continue
+            if path.stat().st_mtime >= cutoff:
+                continue
+            path.unlink()
+            removed.append(path.relative_to(root).as_posix())
+        except OSError as exc:
+            errors.append(f"{path.name}: {exc}")
+    result: dict[str, Any] = {"ok": not errors, "removed": removed, "kept_days": days}
+    if errors:
+        result["errors"] = errors
+    if removed:
+        log_event(config, f"运行日志清理：删除 {len(removed)} 个超过 {days} 天的旧日志",
+                  category="ui")
+    return result
+

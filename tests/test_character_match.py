@@ -52,7 +52,7 @@ class CharacterMatchTests(unittest.TestCase):
             "弭弗连衣裙": "弭弗",
             "弥弗连衣裙": "弭弗",
             "小羊换装": "艾尔黛拉",        # 社区简称（用户纠正：小羊是艾尔黛拉，不是昼雪）
-            "18+女管理员": "管理员",
+            "18+女管理员": "女管理员",   # 2026-11-28 起管理员拆成男/女两条
         }
         for text, want in cases.items():
             with self.subTest(text=text):

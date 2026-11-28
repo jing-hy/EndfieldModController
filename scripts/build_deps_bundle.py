@@ -16,10 +16,21 @@
     python scripts/build_deps_bundle.py --skip-download # 只用本地已有的原件（离线打包）
     python scripts/build_deps_bundle.py --out D:\\xx.zip
     python scripts/build_deps_bundle.py --skip-modtest  # 不同步进测试目录
+    python scripts/build_deps_bundle.py --edition lite  # 轻量版：不含任何 ReShade 链路的东西
 
 产出：`dist\\deps-bundle.zip`（+ `.sha256`），另外**默认复制一份进 `modtest`** —— 用户 2026-10-14：
 「**以后离线包也放 modtest**」（在 modtest 里测"离线导入"时手边就有）。包内结构见
 `endfieldmodcontroller/offline_deps.py` 的模块说明；导入入口在依赖页「导入依赖包…」。
+
+`--edition lite`（轻量版离线包，产物 `dist\\deps-bundle-lite.zip`）**不含**：
+
+* ReShade 链路组件：ReShade 底座、DLSS5-Feeder、iMMERSE；
+* 随包资产段里的 ReShade 资产组：`assets/dlss5/*`、`assets/nvngx/*`、`assets/addon/*`。
+
+服装 Mod（XXMI / XXMI-Libs / EFMI）、乳摇（EndfieldJiggle）、Endfield Poser、
+**Streamline 运行库**（游戏自带 DLSS 的启动修复，不依赖 ReShade）与
+`assets/rabbitfx` 等**照旧保留** —— 轻量版只是去掉了 ReShade 那一条链。
+另外轻量版的包体**默认不补足**到 325 MB（那个下限是给完整版发群文件用的，小了反而好传）。
 
 **许可与再分发**（逐项记在 manifest 的 `license` 字段 + 包内 `licenses/`）：
 
@@ -53,6 +64,19 @@ ASSETS = ROOT / "assets"
 BUNDLE_NAME = "deps-bundle.zip"
 MANIFEST_NAME = "manifest.json"
 README_NAME = "离线包说明.txt"
+#: 形态 → 包名（完整版沿用历史名；轻量版另起一个，两个包可以各自分发）。
+EDITIONS: tuple[str, ...] = ("full", "lite")
+BUNDLE_NAMES: dict[str, str] = {"full": BUNDLE_NAME, "lite": "deps-bundle-lite.zip"}
+#: 轻量版**不收**的资产组（`assets/<组>/...`）—— 与 `build_assets_bundle.py`、
+#: `build_exe.py` 是同一批：Lite 运行期走不到 ReShade 链路。
+RESHADE_ASSET_GROUPS: tuple[str, ...] = ("addon", "dlss5", "nvngx")
+#: 轻量版**不收**的组件（ReShade 底座 / 它的插件与 shader）。它们都只为 ReShade 链路服务：
+#: ReShade=底座、DLSS5-Feeder=喂帧插件、iMMERSE=ReShade shader。
+#: ⚠️ **Streamline 不在这个名单里**：它是游戏自带 DLSS 的运行库修复（游戏自带的太旧会让
+#: 终末地启动几十秒就退），与 ReShade 注入无关 —— 轻量版同样需要它，否则遇到那台机器
+#: 就只能联网修、离线包帮不上忙。
+#: 服装 Mod（XXMI / XXMI-Libs / EFMI）、Poser、EndfieldJiggle 也不在此列 —— 轻量版保留它们。
+RESHADE_DEPS: tuple[str, ...] = ("ReShade", "DLSS5-Feeder", "iMMERSE")
 #: 包体下限（MB）：用户 2026-10-12「325 可以发出去 …… 如果不足 325 补足」——
 #: QQ 群分发以 325 MB 这个尺寸实测可行，所以不足就追加 `_padding.bin`（导入时被忽略）。
 DEFAULT_MIN_SIZE_MB = 325
@@ -139,10 +163,18 @@ def _license_text(repo: str) -> str:
     return f"许可全文请见 https://github.com/{repo}\n"
 
 
-def collect(dest: Path, *, download: bool = True) -> dict[str, dict[str, Any]]:
-    """把各组件原件收进 `dest/`，返回清单条目（key → 条目）。"""
+def collect(dest: Path, *, download: bool = True,
+            edition: str = "full") -> dict[str, dict[str, Any]]:
+    """把各组件原件收进 `dest/`，返回清单条目（key → 条目）。
+
+    `edition="lite"` 时**跳过 ReShade 那一整条链**（`RESHADE_DEPS`）：ReShade 底座、
+    DLSS5-Feeder、iMMERSE —— 轻量版运行期根本不会用到它们，收进包里只是把包撑大、
+    并在离线导入时让人以为"这东西装了"。Streamline **不跳过**（游戏自带 DLSS 的启动
+    修复，与 ReShade 无关）。
+    """
     dest.mkdir(parents=True, exist_ok=True)
     entries: dict[str, dict[str, Any]] = {}
+    with_reshade = edition == "full"
 
     def record(key: str, path: Path, version: str, source: str, *, extra: dict | None = None) -> None:
         entries[key] = {
@@ -187,44 +219,49 @@ def collect(dest: Path, *, download: bool = True) -> dict[str, dict[str, Any]]:
     except Exception as exc:  # noqa: BLE001
         _log(f"!! XXMI-Libs 的 Manifest.json 没拿到：{exc}")
 
-    # ---- ReShade 底座（reshade.me 的 Addon 安装器）
-    try:
-        version = dlss5_fetcher.reshade_latest_version(_log)
-        name = f"ReShade_Setup_{version}_Addon.exe"
-        target = dest / name
-        url = dlss5_fetcher.RESHADE_ASSET_URL.format(version=version)
-        if (not download or _fetch(url, target, label="ReShade")) and target.is_file():
-            record("ReShade", target, version, dlss5_fetcher.RESHADE_HOMEPAGE)
-    except Exception as exc:  # noqa: BLE001
-        _log(f"!! ReShade：{exc}")
+    # ---- ReShade 链路的三个组件（底座 / 喂帧插件 / iMMERSE shader）
+    #      轻量版整块跳过：Lite 不注入 ReShade，收了也用不上。
+    if not with_reshade:
+        _log("轻量版：跳过 ReShade 链路组件（ReShade / DLSS5-Feeder / iMMERSE）")
+    else:
+        # ReShade 底座（reshade.me 的 Addon 安装器）
+        try:
+            version = dlss5_fetcher.reshade_latest_version(_log)
+            name = f"ReShade_Setup_{version}_Addon.exe"
+            target = dest / name
+            url = dlss5_fetcher.RESHADE_ASSET_URL.format(version=version)
+            if (not download or _fetch(url, target, label="ReShade")) and target.is_file():
+                record("ReShade", target, version, dlss5_fetcher.RESHADE_HOMEPAGE)
+        except Exception as exc:  # noqa: BLE001
+            _log(f"!! ReShade：{exc}")
 
-    # ---- DLSS5-Feeder
-    try:
-        release = github.releases_latest(dlss5_fetcher.FEEDER_REPO)
-        tag = str(release.get("tag_name") or "")
-        asset = dlss5_fetcher._pick_asset(release, "DLSS5-Feeder", ".zip")
-        if not asset:
-            raise RuntimeError("release 里没有 zip")
-        name = str(asset.get("name") or "DLSS5-Feeder.zip")
-        target = dest / name
-        url = str(asset.get("browser_download_url") or "")
-        if (not download or _fetch(url, target, digest=str(asset.get("digest") or ""),
-                                   label="DLSS5-Feeder")) and target.is_file():
-            record("DLSS5-Feeder", target, tag, f"https://github.com/{dlss5_fetcher.FEEDER_REPO}")
-    except Exception as exc:  # noqa: BLE001
-        _log(f"!! DLSS5-Feeder：{exc}")
+        # DLSS5-Feeder
+        try:
+            release = github.releases_latest(dlss5_fetcher.FEEDER_REPO)
+            tag = str(release.get("tag_name") or "")
+            asset = dlss5_fetcher._pick_asset(release, "DLSS5-Feeder", ".zip")
+            if not asset:
+                raise RuntimeError("release 里没有 zip")
+            name = str(asset.get("name") or "DLSS5-Feeder.zip")
+            target = dest / name
+            url = str(asset.get("browser_download_url") or "")
+            if (not download or _fetch(url, target, digest=str(asset.get("digest") or ""),
+                                       label="DLSS5-Feeder")) and target.is_file():
+                record("DLSS5-Feeder", target, tag, f"https://github.com/{dlss5_fetcher.FEEDER_REPO}")
+        except Exception as exc:  # noqa: BLE001
+            _log(f"!! DLSS5-Feeder：{exc}")
 
-    # ---- iMMERSE（无 release，走 codeload 分支 zip）
-    try:
-        revision = github.latest_commit(dlss5_fetcher.IMMERSE_REPO, dlss5_fetcher.IMMERSE_BRANCH)[:12]
-        name = f"iMMERSE-{revision}.zip"
-        target = dest / name
-        url = (f"https://codeload.github.com/{dlss5_fetcher.IMMERSE_REPO}"
-               f"/zip/refs/heads/{dlss5_fetcher.IMMERSE_BRANCH}")
-        if (not download or _fetch(url, target, label="iMMERSE")) and target.is_file():
-            record("iMMERSE", target, revision, f"https://github.com/{dlss5_fetcher.IMMERSE_REPO}")
-    except Exception as exc:  # noqa: BLE001
-        _log(f"!! iMMERSE：{exc}")
+        # iMMERSE（无 release，走 codeload 分支 zip）
+        try:
+            revision = github.latest_commit(dlss5_fetcher.IMMERSE_REPO, dlss5_fetcher.IMMERSE_BRANCH)[:12]
+            name = f"iMMERSE-{revision}.zip"
+            target = dest / name
+            url = (f"https://codeload.github.com/{dlss5_fetcher.IMMERSE_REPO}"
+                   f"/zip/refs/heads/{dlss5_fetcher.IMMERSE_BRANCH}")
+            if (not download or _fetch(url, target, label="iMMERSE")) and target.is_file():
+                record("iMMERSE", target, revision, f"https://github.com/{dlss5_fetcher.IMMERSE_REPO}")
+        except Exception as exc:  # noqa: BLE001
+            _log(f"!! iMMERSE：{exc}")
 
     # ---- Endfield Poser（AGPL-3.0）：**允许再分发**，条件是附许可全文 + 保留版权 + 给出源码途径
     #      （用户 2026-10-12：「poser 指明源码地址」）。包内 `licenses/` 与说明里都写了。
@@ -260,6 +297,8 @@ def collect(dest: Path, *, download: bool = True) -> dict[str, dict[str, Any]]:
     # ---- Streamline 运行库（**MIT**，2026-10-12 查证 license.txt 原文）：9 个 dll 可以随包。
     #      ⚠️ 只打**本机已抽取的那 9 个 dll**（≈11 MB）—— 上游 SDK 本体 263 MB，进包会把包撑到
     #      600 MB，群里根本发不出去。条目里标 `kind: streamline-dlls`，安装侧据此直接落位。
+    #      ★ 两个形态**都收**：Streamline 是游戏自带 DLSS 的运行库修复（游戏自带太旧会让
+    #      终末地启动几十秒就退），与 ReShade 注入无关 —— 轻量版也要能离线修这台机器。
     try:
         installed = ROOT / "runtime" / "streamline"
         marker_path = installed / ".endfieldmodcontroller_builtin.json"
@@ -284,10 +323,13 @@ def collect(dest: Path, *, download: bool = True) -> dict[str, dict[str, Any]]:
     return entries
 
 
-def _readme(entries: dict[str, dict[str, Any]]) -> str:
+def _readme(entries: dict[str, dict[str, Any]], edition: str = "full") -> str:
+    lite = edition == "lite"
     lines = [
         "EndfieldModController —— 离线依赖包（应急用）",
         "=" * 46,
+        "",
+        f"形态：{'轻量版（Lite，不含任何 ReShade 链路组件）' if lite else '完整版（Universal）'}",
         "",
         "用途：给**连不上 GitHub / reshade.me** 的机器一次性带上所有可再分发的依赖。",
         "用法：把它放进管理器「依赖」页 → 顶部「导入依赖包…」，导入后点一次「一键启动」即可自动配置。",
@@ -304,15 +346,21 @@ def _readme(entries: dict[str, dict[str, Any]]) -> str:
     lines += [
         "",
         "另外，包内的随包资产段（`assets\\`）会一并落地到程序目录，其中有：",
-        "  · DLSS 运行库分卷（nvngx）、DLSS5 组件与 shader（dlss5）、随包 ReShade 面板 addon、",
+    ]
+    if lite:
+        # 轻量版的资产段里**没有**任何 ReShade 东西（见 RESHADE_ASSET_GROUPS），说明不能照搬。
+        lines.append("  · 轻量版**不含** ReShade 的资产组（nvngx 运行库 / dlss5 组件与 shader / 面板 addon）")
+    else:
+        lines.append("  · DLSS 运行库分卷（nvngx）、DLSS5 组件与 shader（dlss5）、随包 ReShade 面板 addon、")
+    lines += [
         "  · **EFMI RabbitFX（前置，随包 v2.8）** —— 展开到 <Mod 库>\\_deps\\RabbitFX。",
         "",
         "**不包含**：",
         "  · VC++ 运行库（微软条款：必须跑官方安装器；多数机器本来就有）——",
         "    缺的话可在依赖页让程序检测并引导安装，或从微软官网下载 vc_redist.x64.exe。",
         "",
-        "说明：包内若有一个 `_padding.bin`，它只是把包体补到便于分发的体积（约 325 MB），",
-        "      导入时会被完全忽略，不参与任何校验。",
+        "说明：包内若有一个 `_padding.bin`，它只是把包体补到便于分发的体积（完整版默认约 325 MB，",
+        "      轻量版默认不补），导入时会被完全忽略，不参与任何校验。",
         "",
         "许可与来源（本包只做**原样搬运**，未修改任何组件）：",
         "  · 各组件版权归各自作者所有；许可证全文见本包 licenses\\ 目录；",
@@ -354,11 +402,38 @@ def _pad_to_min_size(path: Path, min_mb: int) -> int:
     return need
 
 
+def _manifest_note(edition: str) -> str:
+    """manifest 里那句"包里有什么、没什么" —— 两版措辞不同，别让人按完整版的说明找东西。"""
+    if edition == "lite":
+        # 名单只维护一份：这里直接从 RESHADE_DEPS 生成，别再手抄一遍（抄漏了说明就会骗人）。
+        skipped = " / ".join(RESHADE_DEPS)
+        return ("轻量版离线依赖包（应急用，不随 Release 发布）。包含服装 Mod 与乳摇要用的可再分发"
+                "组件原件（XXMI / XXMI-Libs / EFMI / Endfield Poser / EndfieldJiggle）与随包资产段"
+                f"（assets/，含 EFMI RabbitFX）；**不含**任何 ReShade 链路的东西（{skipped}，"
+                "以及 assets 里的 nvngx / dlss5 / addon）；VC++ 运行库不在包内"
+                "（微软条款：必须跑官方安装器）。")
+    return ("离线依赖包（应急用，不随 Release 发布）。包含可再分发的全部组件原件"
+            "（XXMI / XXMI-Libs / EFMI / ReShade / DLSS5-Feeder / iMMERSE / "
+            "Endfield Poser / EndfieldJiggle / Streamline）与随包资产段（assets/，含 EFMI "
+            "RabbitFX）；VC++ 运行库不在包内（微软条款：必须跑官方安装器）。")
+
+
+def is_reshade_asset(relative: Path) -> bool:
+    """这个（相对仓库根的）资产是否属于 ReShade 资产组（轻量版不收）。
+
+    与 `build_assets_bundle.py` 的同名函数是**同一套判据**（那里决定 assets-bundle 收什么，
+    这里决定离线包的 assets 段收什么）。两份是刻意各写一份的：这两个脚本互相独立，谁都不
+    import 谁（同 `_resolve_modtest_dir` 的先例）。
+    """
+    parts = relative.parts
+    return len(parts) >= 2 and parts[0] == "assets" and parts[1] in RESHADE_ASSET_GROUPS
+
+
 def build(out: Path, *, download: bool = True, min_mb: int = 0,
-          sync_modtest: bool = True) -> int:
+          sync_modtest: bool = True, edition: str = "full") -> int:
     with tempfile.TemporaryDirectory(prefix="mc-deps-") as tmp:
         work = Path(tmp)
-        entries = collect(work / "deps", download=download)
+        entries = collect(work / "deps", download=download, edition=edition)
         if not entries:
             _log("!! 一个组件都没收到（检查网络，或用 --skip-download 配合本机已有原件）")
             return 1
@@ -370,15 +445,14 @@ def build(out: Path, *, download: bool = True, min_mb: int = 0,
             # 而 2026-10-12 逐一查许可证原文后 Poser（AGPL-3.0）与 Streamline（MIT）**本来就允许
             # 再分发**，包里一直带着它们 ⇒ 说明与实际自相矛盾（用户看说明会以为没带）。
             # 现在只写真正进不了包的：VC++（微软条款，必须跑官方安装器）。
-            "note": "离线依赖包（应急用，不随 Release 发布）。包含可再分发的全部组件原件"
-                    "（XXMI / XXMI-Libs / EFMI / ReShade / DLSS5-Feeder / iMMERSE / "
-                    "Endfield Poser / EndfieldJiggle / Streamline）与随包资产段（assets/，含 EFMI "
-                    "RabbitFX）；VC++ 运行库不在包内（微软条款：必须跑官方安装器）。",
+            "note": _manifest_note(edition),
+            # 两版各打各的包（名字不同），manifest 里也写明形态 —— 导入侧据此一眼分辨。
+            "edition": edition,
             "deps": entries,
         }
         (work / MANIFEST_NAME).write_text(json.dumps(manifest, ensure_ascii=False, indent=2),
                                           encoding="utf-8")
-        (work / README_NAME).write_text(_readme(entries), encoding="utf-8")
+        (work / README_NAME).write_text(_readme(entries, edition), encoding="utf-8")
 
         # 许可全文（再分发的前提）：AGPL-3.0（Poser）、GPL-3.0-only（EndfieldJiggle）与
         # MIT（Streamline）都从各自仓库取，走 API（网页被加速器劫持时 API 仍然通）。
@@ -391,6 +465,7 @@ def build(out: Path, *, download: bool = True, min_mb: int = 0,
             _license_text(runtime_deps.POSER_REPO), encoding="utf-8")
         (licenses / "GPL-3.0-only.txt").write_text(
             _license_text(_jiggle_repo.REPO), encoding="utf-8")
+        # 两个形态都收 Streamline（见 RESHADE_DEPS 的说明）⇒ 许可也两份都放。
         (licenses / "Streamline-MIT.txt").write_text(
             _license_text("NVIDIA-RTX/Streamline"), encoding="utf-8")
 
@@ -410,10 +485,14 @@ def build(out: Path, *, download: bool = True, min_mb: int = 0,
                     total += item.stat().st_size
             if ASSETS.is_dir():
                 for item in sorted(ASSETS.rglob("*")):
-                    if item.is_file():
-                        archive.write(item, str(item.relative_to(ROOT)).replace("\\", "/"))
-                        count += 1
-                        total += item.stat().st_size
+                    if not item.is_file():
+                        continue
+                    # 轻量版把 ReShade 资产组（nvngx / dlss5 / addon）整组排除，其余照旧。
+                    if edition != "full" and is_reshade_asset(item.relative_to(ROOT)):
+                        continue
+                    archive.write(item, str(item.relative_to(ROOT)).replace("\\", "/"))
+                    count += 1
+                    total += item.stat().st_size
             else:
                 _log("!! 本机没有 assets\\ 目录 —— 包里不含随包资产（DLSS 运行库等）")
     _pad_to_min_size(out, min_mb)
@@ -480,22 +559,32 @@ def offline_deps_format() -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="构建离线依赖包（应急用，不进 Release）")
-    parser.add_argument("--out", default=str(DIST / BUNDLE_NAME), help="输出路径")
+    parser.add_argument("--edition", choices=EDITIONS, default="full",
+                        help="full = 完整版（默认）；lite = 轻量版，不含任何 ReShade 链路组件与资产组")
+    parser.add_argument("--out", default="", help="输出路径（缺省 dist\\<按 --edition 定名>）")
     parser.add_argument("--skip-download", action="store_true", help="只用本机已有原件，不联网")
-    parser.add_argument("--min-size-mb", type=int, default=DEFAULT_MIN_SIZE_MB,
-                        help=f"包体下限（不足就补足，默认 {DEFAULT_MIN_SIZE_MB} MB；0 = 不补）")
+    parser.add_argument("--min-size-mb", type=int, default=None,
+                        help=f"包体下限（不足就补足；缺省 完整版 {DEFAULT_MIN_SIZE_MB} MB、"
+                             f"轻量版 0 = 不补；显式写 0 也不补）")
     parser.add_argument("--skip-modtest", action="store_true",
                         help="不同步进测试目录（默认会放一份到 modtest）")
-    args = parser.parse_args(argv)
+    # 先把 stdout/stderr 切成 UTF-8 **再**解析参数：否则 `--help` 里的中文在 GBK 控制台上
+    # 直接抛 UnicodeEncodeError（与 `build_assets_bundle.py` 同一处理）。
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
         except Exception:  # noqa: BLE001
             pass
+    args = parser.parse_args(argv)
     if shutil.which("git") is None:
         _log("提示：本脚本不需要 git，这里只是提醒你确认网络能访问 GitHub。")
-    return build(Path(args.out), download=not args.skip_download, min_mb=int(args.min_size_mb),
-                 sync_modtest=not args.skip_modtest)
+    # 包名按形态定（完整版沿用历史名 `deps-bundle.zip`）。`--out` 显式给了就用它。
+    out = Path(args.out) if args.out else DIST / BUNDLE_NAMES[args.edition]
+    # 325 MB 那个下限是给**群里发完整版**定的；轻量版本来就小，补到 325 MB 反而难传 ⇒ 缺省不补。
+    min_mb = (args.min_size_mb if args.min_size_mb is not None
+              else (DEFAULT_MIN_SIZE_MB if args.edition == "full" else 0))
+    return build(out, download=not args.skip_download, min_mb=int(min_mb),
+                 sync_modtest=not args.skip_modtest, edition=args.edition)
 
 
 if __name__ == "__main__":

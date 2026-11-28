@@ -2,353 +2,470 @@
   "schema_version": 2,
   "_comment": "终末地角色名对照表。数据源：官网干员情报页 https://endfield.hypergryph.com/operator（2026-09-27 抓取，共 33 位，页面自标 index N/33）。用于把新加的 Mod 按目录名/元数据自动归类到角色，作为同角色互斥的依据。canonical=中文官方名（界面显示用），codename/key=官网英文代号（Mod 作者最常用），aliases=其它译名与社区简称。匹配时按别名长度降序做子串匹配，所以别名要给全。",
   "source": "https://endfield.hypergryph.com/operator",
-  "fetched_at": "2026-09-27",
-  "official_count": 33,
+  "fetched_at": "2026-11-28",
+  "official_count": 37,
   "characters": [
     {
-      "name": "提弗洛斯",
-      "codename": "Typhoeus",
-      "key": "typhoea",
+      "name": "小刻",
+      "codename": "Kay",
+      "key": "sweetpie",
+      "avatar": "https://web.hycdn.cn/endfield/official-v4/_next/static/media/sweetpie.b91ebec1.png",
       "aliases": [
-        "提弗洛斯",
-        "typhoeus",
-        "typhoea",
-        "tifuluosi"
+        "小刻",
+        "Kay",
+        "sweetpie"
       ]
     },
     {
-      "name": "噗切娜",
-      "codename": "Purrchena",
-      "key": "purrche",
+      "name": "米米诺",
+      "codename": "Mimino",
+      "key": "mimino",
+      "avatar": "https://web.hycdn.cn/endfield/official-v4/_next/static/media/mimino.ccea0d7a.png",
       "aliases": [
-        "噗切娜",
-        "purrchena",
-        "purrche",
-        "puqiena"
+        "米米诺",
+        "Mimino",
+        "mimino"
       ]
     },
     {
-      "name": "管理员",
+      "name": "男管理员",
       "codename": "Endministrator",
-      "key": "endministrator",
+      "key": "endministrator2",
       "aliases": [
-        "管理员",
-        "女管理员",
         "男管理员",
-        "女管理",
         "男管理",
+        "endministrator2"
+      ],
+      "avatar": "https://web.hycdn.cn/endfield/official-v4/_next/static/media/endministrator2.5ccb44a8.png"
+    },
+    {
+      "name": "女管理员",
+      "codename": "Endministrator",
+      "key": "endministrator1",
+      "aliases": [
+        "女管理员",
+        "女管理",
+        "管理员",
         "endministrator",
+        "endministrator1",
         "endmin",
         "guanliyuan"
-      ]
+      ],
+      "avatar": "https://web.hycdn.cn/endfield/official-v4/_next/static/media/endministrator1.c391b13d.png"
     },
     {
       "name": "佩丽卡",
       "codename": "Perlica",
       "key": "perlica",
+      "avatar": "https://web.hycdn.cn/endfield/official-v4/_next/static/media/prelica.d0bbdb53.png",
       "aliases": [
         "佩丽卡",
         "佩利卡",
         "perlica",
         "prelica",
-        "peilika"
+        "peilika",
+        "Perlica"
       ]
     },
     {
       "name": "陈千语",
       "codename": "Chen Qianyu",
       "key": "chen",
+      "avatar": "https://web.hycdn.cn/endfield/official-v4/_next/static/media/chen.b0afd1ba.png",
       "aliases": [
         "陈千语",
         "陈",
         "chen",
         "chenqianyu",
-        "chengqianyu"
+        "chengqianyu",
+        "Chen Qianyu"
+      ]
+    },
+    {
+      "name": "祀",
+      "codename": "Si",
+      "key": "jsspsi",
+      "avatar": "https://web.hycdn.cn/endfield/official-v4/_next/static/media/jsspsi.19ec05d9.png",
+      "aliases": [
+        "祀",
+        "Si",
+        "jsspsi"
+      ]
+    },
+    {
+      "name": "明河",
+      "codename": "Argent Flow",
+      "key": "minghe",
+      "avatar": "https://web.hycdn.cn/endfield/official-v4/_next/static/media/minghe.372272bd.png",
+      "aliases": [
+        "明河",
+        "Argent Flow",
+        "minghe"
+      ]
+    },
+    {
+      "name": "提弗洛斯",
+      "codename": "Typhoeus",
+      "key": "typhoea",
+      "avatar": "https://web.hycdn.cn/endfield/official-v4/_next/static/media/typhoea.87cfb4cd.png",
+      "aliases": [
+        "提弗洛斯",
+        "typhoeus",
+        "typhoea",
+        "tifuluosi",
+        "Typhoeus"
+      ]
+    },
+    {
+      "name": "噗切娜",
+      "codename": "Purrchena",
+      "key": "purrche",
+      "avatar": "https://web.hycdn.cn/endfield/official-v4/_next/static/media/purrche.d6659019.png",
+      "aliases": [
+        "噗切娜",
+        "purrchena",
+        "purrche",
+        "puqiena",
+        "Purrchena"
       ]
     },
     {
       "name": "诀",
       "codename": "Arcane",
       "key": "lizhiyan",
+      "avatar": "https://web.hycdn.cn/endfield/official-v4/_next/static/media/lizhiyan.7ada7b83.png",
       "aliases": [
         "诀",
         "arcane",
         "lizhiyan",
-        "jue"
+        "jue",
+        "Arcane"
       ]
     },
     {
       "name": "梨诺",
       "codename": "Liino",
       "key": "liino",
+      "avatar": "https://web.hycdn.cn/endfield/official-v4/_next/static/media/liino.8d027d2a.png",
       "aliases": [
         "梨诺",
         "liino",
-        "linuo"
+        "linuo",
+        "Liino"
       ]
     },
     {
       "name": "弭弗",
       "codename": "Mi Fu",
       "key": "mifu",
+      "avatar": "https://web.hycdn.cn/endfield/official-v4/_next/static/media/mifu.e1d79970.png",
       "aliases": [
         "弭弗",
         "弥弗",
-        "mifu"
+        "mifu",
+        "Mi Fu"
       ]
     },
     {
       "name": "卡缪",
       "codename": "Camille",
       "key": "camille",
+      "avatar": "https://web.hycdn.cn/endfield/official-v4/_next/static/media/camille.a26b2443.png",
       "aliases": [
         "卡缪",
         "camille",
         "kamou",
         "kamiao",
-        "kamiu"
+        "kamiu",
+        "Camille"
       ]
     },
     {
       "name": "庄方宜",
       "codename": "Zhuang Fangyi",
       "key": "zhuangfy",
+      "avatar": "https://web.hycdn.cn/endfield/official-v4/_next/static/media/zhuangfy.50a608b8.png",
       "aliases": [
         "庄方宜",
         "zhuangfangyi",
         "zhuang fangyi",
-        "zhuangfy"
+        "zhuangfy",
+        "Zhuang Fangyi"
       ]
     },
     {
       "name": "汤汤",
       "codename": "Tangtang",
       "key": "tangtang",
+      "avatar": "https://web.hycdn.cn/endfield/official-v4/_next/static/media/tangtang.b5cd99e9.png",
       "aliases": [
         "汤汤",
-        "tangtang"
+        "tangtang",
+        "Tangtang"
       ]
     },
     {
       "name": "洛茜",
       "codename": "Rossi",
       "key": "rossi",
+      "avatar": "https://web.hycdn.cn/endfield/official-v4/_next/static/media/rossi.c58b721b.png",
       "aliases": [
         "洛茜",
         "rossi",
         "luoqian",
-        "luoxi"
+        "luoxi",
+        "Rossi"
       ]
     },
     {
       "name": "莱万汀",
       "codename": "Laevatain",
       "key": "laevatain",
+      "avatar": "https://web.hycdn.cn/endfield/official-v4/_next/static/media/laevatain.edd103d4.png",
       "aliases": [
         "莱万汀",
         "laevatain",
         "laevat",
-        "laiwanting"
+        "laiwanting",
+        "Laevatain"
       ]
     },
     {
       "name": "伊冯",
       "codename": "Yvonne",
       "key": "yvonne",
+      "avatar": "https://web.hycdn.cn/endfield/official-v4/_next/static/media/yvonne.9695c304.png",
       "aliases": [
         "伊冯",
         "yvonne",
-        "yifeng"
+        "yifeng",
+        "Yvonne"
       ]
     },
     {
       "name": "洁尔佩塔",
       "codename": "Gilberta",
       "key": "gilberta",
+      "avatar": "https://web.hycdn.cn/endfield/official-v4/_next/static/media/gilberta.724f3503.png",
       "aliases": [
         "洁尔佩塔",
         "gilberta",
         "aglina",
         "jieerpeita",
         "杰哥",
-        "jiege"
+        "jiege",
+        "Gilberta"
       ]
     },
     {
       "name": "艾尔黛拉",
       "codename": "Ardelia",
       "key": "ardelia",
+      "avatar": "https://web.hycdn.cn/endfield/official-v4/_next/static/media/ardelia.565c75af.png",
       "aliases": [
         "艾尔黛拉",
         "ardelia",
         "小羊",
-        "aierdaila"
+        "aierdaila",
+        "Ardelia"
       ]
     },
     {
       "name": "余烬",
       "codename": "Ember",
       "key": "ember",
+      "avatar": "https://web.hycdn.cn/endfield/official-v4/_next/static/media/ember.6391acf9.png",
       "aliases": [
         "余烬",
         "ember",
-        "yujin"
+        "yujin",
+        "Ember"
       ]
     },
     {
       "name": "别礼",
       "codename": "Last Rite",
       "key": "lastrite",
+      "avatar": "https://web.hycdn.cn/endfield/official-v4/_next/static/media/lastrite.3860f541.png",
       "aliases": [
         "别礼",
         "last rite",
         "lastrite",
-        "bieli"
+        "bieli",
+        "Last Rite"
       ]
     },
     {
       "name": "黎风",
       "codename": "Lifeng",
       "key": "lifeng",
+      "avatar": "https://web.hycdn.cn/endfield/official-v4/_next/static/media/lifeng.ef41bc3a.png",
       "aliases": [
         "黎风",
-        "lifeng"
+        "lifeng",
+        "Lifeng"
       ]
     },
     {
       "name": "骏卫",
       "codename": "Pogranichnik",
       "key": "pogranichnik",
+      "avatar": "https://web.hycdn.cn/endfield/official-v4/_next/static/media/pogranichnik.80f2ddbb.png",
       "aliases": [
         "骏卫",
         "pogranichnik",
-        "junwei"
+        "junwei",
+        "Pogranichnik"
       ]
     },
     {
       "name": "阿列什",
       "codename": "Alesh",
       "key": "alesh",
+      "avatar": "https://web.hycdn.cn/endfield/official-v4/_next/static/media/alesh.d7f457d2.png",
       "aliases": [
         "阿列什",
         "alesh",
-        "alieshi"
+        "alieshi",
+        "Alesh"
       ]
     },
     {
       "name": "弧光",
       "codename": "Arclight",
       "key": "arclight",
+      "avatar": "https://web.hycdn.cn/endfield/official-v4/_next/static/media/arclight.e31580d7.png",
       "aliases": [
         "弧光",
         "arclight",
-        "huguang"
+        "huguang",
+        "Arclight"
       ]
     },
     {
       "name": "艾维文娜",
       "codename": "Avywenna",
       "key": "avywenna",
+      "avatar": "https://web.hycdn.cn/endfield/official-v4/_next/static/media/avywenna.2a592659.png",
       "aliases": [
         "艾维文娜",
         "艾闻维娜",
         "avywenna",
         "avywen",
-        "aiweiwenna"
+        "aiweiwenna",
+        "Avywenna"
       ]
     },
     {
       "name": "大潘",
       "codename": "Da Pan",
       "key": "dapan",
+      "avatar": "https://web.hycdn.cn/endfield/official-v4/_next/static/media/dapan.7cdb6a4e.png",
       "aliases": [
         "大潘",
         "da pan",
-        "dapan"
+        "dapan",
+        "Da Pan"
       ]
     },
     {
       "name": "昼雪",
       "codename": "Snowshine",
       "key": "snowshine",
+      "avatar": "https://web.hycdn.cn/endfield/official-v4/_next/static/media/snowshine.bb2c0bdc.png",
       "aliases": [
         "昼雪",
         "snowshine",
-        "zhouxue"
+        "zhouxue",
+        "Snowshine"
       ]
     },
     {
       "name": "狼卫",
       "codename": "Wulfgard",
       "key": "wulfgard",
+      "avatar": "https://web.hycdn.cn/endfield/official-v4/_next/static/media/wulfgard.609a252f.png",
       "aliases": [
         "狼卫",
         "wulfgard",
-        "langwei"
+        "langwei",
+        "Wulfgard"
       ]
     },
     {
       "name": "赛希",
       "codename": "Xaihi",
       "key": "xaihi",
+      "avatar": "https://web.hycdn.cn/endfield/official-v4/_next/static/media/xaihi.9ba3eb36.png",
       "aliases": [
         "赛希",
         "塞希",
         "塞西",
         "xaihi",
-        "saixi"
+        "saixi",
+        "Xaihi"
       ]
     },
     {
       "name": "秋栗",
       "codename": "Akekuri",
       "key": "akekuri",
+      "avatar": "https://web.hycdn.cn/endfield/official-v4/_next/static/media/akekuri.3603d013.png",
       "aliases": [
         "秋栗",
         "akekuri",
-        "qiuli"
+        "qiuli",
+        "Akekuri"
       ]
     },
     {
       "name": "安塔尔",
       "codename": "Antal",
       "key": "antal",
+      "avatar": "https://web.hycdn.cn/endfield/official-v4/_next/static/media/antal.763c87e4.png",
       "aliases": [
         "安塔尔",
         "antal",
-        "antaer"
+        "antaer",
+        "Antal"
       ]
     },
     {
       "name": "卡契尔",
       "codename": "Catcher",
       "key": "catcher",
+      "avatar": "https://web.hycdn.cn/endfield/official-v4/_next/static/media/catcher.bc6bcfaa.png",
       "aliases": [
         "卡契尔",
         "catcher",
-        "kaqier"
+        "kaqier",
+        "Catcher"
       ]
     },
     {
       "name": "埃特拉",
       "codename": "Estella",
       "key": "estella",
+      "avatar": "https://web.hycdn.cn/endfield/official-v4/_next/static/media/estella.38c423af.png",
       "aliases": [
         "埃特拉",
         "estella",
         "whiten",
-        "aitela"
+        "aitela",
+        "Estella"
       ]
     },
     {
       "name": "萤石",
       "codename": "Fluorite",
       "key": "fluorite",
+      "avatar": "https://web.hycdn.cn/endfield/official-v4/_next/static/media/fluorite.5a8add29.png",
       "aliases": [
         "萤石",
         "fluorite",
         "bounda",
-        "yingshi"
+        "yingshi",
+        "Fluorite"
       ]
     }
   ],

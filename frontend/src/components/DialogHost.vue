@@ -9,6 +9,7 @@ import { uiState, resolveDialog } from "../lib/dialog.js";
 // ⚠️ `escapeHtml` 复用 `lib/util.js` 的唯一实现（2026-10-04）：本文件原先自己又抄了一份
 // （逐字节相同），改一处漏一处 —— 而这个函数是**弹窗正文的 XSS 防线**，更不能有两份。
 import { escapeHtml } from "../lib/util.js";
+import { t } from "../lib/i18n.js";
 import Btn from "./ui/Btn.vue";
 
 // 破坏性动作默认把焦点放在**安全项**（取消）上 —— `focusCancel: true` 时。
@@ -90,7 +91,7 @@ const renderedMessage = computed(() => {
   html = html.replace(PATH_RE, (match) => {
     const clean = match.replace(/[.,;:，。；：]+$/, "");
     const tail = match.slice(clean.length);
-    return `<a class="dlg-path" data-path="${clean}" title="点击打开所在位置">${clean}</a>${tail}`;
+    return `<a class="dlg-path" data-path="${clean}" title="${t("点击打开所在位置")}">${clean}</a>${tail}`;
   });
   return html;
 });
@@ -109,7 +110,7 @@ async function openPath(path) {
   try {
     const r = await call("open_path_in_explorer", target);
     const { showToast } = await import("../lib/dialog.js");
-    if (r && r.ok === false) showToast(String(r.message || "打不开这个位置"), "danger");
+    if (r && r.ok === false) showToast(String(r.message || t("打不开这个位置")), "danger");
   } catch (e) {
     /* 打不开就算了，用户还能手动复制 */
   }
@@ -158,7 +159,7 @@ function onMessageClick(event) {
                  @input="inputValue = $event.target.value"
                  @keyup.enter="confirmDialog" />
           <div v-if="!textMatched" class="text-xs mt-1" style="color: var(--text-muted)">
-            把 {{ needText }} 照原样输进去，确认按钮才会亮。
+            {{ t("把") }} {{ needText }} {{ t("照原样输进去，确认按钮才会亮。") }}
           </div>
         </div>
         <a v-if="uiState.dialog.link && uiState.dialog.link.url" :href="uiState.dialog.link.url"
@@ -169,12 +170,12 @@ function onMessageClick(event) {
       <div class="px-4 py-3 flex justify-end gap-2 border-t items-center" style="border-color: var(--border)">
         <!-- 强制停留：倒计时没走完时所有按钮都不可点（用户要求"强制用户停留一定秒数"） -->
         <span v-if="holdLeft > 0" class="text-xs mr-auto" style="color: var(--text-muted)">
-          请先读完（{{ holdLeft }} 秒后可操作）
+          {{ t("请先读完（") }}{{ holdLeft }} {{ t("秒后可操作）") }}
         </span>
         <!-- ⚠️ **路径旁边要有「打开」入口**（2026-10-03 用户：「**还有没有打开按钮**」）。
              出现路径时才显示；点它等同于点路径本身（后端有白名单，安全）。 -->
         <Btn v-if="firstPath" variant="secondary" :disabled="holdLeft > 0"
-             class="mr-auto" @click="openPath(firstPath)">打开文件夹</Btn>
+             class="mr-auto" @click="openPath(firstPath)">{{ t("打开文件夹") }}</Btn>
         <Btn v-if="uiState.dialog.showCancel" ref="cancelBtn" variant="secondary"
              :disabled="holdLeft > 0" @click="resolveDialog(false)">
           {{ uiState.dialog.cancelText }}

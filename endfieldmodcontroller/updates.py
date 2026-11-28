@@ -25,7 +25,12 @@ import zipfile
 from pathlib import Path
 from typing import Any, Callable
 
+from . import edition
 from .config import AppConfig
+
+#: `component_versions()` 里**只有 ReShade 链路才用**的键（Lite 下从返回里剔掉）。
+#: 底座 / DLSS5 插件 / 第一人称插件 / 喂帧组件 / shader 资产 / DLSS 运行库 —— 全在 ReShade 里。
+_RESHADE_VERSION_KEYS = ("reshade", "dlss5_addon", "enhancer", "feed", "shaders", "nvngx")
 
 USER_AGENT = "EndfieldModController/0.1"
 RESHADE_SETUP_URL = "https://reshade.me/downloads/ReShade_Setup_{version}_Addon.exe"
@@ -247,6 +252,11 @@ def component_versions(config: AppConfig) -> dict[str, Any]:
             "license": "GPL-3.0-only",
         },
     }
+    if edition.is_lite():
+        # Lite 不含 ReShade 链路 ⇒ 这些组件在本版本里**不存在**，返回里不列
+        #（依赖页 / 版本表比对 / 检查更新都读这一份，不列就不会去碰它们）。
+        for key in _RESHADE_VERSION_KEYS:
+            versions.pop(key, None)
     return versions
 
 
@@ -416,23 +426,25 @@ def check_updates(config: AppConfig, log: Callable[[str], None] | None = None) -
     #    现在恒定返回 HTTP 500 ⇒ 这一处照样报 `ReShade 检查失败: HTTP Error 500`，
     #    用户看到的"检查更新"里 ReShade 永远失败（反馈者日志里 `reshade: null` 就是它）。
     #    统一之后：首页抽风时容忍 500 读正文、连正文都没有就退回内置基线版本，不再整项失败。
-    try:
-        from . import dlss5_fetcher
+    # Lite 完全不含 ReShade ⇒ 这一项不查（`report["reshade"]` 保持空段），也不记 errors
+    if not edition.is_lite():
+        try:
+            from . import dlss5_fetcher
 
-        latest = dlss5_fetcher.reshade_latest_version(log)
-        current = component_versions(config)["reshade"]["version"]
-        report["reshade"] = {
-            "current": current,
-            "latest": latest,
-            # ⚠️ 这个表达式**别"化简"成 `latest != current`**：`current` 来自 dll 的
-            #    `FileVersion`（形如 `6.8.0.2155`，带 build 段），而 `latest` 只有 `6.8.0` ——
-            #    直接比会**永远判成"有更新"**。原来就是截前两段来比的，保持不变。
-            "update_available": bool(latest and current and latest != current.split(".")[0] + "." + ".".join(current.split(".")[1:3])),
-            "download_url": RESHADE_SETUP_URL.format(version=latest) if latest else "",
-            "note": "官方新版可能与 DLSS5 插件不兼容（本方案实测版本为 6.8.0），更新前会备份旧底座。",
-        }
-    except Exception as exc:  # noqa: BLE001
-        report["errors"].append(f"ReShade 检查失败: {exc}")
+            latest = dlss5_fetcher.reshade_latest_version(log)
+            current = component_versions(config)["reshade"]["version"]
+            report["reshade"] = {
+                "current": current,
+                "latest": latest,
+                # ⚠️ 这个表达式**别"化简"成 `latest != current`**：`current` 来自 dll 的
+                #    `FileVersion`（形如 `6.8.0.2155`，带 build 段），而 `latest` 只有 `6.8.0` ——
+                #    直接比会**永远判成"有更新"**。原来就是截前两段来比的，保持不变。
+                "update_available": bool(latest and current and latest != current.split(".")[0] + "." + ".".join(current.split(".")[1:3])),
+                "download_url": RESHADE_SETUP_URL.format(version=latest) if latest else "",
+                "note": "官方新版可能与 DLSS5 插件不兼容（本方案实测版本为 6.8.0），更新前会备份旧底座。",
+            }
+        except Exception as exc:  # noqa: BLE001
+            report["errors"].append(f"ReShade 检查失败: {exc}")
 
     # 乳摇插件 GitHub release
     try:
@@ -623,6 +635,8 @@ def update_reshade_base(config: AppConfig, version: str = "", log: Callable[[str
     是同一个错（用户实测「reshade 下不下来」）。官方安装器是标准 ZIP，
     `zipfile` 直接能读 ⇒ 改成**标准库优先、7z 只作兜底**。
     """
+    if edition.is_lite():
+        return {"ok": False, "message": "轻量版不含 ReShade 底座，无法更新它"}
     version = version or "6.8.0"
     target_dir = config.dlss5_path
     target_dll = config.dlss5_dll_path

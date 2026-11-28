@@ -23,6 +23,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
+from . import edition
 from .config import AppConfig
 
 GAME_PROCESS = "Endfield.exe"
@@ -943,22 +944,25 @@ def crash_forensics(config: AppConfig, evidence: dict[str, Any] | None = None) -
         lines.append("异常：本次时段内没有 WER 报告"
                      "（被 TerminateProcess 结束不会留事件，见 `environment.txt` 的说明）")
     lines.append(f"退出方式：{addon_exit_kind(config)}")
-    lines.append(f"ReShade 日志：{reshade_log_verdict(config)}")
-    snapshot = nr_settings_snapshot(config)
-    if snapshot:
-        lines.append(f"当时的 NR 档位（**只记录、不归因**）：{snapshot}")
-    mismatch = nr_engine_driver_mismatch(config)
-    if mismatch:
-        lines.append(f"NR 版本：{mismatch}")
-    conflict = nr_provider_conflict(config)
-    if conflict:
-        lines.append(f"NR 冲突：{conflict}")
-    crashed = nr_evaluate_crash(config)
-    if crashed:
-        lines.append(f"NR 运行库：{crashed}")
-    flap = nr_toggle_flap(config)
-    if flap:
-        lines.append(f"NR 开关：{flap}")
+    # Lite 不含 ReShade / DLSS5 ⇒ 这一组判据（日志进展 / NR 档位 / 引擎版本 / provider 冲突 /
+    # 运行库崩点 / 开关抖动）在 Lite 里没有对象可判，跳过 —— 否则会给出"DLSS5 有问题"的错结论。
+    if not edition.is_lite():
+        lines.append(f"ReShade 日志：{reshade_log_verdict(config)}")
+        snapshot = nr_settings_snapshot(config)
+        if snapshot:
+            lines.append(f"当时的 NR 档位（**只记录、不归因**）：{snapshot}")
+        mismatch = nr_engine_driver_mismatch(config)
+        if mismatch:
+            lines.append(f"NR 版本：{mismatch}")
+        conflict = nr_provider_conflict(config)
+        if conflict:
+            lines.append(f"NR 冲突：{conflict}")
+        crashed = nr_evaluate_crash(config)
+        if crashed:
+            lines.append(f"NR 运行库：{crashed}")
+        flap = nr_toggle_flap(config)
+        if flap:
+            lines.append(f"NR 开关：{flap}")
     stuck = stuck_on_crt_dialog()
     if stuck:
         lines.append(f"当前状态：{stuck}")
@@ -985,6 +989,9 @@ def dlss5_crash_record(config: AppConfig, started_at: float | None = None) -> di
     只认**本次运行**写下的那条（用日志文件 mtime 与 `started_at` 比），否则会把上一次崩溃
     的记录算到这一次头上。
     """
+    if edition.is_lite():
+        # Lite 不含 ReShade / DLSS5 ⇒ 没有 feed 日志，也不能据此给出"DLSS5 问题"的结论
+        return None
     log = Path(str(getattr(config, "dlss5_path", ""))) / "dlss5-feed.log"
     if not log.is_file():
         return None
@@ -2177,87 +2184,90 @@ def collect_diagnosis_files(config: AppConfig, dest: Path, *,
     reshade = Path(config.reshade_runtime_path)
     dlss5 = Path(config.dlss5_path)
 
-    # ① ReShade 那一侧（**生效那份**的日志与 ini、面板 addon 日志、按键表）
-    take(reshade / "ReShade.log", "reshade-effective-ReShade.log")
-    take(reshade / "ReShade.ini", "reshade-effective-ReShade.ini")
-    take(reshade / "modecontroller.addon.log", "reshade-modecontroller.addon.log")
-    take(reshade / "actions.tsv", "reshade-actions.tsv")
-    take(reshade / "user_ini_path.txt", "reshade-user_ini_path.txt")
-    for extra in ("renodx-dlss5.log", "dlss5.log", "ReShade.log.old"):
-        take(reshade / extra, f"reshade-{extra}")
+    # ①②③ 全是 ReShade / DLSS5 专属取证（生效日志与 ini、addon 位置与身份、shader 清单）——
+    # Lite 没有这条链路，这些文件在本版本里根本不存在 ⇒ 整段不采集（通用素材照常收）。
+    if not edition.is_lite():
+        # ① ReShade 那一侧（**生效那份**的日志与 ini、面板 addon 日志、按键表）
+        take(reshade / "ReShade.log", "reshade-effective-ReShade.log")
+        take(reshade / "ReShade.ini", "reshade-effective-ReShade.ini")
+        take(reshade / "modecontroller.addon.log", "reshade-modecontroller.addon.log")
+        take(reshade / "actions.tsv", "reshade-actions.tsv")
+        take(reshade / "user_ini_path.txt", "reshade-user_ini_path.txt")
+        for extra in ("renodx-dlss5.log", "dlss5.log", "ReShade.log.old"):
+            take(reshade / extra, f"reshade-{extra}")
 
-    # ② DLSS5 那一侧（部署源的 ini、feed 的日志与配置、**运行库变体 marker**）
-    take(dlss5 / "ReShade.ini", "dlss5-ReShade.ini")
-    take(dlss5 / "ReShade.log", "dlss5-ReShade.log")
-    take(dlss5 / "dlss5-feed.log", "dlss5-feed.log")
-    take(dlss5 / "dlss5-feed.cfg", "dlss5-feed.cfg")
-    take(dlss5 / ".dlssnr_variant.json", "dlss5-variant.json")
-    take(dlss5 / "panel_info.txt", "dlss5-panel_info.txt")
+        # ② DLSS5 那一侧（部署源的 ini、feed 的日志与配置、**运行库变体 marker**）
+        take(dlss5 / "ReShade.ini", "dlss5-ReShade.ini")
+        take(dlss5 / "ReShade.log", "dlss5-ReShade.log")
+        take(dlss5 / "dlss5-feed.log", "dlss5-feed.log")
+        take(dlss5 / "dlss5-feed.cfg", "dlss5-feed.cfg")
+        take(dlss5 / ".dlssnr_variant.json", "dlss5-variant.json")
+        take(dlss5 / "panel_info.txt", "dlss5-panel_info.txt")
 
-    # ★★★ 2026-10-07 补采（用户定的规矩：「**你查过啥，啥就要加进诊断包，没加的你不允许看**」）：
-    #     排查「DLSS5 不出帧」时我实际看的就是下面这三样，而它们**当时都不在包里** ——
-    #     我只能去读本机文件，那等于绕开诊断包、对反馈者的机器完全无效。
-    # ① preset 本体：technique 的**全名与启用状态**都写在它里面。
-    #    `dlss5-ReShade.ini` 只给 `PresetPath`（一个路径），`dlss5-ReShade.log` 只给
-    #    "认没认出来"的后果 —— **判据本身在这份文件里**，缺了它就没法定案。
-    take(dlss5 / "ReShadePreset.ini", "dlss5-ReShadePreset.ini")
-    # ② addon 的**位置**（根目录 vs `_disabled\`）：上面 `dlss5-addons.txt` 只列根目录，
-    #    于是"那个插件是被停用了、还是根本没铺进来"分不清 —— 两边各有一份时结论正好相反。
-    try:
-        rows = ["dlss5 里的 addon 位置（根目录 = 启用中；_disabled = 已停用）"]
-        for item in sorted(dlss5.glob("*.addon64")):
-            try:
-                rows.append(f"根目录\t{item.name}\t{item.stat().st_size} B")
-            except OSError:
-                rows.append(f"根目录\t{item.name}\t(读不到)")
-        disabled_dir = dlss5 / "_disabled"     # 与 `launcher.ADDON_DISABLED_DIR` 同一个名字
-        if disabled_dir.is_dir():
-            for item in sorted(disabled_dir.glob("*")):
+        # ★★★ 2026-10-07 补采（用户定的规矩：「**你查过啥，啥就要加进诊断包，没加的你不允许看**」）：
+        #     排查「DLSS5 不出帧」时我实际看的就是下面这三样，而它们**当时都不在包里** ——
+        #     我只能去读本机文件，那等于绕开诊断包、对反馈者的机器完全无效。
+        # ① preset 本体：technique 的**全名与启用状态**都写在它里面。
+        #    `dlss5-ReShade.ini` 只给 `PresetPath`（一个路径），`dlss5-ReShade.log` 只给
+        #    "认没认出来"的后果 —— **判据本身在这份文件里**，缺了它就没法定案。
+        take(dlss5 / "ReShadePreset.ini", "dlss5-ReShadePreset.ini")
+        # ② addon 的**位置**（根目录 vs `_disabled\`）：上面 `dlss5-addons.txt` 只列根目录，
+        #    于是"那个插件是被停用了、还是根本没铺进来"分不清 —— 两边各有一份时结论正好相反。
+        try:
+            rows = ["dlss5 里的 addon 位置（根目录 = 启用中；_disabled = 已停用）"]
+            for item in sorted(dlss5.glob("*.addon64")):
                 try:
-                    rows.append(f"_disabled\t{item.name}\t{item.stat().st_size} B")
+                    rows.append(f"根目录\t{item.name}\t{item.stat().st_size} B")
                 except OSError:
-                    rows.append(f"_disabled\t{item.name}\t(读不到)")
-        else:
-            rows.append("_disabled\t（目录不存在）")
-        (dest / "dlss5-addon-placement.txt").write_text("\n".join(rows) + "\n", encoding="utf-8")
-        taken.append("dlss5-addon-placement.txt")
-    except Exception as exc:  # noqa: BLE001 —— 采集失败绝不影响诊断包生成
-        emit(f"排查素材: addon 位置清单失败（忽略）: {exc}")
-    # ③ shader 的**相对路径清单**：ReShade 的 technique 全名是
-    #    `<Technique>@<effect 相对路径>` ⇒ "`MartysMods_LAUNCHPAD.fx` 在根目录还是 `iMMERSE\` 下"
-    #    直接决定全名对不对。这正是 2026-10-07 那台 `provider is installed but DISABLED`
-    #    的根因，而它**推不出来** —— 已收的任何一份文件里都没有这个信息。
-    try:
-        shaders_root = dlss5 / "reshade-shaders" / "Shaders"
-        rows = [f"shaders 根目录: {shaders_root}"]
-        if shaders_root.is_dir():
-            for item in sorted(shaders_root.rglob("*.fx")):
+                    rows.append(f"根目录\t{item.name}\t(读不到)")
+            disabled_dir = dlss5 / "_disabled"     # 与 `launcher.ADDON_DISABLED_DIR` 同一个名字
+            if disabled_dir.is_dir():
+                for item in sorted(disabled_dir.glob("*")):
+                    try:
+                        rows.append(f"_disabled\t{item.name}\t{item.stat().st_size} B")
+                    except OSError:
+                        rows.append(f"_disabled\t{item.name}\t(读不到)")
+            else:
+                rows.append("_disabled\t（目录不存在）")
+            (dest / "dlss5-addon-placement.txt").write_text("\n".join(rows) + "\n", encoding="utf-8")
+            taken.append("dlss5-addon-placement.txt")
+        except Exception as exc:  # noqa: BLE001 —— 采集失败绝不影响诊断包生成
+            emit(f"排查素材: addon 位置清单失败（忽略）: {exc}")
+        # ③ shader 的**相对路径清单**：ReShade 的 technique 全名是
+        #    `<Technique>@<effect 相对路径>` ⇒ "`MartysMods_LAUNCHPAD.fx` 在根目录还是 `iMMERSE\` 下"
+        #    直接决定全名对不对。这正是 2026-10-07 那台 `provider is installed but DISABLED`
+        #    的根因，而它**推不出来** —— 已收的任何一份文件里都没有这个信息。
+        try:
+            shaders_root = dlss5 / "reshade-shaders" / "Shaders"
+            rows = [f"shaders 根目录: {shaders_root}"]
+            if shaders_root.is_dir():
+                for item in sorted(shaders_root.rglob("*.fx")):
+                    try:
+                        rows.append(item.relative_to(shaders_root).as_posix())
+                    except ValueError:
+                        rows.append(item.name)
+            else:
+                rows.append("（目录不存在）")
+            (dest / "dlss5-shaders-tree.txt").write_text("\n".join(rows) + "\n", encoding="utf-8")
+            taken.append("dlss5-shaders-tree.txt")
+        except Exception as exc:  # noqa: BLE001
+            emit(f"排查素材: shader 清单失败（忽略）: {exc}")
+
+        # ③ 各 addon 的**身份**（只收清单：名 + 字节 + sha256 前 16 —— 判"对方用的是不是我们随包那份"
+        #    靠它；4 MB 的本体不收，包会太大）
+        try:
+            from . import runtime_assets
+
+            rows = ["runtime\\dlss5 里的 addon（名 / 字节 / sha256 前 16）"]
+            for item in sorted(dlss5.glob("*.addon64")):
                 try:
-                    rows.append(item.relative_to(shaders_root).as_posix())
-                except ValueError:
-                    rows.append(item.name)
-        else:
-            rows.append("（目录不存在）")
-        (dest / "dlss5-shaders-tree.txt").write_text("\n".join(rows) + "\n", encoding="utf-8")
-        taken.append("dlss5-shaders-tree.txt")
-    except Exception as exc:  # noqa: BLE001
-        emit(f"排查素材: shader 清单失败（忽略）: {exc}")
-
-    # ③ 各 addon 的**身份**（只收清单：名 + 字节 + sha256 前 16 —— 判"对方用的是不是我们随包那份"
-    #    靠它；4 MB 的本体不收，包会太大）
-    try:
-        from . import runtime_assets
-
-        rows = ["runtime\\dlss5 里的 addon（名 / 字节 / sha256 前 16）"]
-        for item in sorted(dlss5.glob("*.addon64")):
-            try:
-                rows.append(f"{item.name}\t{item.stat().st_size} B\t{runtime_assets.sha256_file(item)[:16]}")
-            except OSError:
-                rows.append(f"{item.name}\t(读不到)")
-        (dest / "dlss5-addons.txt").write_text("\n".join(rows) + "\n", encoding="utf-8")
-        taken.append("dlss5-addons.txt")
-    except Exception as exc:  # noqa: BLE001
-        emit(f"排查素材: addon 清单失败（忽略）: {exc}")
+                    rows.append(f"{item.name}\t{item.stat().st_size} B\t{runtime_assets.sha256_file(item)[:16]}")
+                except OSError:
+                    rows.append(f"{item.name}\t(读不到)")
+            (dest / "dlss5-addons.txt").write_text("\n".join(rows) + "\n", encoding="utf-8")
+            taken.append("dlss5-addons.txt")
+        except Exception as exc:  # noqa: BLE001
+            emit(f"排查素材: addon 清单失败（忽略）: {exc}")
 
     # ④ 游戏自己的日志（判"走到哪一步"必看）
     #    ⚠️ **厂商目录不能写死**（2026-10-07 修）：国服 `Hypergryph`、国际服/其它渠道
@@ -2364,52 +2374,56 @@ def collect_diagnosis_files(config: AppConfig, dest: Path, *,
         emit(f"排查素材: XXMI 侧失败（忽略）: {exc}")
 
     # ⑥ 随包资产清单（每个组一份 manifest.json —— 判"资产齐不齐、分卷对不对"全靠它）
-    try:
-        from . import runtime_assets
+    # 随包资产只有 ReShade 那两组（nvngx / dlss5）—— Lite 没有它们，整段跳过
+    if not edition.is_lite():
+        try:
+            from . import runtime_assets
 
-        seen: set[str] = set()
-        for _group, root, _name, _entry in runtime_assets.manifest_entries(config):
-            key = f"assets-{Path(root).name}-manifest.json"
-            if key in seen:
-                continue
-            seen.add(key)
-            take(Path(root) / "manifest.json", key, limit=1024 * 1024)
-    except Exception as exc:  # noqa: BLE001
-        emit(f"排查素材: 资产清单失败（忽略）: {exc}")
+            seen: set[str] = set()
+            for _group, root, _name, _entry in runtime_assets.manifest_entries(config):
+                key = f"assets-{Path(root).name}-manifest.json"
+                if key in seen:
+                    continue
+                seen.add(key)
+                take(Path(root) / "manifest.json", key, limit=1024 * 1024)
+        except Exception as exc:  # noqa: BLE001
+            emit(f"排查素材: 资产清单失败（忽略）: {exc}")
 
     # ⑦ 游戏目录里的 proxy 本体（依赖检查要用本体，光有哈希查不了）
     _collect_injection_files(config, dest)
 
     # ⑧ **大日志的关键行摘录**（用户 2026-10-05 定的规矩：「**特别大文件可以节选你要的**」）。
-    #    `ReShade.log` 动辄几十上百 KB，而排查真正要看的就那么几类行 ——
-    #    相机 hook 装没装、NR 有没有建帧、addon 注册了哪些、有没有 hook 失败与报错。
-    #    全量那份照收（超限时 `_safe_zip_write` 会截尾并注明），这里再给一份"只看这几类"的，
-    #    让**第一轮排查不必再回头要文件**（这正是这条纪律的目的）。
-    try:
-        src = reshade / "ReShade.log"
-        if src.is_file():
-            keys = ("Camera controls installed", "camera hook installation failed",
-                    "feature 18 created", "evaluation succeeded", "Registered add-on",
-                    "Loading add-on", "installing delayed hooks", "hotkeys:", "| ERROR | ",
-                    # 2026-10-06 加：NR「建了特征却一帧不出」的现场就在这三行里 ——
-                    # 以前它们**不在采集范围内**，于是"池耗尽"这条关键判据只能在
-                    # 我这边翻全量 ReShade.log 才看得到（第一轮排查又得回头要文件）。
-                    "workset pool exhausted",
-                    "NR workset completion fence could not be signaled",
-                    "failed to install native D3D12 queue submission tracker")
-            picked: list[str] = []
-            with src.open("r", encoding="utf-8", errors="replace") as handle:
-                for line in handle:
-                    if any(key in line for key in keys):
-                        picked.append(line.rstrip("\n"))
-            (dest / "reshade-keylines.txt").write_text(
-                "ReShade.log 关键行摘录（相机 hook / NR 建帧 / addon 注册 / hook 失败 / 报错）\n"
-                f"源: {src}（{src.stat().st_size:,} B）· 共命中 {len(picked)} 行"
-                f"（只保留最后 {min(len(picked), 400)} 行）\n\n"
-                + "\n".join(picked[-400:]) + "\n", encoding="utf-8")
-            taken.append("reshade-keylines.txt")
-    except Exception as exc:  # noqa: BLE001
-        emit(f"排查素材: ReShade 关键行摘录失败（忽略）: {exc}")
+    # ReShade.log 在 Lite 里不存在 ⇒ 这份摘录不采（通用日志摘录另有其处）
+    if not edition.is_lite():
+        #    `ReShade.log` 动辄几十上百 KB，而排查真正要看的就那么几类行 ——
+        #    相机 hook 装没装、NR 有没有建帧、addon 注册了哪些、有没有 hook 失败与报错。
+        #    全量那份照收（超限时 `_safe_zip_write` 会截尾并注明），这里再给一份"只看这几类"的，
+        #    让**第一轮排查不必再回头要文件**（这正是这条纪律的目的）。
+        try:
+            src = reshade / "ReShade.log"
+            if src.is_file():
+                keys = ("Camera controls installed", "camera hook installation failed",
+                        "feature 18 created", "evaluation succeeded", "Registered add-on",
+                        "Loading add-on", "installing delayed hooks", "hotkeys:", "| ERROR | ",
+                        # 2026-10-06 加：NR「建了特征却一帧不出」的现场就在这三行里 ——
+                        # 以前它们**不在采集范围内**，于是"池耗尽"这条关键判据只能在
+                        # 我这边翻全量 ReShade.log 才看得到（第一轮排查又得回头要文件）。
+                        "workset pool exhausted",
+                        "NR workset completion fence could not be signaled",
+                        "failed to install native D3D12 queue submission tracker")
+                picked: list[str] = []
+                with src.open("r", encoding="utf-8", errors="replace") as handle:
+                    for line in handle:
+                        if any(key in line for key in keys):
+                            picked.append(line.rstrip("\n"))
+                (dest / "reshade-keylines.txt").write_text(
+                    "ReShade.log 关键行摘录（相机 hook / NR 建帧 / addon 注册 / hook 失败 / 报错）\n"
+                    f"源: {src}（{src.stat().st_size:,} B）· 共命中 {len(picked)} 行"
+                    f"（只保留最后 {min(len(picked), 400)} 行）\n\n"
+                    + "\n".join(picked[-400:]) + "\n", encoding="utf-8")
+                taken.append("reshade-keylines.txt")
+        except Exception as exc:  # noqa: BLE001
+            emit(f"排查素材: ReShade 关键行摘录失败（忽略）: {exc}")
 
     # ⑪ **自更新现场**（2026-10-06 加）。起因：反馈者报「自更新下载完就没了，没提示重启，
     #     手动按重启也没用」，而当时包里**一条相关证据都没有** —— 看不到已下载的载荷还在不在、
@@ -2799,16 +2813,18 @@ def make_bundle(config: AppConfig, evidence: dict[str, Any] | None = None,
     # 运行时组件清单（用户 2026-10-02 要求「一次抓全」）：文件名 / 字节 / sha256 / 是否偏离基线。
     # 之前缺了它，"崩溃那一刻装的是哪一版组件"根本无从回答 —— 2026-10-02 那天用户把 runtime
     # 整个删掉重下，旧现场连清单都没留下，崩因只能停在"配套损坏"这个类别上。
-    try:
-        from . import runtime_assets
+    if not edition.is_lite():
+        # Lite 不含 ReShade / DLSS5 ⇒ 这份 runtime\dlss5 清单没有对象可列
+        try:
+            from . import runtime_assets
 
-        (bundle_dir / "runtime-inventory.txt").write_text(
-            runtime_assets.inventory_text(config), encoding="utf-8"
-        )
-    except Exception as exc:  # noqa: BLE001
-        (bundle_dir / "runtime-inventory.txt").write_text(
-            f"（收集运行时清单失败：{exc}）", encoding="utf-8"
-        )
+            (bundle_dir / "runtime-inventory.txt").write_text(
+                runtime_assets.inventory_text(config), encoding="utf-8"
+            )
+        except Exception as exc:  # noqa: BLE001
+            (bundle_dir / "runtime-inventory.txt").write_text(
+                f"（收集运行时清单失败：{exc}）", encoding="utf-8"
+            )
 
     # ④-b DLSS5 现场 + 崩溃归因
     #   * `dlss5-feed.log` 是"神经渲染到底有没有出帧、卡在哪一步"的直接证据；
@@ -2816,14 +2832,16 @@ def make_bundle(config: AppConfig, evidence: dict[str, Any] | None = None,
     #   * `cause.json` 让前端弹窗知道该走"Mod 冲突"那套文案，还是普通崩溃文案。
     import json as _json
 
-    try:
-        dlss5_dir = Path(config.dlss5_path)
-        for name in ("dlss5-feed.log", "dlss5-feed.cfg", "ReShade.ini", "ReShadePreset.ini"):
-            src = dlss5_dir / name
-            if src.is_file() and src.stat().st_size <= 8 * 1024 * 1024:
-                shutil.copy2(src, bundle_dir / name)
-    except OSError:
-        pass
+    if not edition.is_lite():
+        # Lite 没有 runtime\dlss5 这一套现场（why）
+        try:
+            dlss5_dir = Path(config.dlss5_path)
+            for name in ("dlss5-feed.log", "dlss5-feed.cfg", "ReShade.ini", "ReShadePreset.ini"):
+                src = dlss5_dir / name
+                if src.is_file() and src.stat().st_size <= 8 * 1024 * 1024:
+                    shutil.copy2(src, bundle_dir / name)
+        except OSError:
+            pass
     cause = evidence.get("cause") or classify_cause(config, evidence)
     try:
         (bundle_dir / "cause.json").write_text(
@@ -3130,16 +3148,18 @@ def poll_runtime_watch(config: AppConfig, pid: int, state: dict[str, Any], *,
     try:
         from . import nr_autostart, watchsample
 
+        # Lite 没有 feed / ReShade 日志 ⇒ 这两路行数不采样（传 None 即跳过）
+        no_reshade = edition.is_lite()
         entry = watchsample.sample(
             pid,
             known_modules=state.get("known") or set(),
-            feed_log=Path(config.dlss5_path) / "dlss5-feed.log",
+            feed_log=None if no_reshade else Path(config.dlss5_path) / "dlss5-feed.log",
             # ⚠️ **必须用生效那份的路径**（2026-10-06 修）：ReShade 按
             # `RESHADE_BASE_PATH_OVERRIDE` 把日志写在 `runtime\reshade\` 下，
             # 而这里原先写的是 `runtime\dlss5\ReShade.log`（那是**部署源**目录，
             # 通常根本没有这个文件）⇒ 采样里的 `reshade_lines` **恒为 0**，
             # 那条判据等于从没生效过（反馈者 1.0.15 的包里 8 条采样全是 0，实测抓到）。
-            reshade_log=nr_autostart.reshade_log_path(config),
+            reshade_log=None if no_reshade else nr_autostart.reshade_log_path(config),
         )
         if not entry:
             return False

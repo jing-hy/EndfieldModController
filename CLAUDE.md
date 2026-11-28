@@ -18,6 +18,7 @@
 | [emc-new-managed-component](.agents/skills/emc-new-managed-component/SKILL.md) | 把第三方组件接成"受管组件"（依赖页 + 开关 + 自检 + 更新） |
 | [emc-diagnostics-triage](.agents/skills/emc-diagnostics-triage/SKILL.md) | 用户拿诊断包/日志报故障时的排查路线 |
 | [emc-structure-closeout](.agents/skills/emc-structure-closeout/SKILL.md) | 改完源码的收尾：测试 / 前端产物 / 结构树 / 构建进 modtest |
+| [emc-publish-alert](.agents/skills/emc-publish-alert/SKILL.md) | 在 `alerts.json` 加公告/异常预警（含 `edition` 按形态分发）、判断某条还会不会弹、发完复核线上生效 |
 
 > ⚠️ 这里**故意不做符号链接**（`deepseek-harness` 那类是 `CLAUDE.md → AGENTS.md`）。
 > 本项目在 Windows 上开发与发布，git 符号链接要 `core.symlinks` + 管理员权限才能正常 checkout，

@@ -4,6 +4,7 @@
 // ⚠️ 日志框是**纯黑**的（.log-box 在 tokens.css 里，且 user-select: text 保证可复制）。
 import { ref, computed, onMounted, onUnmounted } from "vue";
 import { call } from "../lib/bridge.js";
+import { t } from "../lib/i18n.js";
 import { store, refreshState } from "../store.js";
 import { loadSettings } from "../lib/settings.js";
 // ⚠️ `sleep` 原先**根本没定义**（2026-10-04 修）：第 96 行 `await sleep(300)` 会抛
@@ -71,10 +72,10 @@ async function importDepsBundle() {
     const r = await call("import_deps_bundle");
     if (r && r.cancelled) return;
     if (r && r.ok === false) {
-      await showAlert("没能导入依赖包", String((r && r.message) || "未知原因"));
+      await showAlert(t("没能导入依赖包"), String((r && r.message) || t("未知原因")));
       return;
     }
-    showToast(String((r && r.message) || "导入完成"), "success");
+    showToast(String((r && r.message) || t("导入完成")), "success");
     await refreshState();
   } catch (e) { /* call() 已经弹过窗 */ }
 }
@@ -90,10 +91,10 @@ async function installVariant(d) {
   try {
     const r = await call("install_dlss5_component", d.key, true);
     if (r && r.ok === false) {
-      await showAlert("没能安装", String((r && r.message) || "未知原因"));
+      await showAlert(t("没能安装"), String((r && r.message) || t("未知原因")));
       return;
     }
-    showToast(String((r && r.message) || "已安装"), "success");
+    showToast(String((r && r.message) || t("已安装")), "success");
     await refreshState();
   } catch (e) { /* 同上 */ }
 }
@@ -123,19 +124,19 @@ const mdPolicy = ref("");
 // "状态 + 开关 + 更新入口"，下载进度/日志统一在下载页看）。
 async function updateComponent(d) {
   const ok = await showModalDialog({
-    title: `更新 ${d.display || d.key}`,
+    title: t("更新") + " " + (d.display || d.key),
     message: [
-      `当前：${d.version || "未装"}`,
-      d.latest ? `最新：${d.latest}` : "",
+      t("当前：") + (d.version || t("未装")),
+      d.latest ? t("最新：") + d.latest : "",
       "",
-      "会下载并替换它。**已经是最新的其它组件会自动跳过**，不会白下。",
+      t("会下载并替换它。**已经是最新的其它组件会自动跳过**，不会白下。"),
       "",
-      "点「开始更新」会跳到「下载」页，那里能看到进度与日志。",
+      t("点「开始更新」会跳到「下载」页，那里能看到进度与日志。"),
     ].filter((x) => x !== "").join("\n"),
-    okText: "开始更新", cancelText: "先不更新",
+    okText: t("开始更新"), cancelText: t("先不更新"),
   });
   if (!ok) return;
-  store.autoStartDepsNote = `正在更新 ${d.display || d.key}…`;
+  store.autoStartDepsNote = t("正在更新") + " " + (d.display || d.key) + "…";
   store.autoStartDeps = true;
   store.tab = "downloads";
 }
@@ -145,7 +146,7 @@ async function updateComponent(d) {
 // 换代后三个按钮是"重新扫描 / 检查并补齐 / 安装缺失依赖"，**没有 dry-run** ——
 // 用户想"先看看会装什么"只能直接开跑。
 async function dryRunCheck() {
-  showProgressToast("dep-dryrun", "正在检查组件状态…（只检查，不下载）");
+  showProgressToast("dep-dryrun", t("正在检查组件状态…（只检查，不下载）"));
   try {
     // ⚠️ 用 `check_component_updates`（**同步**返回结果）—— 一开始我写的是
     // `start_full_update(true)`，但它起的是**后台任务**、立刻返回的是任务状态，
@@ -157,18 +158,18 @@ async function dryRunCheck() {
     const missing = list.filter((c) => !c.current && !c.installed);
     const up = list.filter((c) => c.update_available);
     await showModalDialog({
-      title: "检查完成（没有下载任何东西）",
+      title: t("检查完成（没有下载任何东西）"),
       message: [
-        missing.length ? `缺失 ${missing.length} 个：\n` + missing.map((x) => `· ${x.display || x.name || x}`).join("\n") : "没有缺失的组件。",
+        missing.length ? t("缺失") + " " + missing.length + t(" 个：") + "\n" + missing.map((x) => `· ${x.display || x.name || x}`).join("\n") : t("没有缺失的组件。"),
         "",
-        up.length ? `有 ${up.length} 个可以更新：\n` + up.map((x) => `· ${x.display || x.name || x}`).join("\n") : "没有可更新的组件。",
+        up.length ? t("有") + " " + up.length + t(" 个可以更新：") + "\n" + up.map((x) => `· ${x.display || x.name || x}`).join("\n") : t("没有可更新的组件。"),
         "",
-        "要装/要更新的话，点上面的「安装缺失依赖」或「一键安装/更新全部组件」。",
+        t("要装/要更新的话，点上面的「安装缺失依赖」或「一键安装/更新全部组件」。"),
       ].join("\n"),
-      okText: "知道了", showCancel: false,
+      okText: t("知道了"), showCancel: false,
     });
   } catch (e) {
-    showToast(String((e && e.message) || "检查失败"), "danger");
+    showToast(String((e && e.message) || t("检查失败")), "danger");
   } finally {
     hideProgressToast("dep-dryrun");
     await refreshState();
@@ -182,12 +183,12 @@ async function checkAndComplete() {
     await refreshState();
     await refresh();
     if (r && r.ok === false) {
-      showToast(String(r.message || "检查失败"), "danger");
+      showToast(String(r.message || t("检查失败")), "danger");
     } else {
-      showToast("已检查并补齐缺失组件", "success");
+      showToast(t("已检查并补齐缺失组件"), "success");
     }
   } catch (e) {
-    showToast(String((e && e.message) || "检查失败"), "danger");
+    showToast(String((e && e.message) || t("检查失败")), "danger");
   }
 }
 
@@ -376,28 +377,25 @@ async function pollProgress() {
           modDlManualShown = true;
           const first = manual[0] || {};
           const open = await showModalDialog({
-            title: `${manual.length} 个包需要你手动解压`,
+            title: manual.length + " " + t("个包需要你手动解压"),
             message: [
-              "这些包程序没法自动解压（不是 zip/7z/rar，或者包本身下坏了），"
-                + "所以**原样留在磁盘上、没有删除**：",
+              t("这些包程序没法自动解压（不是 zip/7z/rar，或者包本身下坏了），所以**原样留在磁盘上、没有删除**："),
               "",
               ...manual.slice(0, 8).map((it) => "· " + (it.source_path || it.path || it.name || "?")),
-              manual.length > 8 ? `…另有 ${manual.length - 8} 个` : "",
+              manual.length > 8 ? t("…另有") + " " + (manual.length - 8) + t(" 个") : "",
               "",
-              "**它应该解压到**（把解压出来的 Mod 文件夹放进这里）：",
-              `  ${first.target_dir || store.state.library || "（Mod 库目录）"}`,
+              t("**它应该解压到**（把解压出来的 Mod 文件夹放进这里）："),
+              `  ${first.target_dir || store.state.library || t("（Mod 库目录）")}`,
               "",
-              "手动做法：把上面的包解压，得到里面的 Mod 文件夹"
-                + "（如果解压出来套了好几层，保留最外层那一层），整个放进上面的目录，"
-                + "再回界面点「重新扫描」。",
+              t("手动做法：把上面的包解压，得到里面的 Mod 文件夹（如果解压出来套了好几层，保留最外层那一层），整个放进上面的目录，再回界面点「重新扫描」。"),
               "",
-              "（如果消息里说了是 CRC/损坏，那多半是**下载过程中坏了**，重新下一次即可。）",
+              t("（如果消息里说了是 CRC/损坏，那多半是**下载过程中坏了**，重新下一次即可。）"),
             ].filter((x) => x !== "").join("\n"),
-            okText: "打开下载目录", cancelText: "知道了",
+            okText: t("打开下载目录"), cancelText: t("知道了"),
           });
           if (open) {
             const r = await call("open_download_dir");
-            if (r && r.ok === false) showToast(String(r.message || "打不开下载目录"), "danger");
+            if (r && r.ok === false) showToast(String(r.message || t("打不开下载目录")), "danger");
           }
         }
         // 速度是**独立信号**，不依赖是否知道总大小 —— 无条件接上
@@ -433,22 +431,22 @@ async function pollProgress() {
         const sluggish = it.slow === true || it.unreachable === true ||
           /太慢|慢到|超时|timed out|timeout|无法访问|连不上|卡死/i.test(msg);
         await showModalDialog({
-          title: sluggish ? "这个下载源连不上或太慢" : "Mod 下载失败",
+          title: sluggish ? t("这个下载源连不上或太慢") : t("Mod 下载失败"),
           message: sluggish
             ? [
-                `「${it.name || warnKey}」没能下下来：`,
+                "「" + (it.name || warnKey) + "」" + t("没能下下来："),
                 "",
                 msg || "",
                 "",
-                "**香蕉网在国内直连常常只有 10 KB/s 左右**，这多半不是你或程序的问题。",
+                t("**香蕉网在国内直连常常只有 10 KB/s 左右**，这多半不是你或程序的问题。"),
                 "",
-                "建议：",
-                "· 开加速器 / VPN 后重试（实测能把单连接从 0.008 提到 0.129 MB/s）",
-                "· 或者点上面的「继续」，它会从断点接着下，已下完的部分不用重来",
-                "· 「设置 → 下载与网络」里可以确认「下载加速」没被关掉",
+                t("建议："),
+                t("· 开加速器 / VPN 后重试（实测能把单连接从 0.008 提到 0.129 MB/s）"),
+                t("· 或者点上面的「继续」，它会从断点接着下，已下完的部分不用重来"),
+                t("· 「设置 → 下载与网络」里可以确认「下载加速」没被关掉"),
               ].filter((x) => x !== "").join("\n")
-            : [`「${it.name || warnKey}」下载失败：`, "", msg || "（没有更多信息，详见右侧日志）"].join("\n"),
-          okText: "知道了", showCancel: false,
+            : ["「" + (it.name || warnKey) + "」" + t("下载失败："), "", msg || t("（没有更多信息，详见右侧日志）")].join("\n"),
+          okText: t("知道了"), showCancel: false,
         });
       }
 
@@ -479,40 +477,40 @@ async function pollProgress() {
         const manualItems = items.filter((it) => String(it.status || "") === "需手动解压");
         // 哪些进了库但**没识别出角色**（只有这些才需要提示去「更换归属」）
         const unknown = imported.filter((it) => !it.group);
-        const nameOf = (it) => it.name || it.url || "（未命名）";
+        const nameOf = (it) => it.name || it.url || t("（未命名）");
         if (stopped.length) {
           // 用户自己停的：如实说"停住了 + 本次已完成几个"，**绝不能**说成"下载完成"
           const isPaused = stopped.some((it) => String(it.status) === "已暂停");
           await showAlert(
-            isPaused ? "Mod 下载已暂停" : "Mod 下载已终止",
+            isPaused ? t("Mod 下载已暂停") : t("Mod 下载已终止"),
             (isPaused
-              ? "已停下（断点保留）。"
-              : "已终止（半成品已清理）。") + "\n\n" +
+              ? t("已停下（断点保留）。")
+              : t("已终止（半成品已清理）。")) + "\n\n" +
             (imported.length
-              ? `本次已经完成入库 ${imported.length} 个：\n${imported.map((it) => `· ${nameOf(it)}`).join("\n")}\n\n`
+              ? t("本次已经完成入库") + " " + imported.length + t(" 个：") + "\n"
+                + imported.map((it) => `· ${nameOf(it)}`).join("\n") + "\n\n"
               : "") +
             (isPaused
-              ? `还有 ${stopped.filter((it) => String(it.status) === "已暂停").length} 个没下完 —— ` +
-                "点本页的「继续」会从断点接着下，已下的部分不用重来。"
-              : "没下完的那几个可以在本页重新开始。"),
+              ? t("还有") + " " + stopped.filter((it) => String(it.status) === "已暂停").length + " " + t("个没下完") + t(" —— ") +
+                t("点本页的「继续」会从断点接着下，已下的部分不用重来。")
+              : t("没下完的那几个可以在本页重新开始。")),
           );
         } else if (imported.length) {
-          const lines = imported.map((it) => `· ${nameOf(it)}${it.group ? ` —— 识别为「${it.group}」` : ""}`);
+          const lines = imported.map((it) => `· ${nameOf(it)}${it.group ? t(" —— ") + t("识别为") + "「" + it.group + "」" : ""}`);
           await showAlert(
-            "Mod 下载完成",
-            `已下载并入库 ${imported.length} 个（列表已刷新）：\n${lines.join("\n")}\n\n` +
-            (badItems.length ? `另有 ${badItems.length} 个失败，可在本页重试。\n\n` : "") +
+            t("Mod 下载完成"),
+            t("已下载并入库") + " " + imported.length + t(" 个（列表已刷新）：") + "\n" + lines.join("\n") + "\n\n" +
+            (badItems.length ? t("另有") + " " + badItems.length + t(" 个失败，可在本页重试。") + "\n\n" : "") +
             (unknown.length
-              ? `有 ${unknown.length} 个没识别出角色（${unknown.map(nameOf).join("、")}），` +
-                "去「服装 Mod / 辅助 Mod」页点它的「⋯ → 更换归属」设定。"
+              ? t("有") + " " + unknown.length + t(" 个没识别出角色（") + unknown.map(nameOf).join(t("、")) + t("），去「服装 Mod / 辅助 Mod」页点它的「⋯ → 更换归属」设定。")
               : ""),
           );
         } else if (manualItems.length) {
-          await showAlert("需要手动解压",
+          await showAlert(t("需要手动解压"),
             manualItems.map((it) => `· ${nameOf(it)}\n    ${it.message || ""}`).join("\n"));
         } else if (badItems.length) {
-          await showAlert("Mod 下载失败",
-            badItems.map((it) => `· ${nameOf(it)}：${it.message || it.status}`).join("\n"));
+          await showAlert(t("Mod 下载失败"),
+            badItems.map((it) => `· ${nameOf(it)}${t("：")}${it.message || it.status}`).join("\n"));
         }
       }
       wasModDlActive = modDlActive.value;
@@ -552,13 +550,13 @@ async function pollProgress() {
       const missing = results.filter((r) => String(r && r.status) === "missing").length;
       const message = String(p.message || "");
       if (failed > 0) {
-        showToast(`安装结束，但有 ${failed} 项失败 —— 详情见右侧安装日志`, "danger");
+        showToast(t("安装结束，但有") + " " + failed + t(" 项失败 —— 详情见右侧安装日志"), "danger");
       } else if (missing > 0) {
-        showToast(`安装结束，仍有 ${missing} 项缺失 —— 详情见右侧安装日志`, "warn");
+        showToast(t("安装结束，仍有") + " " + missing + t(" 项缺失 —— 详情见右侧安装日志"), "warn");
       } else if (message.startsWith("失败")) {
-        showToast(`安装失败：${message}`, "danger");
+        showToast(t("安装失败：") + message, "danger");
       } else {
-        showToast("依赖安装/更新完成", "success");
+        showToast(t("依赖安装/更新完成"), "success");
       }
       // 缺 VC++ 运行库（后端在结果里补的那条 `needs_install`）⇒ 问一次
       // 「安装（推荐）/ 跳过」—— 跳过不挡任何流程，装完刷新一次组件清单。
@@ -575,7 +573,7 @@ async function pollProgress() {
 // 那边 `onMounted` 读到 `autoStartDeps` 标志后调 `start_full_update`，并显示进度与日志。
 // （用户原话：「把下载从依赖里面抽出来……依赖也跳转下载」。）
 function start() {
-  store.autoStartDepsNote = "开始安装/更新组件…";
+  store.autoStartDepsNote = t("开始安装/更新组件…");
   store.autoStartDeps = true;
   store.tab = "downloads";
 }
@@ -602,20 +600,20 @@ onUnmounted(() => { if (timer) clearInterval(timer); });
 <template>
   <div class="space-y-4">
     <div class="flex flex-wrap gap-2">
-      <Btn @click="refresh">重新扫描</Btn>
+      <Btn @click="refresh">{{ t("重新扫描") }}</Btn>
       <!-- ⚠️ 原来这里是模板里裸调 `call('ensure_initialized')`（2026-10-03 修）：
            连 `await` 都没有 ⇒ 结果丢弃、页面也不刷新、失败也看不到。 -->
-      <Btn @click="checkAndComplete">检查并补齐</Btn>
-      <Btn @click="dryRunCheck">检查状态（不下载）</Btn>
+      <Btn @click="checkAndComplete">{{ t("检查并补齐") }}</Btn>
+      <Btn @click="dryRunCheck">{{ t("检查状态（不下载）") }}</Btn>
       <!-- 下载统一交给「下载」页去跑、去看（2026-10-07 用户：「依赖页只留状态+开关+
            更新入口……把下载从依赖里面抽出来，依赖也跳转下载」）。 -->
-      <Btn id="dep-update-all-btn" variant="primary" @click="start">下载并补齐组件</Btn>
+      <Btn id="dep-update-all-btn" variant="primary" @click="start">{{ t("下载并补齐组件") }}</Btn>
       <!-- ★ 离线依赖包（用户 2026-10-12）：给**连不上 GitHub** 的机器用 —— 从 QQ 群拿到
            `deps-bundle.zip` 后在这里导入；包里的组件会被各安装链路按"离线源优先"自动装上，
            之后点一次「下载并补齐组件」（或一键启动）即完成配置。 -->
       <Btn @click="importDepsBundle"
-           title="导入离线依赖包（deps-bundle.zip，连不上 GitHub 时的应急包）；导入前会逐条校验清单与哈希">导入依赖包…</Btn>
-      <Btn size="sm" @click="goDownloads">去「下载」页</Btn>
+           :title="t('导入离线依赖包（deps-bundle.zip，连不上 GitHub 时的应急包）；导入前会逐条校验清单与哈希')">{{ t("导入依赖包…") }}</Btn>
+      <Btn size="sm" @click="goDownloads">{{ t("去「下载」页") }}</Btn>
     </div>
 
     <!-- 2026-10-07：原来是"左栏 + 右栏安装日志"两列布局，日志已搬到「下载」页 ⇒ 单列。 -->
@@ -627,18 +625,18 @@ onUnmounted(() => { if (timer) clearInterval(timer); });
     <div class="grid gap-3" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr))">
       <div class="card"><div class="card-body">
         <div class="text-xl font-semibold">{{ okCount }}</div>
-        <div class="text-xs mt-0.5" style="color: var(--text-muted)">已就位组件</div>
+        <div class="text-xs mt-0.5" style="color: var(--text-muted)">{{ t("已就位组件") }}</div>
       </div></div>
       <div class="card"><div class="card-body">
         <div class="text-xl font-semibold">{{ missingCount }}</div>
-        <div class="text-xs mt-0.5" style="color: var(--text-muted)">缺失组件</div>
+        <div class="text-xs mt-0.5" style="color: var(--text-muted)">{{ t("缺失组件") }}</div>
       </div></div>
       <!-- 下载入口卡：数字来自 store.activeDownloads（App.vue 每 2 秒统一轮询），
            点一下就去「下载」页看进度 —— 本页不重复显示进度。 -->
       <div class="card cursor-pointer" @click="goDownloads"><div class="card-body">
         <div class="text-xl font-semibold">{{ store.activeDownloads > 0 ? store.activeDownloads : "—" }}</div>
         <div class="text-xs mt-0.5" style="color: var(--text-muted)">
-          {{ store.activeDownloads > 0 ? "下载进行中 · 点此查看" : "当前没有下载" }}
+          {{ store.activeDownloads > 0 ? t("下载进行中 · 点此查看") : t("当前没有下载") }}
         </div>
       </div></div>
     </div>
@@ -647,7 +645,7 @@ onUnmounted(() => { if (timer) clearInterval(timer); });
          用户要求「把下载从依赖里面抽出来……依赖页只留状态+开关+更新入口」——
          进度条留在这里会变成第二个真相（两页各显示一份进度，用户不知道该信哪个）。 -->
 
-    <Card v-if="deps.length" title="组件状态">
+    <Card v-if="deps.length" :title="t('组件状态')">
       <div class="divide-y" style="border-color: var(--border)">
         <div v-for="d in deps" :key="d.key" class="py-2.5 flex items-center justify-between gap-4"
              :style="{ borderLeft: `3px solid ${rowColor(d)}`, paddingLeft: '10px' }">
@@ -666,7 +664,7 @@ onUnmounted(() => { if (timer) clearInterval(timer); });
                  不再在组件行里再放一个同类按钮。 -->
             <template v-if="d.key && d.key.startsWith('dlssnr_')">
               <Btn size="sm" variant="primary" @click="installVariant(d)">
-                {{ d.present ? "重新安装" : "下载并启用" }}
+                {{ d.present ? t("重新安装") : t("下载并启用") }}
               </Btn>
             </template>
             <!-- ⚠️ **B4：有新版就在这一行直接更新**（2026-10-03 补回归）。
@@ -674,14 +672,14 @@ onUnmounted(() => { if (timer) clearInterval(timer); });
                  「更新到 vX」按钮 → `startAppUpdateFromDep()`（切依赖页 + 进度条）。
                  换代后组件行只有名称/版本/Badge ⇒ 用户看到"有新版"却点不了。 -->
             <Btn v-if="d.update_available" size="sm" variant="primary"
-                 @click="updateComponent(d)">更新到 {{ d.latest || "最新" }}</Btn>
-            <Badge :tone="tone(d)">{{ d.status || "未知" }}</Badge>
+                 @click="updateComponent(d)">{{ t("更新到") }} {{ d.latest || t("最新") }}</Btn>
+            <Badge :tone="tone(d)">{{ t(d.status || "未知") }}</Badge>
           </div>
         </div>
       </div>
     </Card>
 
-    <Card v-if="required.length" title="被引用的依赖名">
+    <Card v-if="required.length" :title="t('被引用的依赖名')">
       <div class="flex flex-wrap gap-1.5">
         <Badge v-for="r in required" :key="r" tone="muted">{{ r }}</Badge>
       </div>

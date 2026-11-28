@@ -12,17 +12,31 @@ python scripts/build_release.py --no-push        # 不自动推 main（默认构
 python scripts/build_release.py --modtest-fake-old # 测试目录改放伪旧版（隐含 --with-fake-old）
 python scripts/build_release.py --modtest-both     # 最新版与伪旧版**都**放进测试目录
 
+两个版本形态（词与 `endfieldmodcontroller/edition.py` 一致；**默认只做完整版**）：
+
+    python scripts/build_release.py --edition lite     # 只做轻量版（不打包任何 ReShade 二进制）
+    python scripts/build_release.py --all-editions     # 一次产出完整版 + 轻量版
+
 产出（全部在 `dist\\`）：
 
-    EndfieldModController.exe                      最新版（唯一发行的 exe）
-    EndfieldModController-<版本>.exe               带版本号副本（本地留档，不上传）
-    EndfieldModController-0.1.9-from-<版本>.exe    伪旧版（版本号 0.1.9、代码最新，用于测自更新）
+    EndfieldModController.exe                      完整版最新（默认，行为与以前一样）
+    EndfieldModController-<版本>.exe               完整版带版本号副本（本地留档，不上传）
+    EndfieldModController-0.1.9-from-<版本>.exe    完整版伪旧版（版本号 0.1.9、代码最新，测自更新）
+    EndfieldModController-Lite.exe                 轻量版最新（`--edition lite` / `--all-editions`）
+    EndfieldModController-Lite-<版本>.exe          轻量版带版本号副本（本地留档，不上传）
+    EndfieldModController-Lite-0.1.9-from-<版本>.exe  轻量版伪旧版（同上，按需构建）
     _old\\                                         上一代及更早的带版本号副本（自动归置）
 
-最后一步会把**一份** exe 同步进**测试目录** `..\\modtest\\`：**先清掉那里原有的 `*.exe`**，
-再放最新版（带 `--modtest-fake-old` 则改放伪旧版，用来测自更新）—— 用户要求「以后都要把 modtest
-里的原来的 exe 去掉，如果我没说就直接放最新版」。控制器 / 游戏 / XXMI 正在运行就**跳过、不杀进程**
-（等他退出后重跑本脚本）；除 exe 外什么都不动（`config.json` / `runtime\\` / `library\\` / `assets\\`）。
+构建记录（`prepare_release.py` 的发版闸读它）：`dist/build-info.json` 记**完整版**、
+`dist/build-info-lite.json` 记**轻量版** —— 两版各写各的文件，`--all-editions` 时不会互相
+覆盖；两次构建写的是两个文件，谁都不会把对方那条记录写坏。
+
+最后一步会把 exe 同步进**测试目录** `..\\modtest\\`：先清掉**本次要放的形态**原有的 `*.exe`，
+再放最新版（带 `--modtest-fake-old` 则改放伪旧版，用来测自更新）。默认放**一份**；
+`--all-editions` 时两版**各放一份**（`EndfieldModController.exe` / `EndfieldModController-Lite.exe`）。
+只构建一版时**不会删掉另一版**（两版可以并排留在 modtest 里）。
+**只有 EMC 自己**在运行才跳过同步、且不杀进程（2026-11-28 用户要求：不再检查游戏本体 / XXMI）；
+除 exe 外什么都不动（`config.json` / `runtime\\` / `library\\` / `assets\\`）。
 `--skip-modtest` 可整步关掉。
 
 静态检查（任一失败即中止，**不会**产出半成品）：
@@ -56,6 +70,11 @@ DIST = ROOT / "dist"
 OLD_DIR = DIST / "_old"
 VERSION_PY = ROOT / "endfieldmodcontroller" / "version.py"
 APP_NAME = "EndfieldModController"
+APP_NAME_LITE = "EndfieldModController-Lite"
+#: 版本形态 → exe 名（与 `build_exe.py` 的 `APP_NAMES` 同一套；脚本之间**刻意不互相 import**，
+#: 见 `build_deps_bundle.py` 里 `_resolve_modtest_dir` 那句注释的做法）。
+EDITIONS: tuple[str, ...] = ("full", "lite")
+APP_NAMES: dict[str, str] = {"full": APP_NAME, "lite": APP_NAME_LITE}
 FAKE_VERSION = "0.1.9"
 # 测试目录：默认是工作区**旁边**的 modtest（`D:\zmdmod\modecontroller` → `D:\zmdmod\modtest`）。
 # 构建完自动把最新版 exe 同步进去（用户 2026-09-30：「这个需要构建脚本自动处理」——
@@ -74,8 +93,12 @@ def _resolve_modtest_dir() -> Path:
 
 
 MODTEST_DIR = _resolve_modtest_dir()
-# 这几个进程在跑 = "控制器/游戏/XXMI 正开着"：此时**不替换 exe、也不杀进程**，等他自己退出。
-GUARD_PROCESSES = ("Endfield", "XXMI Launcher", "EndfieldModController")
+# 只有 **EMC 自己**在跑时才挡住替换（不杀进程、等他自己退出）。
+# ⚠️ 2026-11-28 用户要求：**不要再检查游戏本体 / XXMI Launcher** —— 它们开着并不妨碍
+#   把 exe 复制进测试目录（复制不碰它们正在用的文件），以前把它们算进去，结果
+#   「游戏开着 ⇒ 整个跳过同步」，两版测试包放不进去。
+# 前缀匹配：完整版是 EndfieldModController，轻量版是 EndfieldModController-Lite，都算。
+GUARD_PROCESS_PREFIX = "EndfieldModController"
 
 
 def _fix_console() -> None:
@@ -100,6 +123,90 @@ def read_version() -> str:
     if not match:
         raise SystemExit("!! version.py 里找不到 __version__")
     return match.group(1)
+
+
+def parse_editions(args: list[str]) -> list[str]:
+    """本次要构建哪些形态：`--all-editions` ⇒ 两版都做，否则按 `--edition`（缺省 full）。
+
+    取值口径与 `build_exe.py` 的 `--edition` 一致（同一份 `EDITIONS`）。两个脚本**刻意不
+    互相 import**：import 会把对方的模块级代码（控制台 reconfigure、路径探测）一并拉进来，
+    所以这十几行各留一份 —— 同样的先例在 `build_deps_bundle._resolve_modtest_dir`。
+    """
+    if "--all-editions" in args:
+        return list(EDITIONS)
+    edition = "full"
+    for index, item in enumerate(args):
+        if item == "--edition" and index + 1 < len(args):
+            edition = args[index + 1]
+        elif item.startswith("--edition="):
+            edition = item.split("=", 1)[1]
+    value = str(edition).strip().lower()
+    if value not in EDITIONS:
+        raise SystemExit(f"!! --edition 只能是 {'/'.join(EDITIONS)}，收到的是 {edition!r}")
+    return [value]
+
+
+def edition_label(edition: str) -> str:
+    return "轻量版" if edition == "lite" else "完整版"
+
+
+def exe_name(edition: str) -> str:
+    """某个形态「最新版」的 exe 名（不带目录）。"""
+    return f"{APP_NAMES[edition]}.exe"
+
+
+def versioned_name(edition: str, version: str) -> str:
+    """某个形态「带版本号副本」的 exe 名。"""
+    return f"{APP_NAMES[edition]}-{version}.exe"
+
+
+def fake_old_name(edition: str, version: str) -> str:
+    """某个形态「伪旧版」的 exe 名。"""
+    return f"{APP_NAMES[edition]}-{FAKE_VERSION}-from-{version}.exe"
+
+
+def build_info_path(edition: str) -> Path:
+    """某个形态的构建记录文件路径。
+
+    完整版沿用历史名 `dist/build-info.json`（`prepare_release.py` 的发版闸读它）；
+    轻量版写 `dist/build-info-lite.json`。**两版各写各的文件**，因此 `--all-editions`
+    或者"先建完整版、再单独建轻量版"都不会把对方那条记录覆盖掉。
+
+    ⚠️ 轻量版构建**不动** `build-info.json`（否则发版闸会拿 Lite 的内嵌版本去核对完整版的
+    exe）；反过来完整版也不碰 `build-info-lite.json`。
+    """
+    return DIST / ("build-info.json" if edition == "full" else f"build-info-{edition}.json")
+
+
+def record_build_info(edition: str, version: str) -> None:
+    """把某个形态"exe 内嵌的版本"写进它的构建记录（见 `build_info_path`）。
+
+    `prepare_release.py` 的发版闸读这个文件：exe 必须**自称**本次要发布的正式号，否则用户
+    装上后会自更新无限提示（v1.0.19 的事故）。`edition` 字段让发版闸分得清两版 ——
+    「完整版的记录」和「轻量版的记录」绝不会落进同一个文件。
+    """
+    import json as _json
+
+    exe = DIST / exe_name(edition)
+    path = build_info_path(edition)
+    try:
+        path.write_text(_json.dumps({
+            "version": version,
+            "edition": edition,
+            "artifact": exe.name,
+            "sha256": sha256_of(exe),
+            "built_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    except Exception as exc:  # noqa: BLE001
+        print(f"      !! {path.name} 写入失败：{exc}", flush=True)
+        return
+    # 只影响显示的路径写法（测试里 `DIST` 会被指到临时目录），失败不该让上面那次"写成功"
+    # 被当成"写失败"报出来。
+    try:
+        shown: Path | str = path.relative_to(ROOT)
+    except ValueError:
+        shown = path
+    print(f"      已记录 {shown}（{edition_label(edition)}内嵌版本 = {version}）", flush=True)
 
 
 # 发版时**必须和 version.py 一起改**的地方（用户 2026-09-30 要求：
@@ -284,11 +391,16 @@ def archive_old_exes(version: str) -> list[str]:
     """把 dist 里**非当前版本**的带版本号副本挪到 `_old\\`；旧伪旧版直接删。
 
     用户 2026-10-01 的规则：历史版本在下一版构建后归到单独目录；伪旧版"上一代用完就删"。
+    ⚠️ `keep` 一律按**全部形态**算（`for edition in EDITIONS`），不是只按本次构建的那几个：
+    `--edition lite` 单建轻量版时，完整版的 `EndfieldModController.exe` /
+    `…-<版本>.exe` 也是当前产物，绝不能因为"这次没建它"就被归进 `_old`。
     """
     moved: list[str] = []
     OLD_DIR.mkdir(parents=True, exist_ok=True)
-    keep = {f"{APP_NAME}.exe", f"{APP_NAME}-{version}.exe",
-            f"{APP_NAME}-{FAKE_VERSION}-from-{version}.exe"}
+    keep: set[str] = set()
+    for edition in EDITIONS:
+        keep |= {exe_name(edition), versioned_name(edition, version),
+                 fake_old_name(edition, version)}
     for item in sorted(DIST.glob(f"{APP_NAME}*.exe")):
         if item.name in keep:
             continue
@@ -310,13 +422,16 @@ def clean_dist_extras() -> None:
 
     用户 2026-10-01 要求「只留构建产物」。这些都属于可再生成的运行数据：
     `config.json` / `runtime\\` / `library\\` 是 exe 在 dist 里启动时自己建的，
-    `EndfieldModController\\` 是早期 `--onedir` 构建的残留目录（与 exe 同名）。
+    `EndfieldModController\\`（以及 `EndfieldModController-Lite\\`）是 `--onedir` 构建的
+    残留目录（与 exe 同名）。
     """
     removed: list[str] = []
-    onedir = DIST / APP_NAME
-    if onedir.is_dir():
+    for edition in EDITIONS:
+        onedir = DIST / APP_NAMES[edition]
+        if not onedir.is_dir():
+            continue
         shutil.rmtree(onedir, ignore_errors=True)
-        removed.append(f"{APP_NAME}\\（onedir 残留）")
+        removed.append(f"{APP_NAMES[edition]}\\（onedir 残留）")
     for name in ("config.json", "library", "runtime"):
         target = DIST / name
         if target.is_dir():
@@ -331,13 +446,19 @@ def clean_dist_extras() -> None:
         print("      dist 里没有多余东西", flush=True)
 
 
-def build_fake_old(version: str) -> None:
-    """临时把版本号改成 0.1.9 构建一次，产出伪旧版（版本号旧、代码最新）。"""
+def build_fake_old(version: str, edition: str) -> None:
+    """临时把版本号改成 0.1.9 构建一次，产出该形态的伪旧版（版本号旧、代码最新）。
+
+    伪旧版与正式版跑的是**同一套 PyInstaller**，只是 `version.py` 里的号临时改成 0.1.9，
+    所以这里必须把 `--edition` 透传下去 —— 否则"轻量版伪旧版"会变成一份完整版 exe
+    顶着 Lite 的名字，拿它测自更新根本测不到 Lite 的真实行为。
+    """
     original = VERSION_PY.read_text(encoding="utf-8")
     VERSION_PY.write_text(original.replace(f'__version__ = "{version}"', f'__version__ = "{FAKE_VERSION}"'),
                           encoding="utf-8", newline="\n")
     try:
-        run([sys.executable, "scripts/build_exe.py", "--skip-addon"], label=f"构建伪旧版（{FAKE_VERSION}）")
+        run([sys.executable, "scripts/build_exe.py", "--skip-addon", "--edition", edition],
+            label=f"构建{edition_label(edition)}伪旧版（{FAKE_VERSION}）")
     finally:
         VERSION_PY.write_text(original, encoding="utf-8", newline="\n")
         restored = read_version()
@@ -345,8 +466,8 @@ def build_fake_old(version: str) -> None:
         if restored != version:
             raise SystemExit(f"!! version.py 还原异常：期望 {version}，实际 {restored}")
 
-    built = DIST / f"{APP_NAME}.exe"
-    name = f"{APP_NAME}-{FAKE_VERSION}-from-{version}.exe"
+    built = DIST / exe_name(edition)
+    name = fake_old_name(edition, version)
     target = DIST / name
     shutil.move(str(built), str(target))
     shutil.copy2(target, ROOT / name)
@@ -354,11 +475,15 @@ def build_fake_old(version: str) -> None:
 
 
 def _running_processes() -> list[str]:
-    """返回正在运行的、"会挡住替换"的进程名（没有则空列表）。"""
-    quoted = ",".join(f"'{name}'" for name in GUARD_PROCESSES)
+    """返回正在运行的 **EMC** 进程名（完整版 / 轻量版都算；没有则空列表）。
+
+    ⚠️ 只查 EMC 自己（2026-11-28 用户要求）。游戏本体 / XXMI Launcher 开着**不影响**
+    把 exe 复制进测试目录 —— 以前它们也算"挡路"，于是游戏一开着，两版测试包根本放不进去。
+    """
     script = (
-        f"Get-Process -Name {quoted} -ErrorAction SilentlyContinue "
-        "| Select-Object -ExpandProperty ProcessName"
+        "Get-Process -ErrorAction SilentlyContinue | "
+        f"Where-Object {{ $_.ProcessName -like '{GUARD_PROCESS_PREFIX}*' }} | "
+        "Select-Object -ExpandProperty ProcessName"
     )
     try:
         result = subprocess.run(
@@ -371,19 +496,35 @@ def _running_processes() -> list[str]:
     return sorted({line.strip() for line in result.stdout.splitlines() if line.strip()})
 
 
-def sync_to_modtest(source: Path, *, artifact: str = "latest") -> None:
-    """把**一份** exe 同步进测试目录（`<工作区父目录>\\modtest`）。
+def _modtest_edition(name: str) -> str:
+    """测试目录里的一个 exe 属于哪个形态（按产物名判断：轻量版带 -Lite）。"""
+    return "lite" if "-lite" in str(name).lower() else "full"
+
+
+def sync_to_modtest(sources: list[Path], *, artifact: str = "latest") -> None:
+    """把 exe 同步进测试目录（`<工作区父目录>\\modtest`）。
 
     用户 2026-09-30 的两条要求：
     ① 「**这个需要构建脚本自动处理**」—— 以前每次构建完都要他提醒我复制；
     ② 「以后都要把 modtest 里的**原来的 exe 去掉**，如果我没说就直接放**最新版**，
-        你这次帮我把**伪旧版**放进去」→ 所以这里**先清掉测试目录里所有 `*.exe`**，
-        再放指定的那一份：`artifact="latest"` → `EndfieldModController.exe`（默认）；
-        `artifact="fake-old"` → 保持伪旧版自己的文件名。
+        你这次帮我把**伪旧版**放进去」→ 所以这里先清掉**本次形态**的旧 exe，
+        再放指定的那几份：`artifact="latest"` → 最新版；`artifact="fake-old"` → 伪旧版；
+        `artifact="both"` → 两者各一份。
 
-    原则：程序/游戏**在跑就跳过，绝不为了替换去杀进程**；除 `*.exe` 之外什么都不动
+    放几个由 `sources` 决定（`--all-editions` 时是"完整版 + 轻量版"两个文件），**目标文件名
+    一律沿用源文件名** —— 完整版因此仍是 `EndfieldModController.exe`（与以前一模一样），
+    轻量版则是 `EndfieldModController-Lite.exe`（不会伪装成完整版）。
+
+    原则：**只有 EMC 自己**在跑才跳过（2026-11-28 用户要求：不再检查游戏本体 / XXMI），
+    且绝不为了替换去杀进程；除 `*.exe` 之外什么都不动
     （`config.json` / `runtime\\` / `library\\` / `assets\\` 一律不碰，assets 137 MB 删了要重下）。
+
+    ⚠️ 清理只清**本次要放的形态**：只构建完整版时保留测试目录里的 Lite（反之亦然），
+    这样两版可以一直并排放在 modtest 里测；两版都放时照旧清空重建。
     """
+    if not sources:
+        print("      !! 没有要放的 exe（调用方传了空清单），什么都没动", flush=True)
+        return
     if not MODTEST_DIR.is_dir():
         print(f"      跳过：没有测试目录 {MODTEST_DIR}", flush=True)
         return
@@ -393,13 +534,17 @@ def sync_to_modtest(source: Path, *, artifact: str = "latest") -> None:
         # 2026-10-04 就因为只写了"等他退出后重跑本脚本"，我看漏了这句、误判成"脚本静默失败"，
         # 让用户拿着旧版测了半小时。所以补上"不用重新构建、直接把 dist 那份拷过去"这条更省事的路。
         print(f"      ！跳过同步：{', '.join(running)} 正在运行 —— 不替换、也不杀进程", flush=True)
+        dist_paths = "、".join(str(src) for src in sources)
+        dest_paths = "、".join(str(MODTEST_DIR / src.name) for src in sources)
         print(f"        他关掉之后有两种做法：① 重跑本脚本；"
-              f"② **不用重新构建**，直接把 {source.parent / (APP_NAME + '.exe')} 复制到 "
-              f"{MODTEST_DIR / (APP_NAME + '.exe')}", flush=True)
+              f"② **不用重新构建**，直接把 {dist_paths} 复制到 {dest_paths}", flush=True)
         return
 
-    # ① 先清掉原来的 exe（删除类动作：先打印清单，删完**回读**确认）
-    stale = sorted(MODTEST_DIR.glob("*.exe"))
+    # ① 先清掉**本次要放的形态**的旧 exe（删除类动作：先打印清单，删完**回读**确认）。
+    #    另一形态（例如只构建完整版时的 Lite）保留 —— 两版可以并排留在 modtest 里。
+    target_editions = {_modtest_edition(src.name) for src in sources}
+    stale = sorted(p for p in MODTEST_DIR.glob("*.exe")
+                   if _modtest_edition(p.name) in target_editions)
     if stale:
         print(f"      清掉原有 exe（{len(stale)} 个）：{', '.join(p.name for p in stale)}", flush=True)
         for path in stale:
@@ -407,32 +552,29 @@ def sync_to_modtest(source: Path, *, artifact: str = "latest") -> None:
                 path.unlink()
             except OSError as exc:
                 print(f"          !! 删不掉 {path.name}: {exc}", flush=True)
-        left = sorted(p.name for p in MODTEST_DIR.glob("*.exe"))
+        # 只看**本次形态**的残留：另一形态是故意保留的，不能误报成"删不掉"。
+        left = sorted(p.name for p in MODTEST_DIR.glob("*.exe")
+                      if _modtest_edition(p.name) in target_editions)
         if left:
             print(f"          !! 仍有残留（可能被占用）：{', '.join(left)}", flush=True)
     else:
-        print("      测试目录里原本没有 exe", flush=True)
+        print("      测试目录里没有本形态的旧 exe", flush=True)
 
-    # ② 放置。`artifact="both"` 时**最新版与伪旧版各放一份**
-    #（用户 2026-10-03：「这次构建最新版和伪旧版都放进 modtest」—— 两份都在，
-    #  方便直接测自更新：跑伪旧版 → 它自己更新成最新版）。
-    if artifact == "both":
-        dist = source.parent
-        candidates: list[tuple[str, Path, Path]] = []
-        latest = dist / f"{APP_NAME}.exe"
-        if latest.is_file():
-            candidates.append(("latest", latest, MODTEST_DIR / f"{APP_NAME}.exe"))
-        fake = sorted(dist.glob(f"{APP_NAME}-0.1.9-from-*.exe")) or \
-            sorted(p for p in dist.glob("*.exe") if p.name != f"{APP_NAME}.exe")
-        if fake:
-            candidates.append(("fake-old", fake[-1], MODTEST_DIR / fake[-1].name))
-        if not candidates:
-            print("      !! dist 里既没有最新版也没有伪旧版，什么都没放", flush=True)
-            return
-        pieces = candidates
-    else:
-        target = MODTEST_DIR / (f"{APP_NAME}.exe" if artifact == "latest" else source.name)
-        pieces = [(artifact, source, target)]
+    # ② 放置。调用方已经把"这次要放哪几份"算好了（`--modtest-both` 时最新版与伪旧版都在
+    # 那份清单里；用户 2026-10-03：「这次构建最新版和伪旧版都放进 modtest」—— 两份都在，
+    # 方便直接测自更新：跑伪旧版 → 它自己更新成最新版）。
+    pieces: list[tuple[str, Path, Path]] = []
+    for src in sources:
+        if not src.is_file():
+            print(f"      !! 要放的 {src.name} 其实不在 dist 里，已跳过", flush=True)
+            continue
+        kind = artifact
+        if artifact == "both":
+            kind = "fake-old" if f"-{FAKE_VERSION}-from-" in src.name else "latest"
+        pieces.append((kind, src, MODTEST_DIR / src.name))
+    if not pieces:
+        print("      !! 清单里的 exe 一个都不在 dist 里，什么都没放", flush=True)
+        return
 
     for kind, src, target in pieces:
         shutil.copy2(src, target)
@@ -491,7 +633,13 @@ def main() -> int:
     _fix_console()
     args = sys.argv[1:]
     version = read_version()
-    print(f"== 构建 EndfieldModController {version} ==", flush=True)
+    editions = parse_editions(args)
+    print(f"== 构建 EndfieldModController {version}（{' + '.join(edition_label(e) for e in editions)}） ==",
+          flush=True)
+    # 先把产物名打出来：两版同时构建时，一眼就能看到这次到底会产出哪几个文件
+    for edition in editions:
+        print(f"   {edition_label(edition)}：dist\\{exe_name(edition)}"
+              f"（带版本号副本 {versioned_name(edition, version)}）", flush=True)
     check_readme_versions(version)
     # 版本号规则核对（用户 2026-10-02）：**只跟"最新 Release"比** —— 本地应为「最新 Release + 1」；
     # 只推了源码没发 Release 时不动号。查不到只提示、不中止（这条是软约束）。
@@ -502,7 +650,11 @@ def main() -> int:
         return 1
 
     # [0] 先编译统一控制面板（ReShade addon）：它要随进 exe，构建晚于它就等于带了旧面板。
-    if "--skip-addon" in args:
+    #     ⚠️ 只有**完整版**用得上它（`build_exe.py --edition lite` 把 `assets/addon/` 整个
+    #     排除在包外）⇒ 纯轻量版构建整步跳过，省掉一套编面板的工具链。
+    if "full" not in editions:
+        print("[0/7] 跳过面板编译（本次只有轻量版，assets/addon/ 不进包）", flush=True)
+    elif "--skip-addon" in args:
         print("[0/7] 已按参数跳过面板编译（--skip-addon）", flush=True)
     else:
         print("[0/7] 编译统一控制面板（ReShade addon）", flush=True)
@@ -518,12 +670,15 @@ def main() -> int:
     clean_dist_extras()
 
     print("[3/7] 构建最新版", flush=True)
-    run([sys.executable, "scripts/build_exe.py", "--skip-addon"], label="构建最新版")
-    latest = DIST / f"{APP_NAME}.exe"
-    if not latest.is_file():
-        raise SystemExit("!! 没找到 dist/EndfieldModController.exe")
-    versioned = DIST / f"{APP_NAME}-{version}.exe"
-    shutil.copy2(latest, versioned)
+    for edition in editions:
+        # `--skip-addon` 是给 `build_exe.py` 的：面板在第 0 步已经编好（或本来就跳过），
+        # 打出第二份 exe 时不必再编一遍。`--edition` 决定产物名与包内资源。
+        run([sys.executable, "scripts/build_exe.py", "--skip-addon", "--edition", edition],
+            label=f"构建最新版（{edition_label(edition)}）")
+        latest = DIST / exe_name(edition)
+        if not latest.is_file():
+            raise SystemExit(f"!! 没找到 dist/{exe_name(edition)}")
+        shutil.copy2(latest, DIST / versioned_name(edition, version))
 
     # ⚠️ **伪旧版改为按需构建**（2026-10-03 提速）：它跟"最新版"跑的是**同一套 PyInstaller**，
     # 只是把 version.py 临时改成 0.1.9 再打一次 —— 实测整整 **19.3 秒**，
@@ -537,56 +692,60 @@ def main() -> int:
                      or ("--modtest-both" in args))
     if need_fake_old:
         print("[4/7] 构建伪旧版", flush=True)
-        build_fake_old(version)
+        for edition in editions:
+            build_fake_old(version, edition)
     else:
-        existing_fake = DIST / f"{APP_NAME}-{FAKE_VERSION}-from-{version}.exe"
-        if existing_fake.is_file():
-            print(f"[4/7] 跳过伪旧版（已有 {existing_fake.name}；要重建加 --with-fake-old）",
-                  flush=True)
-        else:
-            print("[4/7] 跳过伪旧版（要测自更新请加 --with-fake-old）", flush=True)
+        for edition in editions:
+            existing_fake = DIST / fake_old_name(edition, version)
+            if existing_fake.is_file():
+                print(f"[4/7] 跳过{edition_label(edition)}伪旧版"
+                      f"（已有 {existing_fake.name}；要重建加 --with-fake-old）", flush=True)
+            else:
+                print(f"[4/7] 跳过{edition_label(edition)}伪旧版（要测自更新请加 --with-fake-old）",
+                      flush=True)
 
-    print("[5/7] 把最新版放回 dist\\EndfieldModController.exe", flush=True)
-    shutil.copy2(versioned, latest)
+    print("[5/7] 把最新版放回 dist（伪旧版构建时临时占用过同名文件）", flush=True)
+    for edition in editions:
+        shutil.copy2(DIST / versioned_name(edition, version), DIST / exe_name(edition))
 
     print("[6/7] 同步测试产物到 modtest（先清掉原有的 exe）", flush=True)
     if "--skip-modtest" in args:
         print("      已按参数跳过（--skip-modtest）", flush=True)
-    elif "--modtest-fake-old" in args:
-        fake_old = DIST / f"{APP_NAME}-{FAKE_VERSION}-from-{version}.exe"
-        if fake_old.is_file():
-            sync_to_modtest(fake_old, artifact="fake-old")
-        else:
-            print(f"      !! 找不到伪旧版 {fake_old}，跳过", flush=True)
-    elif "--modtest-both" in args:
-        # 最新版 + 伪旧版**各放一份**（用户 2026-10-03：「这次构建最新版和伪旧版都放进 modtest」）
-        fake_old = DIST / f"{APP_NAME}-{FAKE_VERSION}-from-{version}.exe"
-        if not fake_old.is_file():
-            print(f"      !! 找不到伪旧版 {fake_old} —— 只放最新版", flush=True)
-        sync_to_modtest(latest, artifact="both")
     else:
-        sync_to_modtest(latest, artifact="latest")
+        # 这次要放哪几份：默认最新版；`--modtest-fake-old` 改放伪旧版；`--modtest-both`
+        # 两者各一份（用户 2026-10-03：「这次构建最新版和伪旧版都放进 modtest」）。
+        # `--all-editions` 时每个形态各算一份，所以清单按 editions 展开。
+        if "--modtest-fake-old" in args:
+            artifact = "fake-old"
+            wanted = [fake_old_name(edition, version) for edition in editions]
+        elif "--modtest-both" in args:
+            artifact = "both"
+            wanted = [name for edition in editions
+                      for name in (exe_name(edition), fake_old_name(edition, version))]
+        else:
+            artifact = "latest"
+            wanted = [exe_name(edition) for edition in editions]
+        for name in wanted:
+            if not (DIST / name).is_file():
+                hint = "（要先加 --with-fake-old 构建）" if FAKE_VERSION in name else ""
+                print(f"      !! 找不到 {DIST / name}{hint}，跳过这一份", flush=True)
+        sync_to_modtest([DIST / name for name in wanted], artifact=artifact)
 
     # 记录**实际内嵌的版本**（2026-10-06 加）：`prepare_release.py` 靠它核对
     # "要发布的这个 exe 到底自称哪一版"。v1.0.19 出过一次事故：exe 是用 `1.0.19-beta`
     # 构建的、发版后才把源码版本号收成正式号 ⇒ 发出去的 exe 自称 beta ⇒
     # 用户装上后自更新**无限提示**（「一直让我重启并更新，重启后还是 beta 版」）。
-    try:
-        import json as _json
-
-        (DIST / "build-info.json").write_text(_json.dumps({
-            "version": version,
-            "artifact": latest.name,
-            "sha256": sha256_of(latest),
-            "built_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        print(f"      已记录 dist/build-info.json（内嵌版本 = {version}）", flush=True)
-    except Exception as exc:  # noqa: BLE001
-        print(f"      !! build-info.json 写入失败：{exc}", flush=True)
+    # 两版各写各的文件（见 `build_info_path`）：`--all-editions` 时谁都不会覆盖对方；
+    # 单独建轻量版时也**不动** `build-info.json`（否则发版闸会拿 Lite 的版本去核对完整版）。
+    for edition in editions:
+        record_build_info(edition, version)
 
     print("[7/7] 产物清单", flush=True)
-    for item in (latest, versioned, DIST / f"{APP_NAME}-{FAKE_VERSION}-from-{version}.exe",
-                 ROOT / f"{APP_NAME}-{FAKE_VERSION}-from-{version}.exe"):
+    products: list[Path] = []
+    for edition in editions:
+        products += [DIST / exe_name(edition), DIST / versioned_name(edition, version),
+                     DIST / fake_old_name(edition, version), ROOT / fake_old_name(edition, version)]
+    for item in products:
         if item.is_file():
             stamp = time.strftime("%H:%M:%S", time.localtime(item.stat().st_mtime))
             print(f"      {item}  {item.stat().st_size:,} B  {stamp}", flush=True)

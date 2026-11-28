@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // 全局 Toast + 命令式弹窗（保持旧 app.js 的 API 与语义，调用方一字不改）。
 import { reactive } from "vue";
+import { t } from "./i18n.js";
 
 export const uiState = reactive({
   toasts: [],           // { id, text }
@@ -26,7 +27,7 @@ export function showProgressToast(key, text) {
   if (!key) return;
   const existing = progressToasts.get(key);
   if (existing) {
-    const found = uiState.toasts.find((t) => t.id === existing);
+    const found = uiState.toasts.find((toast) => toast.id === existing);
     if (found) {
       found.text = text;
       return;
@@ -41,7 +42,7 @@ export function hideProgressToast(key) {
   const id = progressToasts.get(key);
   if (!id) return;
   progressToasts.delete(key);
-  const i = uiState.toasts.findIndex((t) => t.id === id);
+  const i = uiState.toasts.findIndex((toast) => toast.id === id);
   if (i >= 0) uiState.toasts.splice(i, 1);
 }
 
@@ -50,7 +51,7 @@ export function showToast(text, tone) {
   const id = ++toastSeq;
   uiState.toasts.push({ id, text, tone: tone || inferTone(text) });
   setTimeout(() => {
-    const i = uiState.toasts.findIndex((t) => t.id === id);
+    const i = uiState.toasts.findIndex((toast) => toast.id === id);
     if (i >= 0) uiState.toasts.splice(i, 1);
   }, 2600);
 }
@@ -74,7 +75,7 @@ export function showToast(text, tone) {
 // （原来只返回 true/false），取消仍然是 false。重命名走的就是这条。
 // 两者可以同时给：`input` 管"显示输入框 + 交回文本"，`requireText` 管"能不能点确认"。
 export function showModalDialog({
-  title, message, okText = "确定", cancelText = "取消",
+  title, message, okText = t("确定"), cancelText = t("取消"),
   showCancel = true, link = null, extraButtons = [], focusCancel = false,
   holdSeconds = 0, requireText = "", input = null,
 }) {
@@ -103,10 +104,10 @@ export function resolveDialog(value) {
 }
 
 export function showAlert(title, message) {
-  return showModalDialog({ title, message, okText: "知道了", showCancel: false });
+  return showModalDialog({ title, message, okText: t("知道了"), showCancel: false });
 }
 
-export function showConfirm(title, message, okText = "确定", cancelText = "取消") {
+export function showConfirm(title, message, okText = t("确定"), cancelText = t("取消")) {
   return showModalDialog({ title, message, okText, cancelText });
 }
 

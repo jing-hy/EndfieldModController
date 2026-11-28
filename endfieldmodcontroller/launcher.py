@@ -17,6 +17,7 @@ from . import activation
 from . import core
 from . import dependencies
 from . import diagnostics
+from . import edition
 from . import integrity
 from . import runtime_deps
 from .config import AppConfig
@@ -587,6 +588,12 @@ def sync_effective_reshade_ini(config: AppConfig, *, log: Callable[[str], None] 
     所以这个函数是**幂等**的，并且在启动流程里**调用两次**（prepare 之后一次保证目标存在，
     初始化之后再调一次保证内容正确）。
     """
+    # Lite 不写任何 ReShade 文件：安装组件那条路（api._sync_firstperson_ini_after_install）
+    # 也会直接调这里，所以判据放函数里一处。
+    if edition.is_lite():
+        return {"ok": False, "source": str(config.dlss5_ini_path), "target": "",
+                "created": False, "enhancer": 0, "style": 0, "font": "",
+                "reason": "轻量版不含 ReShade"}
     source = config.dlss5_ini_path
     target = config.reshade_runtime_path / "ReShade.ini"
     result: dict[str, Any] = {"ok": False, "source": str(source), "target": str(target),
@@ -635,6 +642,12 @@ def prepare_reshade_runtime(config: AppConfig, controller_dir: Path) -> dict[str
     写到 `runtime\\reshade\\Addons\\`，那份文件永远不会被加载 —— 见
     `reshade_integration` 模块头的说明。
     """
+    # Lite 不写任何 ReShade 文件：别的入口（api.prepare / api.repair_integrity）也会
+    # 走到这里，判据就放在函数里一处，别指望每个调用点都记得跳过。
+    if edition.is_lite():
+        return {"reshade_dir": "", "panel_dir": "", "addon": "", "actions_tsv": "",
+                "user_ini_path": str(config.user_ini_path), "deploy": {},
+                "skipped": "轻量版不含 ReShade"}
     reshade_dir = config.reshade_runtime_path
     reshade_dir.mkdir(parents=True, exist_ok=True)
     (reshade_dir / "reshade-shaders" / "Shaders").mkdir(parents=True, exist_ok=True)
@@ -1738,8 +1751,10 @@ def dlss5_injection_targets(config: AppConfig) -> list[str]:
     RenoDX-DLSS5 与 Endfield Enhancer 两个插件，EFMI 负责服装 Mod，互不抢 hook。
     """
     targets: list[str] = []
+    lite = edition.is_lite()
     dll = config.dlss5_dll_path
-    if not dll.is_file():
+    # Lite 不含 ReShade：底座本来就没有，缺它不是故障（不许拦启动），只留 EFMI loader。
+    if not lite and not dll.is_file():
         raise LaunchError(f"DLSS5 ReShade 底座不存在: {dll}")
     # 要不要注入底座：**判据唯一来源**是 `reshade_integration.reshade_base_wanted()`
     # ——「Mod 快捷键锁定」的"能不能锁"也读它。两边必须同一口径，否则就会出现
@@ -1838,8 +1853,12 @@ def ensure_efmi_loader_deployed(config: AppConfig, *,
     return message
 
 
-def configure_dlss5_injection(config: AppConfig, enabled: bool = True) -> dict[str, Any]:
+def configure_dlss5_injection(config: AppConfig, enabled: bool = True, *,
+                              persist: bool = True) -> dict[str, Any]:
     """开/关**注入库**：改写 XXMI 的 EFMI `extra_libraries`（可回滚）。
+
+    `persist=False`：只写 XXMI 配置，**不落** `config.dlss5_injection / reshade_injection`
+    （Lite 走这条：两版共用同一份 config.json，切回 Universal 要原样恢复）。
 
     ⚠️ 函数名带 `dlss5` 是历史命名，**它管的不是"DLSS5 神经渲染"那个开关**，而是
     **所有功能共用的注入底座**（2026-10-07 用户就被这个名字误导过：
@@ -1882,9 +1901,12 @@ def configure_dlss5_injection(config: AppConfig, enabled: bool = True) -> dict[s
     # 同步签名：不然 XXMI 判定为 unsecure setting 会弹 Reset/Keep，点 Reset 就清空注入列表
     importer["extra_libraries_signature"] = sign_xxmi_setting(config_path, importer["extra_libraries"])
     config_path.write_text(json.dumps(data, ensure_ascii=False, indent=4), encoding="utf-8")
-    config.dlss5_injection = enabled
-    config.reshade_injection = "xxmi_extra" if enabled else "none"
-    config.save()
+    # Lite 一律不落这两个键：它们是 ReShade 侧的配置，写进去就占了共用数据根
+    # （切回 Universal 时用户原来的值必须原样还在）。
+    if persist and not edition.is_lite():
+        config.dlss5_injection = enabled
+        config.reshade_injection = "xxmi_extra" if enabled else "none"
+        config.save()
     # ⚠️ 日志**不要**写成"DLSS5 注入"（2026-10-07 用户被它误导：「为什么我没开dlss5
     #    日志也说按dlss5」）。这里的 `targets` 是 **XXMI 的注入库**（`extra_libraries`）
     #    —— 即 **ReShade 底座 + EFMI**，**所有功能共用的地基**：
@@ -1892,8 +1914,10 @@ def configure_dlss5_injection(config: AppConfig, enabled: bool = True) -> dict[s
     #    它与「DLSS5 神经渲染」那个**开关**没有任何关系（关掉那个开关本条照样打印）。
     _append_log(
         config,
-        f"注入库已写入（ReShade 底座 + EFMI，DLSS5/第一人称共用）: "
-        f"{targets or '(注入库已清空)'}",
+        "注入库已写入（"
+        + ("EFMI，轻量版不含 ReShade" if edition.is_lite()
+           else "ReShade 底座 + EFMI，DLSS5/第一人称共用")
+        + f"）: {targets or '(注入库已清空)'}",
     )
     return {
         "ok": True,
@@ -2020,6 +2044,8 @@ def ensure_injections(config: AppConfig) -> dict[str, Any]:
     """
     actions: list[str] = []
     warnings: list[str] = []
+    # Lite 不含 ReShade：本函数里所有 ReShade 面板 / addon 相关步骤都跳过（见各段注释）。
+    lite = edition.is_lite()
     # 本次是否"为了生成配置临时拉起过一次 XXMI" —— 是的话说明这是第一次启动，
     # 紧接着那次真正的启动有较大概率失败，UI 要在**拉起 XXMI 之后**据此弹提示
     # （用户 2026-10-01：「我说的第一次启动是在拉起 xxmi 之后再谈，选项应该是
@@ -2042,14 +2068,16 @@ def ensure_injections(config: AppConfig) -> dict[str, Any]:
     # ⓪b **最小注入模式**（2026-10-06 用户要求）：先把"除统一管理器面板以外的东西"停掉
     #     （或按记录恢复），再往下走注入库那几步 —— `dlss5_injection_targets()` 是**按开关
     #     状态**决定注入哪几个 dll 的，顺序反了就会出现"开关关了、注入库里还列着"。
-    try:
-        minimal = apply_minimal_injection(config, log=lambda message: actions.append(message))
-        if minimal.get("enabled"):
-            actions.append("最小注入模式：只加载 ReShade 底座与统一管理器面板")
-        for warning in minimal.get("warnings") or []:
-            warnings.append(str(warning))
-    except Exception as exc:  # noqa: BLE001
-        warnings.append(f"应用最小注入模式失败: {exc}")
+    # Lite 跳过「统一管理器」那一步：它搬的是 ReShade 面板 addon，本版本不含 ReShade。
+    if not lite:
+        try:
+            minimal = apply_minimal_injection(config, log=lambda message: actions.append(message))
+            if minimal.get("enabled"):
+                actions.append("最小注入模式：只加载 ReShade 底座与统一管理器面板")
+            for warning in minimal.get("warnings") or []:
+                warnings.append(str(warning))
+        except Exception as exc:  # noqa: BLE001
+            warnings.append(f"应用最小注入模式失败: {exc}")
 
     # ⓪c **Streamline/NGX 的 server manifest 坏了就备份移走**（2026-10-06）。
     #     现场（一台 i9-13980HX + Win11 + RTX 40 系）：游戏启动后 **15 毫秒**连打 10 条
@@ -2145,19 +2173,21 @@ def ensure_injections(config: AppConfig) -> dict[str, Any]:
         warnings.append(f"处理第三方 NGX 注入器失败: {exc}")
 
     # 先按两个开关同步 addon 的启停（同一底座下的 DLSS5 / 第一人称各自独立）
-    status = component_addon_status(config)
-    for component, key, label in (
-        ("dlss5", "dlss5_addon_enabled", "DLSS5 神经渲染"),
-        ("firstperson", "firstperson_addon_enabled", "第一人称 Endfield Enhancer"),
-    ):
-        want = bool(getattr(config, key, True))
-        if bool(status[component]["on"]) != want:
-            try:
-                moved = set_component_addons(config, component, want)
-                detail = ", ".join(moved["moved"]) or "(已一致)"
-                actions.append(f"{label} {'启用' if want else '停用'}: {detail}")
-            except Exception as exc:  # noqa: BLE001
-                warnings.append(f"切换 {label} 失败: {exc}")
+    # Lite 跳过整段：这些 addon 是 ReShade 插件，本版本一个都不铺。
+    if not lite:
+        status = component_addon_status(config)
+        for component, key, label in (
+            ("dlss5", "dlss5_addon_enabled", "DLSS5 神经渲染"),
+            ("firstperson", "firstperson_addon_enabled", "第一人称 Endfield Enhancer"),
+        ):
+            want = bool(getattr(config, key, True))
+            if bool(status[component]["on"]) != want:
+                try:
+                    moved = set_component_addons(config, component, want)
+                    detail = ", ".join(moved["moved"]) or "(已一致)"
+                    actions.append(f"{label} {'启用' if want else '停用'}: {detail}")
+                except Exception as exc:  # noqa: BLE001
+                    warnings.append(f"切换 {label} 失败: {exc}")
 
     # ⓪d **写注入库之前，先把 EFMI 的 loader 部署到位**（2026-10-06 现场）：
     #     否则 `active_efmi_loader()` 会回退到 XXMI 包目录那份，注入库里就写到**另一条路径**
@@ -2170,7 +2200,20 @@ def ensure_injections(config: AppConfig) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001
         warnings.append(f"提前部署 EFMI loader 失败: {exc}")
 
-    if config.dlss5_injection:
+    if lite:
+        # Lite 只要 EFMI loader（服装 Mod 的必需品）；且 persist=False ⇒ 不写
+        # config.dlss5_injection / reshade_injection（两版共用同一数据根）。
+        try:
+            injection = configure_dlss5_injection(config, enabled=True, persist=False)
+            folder_state = injection.get("importer_folder") or {}
+            if folder_state.get("changed"):
+                actions.append(str(folder_state.get("message")))
+            elif folder_state and not folder_state.get("ok"):
+                warnings.append(str(folder_state.get("message")))
+            actions.append("XXMI 注入库: " + " + ".join(injection["extra_libraries"]))
+        except Exception as exc:  # noqa: BLE001
+            warnings.append(f"写入 XXMI 注入库失败: {exc}")
+    elif config.dlss5_injection:
         try:
             injection = configure_dlss5_injection(config, enabled=True)
             # ★ 纠正 `importer_folder` 的结果要**报出来**（自检里是一条"已修好"，
@@ -2238,14 +2281,16 @@ def ensure_injections(config: AppConfig) -> dict[str, Any]:
     #    ⚠️⚠️ **2026-10-07 收口**：这段原来只在本函数里（另一份在 `initialize.ensure_all`
     #       末尾、而且只管 DLSS5）⇒ 走"初始化自检"那条路时不生效。现在统一走
     #       `realign_component_addons()`，两个入口共用同一份判据。
-    try:
-        realigned = realign_component_addons(config, log=_log)
-        if realigned["moved"]:
-            actions.append("按开关归位插件: " + "、".join(realigned["moved"]))
-        for error in realigned["errors"]:
-            warnings.append(f"按开关归位插件失败（{error}）")
-    except Exception as exc:  # noqa: BLE001 - 对齐失败不该拦住启动
-        warnings.append(f"按开关归位插件失败: {exc}")
+    # Lite 跳过：它归位的是 DLSS5 / 第一人称 / 面板这些 ReShade addon，本版本没有它们。
+    if not lite:
+        try:
+            realigned = realign_component_addons(config, log=_log)
+            if realigned["moved"]:
+                actions.append("按开关归位插件: " + "、".join(realigned["moved"]))
+            for error in realigned["errors"]:
+                warnings.append(f"按开关归位插件失败（{error}）")
+        except Exception as exc:  # noqa: BLE001 - 对齐失败不该拦住启动
+            warnings.append(f"按开关归位插件失败: {exc}")
 
     for action in actions:
         _append_log(config, f"注入自检: {action}")
@@ -3191,6 +3236,9 @@ def launch(
     inject_timeout: float = 60.0,
 ) -> dict[str, Any]:
     config.ensure_dirs()
+    # Lite 不含 ReShade：下面 prepare_reshade_runtime / sync_effective_reshade_ini 全跳过
+    #（它们都会往 runtime\reshade 写 ReShade 文件，Lite 一个都不写）。
+    lite = edition.is_lite()
     # ★ 注入现场时间线·**时机 1／5：一键启动最开始**（用户 2026-10-05 要求：
     #   「在一键启动最开始和 xxmi 拉起后和终末地启动后和终末地关闭和崩溃后都要收注入列表」）。
     #   此刻还没净化、还没写注入库，记的是"**这一趟出发前**"的状态 —— 与后面四个点一比，
@@ -3278,8 +3326,15 @@ def launch(
         manifest = dependencies.load_manifest(Path(config.dependency_manifest))
         dependency_updates += [r.__dict__ for r in dependencies.update_all(manifest, config.library_path, dry_run=False)]
 
-    set_launch_stage("正在准备 ReShade 底座与游戏内面板…")
-    reshade = prepare_reshade_runtime(config, controller_dir)
+    set_launch_stage("正在准备注入环境…" if lite else "正在准备 ReShade 底座与游戏内面板…")
+    if lite:
+        # 同一套键的占位（前端照旧读这些字段），但不写任何 ReShade 文件。
+        reshade = {"reshade_dir": "", "panel_dir": "", "addon": "", "actions_tsv": "",
+                   "user_ini_path": str(config.user_ini_path), "deploy": {},
+                   "skipped": "轻量版不含 ReShade"}
+    else:
+        reshade = prepare_reshade_runtime(config, controller_dir)
+    # 只读检测保留：Lite 用它告诉用户"残留会被启动前净化移走"。
     existing_reshade = reshade_integration.detect_existing_reshade(config)
     if not dry_run and game_dir is not None:
         diagnostics.log_runtime_snapshot(config, game_dir=game_dir)
@@ -3292,10 +3347,13 @@ def launch(
     if existing_reshade is not None:
         _append_log(
             config,
-            "检测到游戏目录仍有 ReShade（"
-            + str(existing_reshade.get("ini"))
-            + "）——本方案不使用它，唯一底座由 XXMI 注入；"
-            "建议用「清理游戏目录注入」把它停放，避免两个 ReShade 抢 hook。",
+            ("检测到游戏目录仍有 ReShade（" + str(existing_reshade.get("ini"))
+             + "）—— 本版本不含 ReShade，启动前净化会把它移走（有备份、可还原）。")
+            if lite else
+            ("检测到游戏目录仍有 ReShade（"
+             + str(existing_reshade.get("ini"))
+             + "）——本方案不使用它，唯一底座由 XXMI 注入；"
+             "建议用「清理游戏目录注入」把它停放，避免两个 ReShade 抢 hook。"),
         )
 
     # **一键启动前的自动净化**（2026-10-04 用户要求；设置页开关，默认开）。
@@ -3354,7 +3412,9 @@ def launch(
         # 于是"生效的那份"（`runtime\reshade\ReShade.ini`，由 `RESHADE_BASE_PATH_OVERRIDE`
         # 决定）保持 addon 写的 `Language=0`（英文）⇒ 用户进游戏看到英文。
         # 这里再同步一次是**幂等**的，只补差异项，不会覆盖用户自己调过的值。
-        sync_effective_reshade_ini(config, log=lambda message: _append_log(config, message))
+        # Lite 跳过：这一步写的就是 runtime\reshade\ReShade.ini（Lite 一个 ReShade 文件都不写）。
+        if not lite:
+            sync_effective_reshade_ini(config, log=lambda message: _append_log(config, message))
 
     # ⚠ **2026-10-01 根因修复：EFMI 的 `skip_early_includes_load` 必须为 0。**
     #   EFMI 的 `d3dx.ini` 出厂默认是 `skip_early_includes_load = 1`（配套
@@ -3409,14 +3469,19 @@ def launch(
         #    随后 ReShade 就加载了它 ⇒ 用户报「关掉了还是注入进去了」。
         #    ⚠️ 治本在 `integrity.check_integrity()` 那一侧（已改成按开关判"要不要检"），
         #       这里再对齐一次是**兜底**：任何"修复/补齐"路径都可能顺手把文件铺回来。
-        try:
-            apply_minimal_injection(config, log=lambda message: _append_log(config, message))
-            for _component, _flag in (("dlss5", "dlss5_addon_enabled"),
-                                      ("firstperson", "firstperson_addon_enabled")):
-                set_component_addons(config, _component,
-                                     bool(getattr(config, _flag, False)))
-        except Exception as exc:  # noqa: BLE001 - 对齐失败不该拦住启动
-            _append_log(config, f"插件位置对齐失败（忽略）: {exc}")
+        # Lite 跳过：面板与这两个 addon 都是 ReShade 侧文件，而且
+        # `apply_minimal_injection()` 会顺手写 `hotkey_takeover`（ReShade 配置键）。
+        if lite:
+            pass
+        else:
+            try:
+                apply_minimal_injection(config, log=lambda message: _append_log(config, message))
+                for _component, _flag in (("dlss5", "dlss5_addon_enabled"),
+                                          ("firstperson", "firstperson_addon_enabled")):
+                    set_component_addons(config, _component,
+                                         bool(getattr(config, _flag, False)))
+            except Exception as exc:  # noqa: BLE001 - 对齐失败不该拦住启动
+                _append_log(config, f"插件位置对齐失败（忽略）: {exc}")
 
     set_launch_stage("正在拉起 XXMI 启动器…")
     command = build_launch_command(config, start_game=start_game)
@@ -3469,7 +3534,10 @@ def launch(
     else:
         result["elevated"] = True
 
-    _append_log(config, "ReShade/DLSS5 与第一人称插件由 XXMI 注入库在进程启动时加载，无外部注入。")
+    _append_log(config,
+                "EFMI（服装 Mod）由 XXMI 注入库在进程启动时加载；本版本不含 ReShade，无外部注入。"
+                if lite else
+                "ReShade/DLSS5 与第一人称插件由 XXMI 注入库在进程启动时加载，无外部注入。")
     diagnostics.start_process_monitor(config, game_dir=game_dir, timeout=1800.0)
     return result
 

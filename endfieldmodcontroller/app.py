@@ -16,6 +16,7 @@ try:
 except Exception:  # pragma: no cover
     webview = None
 
+from . import edition
 from .api import EndfieldModControllerApi
 from .version import WINDOW_TITLE
 
@@ -473,8 +474,10 @@ def main(argv: list[str] | None = None) -> int:
     theme = str(getattr(api.config, "theme", "light") or "light")
     window_bg = "#eef2f7" if theme == "light" else "#0a0e13"
 
+    # Lite 的窗口标题加「（轻量版）」后缀（`WINDOW_TITLE` 本身不动，Universal 照旧）。
+    window_title = f"{WINDOW_TITLE}（轻量版）" if edition.is_lite() else WINDOW_TITLE
     window = webview.create_window(
-        WINDOW_TITLE,
+        window_title,
         str(_index_html()),
         js_api=api,
         width=1180,
@@ -492,18 +495,48 @@ def main(argv: list[str] | None = None) -> int:
     except Exception:  # noqa: BLE001
         pass
 
+    # ── 启动时清理过期的运行日志（2026-11-28 用户要求：「自动清理运行日志」）──
+    #    开关 / 保留天数在 设置 → 通用 → 运行日志；只动 runtime\logs 下的文件。
+    try:
+        from . import diagnostics as _diag
+        from . import launcher as _launcher_log
+
+        cleaned = _diag.auto_clear_logs(api.config)
+        if cleaned.get("removed"):
+            _launcher_log._append_log(
+                api.config,
+                f"启动清理：删除 {len(cleaned['removed'])} 个超过 "
+                f"{cleaned.get('kept_days')} 天的运行日志",
+            )
+    except Exception as exc:  # noqa: BLE001 —— 清理失败绝不能挡住启动
+        try:
+            from . import launcher as _launcher_log
+
+            _launcher_log._append_log(api.config, f"WARN 启动清理旧日志失败（忽略）: {exc}")
+        except Exception:  # noqa: BLE001
+            pass
+
     # ── 本机无障碍 / 自动化通道（2026-11-17 用户要求：「能有个 api 或者命令行，
     #    允许 ai 操作 ui，比如切换页面，点击开关，滑动这种」）──────────────
-    # 只绑 127.0.0.1 + 随机 token（写进 runtime/_state/ui_api.json，`scripts/ui_ctl.py` 读它）；
+    # 2026-11-28 用户要求「那个 api 接口要留个开关，默认关闭」⇒ 只有 ui_api_enabled=true
+    # 才监听端口；端口 0 = 随机。只绑 127.0.0.1 + 随机 token（写进
+    # runtime/_state/ui_api.json，`scripts/ui_ctl.py` 读它）。
     # 端口被占 / 起不来只写一条日志，**绝不能挡住用户开程序**。
     try:
         from . import launcher as _launcher_ui
         from . import ui_automation
 
-        ui_automation.start(
-            api.config,
-            log=lambda message: _launcher_ui._append_log(api.config, message),
-        )
+        if bool(getattr(api.config, "ui_api_enabled", False)):
+            ui_automation.start(
+                api.config,
+                log=lambda message: _launcher_ui._append_log(api.config, message),
+                port=int(getattr(api.config, "ui_api_port", 0) or 0),
+            )
+        else:
+            _launcher_ui._append_log(
+                api.config,
+                "本机 Web 服务（UI 自动化）未启用 —— 设置 → Web 服务 里可以打开",
+            )
     except Exception as exc:  # noqa: BLE001
         try:
             from . import launcher as _launcher_ui

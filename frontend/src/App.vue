@@ -1,11 +1,14 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup>
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, watch } from "vue";
 import {
-  Library, Wrench, PackageCheck, Rocket, Settings, Info, Palette, Download, ShoppingBag,
+  Library, Wrench, PackageCheck, Rocket, Settings, Download, ShoppingBag,
 } from "lucide-vue-next";
-import { store, refreshState, setTheme, THEMES, PAGE_IDS, onStateRefreshed } from "./store.js";
+import {
+  store, refreshState, PAGE_IDS, onStateRefreshed, openSettings, showAbout,
+} from "./store.js";
 import { waitForBridge, reportFrontendError } from "./lib/bridge.js";
+import { t } from "./lib/i18n.js";
 import { loadSettings } from "./lib/settings.js";
 import { dragHasFiles, importDroppedFile } from "./lib/importMod.js";
 import { normalizeAnnouncements } from "./lib/announce.js";
@@ -16,8 +19,7 @@ import DialogHost from "./components/DialogHost.vue";
 import OnboardingTour from "./components/OnboardingTour.vue";
 import CharacterPickerDialog from "./components/CharacterPickerDialog.vue";
 import ToastHost from "./components/ToastHost.vue";
-import AboutPage from "./pages/AboutPage.vue";
-import SettingsPage from "./pages/SettingsPage.vue";
+import SettingsDialog from "./components/SettingsDialog.vue";
 import AssistPage from "./pages/AssistPage.vue";
 import DepsPage from "./pages/DepsPage.vue";
 import LaunchPage from "./pages/LaunchPage.vue";
@@ -29,11 +31,12 @@ import UiPreviewPage from "./pages/UiPreviewPage.vue";
 const pages = {
   preview: UiPreviewPage,
   library: ModLibraryPage, assist: AssistPage, store: StorePage, downloads: DownloadsPage,
-  dependencies: DepsPage, launch: LaunchPage, settings: SettingsPage,
-  about: AboutPage,
+  dependencies: DepsPage, launch: LaunchPage,
 };
-// 侧栏顺序：**服装 Mod | 辅助 Mod | Mod 商城 | 下载 | 依赖 | 启动 | 设置 | 说明**
+// 侧栏顺序：**服装 Mod | 辅助 Mod | Mod 商城 | 下载 | 依赖 | 启动**
 // 「下载」紧跟在「Mod 商城」后面 —— 商城点下载不再跳走，进度都汇到那一页看。
+// 2026-11-28：「设置」「说明」不再是页面 —— 设置改为侧栏底部按钮（应用内浮窗），
+// 说明在设置浮窗最下面；主题色也搬进了设置。
 const tabs = [
   { id: "library", name: "服装 Mod", icon: Library },
   { id: "assist", name: "辅助 Mod", icon: Wrench },
@@ -41,14 +44,9 @@ const tabs = [
   { id: "downloads", name: "下载", icon: Download },
   { id: "dependencies", name: "依赖", icon: PackageCheck },
   { id: "launch", name: "启动", icon: Rocket },
-  { id: "settings", name: "设置", icon: Settings },
-  { id: "about", name: "说明", icon: Info },
 ];
-const THEME_LABELS = { light: "浅色", dark: "深色", amber: "琥珀", cyan: "青蓝", violet: "紫罗兰", emerald: "翡翠" };
-// ⚠️ 主题读 **store 的单一真源**（2026-10-04）：原先这里是 `ref(currentTheme())` 的本地副本，
-// 于是"设置页改了主题、侧栏标签不跟着变"（两套真相）。现在两边都只认 `store.theme`。
-const theme = computed(() => store.theme);
-const themeLabel = computed(() => THEME_LABELS[theme.value] || theme.value);
+// 2026-11-28：主题色搬进「设置 → 通用 → 外观」（侧栏不再有主题菜单）。
+// 主题仍只有 `store.theme` 一个真源，切换走 `setTheme()`。
 // 版本号与更新入口统一在左侧栏的 UpdateBadge 里（顶栏不再显示，这里也就没有 versionText 了）
 // 拖放导入：提示层**松开鼠标就消失**（用户要求「应该是释放就消失」），拖拽计数避免子元素抖动
 const dragging = ref(false);
@@ -71,7 +69,7 @@ let bootFallbackTimer = null;
 const bootStartedAt = Date.now();
 const bootElapsed = ref(0);
 let bootTicker = null;
-const bootPhase = ref("正在启动界面");   // 桥就绪前 / 之后就绪；文案跟着走
+const bootPhase = ref(t("正在启动界面"));   // 桥就绪前 / 之后就绪；文案跟着走
 function stopBootTicker() {
   if (bootTicker) { clearInterval(bootTicker); bootTicker = null; }
 }
@@ -94,6 +92,37 @@ async function pollDownloads() {
     store.activeDownloads = Number((result && result.active) || 0);
   } catch (e) { /* 忽略：下次轮询再说 */ }
 }
+
+// 自定义背景图（设置 → 外观）：配置里的图片转成 file:// URL 设到根节点变量上，
+// 由 tokens.css 的 body::before 显示；透明度 0-100 → 0-1。
+function applyUiBackground() {
+  const cfg = (store.state && store.state.config) || {};
+  const style = document.documentElement.style;
+  const raw = String(cfg.ui_background_image || "").trim();
+  if (!raw) {
+    style.removeProperty("--ui-bg-image");
+    style.removeProperty("--ui-bg-opacity");
+    return;
+  }
+  const root = String(store.state.data_root || "").replace(/[\\/]+$/, "");
+  const isAbs = /^[A-Za-z]:[\\/]/.test(raw) || raw.startsWith("\\\\") || raw.startsWith("/");
+  const abs = isAbs ? raw : (root ? root + "\\" + raw.replace(/\//g, "\\") : raw);
+  const encoded = encodeURI(abs.replace(/\\/g, "/")).replace(/#/g, "%23").replace(/\?/g, "%3F");
+  const url = "file:///" + encoded.replace(/^\/+/, "");
+  const opacity = Math.max(0, Math.min(100, Number(cfg.ui_background_opacity ?? 80))) / 100;
+  style.setProperty("--ui-bg-image", "url(\"" + url + "\")");
+  style.setProperty("--ui-bg-opacity", String(opacity));
+}
+
+watch(
+  () => [
+    store.ready,
+    store.state && store.state.config && store.state.config.ui_background_image,
+    store.state && store.state.config && store.state.config.ui_background_opacity,
+  ],
+  applyUiBackground,
+  { immediate: true },
+);
 
 onMounted(() => {
   bootFallbackTimer = setTimeout(() => { bootStuck.value = true; }, 12000);
@@ -163,43 +192,43 @@ async function pollCrash() {
       const advice = (fresh.advice && typeof fresh.advice === "object") ? fresh.advice : {};
       const canRedownload = String(advice.action || "") === "reset_dependencies_and_redownload";
       const lines = [
-        `游戏进程在启动后异常结束了（${reason}）。`,
+        t("游戏进程在启动后异常结束了（") + reason + t("）。"),
         "",
       ];
       if (isConflict) {
         lines.push(
-          "**看起来是 Mod 资源冲突**：同时启用的 Mod 改了同一批资源。",
+          t("**看起来是 Mod 资源冲突**：同时启用的 Mod 改了同一批资源。"),
           "",
-          "可以点「去清理冲突」—— 会列出来让你选保留哪一个，不用自己猜。",
+          t("可以点「去清理冲突」—— 会列出来让你选保留哪一个，不用自己猜。"),
           "",
         );
       } else if (cause.detail || cause.reason) {
-        lines.push(`归因：${cause.detail || cause.reason}`, "");
+        lines.push(t("归因：") + (cause.detail || cause.reason), "");
       }
       if (advice.message) {
         lines.push(String(advice.message), "");
       }
       lines.push(
-        `管理器已经把现场收集成一个诊断包：`,
-        path || "（路径读取失败）",
+        t(`管理器已经把现场收集成一个诊断包：`),
+        path || t("（路径读取失败）"),
         "",
       );
-      if (mods.length) lines.push(`当时启用的 Mod：`, `· ${mods.join("\n· ")}`, "");
+      if (mods.length) lines.push(t("当时启用的 Mod："), `· ${mods.join("\n· ")}`, "");
       lines.push(
-        "把这个 zip 发到 Issues 或 QQ 群，就能定位原因。",
+        t("把这个 zip 发到 Issues 或 QQ 群，就能定位原因。"),
         "",
         // 「让 AI 帮你修」（2026-10-07 用户要求）：UP 在上学，有时间差；
         // 仓库里有一份给 AI 看的 `AGENTS.md`，这类工具会自动读到。
-        "UP 在上学期间不一定有时间及时修；也可以让 AI 工具（如 DSH，https://deepseek.com/harness ）",
-        "对着这个开源仓库自己排查修复 —— 详细说明见「说明」页的「也可以让 AI 帮你修」。",
+        t("UP 在上学期间不一定有时间及时修；也可以让 AI 工具（如 DSH，https://deepseek.com/harness ）"),
+        t("对着这个开源仓库自己排查修复 —— 详细说明见设置最下面的「说明」。"),
       );
       const extraButtons = [];
-      if (isConflict) extraButtons.push({ text: "去清理冲突", value: "conflict" });
-      if (canRedownload) extraButtons.push({ text: "清空依赖并重新下载", value: "redownload" });
+      if (isConflict) extraButtons.push({ text: t("去清理冲突"), value: "conflict" });
+      if (canRedownload) extraButtons.push({ text: t("清空依赖并重新下载"), value: "redownload" });
       const choice = await showModalDialog({
-        title: isConflict ? "终末地异常退出（疑似 Mod 冲突）" : "终末地异常退出",
+        title: isConflict ? t("终末地异常退出（疑似 Mod 冲突）") : t("终末地异常退出"),
         message: lines.join("\n"),
-        okText: "打开诊断包", cancelText: "知道了",
+        okText: t("打开诊断包"), cancelText: t("知道了"),
         // 冲突时多给一个"去清理"的按钮（0.9.5 的主路径）；
         // 崩在注入链时多给一个"清空依赖重下"的按钮（2026-10-05 加，见 `redownloadDependencies`）。
         extraButtons,
@@ -212,8 +241,8 @@ async function pollCrash() {
         try {
           const info = await call("conflict_groups");
           const groups = (info && info.groups) || [];
-          if (groups.length) showToast(`发现 ${groups.length} 组冲突，在「Mod 库」页里处理`, "warn");
-          else showToast("当前没有检测到冲突组（可能是历史记录）", "info");
+          if (groups.length) showToast(t("发现") + " " + groups.length + " " + t("组冲突，在「Mod 库」页里处理"), "warn");
+          else showToast(t("当前没有检测到冲突组（可能是历史记录）"), "info");
         } catch (e) { /* 忽略 */ }
       } else if (choice && path) {
         try { await call("open_path_in_explorer", path); } catch (e) { /* 忽略 */ }
@@ -231,18 +260,18 @@ async function pollCrash() {
 // ⚠️ 这里**不动任何插件开关**：用户的功能照旧开着，只是把整套组件重装一遍再试。
 async function redownloadDependencies() {
   const ok = await showModalDialog({
-    title: "清空依赖并重新下载",
+    title: t("清空依赖并重新下载"),
     message: [
-      "会依次做三件事：",
-      "① 从备份区还原终末地本体（没做过净化就跳过）；",
-      "② 清掉 runtime 与 assets，然后重新下载并展开；",
-      "③ 跳到「下载」页开始一键下载。",
-      "",
-      "你的 Mod 库、Mod 备份与路径设置都不受影响。",
-      "清完到装好之间，组件列表会先变空，属于正常现象。",
+      t("会依次做三件事："),
+      t("① 从备份区还原终末地本体（没做过净化就跳过）；"),
+      t("② 清掉 runtime 与 assets，然后重新下载并展开；"),
+      t("③ 跳到「下载」页开始一键下载。"),
+      t(""),
+      t("你的 Mod 库、Mod 备份与路径设置都不受影响。"),
+      t("清完到装好之间，组件列表会先变空，属于正常现象。"),
     ].join("\n"),
-    okText: "清空并重新下载",
-    cancelText: "取消，什么都不做",
+    okText: t("清空并重新下载"),
+    cancelText: t("取消，什么都不做"),
     focusCancel: true,
   });
   if (!ok) return;
@@ -251,10 +280,10 @@ async function redownloadDependencies() {
     result = await call("reset_dependencies_and_redownload");
   } catch (e) { /* call 已经弹过错误窗了 */ }
   if (!result || result.ok === false) {
-    showToast((result && result.message) || "清空失败，详情见运行日志", "danger");
+    showToast((result && result.message) || t("清空失败，详情见运行日志"), "danger");
     return;
   }
-  showToast("已清空 runtime 与 assets，正在跳到下载页重新下载…", "success");
+  showToast(t("已清空 runtime 与 assets，正在跳到下载页重新下载…"), "success");
   store.autoStartDeps = true;
   store.tab = "downloads";   // 2026-10-07：下载统一去「下载」页
 }
@@ -263,26 +292,26 @@ async function redownloadDependencies() {
 // 返回值：主按钮 → truthy（去修）；`"bundle"` → 用户想先看诊断包；取消 → falsy。
 async function strongRepairModal(sr, hasBundle) {
   const lines = [
-    `终末地已经**连续 ${sr.streak} 次**启动失败了（每次启动后很快就退出）。`,
+    t("终末地已经**连续") + " " + sr.streak + " " + t("次**启动失败了（每次启动后很快就退出）。"),
     "",
-    "这种时候多半不是某个开关没开对，而是组件本身坏了、或者被第三方文件搅了。",
-    "「强力修复」会依次做两件事：",
+    t("这种时候多半不是某个开关没开对，而是组件本身坏了、或者被第三方文件搅了。"),
+    t("「强力修复」会依次做两件事："),
     "",
-    "① **还原终末地**：把游戏目录里的第三方注入**全部**搬走（**不管是谁装的** —— 别的工具、" +
-      "整合包残留都算），并把系统原版文件补回去，游戏目录回到纯原版；",
-    "② **清空依赖并重新下载**：runtime 与 assets 整个重装一遍。",
+    t("① **还原终末地**：把游戏目录里的第三方注入**全部**搬走（**不管是谁装的** —— 别的工具、" +
+      "整合包残留都算），并把系统原版文件补回去，游戏目录回到纯原版；"),
+    t("② **清空依赖并重新下载**：runtime 与 assets 整个重装一遍。"),
     "",
-    "你的 Mod 库、Mod 备份与路径设置都不受影响；被搬走的第三方文件会留备份，" +
-      "设置页的「撤销清除」可以原样放回。",
-    "重下要花点时间（国内建议先把加速器打开）。",
+    t("你的 Mod 库、Mod 备份与路径设置都不受影响；被搬走的第三方文件会留备份，" +
+      "设置页的「撤销清除」可以原样放回。"),
+    t("重下要花点时间（国内建议先把加速器打开）。"),
   ];
   const extraButtons = [];
-  if (hasBundle) extraButtons.push({ text: "先看诊断包", value: "bundle" });
+  if (hasBundle) extraButtons.push({ text: t("先看诊断包"), value: "bundle" });
   return await showModalDialog({
-    title: "连续启动失败 —— 建议强力修复",
+    title: t("连续启动失败 —— 建议强力修复"),
     message: lines.join("\n"),
-    okText: "强力修复",
-    cancelText: "暂时不要",
+    okText: t("强力修复"),
+    cancelText: t("暂时不要"),
     focusCancel: true,
     extraButtons,
   });
@@ -292,18 +321,18 @@ async function strongRepairModal(sr, hasBundle) {
 // 破坏性动作 ⇒ **二次确认 + 默认聚焦取消**（用户定的规矩）。
 async function forceRepair() {
   const ok = await showModalDialog({
-    title: "强力修复",
+    title: t("强力修复"),
     message: [
-      "会依次做两件事：",
-      "① 还原终末地：把游戏目录里的第三方注入全部搬走（不管是谁装的），" +
-        "并把系统原版文件补回去；",
-      "② 清空 runtime 与 assets，然后重新下载并展开（接着会自动跳到「下载」页开跑）。",
+      t("会依次做两件事："),
+      t("① 还原终末地：把游戏目录里的第三方注入全部搬走（不管是谁装的），" +
+        "并把系统原版文件补回去；"),
+      t("② 清空 runtime 与 assets，然后重新下载并展开（接着会自动跳到「下载」页开跑）。"),
       "",
-      "被搬走的第三方文件会留备份，设置页「撤销清除」可以原样放回。",
-      "游戏正在运行时请先完全退出游戏 —— 否则这一步会被拒绝。",
+      t("被搬走的第三方文件会留备份，设置页「撤销清除」可以原样放回。"),
+      t("游戏正在运行时请先完全退出游戏 —— 否则这一步会被拒绝。"),
     ].join("\n"),
-    okText: "开始强力修复",
-    cancelText: "取消，什么都不做",
+    okText: t("开始强力修复"),
+    cancelText: t("取消，什么都不做"),
     focusCancel: true,
   });
   if (!ok) return;
@@ -312,10 +341,10 @@ async function forceRepair() {
     result = await call("force_repair");
   } catch (e) { /* call 已经弹过错误窗了 */ }
   if (!result || result.ok === false) {
-    showToast((result && result.message) || "强力修复失败，详情见运行日志", "danger");
+    showToast((result && result.message) || t("强力修复失败，详情见运行日志"), "danger");
     return;
   }
-  showToast(result.message || "强力修复完成，正在跳到下载页重新下载…", "success");
+  showToast(result.message || t("强力修复完成，正在跳到下载页重新下载…"), "success");
   store.autoStartDeps = true;
   store.tab = "downloads";   // 2026-10-07：下载统一去「下载」页
 }
@@ -349,9 +378,9 @@ async function maybeShowAnnouncements() {
   for (const item of fresh) {
     try {
       await showModalDialog({
-        title: item.title || "公告",
+        title: item.title || t("公告"),
         message: item.body || "",
-        okText: "知道了",
+        okText: t("知道了"),
         showCancel: false,
         link: item.link ? { url: item.link, text: item.link } : null,
       });
@@ -375,16 +404,16 @@ async function maybePromptDesktopRoot() {
   desktopRootAsked = true;
   try {
     await showModalDialog({
-      title: "没搬成：程序还在桌面",
+      title: t("没搬成：程序还在桌面"),
       message: [
-        "这个 exe 在桌面运行，而它的 config.json、runtime、assets 都会生成在 exe 旁边 —— 也就是全部铺在桌面。",
+        t("这个 exe 在桌面运行，而它的 config.json、runtime、assets 都会生成在 exe 旁边 —— 也就是全部铺在桌面。"),
         "",
-        "本来应该自动搬到磁盘根目录再启动，这次没搬成：" + (info.relocate_reason || "原因未知"),
+        t("本来应该自动搬到磁盘根目录再启动，这次没搬成：") + (info.relocate_reason || t("原因未知")),
         "",
-        "可以手动把整个程序文件夹挪到 D:\\EndfieldModController（没有 D 盘就用 C:\\EndfieldModController），",
-        "再启动里面的 exe；桌面上留一个快捷方式就行。",
+        t("可以手动把整个程序文件夹挪到 D:\\EndfieldModController（没有 D 盘就用 C:\\EndfieldModController），"),
+        t("再启动里面的 exe；桌面上留一个快捷方式就行。"),
       ].join("\n"),
-      okText: "知道了",
+      okText: t("知道了"),
       showCancel: false,
     });
   } catch (e) { /* 弹窗失败不该影响启动 */ }
@@ -418,7 +447,6 @@ async function onDrop(event) {
 }
 // 角色归属待确认弹窗的引用（导入 Mod 后要主动刷新它）
 const pickerRef = ref(null);
-const themeOpen = ref(false);
 const currentPage = computed(() => pages[store.tab]);
 const currentName = computed(() => tabs.find((t) => t.id === store.tab)?.name || "");
 
@@ -432,11 +460,11 @@ const currentName = computed(() => tabs.find((t) => t.id === store.tab)?.name ||
 window.mcAskExit = async function () {
   try {
     const ok = await showModalDialog({
-      title: "还在下载，确定要退出吗？",
+      title: t("还在下载，确定要退出吗？"),
       message:
-        "现在退出会**中断正在进行的下载**（已下完的部分会保留，下次可以继续）。\n\n" +
-        "想让它跑完的话，选「继续下载」就行。",
-      okText: "仍然退出", cancelText: "继续下载",
+        t("现在退出会**中断正在进行的下载**（已下完的部分会保留，下次可以继续）。\n\n" +
+        "想让它跑完的话，选「继续下载」就行。"),
+      okText: t("仍然退出"), cancelText: t("继续下载"),
     });
     if (!ok) return;
     // ⚠️ 这里**只调后端**，不要再调 JS 的 `window.close()` ——
@@ -468,18 +496,17 @@ async function goTab(id) {
   try { await call("save_config", { last_tab: id }); } catch (e) { /* 记不上不影响使用 */ }
 }
 
-// 主题切换：走 store 的唯一入口（它会写 localStorage + store.theme + config.json）
-async function pickTheme(name) {
-  await setTheme(name);
-  themeOpen.value = false;
-}
-
 onMounted(async () => {
   // UI 预览页（#preview?d=xxx）：只截图/回归用，不碰后端
   if (String(location.hash || "").startsWith("#preview")) {
     store.tab = "preview";
     return;
   }
+  // 旧深链 #settings / #about（2026-11-28）：设置与说明已不是页面 —— 打开浮窗即可，
+  // 底层页面仍按 last_tab / 默认走（截图与排查脚本照旧能用）。
+  const deepLink = String(location.hash || "").replace(/^#/, "");
+  if (deepLink === "settings") openSettings(store.settingsSection);
+  else if (deepLink === "about") showAbout();
   // `?demo=1`：用真实库快照渲染 —— **只在 `VITE_UI_DEMO=1 npm run build` 的构建里存在**。
   // 正式构建会被下面这行 `import.meta.env.VITE_UI_DEMO` 判断整段摇掉（rollup 常量折叠），
   // 所以正式包既没有这段逻辑、也不会去读任何本地文件（用户准则：正式版不含测试通道）。
@@ -547,7 +574,7 @@ onMounted(async () => {
   // 抛 `api[e] is not a function`（用户截图反馈的那条红框）。
   // 现在等的是 boot 真正要用的第一个方法 `ui_ready` 出现为止。
   if (await waitForBridge(15000, "ui_ready")) {
-    bootPhase.value = "正在读取 Mod 库与配置";
+    bootPhase.value = t("正在读取 Mod 库与配置");
     // 告诉后端"界面已经起来了" —— `_warm_up` 第一件事就是等这个信号（最多 15 秒），
     // 等不到它就会白等满 15 秒才开始拉公告/角色表。前端此前**从没调用过**它（grep 无结果），
     // 所以公告要等 15 秒后才可能到。这里一进 boot 就先发信号。
@@ -564,7 +591,11 @@ onMounted(async () => {
       // 旧版会记住上次停留的页签（config.last_tab）；带 hash 深链时以 hash 为准
       // 校验后再用：配置里残留的旧页签名会让 currentPage 变成 undefined、页面一片空白
       const lastTab = store.state.config && store.state.config.last_tab;
-      if (!location.hash && PAGE_IDS.includes(lastTab)) store.tab = lastTab;
+      // 带 hash 深链时以 hash 为准；但 #settings/#about 不是页面（只开浮窗），
+      // 底层仍落到上次的页面。
+      const hashTab = String(location.hash || "").replace(/^#/, "");
+      const hashIsOverlay = hashTab === "settings" || hashTab === "about";
+      if ((!location.hash || hashIsOverlay) && PAGE_IDS.includes(lastTab)) store.tab = lastTab;
       await maybeShowAnnouncements();
       // 首次启动：**只提示一次**（判据用后端持久化的 onboarding_done，而不是"当前还没就绪"
       // 这类会一直为真的状态 —— 否则会连环弹）。
@@ -588,7 +619,7 @@ const TOUR_STEPS = [
     tab: "dependencies", target: "dep-update-all-btn",
     title: "第一步：先把组件装齐",
     body: "这里是「依赖」页。点这个「下载并补齐组件」按钮，程序会自动下载并安装\n"
-      + "XXMI Launcher、XXMI 库、EFMI、DLSS5 组件等全部依赖（需要联网）。\n\n"
+      + "XXMI Launcher、XXMI 库、EFMI 等全部依赖（需要联网；完整版还会一并装 DLSS5 等组件）。\n\n"
       + "点下去会跳到「下载」页 —— 进度、速度与日志都在那儿看。装完再回启动页。",
   },
   {
@@ -612,9 +643,11 @@ const TOUR_STEPS = [
       + "第一次可能会提示「请再点一次一键启动」，看到后再点一次即可。",
   },
   {
-    tab: "settings", target: "game-restore-btn",
+    // 2026-11-28：设置不再是页面 —— 第 4 步先打开设置浮窗并切到「维护」，
+    // 再高亮里面的「还原游戏本体」（落点 id 保持不变，静态回归仍能校验它存在）。
+    settingsSection: "maintenance", target: "game-restore-btn",
     title: "第四步：随时可以还原",
-    body: "「设置」页有「还原游戏本体」：\n"
+    body: "左侧导航栏最下面的「设置」→「维护」里有「还原游戏本体」：\n"
       + "本程序对游戏目录做的任何改动都可回滚（净化前会完整备份、只移动不删除）。\n\n"
       + "同一页还有「依赖清空并重新下载」——组件装坏了、缺文件时可以一键清空重来。",
   },
@@ -677,19 +710,19 @@ window.addEventListener("pagehide", clearAnnounceTimers);
     <div v-if="!store.ready"
          class="fixed inset-0 z-50 flex flex-col items-center justify-center gap-3"
          style="background: var(--bg)">
-      <div class="text-base font-semibold" style="color: var(--text)">终末地 Mod 管理器</div>
+      <div class="text-base font-semibold" style="color: var(--text)">{{ t("终末地 Mod 管理器") }}</div>
       <div class="text-sm" style="color: var(--text-muted)">
-        {{ bootStuck ? "读取时间比平时长（可能正在扫描较大的 Mod 库）…" : bootPhase + "…" }}
+        {{ bootStuck ? t("读取时间比平时长（可能正在扫描较大的 Mod 库）…") : bootPhase + "…" }}
       </div>
       <div class="text-xs" style="color: var(--text-muted)">
         {{ bootStuck
-          ? "列表读完会自动出现，也可以先进入界面。"
-          : "已等待 " + bootElapsed.toFixed(1) + " 秒（首次启动会久一点）" }}
+          ? t("列表读完会自动出现，也可以先进入界面。")
+          : t("已等待") + " " + bootElapsed.toFixed(1) + " " + t("秒（首次启动会久一点）") }}
       </div>
       <button v-if="bootStuck" @click="enterAnyway"
               class="px-4 py-1.5 rounded text-sm"
               style="background: var(--accent); color: var(--accent-contrast)">
-        先进界面
+        {{ t("先进界面") }}
       </button>
     </div>
     <!-- data-mc-current-tab：无障碍 / 自动化通道靠它回报"现在在哪个页面"
@@ -698,46 +731,41 @@ window.addEventListener("pagehide", clearAnnounceTimers);
            :data-mc-current-tab="store.tab"
            style="background: var(--surface); border-color: var(--border)">
       <div class="h-12 px-4 flex items-center text-sm font-semibold border-b" style="border-color: var(--border)">
-        终末地 Mod 管理器
+        {{ t("终末地 Mod 管理器") }}
       </div>
       <nav class="flex-1 p-2 space-y-0.5">
         <!-- data-mc-id 形如 tab:library：AI 用 GET /state 拿到它就能直接切换页面 -->
-        <button v-for="t in tabs" :key="t.id" @click="goTab(t.id)"
-          :data-mc-id="'tab:' + t.id"
+        <!-- ⚠️ v-for 的别名不能叫 t：它会遮蔽 i18n 的 t() 函数（2026-11-28 白屏事故）。 -->
+        <button v-for="tab in tabs" :key="tab.id" @click="goTab(tab.id)"
+          :data-mc-id="'tab:' + tab.id"
           class="w-full flex items-center gap-2.5 px-3 py-2 rounded text-left transition-colors"
-          :style="store.tab === t.id
+          :style="store.tab === tab.id
             ? { background: 'var(--accent-soft)', color: 'var(--accent)', fontWeight: 500 }
             : { color: 'var(--text-muted)' }">
-          <component :is="t.icon" :size="16" />
-          <span class="text-sm flex-1">{{ t.name }}</span>
+          <component :is="tab.icon" :size="16" />
+          <span class="text-sm flex-1">{{ t(tab.name) }}</span>
           <!-- 下载徽标 —— 就是用户要的那个「动态」（2026-10-07：「看商城不用下一个就跳转一次，
                **但是要有动态**」）。只在真有活跃下载时出现；数字来自 store.activeDownloads，
                由下方每 2 秒一次的 `pollDownloads()` 统一刷新（商城/下载页读同一份）。 -->
-          <span v-if="t.id === 'downloads' && store.activeDownloads > 0"
+          <span v-if="tab.id === 'downloads' && store.activeDownloads > 0"
                 class="text-xs px-1.5 rounded-full"
                 style="background: var(--accent); color: var(--accent-contrast)">
             {{ store.activeDownloads }}
           </span>
         </button>
       </nav>
-      <!-- 自更新入口（用户要求：左侧导航下面、主题色上面） -->
+      <!-- 自更新入口（左侧导航下面、设置按钮上面） -->
       <div class="p-1.5 border-t" style="border-color: var(--border)">
         <UpdateBadge />
       </div>
-      <div class="p-2 border-t relative" style="border-color: var(--border)">
-        <button @click="themeOpen = !themeOpen"
+      <!-- 设置入口（2026-11-28）：固定在侧栏最底部，点开应用内浮窗；主题色已搬进设置 -->
+      <div class="p-2 border-t" style="border-color: var(--border)">
+        <button id="settings-btn" data-mc-id="settings:open" @click="openSettings()"
           class="w-full flex items-center gap-2.5 px-3 py-2 rounded text-sm"
           style="color: var(--text-muted)">
-          <Palette :size="16" />
-          <span>主题：{{ themeLabel }}</span>
+          <Settings :size="16" />
+          <span class="text-sm">{{ t("设置") }}</span>
         </button>
-        <div v-if="themeOpen" class="absolute bottom-12 left-2 right-2 card p-1.5 shadow-lg z-20">
-          <button v-for="t in THEMES" :key="t" @click="pickTheme(t)"
-            class="w-full text-left px-2.5 py-1.5 rounded text-sm"
-            :style="t === theme ? { background: 'var(--accent-soft)', color: 'var(--accent)' } : {}">
-            {{ THEME_LABELS[t] }}
-          </button>
-        </div>
       </div>
     </aside>
 
@@ -750,15 +778,20 @@ window.addEventListener("pagehide", clearAnnounceTimers);
       <header class="h-14 px-6 flex items-center justify-between border-b sticky top-0 z-10"
               style="background: var(--surface); border-color: var(--border)">
         <div>
-          <h1 class="page-title">{{ currentName }}</h1>
+          <h1 class="page-title">{{ t(currentName) }}</h1>
         </div>
         <!-- 版本号与更新入口统一放在左侧栏底部（顶栏不再重复显示） -->
       </header>
       <div class="px-6 py-5">
         <div class="page-inner">
-          <component :is="currentPage" v-if="currentPage" />
+          <!-- ⚠️ 必须 KeepAlive（2026-11-28 用户要求）：切到别的标签再回商城，
+             详情页/滚动位置/正在加载的请求都要还在，不能一回来就跳回主页。
+             DownloadsPage 也靠它保住"本次已入库"的显示。 -->
+        <KeepAlive v-if="currentPage">
+          <component :is="currentPage" />
+        </KeepAlive>
           <div v-else class="card p-6 text-sm" style="color: var(--text-muted)">
-            「{{ currentName }}」还在迁移中（新前端逐页搬，这一页暂时用旧界面）。
+            「{{ t(currentName) }}」{{ t("还在迁移中（新前端逐页搬，这一页暂时用旧界面）。") }}
           </div>
         </div>
       </div>
@@ -768,8 +801,8 @@ window.addEventListener("pagehide", clearAnnounceTimers);
     <div v-if="dragging" class="fixed inset-0 z-[70] flex items-center justify-center"
          style="background: rgba(0,0,0,.35)">
       <div class="card px-6 py-4 text-center shadow-lg">
-        <div class="font-medium">松手即可导入 Mod</div>
-        <div class="text-xs mt-1" style="color: var(--text-muted)">支持 .zip / .7z / .rar（进度显示在顶部提示条）</div>
+        <div class="font-medium">{{ t("松手即可导入 Mod") }}</div>
+        <div class="text-xs mt-1" style="color: var(--text-muted)">{{ t("支持 .zip / .7z / .rar（进度显示在顶部提示条）") }}</div>
       </div>
     </div>
 
@@ -781,11 +814,12 @@ window.addEventListener("pagehide", clearAnnounceTimers);
 
     <!-- ⚠️ 必须接 `open-link`：DialogHost 会 emit 它，但这里以前是裸的 `<DialogHost />`
          ⇒ 弹窗/公告里的链接**点了没有任何反应**（用户定的规矩是"点击网址直接打开"）。 -->
+    <!-- 设置浮窗（z-40：必须低于 DialogHost / Toast / 引导，弹窗才能盖在它上面） -->
+    <SettingsDialog />
     <DialogHost @open-link="(url) => openExternal(url)" />
     <ToastHost />
   </div>
 </template>
-
 
 
 

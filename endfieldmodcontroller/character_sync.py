@@ -125,6 +125,21 @@ def fetch_official(*, timeout: int = 25) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------- 合并
+# 官网把管理员列成两条（都叫「管理员」，key=endministrator2 男 / endministrator1 女）：
+# 2026-11-28 起**拆成两个 canonical 角色**（各有头像；用户：「管理员那里似乎只会识别男管理员」）。
+ADMIN_KEYS = {"endministrator1": "女管理员", "endministrator2": "男管理员",
+              # 旧本地表/老配置里管理员只有一个 key（无性别后缀）⇒ 按默认外观归女管理员
+              "endministrator": "女管理员"}
+
+
+def canonical_name(name: str, key: str = "") -> str:
+    """把官网条目名归到我们的 canonical 名（管理员按 key 拆成男/女）。"""
+    text = str(name or "").strip()
+    if text == "管理员":
+        return ADMIN_KEYS.get(str(key or "").strip().lower(), text)
+    return text
+
+
 def merge_payload(local: dict[str, Any], official: dict[str, Any]) -> dict[str, Any]:
     """把官网结果合并进本地表。
 
@@ -141,6 +156,10 @@ def merge_payload(local: dict[str, Any], official: dict[str, Any]) -> dict[str, 
             local_items[str(item["name"]).strip()] = dict(item)
     by_code = {str(item.get("codename") or "").strip().lower(): name
                for name, item in local_items.items() if item.get("codename")}
+    # 管理员两条 codename 相同（Endministrator）⇒ 必须按 **key** 找本地对应条目，
+    # 否则两条都会匹配到同一张本地记录（或者互相覆盖）。
+    by_key = {str(item.get("key") or "").strip().lower(): name
+              for name, item in local_items.items() if item.get("key")}
 
     # 官网可能把同一角色列多条 → 先按 canonical 名聚合（保持官网顺序）
     grouped: dict[str, list[dict[str, Any]]] = {}
@@ -148,7 +167,7 @@ def merge_payload(local: dict[str, Any], official: dict[str, Any]) -> dict[str, 
     for item in (official.get("characters") or []):
         if not isinstance(item, dict):
             continue
-        name = str(item.get("name") or "").strip()
+        name = canonical_name(str(item.get("name") or ""), str(item.get("key") or ""))
         if not name:
             continue
         if name not in grouped:
@@ -171,7 +190,14 @@ def merge_payload(local: dict[str, Any], official: dict[str, Any]) -> dict[str, 
                        if str(i.get("avatar") or "").strip()), "")
         official_aliases = [str(a).strip() for i in items
                             for a in (i.get("aliases") or []) if str(a).strip()]
+        if name == "男管理员":
+            # 官网两条管理员都叫「管理员」⇒ 裸名与女性向别名只能给女管理员，
+            # 否则男管理员的 Mod 名字里只要出现「管理员」就会被判成女的那张卡。
+            official_aliases = [a for a in official_aliases
+                                if a not in ("管理员", "女管理员", "女管理")]
         prior = local_items.get(name)
+        if prior is None:
+            prior = local_items.get(by_key.get(str(key).lower(), ""))
         if prior is None and codename:
             prior = local_items.get(by_code.get(codename.lower(), ""))
         if prior is None:
@@ -186,11 +212,18 @@ def merge_payload(local: dict[str, Any], official: dict[str, Any]) -> dict[str, 
             [str(a).strip() for a in (prior.get("aliases") or []) if str(a).strip()]
             + [name] + official_aliases
         ))
+        if name == "女管理员":
+            aliases = [a for a in aliases if a not in ("男管理员", "男管理")]
+        elif name == "男管理员":
+            aliases = [a for a in aliases if a not in ("管理员", "女管理员", "女管理")]
         new_code = codename or str(prior.get("codename") or "")
         new_key = key or str(prior.get("key") or "")
         if new_code != str(prior.get("codename") or "") or new_key != str(prior.get("key") or ""):
             updated += 1
-        merged.append({"name": prior.get("name") or name, "codename": new_code,
+        # ⚠️ 管理员按 key 拆开后 canonical 名（男/女管理员）才是唯一正确的名字 ——
+        # 沿用 prior 的旧名（「管理员」）会把两条又变回同名，等于没拆。
+        entry_name = name if name in ("男管理员", "女管理员") else (prior.get("name") or name)
+        merged.append({"name": entry_name, "codename": new_code,
                        "key": new_key,
                        # 官网这次没给就用上次那份（别把已有的直链擦掉）
                        "avatar": avatar or str(prior.get("avatar") or ""),
@@ -198,9 +231,13 @@ def merge_payload(local: dict[str, Any], official: dict[str, Any]) -> dict[str, 
 
     # 官网没列、但本地有的（下架 / 改名）→ **保留**，别让用户已有的 Mod 突然识别不出来
     seen = {item["name"] for item in merged}
+    absorbed_admin = "女管理员" in seen
     for name, item in local_items.items():
-        if name not in seen:
-            merged.append(item)
+        if name in seen:
+            continue
+        if name == "管理员" and absorbed_admin:
+            continue          # 旧合并条目已吸收进女管理员（别名并过了），不再单列
+        merged.append(item)
 
     payload = dict(local)
     payload.update({
@@ -263,6 +300,10 @@ def combine_tables(primary: dict[str, Any], secondary: dict[str, Any]) -> dict[s
         if other is None:
             code = str(entry.get("codename") or "").strip().lower()
             other = by_code.get(code) if code else None
+            if other is not None and name in ("女管理员", "男管理员"):
+                # 男女管理员 codename 相同（Endministrator）⇒ 不能按 codename 把旧「管理员」
+                # 条目并进来（那会把「男管理员」别名混进女管理员）；旧条目在下面单独吸收。
+                other = None
         if other is not None:
             entry["aliases"] = list(dict.fromkeys(_aliases_of(entry) + _aliases_of(other)))
             # ⚠️ **头像只在官网那份里**（随包表根本没这个字段）⇒ 必须从 secondary 带过来。
@@ -272,10 +313,20 @@ def combine_tables(primary: dict[str, Any], secondary: dict[str, Any]) -> dict[s
                 entry["avatar"] = other["avatar"]
         merged.append(entry)
 
+    by_name_merged = {str(entry.get("name") or "").strip(): entry for entry in merged}
     for item in secondary["characters"]:
         name = str(item.get("name") or "").strip()
+        if name == "管理员" and "女管理员" in by_name_merged:
+            # 旧运行时表（升级前）把男女管理员合成一条 ⇒ 别名并进「女管理员」，不再单列；
+            # 裸「管理员」本来就归女管理员（默认外观），男管理员的别名不进这里。
+            entry = by_name_merged["女管理员"]
+            entry["aliases"] = list(dict.fromkeys(
+                _aliases_of(entry) + [a for a in _aliases_of(item)
+                                       if a not in ("男管理员", "男管理")]))
+            continue
         if name and name not in seen:
             merged.append(dict(item))
+            seen.add(name)
 
     payload = dict(secondary)
     payload.update({"characters": merged})

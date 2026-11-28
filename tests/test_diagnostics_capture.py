@@ -495,3 +495,29 @@ def test_bundle_carries_component_update_forensics(tmp_path: Path, monkeypatch):
     assert "2.4.1" in text, "他实际在用的那份的真实版本"
     assert "v1.2.2" in text, "各组件 marker 里的已装版本"
     assert "update_available" in text and "1.4.2" in text, "自更新缓存的关键字段"
+
+
+def test_bundle_records_edition(tmp_path: Path, monkeypatch):
+    """反馈包必须写清是「完整版」还是「轻量版」（2026-11-28 用户要求）。
+
+    用户原话：「确定一下反馈包会收集是否为 lite」——排查时先排掉"这个功能轻量版本来就没有"
+    这一类，否则会把整条 ReShade 链路缺失当成故障。
+    """
+    from endfieldmodcontroller import edition
+
+    _quiet_collectors(monkeypatch)
+    staging = tmp_path / "EFMI" / "Mods"
+    staging.mkdir(parents=True)
+    config, game, _runtime = _make_config(tmp_path, staging=staging)
+    monkeypatch.setenv("MC_EDITION", "lite")
+    edition.reset_cache()
+    try:
+        bundle = diagnostics.create_diagnostic_bundle(config, game_dir=game, note="test")
+    finally:
+        edition.reset_cache()
+
+    with zipfile.ZipFile(bundle) as archive:
+        summary = archive.read("summary.txt").decode("utf-8")
+
+    assert "edition=lite" in summary
+    assert "轻量版" in summary

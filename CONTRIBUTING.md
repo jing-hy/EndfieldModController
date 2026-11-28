@@ -116,6 +116,31 @@ python scripts/memory_log.py     # 重新导出（push.py 也会自动跑）
   重打命令；本机根本没有离线包时只提示、不阻断（从没打过包的机器不该被拦）。
 * 表里更新了组件版本 ⇒ 先重打离线包再发版；确实要带着旧包发版，用 `--skip-version-table-check`。
 
+### 7. 两个版本形态（Universal / Lite）
+
+exe 有两种形态，**同一份源码**，由构建参数决定。Lite 运行期**不含 ReShade 链路**
+（不下载、不安装、不注入、不写文件；游戏目录里已有的 ReShade 残留每次启动强制清走，有备份可还原）；
+两版**共用数据根**，可放在同一目录里互换（配置、Mod 库、备份、下载记录都保留）。
+
+```powershell
+python scripts\build_release.py                    # 完整版（默认，行为与以前一样）
+python scripts\build_release.py --edition lite     # 轻量版
+python scripts\build_release.py --all-editions     # 两个一起构建
+```
+
+产物名：
+
+| 形态 | 最新 | 带版本副本 | 构建记录 |
+| --- | --- | --- | --- |
+| 完整版 | `dist\EndfieldModController.exe` | `EndfieldModController-<版本>.exe` | `dist\build-info.json` |
+| 轻量版 | `dist\EndfieldModController-Lite.exe` | `EndfieldModController-Lite-<版本>.exe` | `dist\build-info-lite.json` |
+
+- Lite **不编译** ReShade 面板、**不打包** `assets/addon` 与 `assets/dlss5`；
+  `edition.json` 会打进 exe 资源根，后端 `endfieldmodcontroller/edition.py` 据此判形态。
+- 两版自更新各取各的附件（Lite 只认文件名含 `lite` 的包），**不会互相覆盖**。
+- 离线包 / 资产包同样分形态：`assets-bundle-lite.zip` / `deps-bundle-lite.zip`。
+- 发版时完整版必须过闸（否则中止）；Lite 缺失只告警、不阻断主线。
+
 ## 三、提交与发布流程（照抄即可）
 
 ```bash

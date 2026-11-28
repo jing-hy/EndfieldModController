@@ -5,9 +5,13 @@
 它是给自动化用的，不影响正常使用；命令走的是**真实的界面交互**（等价于人手点一下），
 所以界面上看到的变化与真正生效的状态完全一致。
 
+> ⚠️ **默认关闭**（2026-11-28 用户要求：「那个 api 接口要留个开关，默认关闭」）。
+> 打开方式：设置 → **Web 服务** → 「启用本机 Web 服务」；端口留 0 = 每次随机。
+> 开关与端口**立即生效**，不用重启程序。关闭后不监听任何端口。
+
 ## 一、在哪
 
-程序一启动就会在本机起一个 HTTP 接口（只绑 `127.0.0.1`，不对外网开放）：
+打开开关后，程序会在本机起一个 HTTP 接口（只绑 `127.0.0.1`，不对外网开放）：
 
 ```
 <程序目录>\runtime\_state\ui_api.json
@@ -49,12 +53,12 @@
   "count": 42,
   "elements": [
     {
-      "id": "[data-mc-id=\"tab:settings\"]",
+      "id": "[data-mc-id=\"settings:open\"]",
       "role": "button",
       "label": "设置",
       "tag": "button",
       "disabled": false,
-      "bounds": {"x": 8, "y": 300, "w": 190, "h": 34}
+      "bounds": {"x": 8, "y": 736, "w": 190, "h": 34}
     },
     {
       "id": "div.card > button.switch:nth-of-type(1)",
@@ -71,7 +75,11 @@
 
 - `id` 是**可用的 CSS 选择器**，直接传给 `/act` 就能操作它；
 - 侧栏页面按钮带固定标识 `tab:<页面id>`（`library` / `assist` / `store` / `downloads` /
-  `dependencies` / `launch` / `settings` / `about`），页面之间的切换不用靠猜位置；
+  `dependencies` / `launch`），页面之间的切换不用靠猜位置；
+- **设置与说明不是页面**（2026-11-28 起）：点侧栏底部的 `settings:open` 打开设置浮窗，
+  浮窗里再点 `settings:section:<general|paths|downloads|maintenance>` 切分类；
+  底部 `settings:about` 切到说明、`settings:back` 返回、`settings:close` 关闭；
+- 设置浮窗是**应用内浮层**，打开时 `/state` 里会同时出现底下的页面按钮与浮窗里的元素；
 - 其余元素的选择器是 DOM 路径，页面内容变化后**要重新 `/state` 取**，不要缓存。
 
 ### `/act` 支持的动作
@@ -94,7 +102,8 @@
 ```powershell
 python scripts\ui_ctl.py state                  # 看当前页面和所有可点元素
 python scripts\ui_ctl.py find 壁纸              # 按文字找元素（拿到 id）
-python scripts\ui_ctl.py tab settings           # 切到设置页
+python scripts\ui_ctl.py tab settings           # 打开设置浮窗（已不是页面，命令仍兼容）
+python scripts\ui_ctl.py click '[data-mc-id="settings:section:maintenance"]'   # 切到「维护」
 python scripts\ui_ctl.py set '[data-mc-id="x"]' on
 python scripts\ui_ctl.py value 'input#search' "终末地"
 python scripts\ui_ctl.py scroll-by 400

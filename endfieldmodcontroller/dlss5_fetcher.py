@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from . import dependencies, updates
+from . import dependencies, edition, updates
 from .config import AppConfig
 
 USER_AGENT = "EndfieldModController/0.1"
@@ -88,6 +88,9 @@ def downloadable_file_names() -> set[str]:
     「**要是缺下载，应该跳转到依赖进行下载**」⇒ 需要先能**识别**出"这是缺下载"，
     再引导到依赖页（那边有完整的下载链路 + 进度 + 线路切换）。
     """
+    # Lite 不含 ReShade：这些文件名不归本版本管（判据也别把用户引到依赖页去下它们）。
+    if edition.is_lite():
+        return set()
     names: set[str] = set()
     for component in COMPONENTS:
         for relative in component.required:
@@ -195,6 +198,9 @@ def _component_state(config: AppConfig, component: Component) -> dict[str, Any]:
 
 def component_report(config: AppConfig) -> dict[str, dict[str, Any]]:
     """依赖页用：每个在线组件的在位状态（含**按本机显卡**决定的可选运行库变体）。"""
+    # Lite 不含 ReShade：三个在线组件全是 ReShade / DLSS5 侧的，依赖页不该列它们。
+    if edition.is_lite():
+        return {}
     report = {component.key: _component_state(config, component) for component in COMPONENTS}
     optional = dlssnr_variant_component(config)
     if optional is not None:
@@ -659,6 +665,11 @@ INSTALLERS: dict[str, Callable[..., dict[str, Any]]] = {
 
 def install(config: AppConfig, key: str, *, log: Callable[[str], None] | None = None,
             force: bool = False) -> dict[str, Any]:
+    # Lite 不含 ReShade：这里每一个安装器（底座 / feeder / iMMERSE / 运行库变体）都是
+    # ReShade 侧的东西 ⇒ 一律不下载、不解包。
+    if edition.is_lite():
+        return {"ok": False, "changed": False, "key": key,
+                "message": "轻量版不含 ReShade 相关功能"}
     # 运行库变体（`dlssnr_rtx40` 等）走自己的安装器：它要按**本机架构**去镜像里挑
     # 不同的 release tag，不是固定 URL，所以塞不进 `INSTALLERS` 那张静态表。
     if key.startswith("dlssnr_"):
@@ -685,6 +696,10 @@ def ensure_all(
     **单项失败不中断其它项，跑完后再对失败项重试（最多 3 次）** —— 用户 2026-10-01
     要求：「下载一旦失败就停了，改成全部下载完之后如果有失败项，就重试，3 次截止」。
     """
+    # Lite 不含 ReShade：没有任何一个组件要装 ⇒ 直接给空结果（进度分母那侧也按 0 算）。
+    if edition.is_lite():
+        return []
+
     def work(component: Component, attempt: int) -> dict[str, Any]:
         state = _component_state(config, component)
         if only_missing and state["present"]:

@@ -72,6 +72,9 @@ BUNDLED_ASSET_PROBES: dict[str, tuple[tuple[str, ...], str]] = {
     "rabbitfx": (("assets", "rabbitfx", "manifest.json"), "manifest"),
 }
 
+# 第四道比对读的角色表（随包那份）。官网角色页=唯一可信来源，见 character_sync。
+CHARACTERS_JSON = ROOT / "endfieldmodcontroller" / "characters.json"
+
 
 def _fix_console() -> None:
     for stream in (sys.stdout, sys.stderr):
@@ -274,6 +277,62 @@ def collect_offline_bundle(table: dict[str, Any], *, bundle_path: Path | None = 
     return {"bundle": str(path), "built_at": built_at, "rows": rows, "problems": problems}
 
 
+def compare_characters(local_payload: dict[str, Any],
+                       official_payload: dict[str, Any]) -> dict[str, Any]:
+    """随包角色表 vs 官网角色页（纯比较，不联网 —— 便于单测）。
+
+    判据：官网有、随包没有 = **缺角色**（发版前必须补），随包有、官网没有 = 下架/改名，
+    保留不报错（老 Mod 还要能认）。管理员按 canonical 名拆成男/女两条。
+    """
+    from endfieldmodcontroller import character_sync
+
+    official_names: set[str] = set()
+    for item in (official_payload.get("characters") or []):
+        if not isinstance(item, dict):
+            continue
+        name = character_sync.canonical_name(str(item.get("name") or ""),
+                                             str(item.get("key") or ""))
+        if name:
+            official_names.add(name)
+    local_names: set[str] = set()
+    for item in (local_payload.get("characters") or []):
+        if isinstance(item, dict) and str(item.get("name") or "").strip():
+            local_names.add(str(item["name"]).strip())
+    missing = sorted(official_names - local_names)
+    extra = sorted(local_names - official_names)
+    return {
+        "status": "ok" if not missing else "outdated",
+        "official": len(official_names),
+        "local": len(local_names),
+        "missing": missing,
+        "extra": extra,
+        "problems": missing,
+    }
+
+
+def collect_characters() -> dict[str, Any]:
+    """第四道：联网拉官网角色页，和随包 `characters.json` 比一遍。
+
+    为什么要有（2026-11-28 用户：「把角色检查加进上游更新检查后面」）：
+    角色表决定新导入的 Mod 能不能自动归类、同角色互斥会不会误判；随包表过期时
+    用户的 Mod 会被归到「其他」或判错角色 —— v1.7 上线后随包表还停在 9 月的 32 位，
+    小刻这类新角色直接缺失。发版前必须让它对上官网。
+    """
+    try:
+        from endfieldmodcontroller import character_sync
+
+        official = character_sync.fetch_official(timeout=25)
+    except Exception as exc:  # noqa: BLE001 —— 网络/限流不算"表过期"
+        return {"status": "unknown", "official": 0, "local": 0, "missing": [],
+                "extra": [], "problems": [], "message": f"官网角色表拉取失败：{exc}"}
+    try:
+        local = json.loads(CHARACTERS_JSON.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return {"status": "missing", "official": 0, "local": 0, "missing": [],
+                "extra": [], "problems": [], "message": f"随包角色表读不出：{exc}"}
+    return compare_characters(local, official)
+
+
 def collect(*, allow_missing_assets: bool = False) -> dict[str, Any]:
     table = component_versions.load()
     if not table:
@@ -308,9 +367,13 @@ def collect(*, allow_missing_assets: bool = False) -> dict[str, Any]:
     problems = [row for row in rows if row["status"] in ("outdated", "ahead")]
     asset_problems = [row for row in asset_rows if row["status"] in ("stale", "asset_ahead", "missing")]
     offline_problems = offline.get("problems") or []
+    characters = collect_characters()
+    character_problems = characters.get("problems") or []
     errors = [str(item) for item in (report.get("errors") or [])]
     return {
-        "ok": not problems and not asset_problems and not offline_problems,
+        "ok": not problems and not asset_problems and not offline_problems and not character_problems,
+        "characters": characters,
+        "character_problems": character_problems,
         "rows": rows,
         "assets": asset_rows,
         "offline": offline,
@@ -403,6 +466,22 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 print(f'    {row["display"]}：随包已是 {row["bundled"]}，表还写 {row["table"]}'
                       f'（{row["source"]}）⇒ 把表改成 {row["bundled"]}')
+    characters = data.get("characters") or {}
+    if characters:
+        print("")
+        print("[角色表] 随包角色表 vs 官网角色页：")
+        char_marks = {"ok": "✓", "outdated": "⚠ 角色表该更新", "unknown": "？ 没查到",
+                      "missing": "⚠ 随包表读不出"}
+        print(f"  {char_marks.get(characters.get('status'), characters.get('status')):<16} "
+              f"随包 {characters.get('local', 0)} 位 / 官网 {characters.get('official', 0)} 位")
+        if characters.get("missing"):
+            print(f"    官网有、随包没有：{'、'.join(characters['missing'])}")
+            print("    ⇒ 跑 `python scripts\\fetch_characters.py --update-bundled` 把随包表更新到官网最新")
+        if characters.get("extra"):
+            print(f"    随包有、官网没有（下架保留）：{'、'.join(characters['extra'])}")
+        if characters.get("message"):
+            print(f"    （{characters['message']}）")
+
     offline_problems = data.get("offline_problems") or []
     if offline_problems:
         print("")
@@ -416,13 +495,19 @@ def main(argv: list[str] | None = None) -> int:
                       f" ⇒ 把表改成 {row['bundle']}")
             else:
                 print(f"    {row['display']}：{row.get('reason') or row['status']}")
-    if not problems and not asset_problems and not offline_problems:
+    character_problems = data.get("character_problems") or []
+    if character_problems:
         print("")
-        print("✓ 表里所有组件都是上游最新；随包资产都在本机且与表一致；离线包（若有）与表一致")
+        print(f"⚠ 随包角色表缺 {len(character_problems)} 位官网角色 —— 先更新再发版：")
+        print(f"    {'、'.join(character_problems)}")
+
+    if not problems and not asset_problems and not offline_problems and not character_problems:
+        print("")
+        print("✓ 表里所有组件都是上游最新；随包资产都在本机且与表一致；离线包（若有）与表一致；角色表与官网一致")
     for message in data.get("errors") or []:
         print(f"  （联网提示：{message}）")
 
-    if args.strict and (problems or asset_problems or offline_problems):
+    if args.strict and (problems or asset_problems or offline_problems or character_problems):
         return 1
     return 0
 

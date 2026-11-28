@@ -11,6 +11,8 @@ from dataclasses import MISSING, asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
+from . import edition
+
 
 def _detect_project_root() -> Path:
     """数据根目录（config.json / runtime / library 的所在地）。
@@ -53,10 +55,14 @@ PROJECT_ROOT = _detect_project_root()
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config.json"
 DEFAULT_DATA_ROOT = PROJECT_ROOT / "runtime"
 
-# 主题白名单：**必须与 `frontend/src/store.js` 的 `THEMES` 完全一致**（2026-10-04 加）。
-# 加载配置时会用它做校验 —— 两侧一旦不一致，用户选的主题就会被静默改回默认
-# （历史上这里只认 dark/light，而前端有 6 套，于是琥珀/青蓝/紫罗兰/翡翠**存不住**）。
-THEMES = ("light", "dark", "amber", "cyan", "violet", "emerald")
+# 主题：**底色（明暗）与强调色分开选**（2026-11-28 用户要求）。两份白名单都必须与
+# `frontend/src/store.js` 的 `THEME_BASES` / `THEME_ACCENTS` 完全一致（2026-10-04 的教训：
+# 两边不一致 ⇒ 用户选的存不住、下次启动被静默改回 light）。
+THEME_BASES = ("light", "dark")
+THEME_ACCENTS = ("blue", "amber", "cyan", "violet", "emerald")
+# 旧版把强调色当整套主题存（theme=amber/...）⇒ 读老配置时迁移成 dark + 对应强调色。
+LEGACY_THEMES = {"amber": "amber", "cyan": "cyan", "violet": "violet", "emerald": "emerald"}
+THEMES = THEME_BASES
 
 
 def resource_root() -> Path:
@@ -461,6 +467,27 @@ class AppConfig:
     # 旧 config.json 里残留的这个键会被 `load()` 的 known 过滤丢掉，不需要迁移。
 
     theme: str = "light"
+    # 强调色（与明暗底色分开）：blue / amber / cyan / violet / emerald。
+    theme_accent: str = "blue"
+    # Mod 商城 R18 三档（show / blur / hide）：要**跨页面、跨重启**记住
+    # （2026-11-28 用户：「mod商城的r18选择需要记忆」）。
+    mod_store_nsfw: str = "blur"
+    # 界面语言（zh / en；默认中文）。2026-11-28 用户要求英文版本 + 设置页语言切换。
+    language: str = "zh"
+    # ── 界面外观 / 运行日志 / 本机 Web 服务（2026-11-28 用户要求，参考 MaaEnd）──
+    # 自定义背景图：留空 = 不显示；选图后由后端把路径存成"数据根相对路径"（搬目录也跟随）。
+    ui_background_image: str = ""
+    # 背景不透明度（0-100）：背景图铺在页面底色之上、卡片之下。
+    ui_background_opacity: int = 80
+    # 启动时自动清理运行日志（只动 runtime\logs 下超过保留天数的文件）。
+    auto_clear_logs: bool = True
+    # 运行日志保留天数（0 = 不按时间清理）。
+    log_retention_days: int = 14
+    # 本机 UI 自动化 / 无障碍 HTTP 服务：**默认关闭**（用户 2026-11-28：
+    # 「那个 api 接口要留个开关，默认关闭」）。关闭时不监听任何端口。
+    ui_api_enabled: bool = False
+    # 端口：0 = 每次启动随机（推荐）；填固定值便于脚本记住地址。
+    ui_api_port: int = 0
     last_tab: str = "library"
     # 「角色视图」开关（用户 2026-10-07 要求）：
     #   关（默认）= 现在这样（一屏 Mod 卡片）；
@@ -660,8 +687,23 @@ class AppConfig:
         # 有 6 套（light/dark/amber/cyan/violet/emerald），而这里只认 dark/light ⇒
         # 用户选「琥珀/青蓝/紫罗兰/翡翠」存进 config.json 后，**下次启动被静默改回 light**
         # （设置页下拉显示「浅色」而界面还是琥珀色，两处还对不上）。
-        if cfg.theme not in THEMES:
+        # 旧配置（theme=amber/cyan/violet/emerald）迁移成「深色底 + 对应强调色」，
+        # 不迁移的话这些用户的配色会在升级后直接变成浅色。
+        legacy = str(cfg.theme or "").strip().lower()
+        if legacy in LEGACY_THEMES:
+            cfg.theme = "dark"
+            cfg.theme_accent = LEGACY_THEMES[legacy]
+        elif cfg.theme not in THEMES:
             cfg.theme = "light"
+        accent = str(getattr(cfg, "theme_accent", "") or "").strip().lower()
+        if accent not in THEME_ACCENTS:
+            cfg.theme_accent = "blue"
+        else:
+            cfg.theme_accent = accent
+        nsfw = str(getattr(cfg, "mod_store_nsfw", "") or "").strip().lower()
+        cfg.mod_store_nsfw = nsfw if nsfw in ("show", "blur", "hide") else "blur"
+        lang = str(getattr(cfg, "language", "") or "").strip().lower()
+        cfg.language = lang if lang in ("zh", "en") else "zh"
         # **一次性默认值迁移**（2026-10-01 用户要求「把快捷键整合设为默认开启」）：
         # 老配置里躺着显式的 `"hotkey_takeover": false`，光改 dataclass 默认值对它无效 ——
         # 所以只要这份配置**没跟过新默认**（`hotkey_default_applied` 不为 True），就把它设成
@@ -767,7 +809,8 @@ class AppConfig:
                 filled.append("poser_dir")
 
         # ④ DLSS5 底座 DLL：永远指向内嵌 dlss5
-        if not self.reshade_dll.strip():
+        # Lite 跳过：这是 ReShade 侧的回填，两版共用同一份 config.json，不替用户写。
+        if not edition.is_lite() and not self.reshade_dll.strip():
             candidate = self.dlss5_path / "d3d12.dll"
             if candidate.is_file():
                 self.reshade_dll = "runtime/dlss5/d3d12.dll"

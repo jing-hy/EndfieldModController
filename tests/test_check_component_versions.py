@@ -22,6 +22,12 @@ def _load(*, offline_bundle: Path | None = None):
     assert spec.loader is not None
     spec.loader.exec_module(module)
     module.OFFLINE_BUNDLE = offline_bundle or _NO_BUNDLE
+    # 第四道（角色表 vs 官网）会联网：这些用例只测版本比对，统一打成"没查到"，
+    # 免得测试依赖网络与时延。角色表自己的用例在 test_check_component_versions_characters.py。
+    module.collect_characters = lambda: {
+        "status": "unknown", "official": 0, "local": 0,
+        "missing": [], "extra": [], "problems": [], "message": "测试不联网",
+    }
     return module
 
 

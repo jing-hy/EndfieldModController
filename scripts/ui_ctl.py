@@ -108,7 +108,11 @@ def main(argv: list[str] | None = None) -> int:
     p_find = sub.add_parser("find", help="按文字找元素")
     p_find.add_argument("keyword")
 
-    p_tab = sub.add_parser("tab", help="切换页面（library/assist/store/downloads/dependencies/launch/settings/about）")
+    p_tab = sub.add_parser(
+        "tab",
+        help="切换页面（library/assist/store/downloads/dependencies/launch）；"
+             "tab settings / tab about 仍然可用 —— 会打开设置浮窗（它们已不是页面）",
+    )
     p_tab.add_argument("name")
 
     p_click = sub.add_parser("click", help="点一个元素")
@@ -147,7 +151,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "tab":
-        body = {"id": "tab:" + str(args.name), "action": "click"}
+        # 2026-11-28：设置/说明从导航页变成浮窗 —— 老命令保留，映射到浮窗入口，
+        # 已经写好脚本的人不用改。
+        overlays = {
+            "settings": '[data-mc-id="settings:open"]',
+            "about": '[data-mc-id="settings:about"]',
+        }
+        body = {"id": overlays.get(str(args.name)) or ("tab:" + str(args.name)), "action": "click"}
     elif args.command == "click":
         body = {"id": args.id, "action": "click"}
     elif args.command == "set":

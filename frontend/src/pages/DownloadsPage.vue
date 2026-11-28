@@ -19,6 +19,7 @@
 //    「进度条不要一卡一卡的，应该跟着实际大小走」）。
 import { ref, computed, onMounted, onUnmounted } from "vue";
 import { call } from "../lib/bridge.js";
+import { t } from "../lib/i18n.js";
 import { store } from "../store.js";
 import { humanSize, sleep } from "../lib/util.js";
 import { showModalDialog, showToast } from "../lib/dialog.js";
@@ -42,6 +43,11 @@ const logLines = computed(() => (depTask.value && depTask.value.log) || []);
 const counts = computed(() => (modTask.value && modTask.value.counts) || {});
 // 有"内容"才画卡片：干过活的记录（哪怕已结束）也留着，方便回看结果
 const hasMods = computed(() => modItems.value.length > 0);
+// 「已入库」与「进行中/等待」分开展示（2026-11-28 用户：下完自动挪到下方「已下载」卡片；
+// 没重启就不该清零 —— 后端 `_mod_dl` 会保留本次会话的已入库项）。
+const doneItems = computed(() => modItems.value.filter((it) => String(it.status || "") === "已入库"));
+const pendingItems = computed(() => modItems.value.filter((it) => String(it.status || "") !== "已入库"));
+const hasDone = computed(() => doneItems.value.length > 0);
 const hasDeps = computed(() => !!depTask.value);
 const nothing = computed(() => !hasMods.value && !hasDeps.value);
 
@@ -88,9 +94,9 @@ async function maybeSuggestOffline(task) {
   if (!hint || task.running || hintShown.value === String(hint)) return;
   hintShown.value = String(hint);
   const ok = await showModalDialog({
-    title: "组件没下载成功：可以改用离线依赖包",
-    message: String(hint) + "\n\n拿到包之后：依赖页 → 顶部「导入依赖包…」。",
-    okText: "知道了", cancelText: "去依赖页导入",
+    title: t("组件没下载成功：可以改用离线依赖包"),
+    message: String(hint) + "\n\n" + t("拿到包之后：依赖页 → 顶部「导入依赖包…」。"),
+    okText: t("知道了"), cancelText: t("去依赖页导入"),
   });
   if (!ok) store.tab = "dependencies";
 }
@@ -121,23 +127,24 @@ async function control(act) {
   if (act === "cancel") {
     // 破坏性动作：按钮自解释 + 默认聚焦安全项（项目既定规矩）
     const ok = await showModalDialog({
-      title: "终止下载",
-      message: "会停下所有下载任务，**已下完的部分会被清掉**。\n\n确定终止吗？\n"
-             + "（只是想暂存进度就选「暂停」，那会保留断点。）",
-      okText: "终止并清掉半成品", cancelText: "继续下载", focusCancel: true,
+      title: t("终止下载"),
+      message: t("会停下所有下载任务，**已下完的部分会被清掉**。") + "\n\n"
+             + t("确定终止吗？") + "\n"
+             + t("（只是想暂存进度就选「暂停」，那会保留断点。）"),
+      okText: t("终止并清掉半成品"), cancelText: t("继续下载"), focusCancel: true,
     });
     if (!ok) return;
   }
   try {
     const result = await call(method, "");
     if (result && result.ok === false) {
-      showToast(String(result.message || "操作失败"), "danger");
+      showToast(String(result.message || t("操作失败")), "danger");
       return;
     }
     if (result && result.resumed === 0 && act === "resume") {
-      showToast("没有可继续的任务", "info");
+      showToast(t("没有可继续的任务"), "info");
     } else {
-      showToast(DONE_TEXT[act] || "已处理", act === "cancel" ? "warning" : "success");
+      showToast(t(DONE_TEXT[act] || "已处理"), act === "cancel" ? "warning" : "success");
     }
   } catch (e) {
     return;                                  // call 已经弹过错误窗
@@ -148,7 +155,14 @@ async function control(act) {
 
 async function openDir() {
   const result = await call("open_download_dir");
-  if (result && result.ok === false) showToast(String(result.message || "打不开下载目录"), "danger");
+  if (result && result.ok === false) showToast(String(result.message || t("打不开下载目录")), "danger");
+}
+
+async function openPath(path) {
+  if (!path) return;
+  const result = await call("open_path_in_explorer", String(path), true);
+  if (result && result.ok === false) showToast(String(result.message || t("打不开这个位置")), "danger");
+  else if (result && result.message) showToast(String(result.message), "info");
 }
 
 // 依赖/组件下载：没有暂停语义（`ensure_all` 是一条顺下来的流程），所以这里只负责"开跑"
@@ -178,7 +192,7 @@ onMounted(async () => {
     store.autoStartDeps = false;
     const note = store.autoStartDepsNote || "";
     store.autoStartDepsNote = "";
-    await startDeps(note || "开始下载依赖组件…");
+    await startDeps(note || t("开始下载依赖组件…"));
   }
 });
 onUnmounted(() => { if (timer) clearInterval(timer); });
@@ -196,68 +210,72 @@ useLogAutoScroll(logBox, () => logLines.value);
     <ModDownloadCard />
 
     <!-- 汇总：现在到底有没有在下载、多快、队列里几件 -->
-    <Card title="下载">
+    <Card :title="t('下载')">
       <template #badge>
         <span class="text-xs" style="color: var(--text-muted)">
-          {{ activeCount > 0 ? `${activeCount} 个进行中` : "当前空闲" }}
+          {{ activeCount > 0 ? `${activeCount} ${t("个进行中")}` : t("当前空闲") }}
         </span>
       </template>
       <div class="grid gap-3" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr))">
         <div class="card"><div class="card-body">
           <div class="text-xl font-semibold">{{ activeCount }}</div>
-          <div class="text-xs mt-0.5" style="color: var(--text-muted)">进行中的任务</div>
+          <div class="text-xs mt-0.5" style="color: var(--text-muted)">{{ t("进行中的任务") }}</div>
         </div></div>
         <div class="card"><div class="card-body">
           <div class="text-xl font-semibold">{{ speedText(totalSpeed) }}</div>
-          <div class="text-xs mt-0.5" style="color: var(--text-muted)">总速度</div>
+          <div class="text-xs mt-0.5" style="color: var(--text-muted)">{{ t("总速度") }}</div>
         </div></div>
         <div class="card"><div class="card-body">
           <div class="text-xl font-semibold">{{ modItems.length }}</div>
-          <div class="text-xs mt-0.5" style="color: var(--text-muted)">Mod 队列</div>
+          <div class="text-xs mt-0.5" style="color: var(--text-muted)">{{ t("Mod 队列") }}</div>
         </div></div>
         <div class="card"><div class="card-body">
           <div class="text-xl font-semibold">
             {{ modTask ? counts.imported || 0 : "—" }}
           </div>
-          <div class="text-xs mt-0.5" style="color: var(--text-muted)">本次已入库</div>
+          <div class="text-xs mt-0.5" style="color: var(--text-muted)">{{ t("本次已入库") }}</div>
         </div></div>
       </div>
       <div class="flex flex-wrap items-center gap-2 mt-3">
-        <Btn @click="openDir">打开下载目录</Btn>
+        <Btn @click="openDir">{{ t("打开下载目录") }}</Btn>
         <span class="text-xs" style="color: var(--text-muted)">
-          下载在后台进行，切到别的页面也不会停；随时可以再往里加任务。
+          {{ t("下载在后台进行，切到别的页面也不会停；随时可以再往里加任务。") }}
         </span>
       </div>
     </Card>
 
     <!-- Mod 下载队列 -->
-    <Card v-if="hasMods" title="Mod 下载">
+    <Card v-if="hasMods" :title="t('Mod 下载')">
       <template #badge>
         <span class="text-xs" style="color: var(--text-muted)">
-          {{ counts.imported || 0 }} 入库 · {{ counts.failed || 0 }} 失败
+          {{ counts.imported || 0 }} {{ t("入库") }} · {{ counts.failed || 0 }} {{ t("失败") }}
         </span>
       </template>
       <div class="flex flex-wrap gap-2 mb-3">
         <template v-if="modActive">
-          <Btn size="sm" @click="control('pause')">暂停</Btn>
-          <Btn size="sm" variant="danger" @click="control('cancel')">终止</Btn>
+          <Btn size="sm" @click="control('pause')">{{ t("暂停") }}</Btn>
+          <Btn size="sm" variant="danger" @click="control('cancel')">{{ t("终止") }}</Btn>
         </template>
-        <Btn v-else size="sm" @click="control('resume')">继续</Btn>
-        <Btn size="sm" @click="control('clear')">清除记录</Btn>
+        <Btn v-else size="sm" @click="control('resume')">{{ t("继续") }}</Btn>
+        <Btn size="sm" @click="control('clear')">{{ t("清除记录") }}</Btn>
         <span class="text-xs self-center" style="color: var(--text-muted)">
-          「暂停」保留断点，「终止」会清掉半成品。
+          {{ t("「暂停」保留断点，「终止」会清掉半成品。") }}
         </span>
       </div>
 
       <div class="space-y-2">
-        <div v-for="(item, index) in modItems" :key="item.id || index"
+        <div v-if="!pendingItems.length && hasDone" class="text-xs"
+             style="color: var(--text-muted)">
+          {{ t("队列里的都下完了 —— 已入库的都在下面「已下载」里。") }}
+        </div>
+        <div v-for="(item, index) in pendingItems" :key="item.id || index"
              class="flex gap-3 p-2 rounded"
              style="border: 1px solid var(--border); background: var(--surface-2)">
           <!-- 封面（后端转好的 data URI；没有就用占位块） -->
           <div class="w-24 h-14 shrink-0 rounded overflow-hidden flex items-center justify-center"
                style="background: var(--surface); border: 1px solid var(--border)">
             <img v-if="item.cover_data" :src="item.cover_data" class="w-full h-full object-cover" alt="" />
-            <span v-else class="text-xs" style="color: var(--text-muted)">无图</span>
+            <span v-else class="text-xs" style="color: var(--text-muted)">{{ t("无图") }}</span>
           </div>
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2">
@@ -274,40 +292,79 @@ useLogAutoScroll(logBox, () => logLines.value);
                            :text="item.size ? `${humanSize(item.received || 0)} / ${humanSize(item.size)}` : ''" />
             </div>
             <div class="text-xs mt-1 flex flex-wrap gap-x-3" style="color: var(--text-muted)">
-              <span v-if="item.speed_bps > 0">速度 {{ speedText(item.speed_bps) }}</span>
+              <span v-if="item.speed_bps > 0">{{ t("速度") }} {{ speedText(item.speed_bps) }}</span>
               <span v-if="item.site_category">{{ item.site_category }}</span>
               <span v-if="item.message" :style="item.status === '失败' ? 'color: var(--danger)' : ''">
                 {{ item.message }}
               </span>
             </div>
             <div v-if="item.status === '需手动解压'" class="text-xs mt-1" style="color: var(--warn)">
-              已保留原包：{{ item.source_path }} → 手动解压到 {{ item.target_dir }}
+              {{ t("已保留原包：") }}{{ item.source_path }} → {{ t("手动解压到") }} {{ item.target_dir }}
             </div>
             <div v-if="item.retired && item.retired.length" class="text-xs mt-1"
                  style="color: var(--text-muted)">
-              同来源旧版已移出：{{ item.retired.join("、") }}
+              {{ t("同来源旧版已移出：") }}{{ item.retired.join(t("、")) }}
             </div>
           </div>
         </div>
       </div>
     </Card>
 
+    <!-- 已下载：本次运行里下完并入库的（重启后清空；用户 2026-11-28 要求单独一张卡） -->
+    <Card v-if="hasDone" :title="t('已下载')">
+      <template #badge>
+        <span class="text-xs" style="color: var(--text-muted)">
+          {{ doneItems.length }} {{ t("个") }} · {{ t("本次运行内保留（重启后清空）") }}
+        </span>
+      </template>
+      <div class="space-y-2">
+        <div v-for="(item, index) in doneItems" :key="'done-' + (item.id || index)"
+             class="flex gap-3 p-2 rounded"
+             style="border: 1px solid var(--border); background: var(--surface-2)">
+          <div class="w-24 h-14 shrink-0 rounded overflow-hidden flex items-center justify-center"
+               style="background: var(--surface); border: 1px solid var(--border)">
+            <img v-if="item.cover_data" :src="item.cover_data" class="w-full h-full object-cover" alt="" />
+            <span v-else class="text-xs" style="color: var(--text-muted)">{{ t("无图") }}</span>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2">
+              <span class="text-sm truncate" :title="item.title || item.name">
+                {{ item.title || item.name || item.url }}
+              </span>
+              <Badge tone="success">{{ t("已入库") }}</Badge>
+              <span v-if="item.site_category" class="text-xs" style="color: var(--text-muted)">
+                {{ item.site_category }}
+              </span>
+            </div>
+            <div class="text-xs mt-1 flex flex-wrap gap-x-3" style="color: var(--text-muted)">
+              <span v-if="item.size">{{ t("大小") }} {{ humanSize(item.size) }}</span>
+              <span v-if="item.target_dir" class="truncate" :title="item.target_dir">
+                → {{ item.target_dir }}
+              </span>
+              <span v-else-if="item.message">{{ item.message }}</span>
+            </div>
+          </div>
+          <Btn v-if="item.target_dir" size="sm" @click="openPath(item.target_dir)">{{ t("打开") }}</Btn>
+        </div>
+      </div>
+    </Card>
+
     <!-- 依赖 / 组件下载（含自更新） -->
-    <Card v-if="hasDeps" title="依赖 / 组件">
+    <Card v-if="hasDeps" :title="t('依赖 / 组件')">
       <template #badge>
         <span class="text-xs" style="color: var(--text-muted)">
           {{ depTask.running ? speedText(depTask.speed_bps) : (depTask.status || "") }}
         </span>
       </template>
       <div class="text-sm mb-2" style="color: var(--text-muted)">
-        {{ depTask.message || "（等待开始…）" }}
+        {{ depTask.message || t("（等待开始…）") }}
       </div>
       <ProgressBar :value="percentOf(depTask)"
                    :text="depTask.total_bytes
                      ? `${humanSize(depTask.done_bytes || 0)} / ${humanSize(depTask.total_bytes)}`
                      : `${Math.round(percentOf(depTask))}%`" />
       <div class="text-xs mt-2" style="color: var(--text-muted)">
-        组件更新/补齐没有"暂停"（它是一条顺下来的流程）；要停下就关掉程序再开。
+        {{ t('组件更新/补齐没有"暂停"（它是一条顺下来的流程）；要停下就关掉程序再开。') }}
       </div>
       <!-- ⚠️ 日志框**任何情况都是纯黑**（.log-box 在 tokens.css 里）—— 只为与深色主题
            区分边界；`text_select` / user-select 保证可复制（用户明确要过）。 -->
@@ -319,13 +376,13 @@ useLogAutoScroll(logBox, () => logLines.value);
     </Card>
 
     <!-- 空态：说清"这里会出现什么"，而不是一片空白 -->
-    <Card v-if="nothing" title="还没有下载任务">
+    <Card v-if="nothing" :title="t('还没有下载任务')">
       <p class="text-sm" style="color: var(--text-muted)">
-        这里会显示所有下载：在「服装 Mod / 辅助 Mod」页粘贴网址、或在「Mod 商城」里点下载，
-        任务都会出现在这儿；点「一键启动」时补齐依赖组件的下载也在这儿。
+        {{ t("这里会显示所有下载：在「服装 Mod / 辅助 Mod」页粘贴网址、或在「Mod 商城」里点下载，") }}
+        {{ t("任务都会出现在这儿；点「一键启动」时补齐依赖组件的下载也在这儿。") }}
       </p>
       <p class="text-xs mt-2" style="color: var(--text-muted)">
-        下载全程在后台跑，切页不会中断，也可以随时继续追加新任务。
+        {{ t("下载全程在后台跑，切页不会中断，也可以随时继续追加新任务。") }}
       </p>
     </Card>
   </div>

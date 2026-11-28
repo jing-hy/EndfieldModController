@@ -5,6 +5,7 @@
 // 「发现 mod 冲突风险应该先去清理才是右边的橙色主选项」—— 所以主按钮在右、
 // "仍然继续"在最左且是次要样式。
 import { ref, watch, computed } from "vue";
+import { t } from "../lib/i18n.js";
 
 const props = defineProps({ groups: { type: Array, default: () => [] } });
 
@@ -50,7 +51,7 @@ function keepList() {
 
 function slotLabel(name) {
   if (!name) return "";
-  return SLOT_LABELS[String(name).toLowerCase()] || String(name);
+  return t(SLOT_LABELS[String(name).toLowerCase()] || String(name));
 }
 
 const picked = ref({});
@@ -68,30 +69,30 @@ watch(
 <template>
   <div class="fixed inset-0 z-[60] flex items-center justify-center" style="background: rgba(0,0,0,.45)">
     <div class="card w-[min(640px,92vw)] shadow-lg">
-      <div class="card-head">发现 Mod 资源冲突</div>
+      <div class="card-head">{{ t("发现 Mod 资源冲突") }}</div>
       <div class="card-body space-y-3 overflow-auto" style="max-height: 56vh; padding-bottom: 8px">
         <!-- ⚠️ **C14：标明"这份结论是什么时候算的"**（2026-10-03 补回归）。
              后端 `_conflict_state_report()` 一直带 `checked_at`，0.9.5 的启动前弹窗会讲，
              换代后没显示 —— 而用户拿到的可能是**上一次点「生成控制器」时的旧结论**，
              不写时间的话会以为是刚算出来的。 -->
         <div v-if="checkedAt" class="text-xs" style="color: var(--text-muted)">
-          这份结论算于 {{ checkedAt }}（点「生成控制器」可重新检查）
+          {{ t("这份结论算于") }} {{ checkedAt }}{{ t("（点「生成控制器」可重新检查）") }}
         </div>
         <p class="text-sm leading-6" style="color: var(--text-muted)">
-          下面每组里的 Mod 会互相覆盖同一批资源，同时生效常常让游戏崩。
-          每组选一个<b>要保留的</b>，该组其余 Mod 会被取消勾选。
-          <b>只改勾选，不删任何文件、不动你的 Mod 库</b>（随时可以再勾回来）。
+          {{ t("下面每组里的 Mod 会互相覆盖同一批资源，同时生效常常让游戏崩。") }}
+          {{ t("每组选一个") }}<b>{{ t("要保留的") }}</b>{{ t("，该组其余 Mod 会被取消勾选。") }}
+          <b>{{ t("只改勾选，不删任何文件、不动你的 Mod 库") }}</b>{{ t("（随时可以再勾回来）。") }}
         </p>
         <div v-for="(g, i) in groups" :key="i" class="rounded-lg border p-3" style="border-color: var(--border)">
           <div class="text-xs mb-2" style="color: var(--text-muted)">
-            第 {{ i + 1 }} 组{{ slotLabel(g.group) ? " · " + slotLabel(g.group) : "" }} · 共 {{ (g.mods || []).length }} 个 Mod
+            {{ t("第") }} {{ i + 1 }} {{ t("组") }}{{ slotLabel(g.group) ? " · " + slotLabel(g.group) : "" }} · {{ t("共") }} {{ (g.mods || []).length }} {{ t("个 Mod") }}
           </div>
           <select class="field" v-model="picked[i]">
             <option value="">
-              暂不处理：这 {{ (g.mods || []).length }} 个 Mod 都保持启用
+              {{ t("暂不处理：这") }} {{ (g.mods || []).length }} {{ t("个 Mod 都保持启用") }}
             </option>
             <option v-for="m in (g.mods || [])" :key="m.id" :value="String(m.id)">
-              保留「{{ m.name || m.id }}」，停用该组其他 {{ (g.mods || []).length - 1 }} 个
+              {{ t("保留") }}「{{ m.name || m.id }}」{{ t("，停用该组其他") }} {{ (g.mods || []).length - 1 }} {{ t("个") }}
             </option>
           </select>
           <div v-if="g.reason" class="text-xs mt-2" style="color: var(--text-muted)">{{ g.reason }}</div>
@@ -100,12 +101,12 @@ watch(
       <div class="px-4 py-3 border-t" style="border-color: var(--border)">
         <div class="flex items-center justify-between gap-3">
           <span class="text-xs" style="color: var(--text-muted)">
-            不会删除 Mod 文件，只调整"启用哪些"。整理完记得点「生成控制器」。
+            {{ t('不会删除 Mod 文件，只调整"启用哪些"。整理完记得点「生成控制器」。') }}
           </span>
           <span class="flex gap-2 shrink-0">
-            <button class="btn btn-secondary" @click="emit('cancel')">暂不处理，继续</button>
+            <button class="btn btn-secondary" @click="emit('cancel')">{{ t("暂不处理，继续") }}</button>
             <button class="btn btn-primary" @click="emit('resolve', keepList())">
-              应用选择并停用其他
+              {{ t("应用选择并停用其他") }}
             </button>
           </span>
         </div>

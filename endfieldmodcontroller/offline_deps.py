@@ -52,6 +52,7 @@ import zipfile
 from pathlib import Path
 from typing import Any, Callable
 
+from . import edition
 from .config import AppConfig
 
 OFFLINE_DIRNAME = "_offline"
@@ -61,6 +62,28 @@ DEPS_PREFIX = "deps/"
 ASSETS_PREFIX = "assets/"
 #: 包内清单的格式版本（将来改结构时用它判新旧）
 BUNDLE_FORMAT = 1
+
+#: 随包资产里**只有 ReShade 链路会用**的那些组（assets\nvngx 的 DLSS 运行库、
+#: assets\dlss5 的组件包）。Lite 没有这条链路 ⇒ 这两组一概不导入。
+_RESHADE_ASSET_GROUPS = frozenset({"nvngx", "dlss5"})
+
+
+def skipped_asset_groups() -> frozenset[str]:
+    """本次运行**不导入**的随包资产组（Lite = ReShade 那两组；Universal 恒为空集）。"""
+    return _RESHADE_ASSET_GROUPS if edition.is_lite() else frozenset()
+
+
+def _asset_groups_in(archive_zip: zipfile.ZipFile) -> set[str]:
+    """包里 assets/<组>/… 出现过哪些顶层组名（判断该不该整份跳过用）。"""
+    groups: set[str] = set()
+    for name in archive_zip.namelist():
+        normalized = name.replace("\\", "/")
+        if not normalized.startswith(ASSETS_PREFIX):
+            continue
+        parts = [part for part in normalized[len(ASSETS_PREFIX):].split("/") if part]
+        if len(parts) >= 2:
+            groups.add(parts[0])
+    return groups
 
 
 def _log(log: Callable[[str], None] | None, message: str) -> None:
@@ -267,14 +290,35 @@ def import_deps_bundle(config: AppConfig, archive: str | Path,
     _log(log, f"离线依赖包：已放入 {len(written)} 个组件到 {root}")
 
     assets_message = ""
+    assets_skipped: list[str] = []
     if report.get("has_assets"):
+        skip = skipped_asset_groups()
         try:
-            assets = runtime_assets.import_bundle(config, path)
-            assets_message = str(assets.get("message") or assets.get("kind") or "")
-            _log(log, f"离线依赖包里的随包资产：{assets_message}")
-        except Exception as exc:  # noqa: BLE001 —— 资产那份失败不影响组件那部分
-            assets_message = f"随包资产导入失败：{exc}"
-            _log(log, "!! " + assets_message)
+            with zipfile.ZipFile(path) as archive_zip:
+                present = _asset_groups_in(archive_zip)
+        except (OSError, zipfile.BadZipFile) as exc:
+            present = set()
+            _log(log, f"离线依赖包：读资产组失败（{exc}）")
+        assets_skipped = sorted(present & skip)
+        if assets_skipped:
+            # Lite 不含 ReShade 链路 ⇒ ReShade 那两组一个文件都不落盘（整份不导入，
+            # 而不是"导入后再挑"—— 落到磁盘就算违反「轻量版不含 ReShade」）。
+            # shortcut: 资产包目前只有 ReShade 两组；将来真加了别的组，这里要改成
+            # "过滤 ReShade 组后导入"，否则 Lite 会把这些新组也一起跳过。
+            assets_message = "轻量版已跳过 ReShade 组件：" + "、".join(
+                f"assets/{name}" for name in assets_skipped)
+            others = sorted(present - skip)
+            if others:
+                assets_message += "（包内还有非 ReShade 资产组，本次未导入：" + "、".join(others) + "）"
+            _log(log, "离线依赖包：" + assets_message)
+        else:
+            try:
+                assets = runtime_assets.import_bundle(config, path)
+                assets_message = str(assets.get("message") or assets.get("kind") or "")
+                _log(log, f"离线依赖包里的随包资产：{assets_message}")
+            except Exception as exc:  # noqa: BLE001 —— 资产那份失败不影响组件那部分
+                assets_message = f"随包资产导入失败：{exc}"
+                _log(log, "!! " + assets_message)
 
     return {
         "ok": True,
@@ -282,6 +326,7 @@ def import_deps_bundle(config: AppConfig, archive: str | Path,
         "components": written,
         "deps": list((report.get("manifest", {}).get("deps") or {}).keys()),
         "assets": assets_message,
+        "assets_skipped": assets_skipped,
     }
 
 

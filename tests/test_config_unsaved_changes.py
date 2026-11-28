@@ -100,7 +100,7 @@ def test_external_change_still_reloads_when_memory_is_clean(monkeypatch, cfg_fil
     assert cfg.has_unsaved_changes() is False
 
     cfg_file.write_text(json.dumps({
-        "data_root": str(cfg_file.parent), "theme": "cyan",
+        "data_root": str(cfg_file.parent), "theme": "dark", "theme_accent": "cyan",
         "dlss5_addon_enabled": True, "hotkey_takeover": True,
     }, ensure_ascii=False), encoding="utf-8")
     # 确保 mtime 与缓存不同（同一秒内写入时 mtime 可能一样）
@@ -111,7 +111,9 @@ def test_external_change_still_reloads_when_memory_is_clean(monkeypatch, cfg_fil
     time.sleep(0.01)
 
     got = inst.config
-    assert got.theme == "cyan", "内存干净时应当重新加载磁盘上的新配置"
+    assert got.theme == "dark" and got.theme_accent == "cyan", (
+        "内存干净时应当重新加载磁盘上的新配置"
+    )
 
 
 def test_runtime_only_attrs_do_not_dirty(monkeypatch, cfg_file):
@@ -142,10 +144,12 @@ def test_external_change_works_after_a_reload(monkeypatch, cfg_file):
     assert cfg.has_unsaved_changes() is False
 
     # 第一次外部改动 ⇒ 触发重载
-    _write_cfg(cfg_file, theme="amber")
-    assert inst.config.theme == "amber"
+    _write_cfg(cfg_file, theme_accent="amber")
+    assert inst.config.theme_accent == "amber"
     assert inst.config.has_unsaved_changes() is False, "重载之后不该留着脏标记"
 
     # 第二次外部改动 ⇒ 仍要能被感知（若第一次留下脏标记，这里就会失败）
-    _write_cfg(cfg_file, theme="violet")
-    assert inst.config.theme == "violet", "第一次重载留下的脏标记把后续重载全挡掉了"
+    _write_cfg(cfg_file, theme_accent="violet")
+    assert inst.config.theme_accent == "violet", (
+        "第一次重载留下的脏标记把后续重载全挡掉了"
+    )

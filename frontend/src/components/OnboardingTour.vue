@@ -9,8 +9,9 @@
 // 定位逻辑沿用旧版的做法：切页 → **等两帧**（切页后布局才稳定）→ 量目标矩形 →
 // 聚光对齐（外扩 8px）→ 卡片贴目标下方，放不下就挪到上方；没有目标时卡片居中。
 import { ref, watch, nextTick } from "vue";
-import { store } from "../store.js";
+import { store, openSettings, closeSettings } from "../store.js";
 import Btn from "./ui/Btn.vue";
+import { t } from "../lib/i18n.js";
 
 const props = defineProps({
   steps: { type: Array, required: true },
@@ -31,7 +32,14 @@ function current() { return props.steps[index.value] || null; }
 async function layout() {
   const step = current();
   if (!step) return;
-  if (step.tab && store.tab !== step.tab) store.tab = step.tab;
+  // 2026-11-28：设置不再是页面 —— 带 settingsSection 的步骤先打开设置浮窗并切到该分类；
+  // 从设置步骤退回页面步骤时要把浮窗关掉，否则它会一直盖着要展示的页面。
+  if (step.settingsSection) {
+    openSettings(step.settingsSection);
+  } else {
+    if (store.settingsOpen) closeSettings();
+    if (step.tab && store.tab !== step.tab) store.tab = step.tab;
+  }
   await nextTick();
 
   // ⚠️ 切页之后目标元素**不一定已经渲染出来**（页面组件要挂载一次）。
@@ -96,14 +104,14 @@ watch(() => props.modelValue, (visible) => {
 
     <div class="tour-card" :style="card">
       <div class="tour-progress">{{ index + 1 }} / {{ steps.length }}</div>
-      <h3 class="tour-title">{{ current() ? current().title : "" }}</h3>
-      <div class="tour-body">{{ current() ? current().body : "" }}</div>
+      <h3 class="tour-title">{{ t(current() ? current().title : "") }}</h3>
+      <div class="tour-body">{{ t(current() ? current().body : "") }}</div>
       <div class="tour-actions">
-        <button class="btn" @click="finish">跳过引导</button>
+        <button class="btn" @click="finish">{{ t("跳过引导") }}</button>
         <button class="btn" :style="{ visibility: index === 0 ? 'hidden' : 'visible' }"
-                @click="go(-1)">上一步</button>
+                @click="go(-1)">{{ t("上一步") }}</button>
         <Btn variant="primary" @click="go(1)">
-          {{ index === steps.length - 1 ? "开始使用" : "下一步" }}
+          {{ index === steps.length - 1 ? t("开始使用") : t("下一步") }}
         </Btn>
       </div>
     </div>

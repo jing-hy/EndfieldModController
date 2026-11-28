@@ -1,11 +1,24 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """把 EndfieldModController 打包成单个 exe（PyInstaller）。
 
-    python scripts/build_exe.py             # 单文件 exe（默认）
-    python scripts/build_exe.py --onedir    # 目录模式：启动更快，但不是单个文件
-    python scripts/build_exe.py --console   # 保留控制台（调试 --cli 用）
+    python scripts/build_exe.py                    # 单文件 exe（默认，完整版）
+    python scripts/build_exe.py --onedir           # 目录模式：启动更快，但不是单个文件
+    python scripts/build_exe.py --console          # 保留控制台（调试 --cli 用）
+    python scripts/build_exe.py --skip-addon       # 沿用上次的 ReShade 面板产物，不重编
+    python scripts/build_exe.py --edition lite     # 轻量版：不打包任何 ReShade 二进制
 
-产出：``dist/EndfieldModController.exe``
+产出：
+
+    dist/EndfieldModController.exe            完整版（默认；产物名与行为都跟以前一样）
+    dist/EndfieldModController-Lite.exe       轻量版（`--edition lite`）
+
+两个形态的差别（词与 `endfieldmodcontroller/edition.py` 的 FULL / LITE 一致）：
+
+* **不编译**自研 ReShade 面板（`scripts/build_addon.py` 整步跳过）；
+* **不打包** `assets/addon/`（面板 .addon64）与 `assets/dlss5/*`（清单 + ReShade 模板 +
+  三个 addon 压缩包）—— 轻量版运行期走不到 ReShade 链路；
+* 额外打一份 `edition.json`（`{"edition": "lite"}`）到**资源根**（`sys._MEIPASS` 根），
+  `edition.py` 运行期读它判形态。完整版**不打**这个文件（缺席即按 full 处理）。
 
 ⚠ 两个「根目录」必须分清，改代码时别搞混（细节见 config._detect_project_root
 与 app._resource_root）：
@@ -20,10 +33,12 @@
 """
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
 import sys
+import tempfile
 
 
 def _fix_console() -> None:
@@ -49,6 +64,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 ENTRY = ROOT / "scripts" / "exe_entry.py"
 APP_NAME = "EndfieldModController"
+APP_NAME_LITE = "EndfieldModController-Lite"
+#: 版本形态 → exe 名（词与 `endfieldmodcontroller/edition.py` 的 FULL / LITE 一致）。
+EDITIONS: tuple[str, ...] = ("full", "lite")
+APP_NAMES: dict[str, str] = {"full": APP_NAME, "lite": APP_NAME_LITE}
+#: 轻量版**一个都不打**的资产目录（`ADD_DATA` 里 src 以这些前缀开头的条目）：
+#: 自研 ReShade 面板 + DLSS5 的清单/模板/addon 压缩包。
+LITE_EXCLUDED_ASSET_PREFIXES: tuple[str, ...] = ("assets/addon/", "assets/dlss5/")
 
 # 只读资源：web 前端整目录 + 角色名表（含拼音别名）+ 面板词表 + 自研 ReShade 面板。
 # ⚠ 这些 .json / .addon64 都是数据文件，PyInstaller 只自动收 .py —— 少一个，发布版就会
@@ -90,32 +112,112 @@ ADD_DATA = [
 ICON = ROOT / "assets" / "app.ico"
 
 
+def parse_edition(args: list[str]) -> str:
+    """取 `--edition full|lite`（缺省 full）；取值非法直接中止。
+
+    本脚本一直是手工扫 argv（`--onedir` / `--console` / `--skip-addon`），改成 argparse
+    会让已有参数的语义变味（未知参数一律忽略），所以就在同一套风格里加这一项。
+    """
+    edition = "full"
+    for index, item in enumerate(args):
+        if item == "--edition" and index + 1 < len(args):
+            edition = args[index + 1]
+        elif item.startswith("--edition="):
+            edition = item.split("=", 1)[1]
+    value = str(edition).strip().lower()
+    if value not in EDITIONS:
+        raise SystemExit(f"!! --edition 只能是 {'/'.join(EDITIONS)}，收到的是 {edition!r}")
+    return value
+
+
+def is_reshade_asset(src: str) -> bool:
+    """ADD_DATA 里这一项是否属于 ReShade 链路（轻量版一个都不打）。"""
+    normalized = str(src).replace("\\", "/")
+    return normalized.startswith(LITE_EXCLUDED_ASSET_PREFIXES)
+
+
+def add_data_for(edition: str) -> list[tuple[str, str]]:
+    """某个形态要打进 exe 的 `--add-data` 清单。
+
+    完整版**原样**返回 `ADD_DATA`（逐项与以前一致，不多不少）；轻量版去掉
+    `assets/addon/` 与 `assets/dlss5/` 下的条目，其余（web / 角色名表 / 头像 /
+    版本表 / 热键词表 …）照旧。
+    """
+    if edition == "full":
+        return list(ADD_DATA)
+    return [item for item in ADD_DATA if not is_reshade_asset(item[0])]
+
+
+def app_name_for(edition: str) -> str:
+    """PyInstaller 的 `--name`（**不带扩展名**）：单文件模式下产出 = 它 + `.exe`。
+
+    完整版沿用历史名 `EndfieldModController`（产物 `EndfieldModController.exe`，与以前一致）；
+    轻量版是 `EndfieldModController-Lite`（产物 `EndfieldModController-Lite.exe`）。
+    """
+    return APP_NAMES[edition]
+
+
+def _write_edition_json(tmp_dir: Path, edition: str) -> Path:
+    """在临时目录里写 `edition.json`，返回路径（由调用方 add-data 到 `.`）。"""
+    path = tmp_dir / "edition.json"
+    path.write_text(json.dumps({"edition": edition}, ensure_ascii=False) + "\n",
+                    encoding="utf-8")
+    return path
+
+
 def main() -> int:
     args = list(sys.argv[1:])
     onefile = "--onedir" not in args
     keep_console = "--console" in args
+    edition = parse_edition(args)
+    app_name = app_name_for(edition)
+    data_items = add_data_for(edition)
+    print(f"[edition] {edition} → dist/{app_name}.exe（随包资源 {len(data_items)} 项）", flush=True)
 
     # 面板必须在打之前就编好 —— 缺了它 exe 里就没有统一面板。
     # （默认自动编；`--skip-addon` 只给"刚编过、确认没改源码"的场合用。）
-    if "--skip-addon" not in args:
+    # 轻量版**不带** `assets/addon/` ⇒ 压根用不到它，编译整步跳过：否则 Lite 构建会白
+    # 依赖一套编面板的工具链（而它打出来的东西又不进包）。
+    if edition == "lite":
+        print("[edition] lite：跳过 ReShade 面板编译（assets/addon/ 不进包）", flush=True)
+    elif "--skip-addon" not in args:
         addon_script = ROOT / "scripts" / "build_addon.py"
         result = subprocess.run([sys.executable, str(addon_script)], cwd=str(ROOT))
         if result.returncode != 0:
             print("\n!! ReShade 面板编译失败（可加 --skip-addon 沿用上次产物）")
             return result.returncode
-    for src, _dest in ADD_DATA:
+    for src, _dest in data_items:
         if not (ROOT / src).exists():
             print(f"!! 缺少随包资源：{src}")
             return 1
 
+    # 轻量版额外打一份 `edition.json` 到**资源根**（`sys._MEIPASS` 根，即 add-data 的
+    # `.`）：`edition.py` 运行期按它判形态。放临时目录（不污染仓库、不进 git），跑完就删。
+    # 完整版**不打**它 —— 缺席时 `edition.current()` 本来就返回 full，多一个文件反而会让
+    # 完整版 exe 的字节内容跟以前不一样。
+    if edition == "lite":
+        with tempfile.TemporaryDirectory(prefix="mc-edition-json-") as tmp:
+            return _run_pyinstaller(
+                app_name=app_name,
+                data_items=data_items + [(_write_edition_json(Path(tmp), edition), ".")],
+                onefile=onefile,
+                keep_console=keep_console,
+            )
+    return _run_pyinstaller(app_name=app_name, data_items=data_items,
+                            onefile=onefile, keep_console=keep_console)
+
+
+def _run_pyinstaller(*, app_name: str, data_items: list[tuple[str, str]],
+                     onefile: bool, keep_console: bool) -> int:
+    """按给定的 exe 名与 add-data 清单调 PyInstaller，并核对产出。"""
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--noconfirm", "--clean",
-        "--name", APP_NAME,
+        "--name", app_name,
         "--onefile" if onefile else "--onedir",
         "--console" if keep_console else "--noconsole",
     ]
-    for src, dest in ADD_DATA:
+    for src, dest in data_items:
         cmd += ["--add-data", f"{src}{';' if sys.platform == 'win32' else ':'}{dest}"]
     if ICON.is_file():
         cmd += ["--icon", str(ICON)]
@@ -140,7 +242,7 @@ def main() -> int:
         print("\n!! 打包失败")
         return result.returncode
 
-    target = ROOT / "dist" / (f"{APP_NAME}.exe" if onefile else APP_NAME)
+    target = ROOT / "dist" / (f"{app_name}.exe" if onefile else app_name)
     if target.exists():
         if target.is_file():
             size = target.stat().st_size / 1024 / 1024

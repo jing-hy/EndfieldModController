@@ -4,6 +4,7 @@
 import { call } from "./bridge.js";
 import { showAlert, showModalDialog, showProgressToast, hideProgressToast } from "./dialog.js";
 import { setStatus } from "./status.js";
+import { t } from "./i18n.js";
 
 const CHUNK = 1024 * 1024;
 
@@ -29,7 +30,7 @@ export function dragHasFiles(event) {
 function sliceToBase64(file, start, end) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onerror = () => reject(reader.error || new Error("读取失败"));
+    reader.onerror = () => reject(reader.error || new Error(t("读取失败")));
     reader.onload = () => {
       const text = String(reader.result || "");
       resolve(text.slice(text.indexOf(",") + 1));
@@ -47,28 +48,28 @@ export async function importDroppedFile(file, { onDone, onNeedConfirm } = {}) {
     // 缺的只是"该解压到哪" —— 那就是 Mod 库。
     hideProgressToast("import");
     await showModalDialog({
-      title: "这个格式不能自动导入",
+      title: t("这个格式不能自动导入"),
       message: [
-        `拖进来的是：${file.name}`,
-        "程序只能自动解压 .zip / .7z / .rar。",
+        `${t("拖进来的是：")}${file.name}`,
+        t("程序只能自动解压 .zip / .7z / .rar。"),
         "",
-        "**它应该解压到**（把解压出来的 Mod 文件夹放进这里）：",
-        `  ${(await libraryDir()) || "（Mod 库目录，见设置页「工作区与 Mod 库」）"}`,
+        t("**它应该解压到**（把解压出来的 Mod 文件夹放进这里）："),
+        `  ${(await libraryDir()) || t("（Mod 库目录，见设置页「工作区与 Mod 库」）")}`,
         "",
-        "手动做法：把它解压，得到里面的 Mod 文件夹"
-          + "（如果解压出来套了好几层，保留最外层那一层），整个放进上面的目录，"
-          + "再回界面点「重新扫描」。",
+        t("手动做法：把它解压，得到里面的 Mod 文件夹")
+          + t("（如果解压出来套了好几层，保留最外层那一层），整个放进上面的目录，")
+          + t("再回界面点「重新扫描」。"),
       ].join("\n"),
-      okText: "知道了", showCancel: false,
+      okText: t("知道了"), showCancel: false,
     });
     return;
   }
   try {
-    showProgressToast("import", `准备导入 ${file.name} …`);
+    showProgressToast("import", `${t("准备导入")} ${file.name} …`);
     const begin = await call("import_mod_begin", file.name);
     if (!begin || !begin.ok) {
       hideProgressToast("import");       // 失败也要撤掉进度，否则界面停在"准备导入…"
-      await showAlert("导入 Mod", (begin && begin.message) || "导入失败");
+      await showAlert(t("导入 Mod"), (begin && begin.message) || t("导入失败"));
       return;
     }
     let sent = 0;
@@ -82,22 +83,22 @@ export async function importDroppedFile(file, { onDone, onNeedConfirm } = {}) {
         // 没有撤掉**（`hideProgressToast("import")` 只在成功路径上调）⇒ 进度条永远停在
         // 超限那一刻，看起来就是"卡死"。现在：**任何失败分支都先把进度提示撤掉**。
         hideProgressToast("import");
-        await showAlert("导入 Mod", (part && part.message) || "传输失败");
+        await showAlert(t("导入 Mod"), (part && part.message) || t("传输失败"));
         return;
       }
       sent = end;
       // 用**一条会自我更新**的进度提示：原来这里是 setStatus，而 setStatus 带 toast，
       // 于是每 1MB 弹一条、大包连弹上百条（用户反馈的"弹出来一堆动态"）。
       const pct = Math.floor((sent * 100) / Math.max(file.size, 1));
-      showProgressToast("import", `正在上传 ${file.name}：${pct}%（${(sent / 1048576).toFixed(1)} MB）`);
-      setStatus(`正在上传 ${file.name}：${pct}%`);
+      showProgressToast("import", `${t("正在上传")} ${file.name}${t("：")}${pct}%${t("（")}${(sent / 1048576).toFixed(1)} MB${t("）")}`);
+      setStatus(`${t("正在上传")} ${file.name}${t("：")}${pct}%`);
     }
-    showProgressToast("import", `正在解压并识别角色：${file.name} …`);
-    setStatus(`正在解压并识别角色：${file.name} …`);
+    showProgressToast("import", `${t("正在解压并识别角色")}${t("：")}${file.name} …`);
+    setStatus(`${t("正在解压并识别角色")}${t("：")}${file.name} …`);
     const result = await call("import_mod_finish", begin.token);
     if (!result || !result.ok) {
       hideProgressToast("import");       // 失败也要撤掉进度，否则停在"正在解压…"
-      await showAlert("导入 Mod", (result && result.message) || "导入失败");
+      await showAlert(t("导入 Mod"), (result && result.message) || t("导入失败"));
       return;
     }
     hideProgressToast("import");   // 收尾：把进度提示撤掉
@@ -113,21 +114,21 @@ export async function importDroppedFile(file, { onDone, onNeedConfirm } = {}) {
         await onNeedConfirm(result);
       } else {
         await showModalDialog({
-          title: "这个 Mod 归到哪个角色？",
-          message: `已导入「${result.name}」，但没看出属于哪个角色。\n\n` +
-            "去 Mod 库页点它的「⋯ → 更换归属」就能设定。",
-          okText: "知道了", showCancel: false,
+          title: t("这个 Mod 归到哪个角色？"),
+          message: `${t("已导入「")}${result.name}${t("」，但没看出属于哪个角色。")}\n\n` +
+            t("去 Mod 库页点它的「⋯ → 更换归属」就能设定。"),
+          okText: t("知道了"), showCancel: false,
         });
       }
     } else if (result.group) {
-      await showAlert("导入 Mod", `已导入「${result.name}」，识别为「${result.group}」。`);
+      await showAlert(t("导入 Mod"), `${t("已导入「")}${result.name}${t("」，识别为「")}${result.group}${t("」。")}`);
     } else {
-      await showAlert("导入 Mod", result.warning || `已导入「${result.name}」。`);
+      await showAlert(t("导入 Mod"), result.warning || `${t("已导入「")}${result.name}${t("」。")}`);
     }
   } catch (err) {
     // ⚠️ **任何异常都要撤掉进度提示** —— 这是"动态一直卡在那里"的最后一道兜底：
     // 进度 toast 是 sticky 的（同一 key 只占一条、不会自己消失），不主动撤就会一直挂着。
     hideProgressToast("import");
-    await showAlert("导入 Mod", `导入失败：${(err && err.message) || err}`);
+    await showAlert(t("导入 Mod"), `${t("导入失败")}${t("：")}${(err && err.message) || err}`);
   }
 }

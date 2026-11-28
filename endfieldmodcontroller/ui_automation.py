@@ -270,9 +270,18 @@ def is_running() -> bool:
 
 
 def endpoint_info(config: Any = None) -> dict[str, Any]:
-    """给设置页/诊断用的只读信息（不含 token）。"""
+    """给设置页/诊断用的只读信息（不含 token）。
+
+    `token_file` 是 `runtime/_state/ui_api.json`（里面才有 token）—— 设置页直接把它
+    显示出来，用户/脚本不用猜路径。2026-11-28 起服务默认关闭，前端按 running 显示状态。
+    """
     server = _SERVER
+    token_file = str(_STATE_PATH) if _STATE_PATH else ""
     if server is None:
-        return {"ok": True, "running": False}
-    return {"ok": True, "running": True, "url": f"http://127.0.0.1:{server.server_address[1]}",
+        return {"ok": True, "running": False, "token_file": token_file,
+                "poll_ms": POLL_INTERVAL_MS}
+    return {"ok": True, "running": True,
+            "url": f"http://127.0.0.1:{server.server_address[1]}",
+            "port": int(server.server_address[1]),
+            "token_file": token_file,
             "poll_ms": POLL_INTERVAL_MS}

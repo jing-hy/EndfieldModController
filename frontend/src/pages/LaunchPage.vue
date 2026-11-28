@@ -3,6 +3,7 @@
 // 启动页（旧 #tab-launch）：一键启动 + 六个注入开关（**与设置页共享同一份 settings 状态**）。
 import { ref, computed, onMounted, onUnmounted } from "vue";
 import { call } from "../lib/bridge.js";
+import { t } from "../lib/i18n.js";
 // ⚠️ 这里**必须把用到的都列全**（2026-10-04 修）：原先只导入了 showModalDialog / showAlert，
 // 而「检查/修复完整性」那条链路用了 showProgressToast(313) / showToast(327) /
 // hideProgressToast(329) —— 三个都不在作用域里 ⇒ 一点「修复」就在 try 之前抛
@@ -21,7 +22,7 @@ import Card from "../components/ui/Card.vue";
 import Btn from "../components/ui/Btn.vue";
 import Switch from "../components/ui/Switch.vue";
 
-const consoleLog = ref("就绪。点「一键启动」：先跑初始化自检（缺什么补什么），再拉起 XXMI Launcher。");
+const consoleLog = ref(t("就绪。点「一键启动」：先跑初始化自检（缺什么补什么），再拉起 XXMI Launcher。"));
 const renderApi = ref("");
 // ⚠️ **渲染 API 的告警文案**（2026-10-03 补回归）。0.9.5 是这么写的：
 //   vulkan / d3d12 → 「上次启动：X（**服装 Mod 不生效**，请在启动器里点 DirectX 11 启动）」
@@ -31,10 +32,10 @@ const renderApi = ref("");
 // 而这是"我装了 Mod 怎么没效果"最常见的原因。
 const renderApiText = computed(() => {
   const v = String(renderApi.value || "").toLowerCase();
-  if (v === "vulkan") return "上次启动：Vulkan —— 服装 Mod 不生效，请在启动器里选 DirectX 11 启动";
-  if (v === "d3d12") return "上次启动：DirectX 12 —— 服装 Mod 不生效，请在启动器里选 DirectX 11 启动";
-  if (v === "d3d11") return "上次启动：DirectX 11";
-  return "上次启动：未知（还没启动过，或读不到渲染 API）";
+  if (v === "vulkan") return t("上次启动：Vulkan —— 服装 Mod 不生效，请在启动器里选 DirectX 11 启动");
+  if (v === "d3d12") return t("上次启动：DirectX 12 —— 服装 Mod 不生效，请在启动器里选 DirectX 11 启动");
+  if (v === "d3d11") return t("上次启动：DirectX 11");
+  return t("上次启动：未知（还没启动过，或读不到渲染 API）");
 });
 const renderApiWarn = computed(() => {
   const v = String(renderApi.value || "").toLowerCase();
@@ -70,17 +71,17 @@ async function refreshGameLive() {
 async function hotReload() {
   if (hotReloading.value) return;          // 一次点击 = 一次热重载，连点不叠
   hotReloading.value = true;
-  appendLog("热重载：先重铺配置，再给游戏发 F10…");
+  appendLog(t("热重载：先重铺配置，再给游戏发 F10…"));
   startLogPolling();
   try {
     const r = await call("hot_reload");
-    const msg = (r && r.message) || "热重载已发起";
+    const msg = (r && r.message) || t("热重载已发起");
     appendLog(msg);
     if (r && r.ok === false) {
-      await showModalDialog({ title: "热重载没成功", message: String(msg) });
+      await showModalDialog({ title: t("热重载没成功"), message: String(msg) });
     }
   } catch (e) {
-    appendLog("热重载失败：" + String(e));
+    appendLog(t("热重载失败：") + String(e));
   } finally {
     hotReloading.value = false;
     refreshGameLive();
@@ -114,6 +115,10 @@ async function hotReload() {
 //   前端这道只是"别让他白点"，后端 `set_hotkey_takeover` 会**再拒一次**。
 const RESHADE_DEPENDENT = ["minimal_injection", "dlss5_addon_enabled",
                            "firstperson_addon_enabled", "hotkey_takeover"];
+
+// 轻量版不含 ReShade：总闸与 4 个依赖它的开关都不显示（后端同样门控，这里只是不让人点空气）。
+const RESHADE_ONLY_SWITCHES = new Set(["reshade_disabled", ...RESHADE_DEPENDENT]);
+const isLite = computed(() => ((store.state && store.state.edition) || "full") === "lite");
 const reshadeLocked = (k) => !!settings.reshade_disabled && RESHADE_DEPENDENT.includes(k);
 const RESHADE_LOCK_REASON = "「禁用所有 ReShade 注入」开着 —— 先关掉它才能开这个";
 
@@ -163,6 +168,11 @@ const SWITCHES = [
     } },
 ];
 
+// 实际渲染的开关：轻量版去掉总闸与 4 个依赖 ReShade 的项（顺序与 SWITCHES 一致）。
+const visibleSwitches = computed(() => (
+  isLite.value ? SWITCHES.filter((sw) => !RESHADE_ONLY_SWITCHES.has(sw.k)) : SWITCHES
+));
+
 // 切换一个开关：有专用接口的走专用接口（它们还要动文件/注入库），其余只写配置。
 //
 // ⚠️ 2026-10-03 修「乳摇 / Poser 这两个开关**关不掉**」（用户实测：点一下界面弹回「已开启」）：
@@ -199,14 +209,14 @@ async function toggleSwitch(sw) {
       if (r && r.ok === false && !persisted) {
         settings[sw.k] = !next;                // 后端根本没动手（例如非 50 系开 DLSS5）→ 回滚
         syncConfig(sw.k, !next);
-        await showAlert("没能改这个开关", r.message || "未知原因");
+        await showAlert(t("没能改这个开关"), r.message || t("未知原因"));
         return;
       }
       if (r && r.ok === false && persisted) {
         // 做了但没做全（例如找不到注入源、游戏正在运行占用 dll）：**开关保持你点的样子**
         // （配置已记下），把遗留问题说清楚 —— 因为弹窗让开关自己弹回去才是真正的"关不掉"。
-        await showAlert("开关已改，但有遗留问题", r.message
-          || (r.warnings || []).join("\n") || "未知原因");
+        await showAlert(t("开关已改，但有遗留问题"), r.message
+          || (r.warnings || []).join("\n") || t("未知原因"));
       }
       // 以后端落盘的结果为准（它才是下次启动的依据）
       const applied = persisted ? r.config[sw.k] : next;
@@ -279,37 +289,37 @@ async function alertGate() {
     // 用户要求"强制停留一定秒数"——秒数来自仓库里的 alerts.json（默认 10），
     // 作者改了 push 就生效、不用发版。
     const hold = Math.max(0, Number(a.hold_seconds || gate.hold_seconds || 10));
-    const lines = [a.title || "异常状态", ""];
+    const lines = [a.title || t("异常状态"), ""];
     if (a.body) lines.push(a.body, "");
-    if (a.url) lines.push(`详情：${a.url}`, "");
+    if (a.url) lines.push(t("详情：") + a.url, "");
     lines.push(
-      hold > 0 ? `（请先读完，${hold} 秒后按钮才可点）` : "",
+      hold > 0 ? t("（请先读完，") + hold + t(" 秒后按钮才可点）") : "",
       "",
-      "「还原配置」= 关掉所有注入开关 + 把游戏目录的第三方文件备份移走（可恢复）",
-      "「保持配置」= 什么都不动，只是这次不启动",
-      "「仍然启动」= 照常启动（配置有问题的话很可能起不来）",
+      t("「还原配置」= 关掉所有注入开关 + 把游戏目录的第三方文件备份移走（可恢复）"),
+      t("「保持配置」= 什么都不动，只是这次不启动"),
+      t("「仍然启动」= 照常启动（配置有问题的话很可能起不来）"),
     );
     // 三选一（用户 2026-09-30 定的顺序）：
     //   主按钮（橙色/最右）= **还原配置**（推荐动作，主选项）
     //   取消（最左）      = 保持配置但不启动
     //   额外按钮          = 仍然启动
     const choice = await showModalDialog({
-      title: "检测到异常状态",
+      title: t("检测到异常状态"),
       message: lines.filter((x) => x !== "").join("\n"),
-      okText: "还原配置（推荐）", cancelText: "保持配置，不启动",
+      okText: t("还原配置（推荐）"), cancelText: t("保持配置，不启动"),
       holdSeconds: hold,                                    // 强制停留（倒计时结束前按钮不可点）
-      extraButtons: [{ text: "仍然启动", value: "launch" }],
+      extraButtons: [{ text: t("仍然启动"), value: "launch" }],
     });
     const action = choice === "launch" ? "launch" : (choice === true ? "restore" : "hold");
     try {
       await call("alert_action", String(a.id || ""), action);
     } catch (e) { /* 后端会记日志 */ }
     if (action !== "launch") {
-      appendLog(action === "restore" ? "已按你的选择还原配置，这次不启动。"
-                                     : "已保持配置，这次不启动。");
+      appendLog(action === "restore" ? t("已按你的选择还原配置，这次不启动。")
+                                     : t("已保持配置，这次不启动。"));
       return false;
     }
-    appendLog("你选择了「仍然启动」，继续。");
+    appendLog(t("你选择了「仍然启动」，继续。"));
   }
   return true;
 }
@@ -327,33 +337,33 @@ async function riskGate() {
   const crashed = risks.crashed || [];
   const lines = [];
   if (conflicts.length) {
-    lines.push("**资源冲突**（这些 Mod 改的是同一批资源，同时开常常会让游戏崩）：");
+    lines.push(t("**资源冲突**（这些 Mod 改的是同一批资源，同时开常常会让游戏崩）："));
     for (const c of conflicts.slice(0, 6)) {
-      lines.push(`· ${c.label || c.group || "一组 Mod"}`);
+      lines.push(`· ${c.label || c.group || t("一组 Mod")}`);
     }
     lines.push("");
   }
   // ⚠️ 用户强调过：**不要把"以前崩过"说成"冲突"**，两者分开如实讲。
   if (crashed.length) {
-    lines.push("**以前崩过**（这套组合在你这台机器上留下过崩溃记录）：");
+    lines.push(t("**以前崩过**（这套组合在你这台机器上留下过崩溃记录）："));
     for (const c of crashed.slice(0, 6)) {
-      lines.push(`· ${c.label || c.group || "一组 Mod"}${c.checked_at ? `（${c.checked_at}）` : ""}`);
+      lines.push(`· ${c.label || c.group || t("一组 Mod")}${c.checked_at ? `（${c.checked_at}）` : ""}`);
     }
-    lines.push("", "（以前崩过 ≠ 现在一定冲突；后来跑通过的话记录会被自动忽略。）");
+    lines.push("", t("（以前崩过 ≠ 现在一定冲突；后来跑通过的话记录会被自动忽略。）"));
   }
   const go = await showModalDialog({
-    title: conflicts.length ? "发现 Mod 冲突风险" : "这套组合以前崩过",
+    title: conflicts.length ? t("发现 Mod 冲突风险") : t("这套组合以前崩过"),
     message: lines.join("\n"),
     // 用户定过：**推荐动作放最右的橙色主选项**（"先去清理"），"仍然启动"是次要项。
-    okText: "先去清理", cancelText: "仍然启动",
+    okText: t("先去清理"), cancelText: t("仍然启动"),
     focusCancel: false,
   });
   if (go) {
     store.tab = "library";
-    appendLog("已按提示先去清理冲突，这次不启动。");
+    appendLog(t("已按提示先去清理冲突，这次不启动。"));
     return false;
   }
-  appendLog("你选择了「仍然启动」，继续。");
+  appendLog(t("你选择了「仍然启动」，继续。"));
   return true;
 }
 
@@ -366,17 +376,17 @@ async function fileWatchdogGate() {
     if (info.acknowledged) return true;          // 用户已经"不再提醒"
     const names = (info.files || []).slice(0, 6).map((f) => `· ${f.name || f}`).join("\n");
     const ok = await showModalDialog({
-      title: "有文件被反复删除",
+      title: t("有文件被反复删除"),
       message: [
-        "这些关键文件被删掉过不止一次：",
-        names || "（见日志）",
+        t("这些关键文件被删掉过不止一次："),
+        names || t("（见日志）"),
         "",
-        "**多半是杀毒软件误删**。建议把下面这个目录加进杀毒软件的白名单：",
+        t("**多半是杀毒软件误删**。建议把下面这个目录加进杀毒软件的白名单："),
         String(info.watch_dir || store.state.data_root || ""),
         "",
-        "选「知道了」以后不再提醒；选「继续提醒」则会保留这条提醒。",
+        t("选「知道了」以后不再提醒；选「继续提醒」则会保留这条提醒。"),
       ].join("\n"),
-      okText: "知道了，不再提醒", cancelText: "继续提醒我",
+      okText: t("知道了，不再提醒"), cancelText: t("继续提醒我"),
     });
     if (ok) {
       try { await call("file_watchdog_ack"); } catch (e) { /* 忽略 */ }
@@ -410,15 +420,15 @@ async function antivirusGate() {
     for (const f of (hit.files || []).slice(0, 3)) names.push(`· ${f}`);
   }
   const ok = await showModalDialog({
-    title: "Windows Defender 处理过这些文件",
+    title: t("Windows Defender 处理过这些文件"),
     message: [
-      "Defender 最近隔离 / 删除了本程序或游戏要用的文件：",
+      t("Defender 最近隔离 / 删除了本程序或游戏要用的文件："),
       ...names,
       "",
-      "缺了它们游戏可能起不来、或者装好的功能失效。点下面的按钮把它们从隔离区还原回去。",
-      "若反复发生，可在设置里确认「自动加 Defender 白名单」是开着的（默认开）。",
+      t("缺了它们游戏可能起不来、或者装好的功能失效。点下面的按钮把它们从隔离区还原回去。"),
+      t("若反复发生，可在设置里确认「自动加 Defender 白名单」是开着的（默认开）。"),
     ].join("\n"),
-    okText: "从隔离区还原", cancelText: "知道了",
+    okText: t("从隔离区还原"), cancelText: t("知道了"),
   });
   if (!ok) return true;
   let done = 0;
@@ -432,7 +442,7 @@ async function antivirusGate() {
   }
   // ⚠️ **如实说结果**：`MpCmdRun -Restore` 会因威胁名/路径不匹配而失败（不同 Defender
   // 版本行为有差异）。所以成功才说成功，没成才指路日志 —— 不粉饰。
-  showToast(done ? `已还原 ${done} 个文件` : "还原没成功，原始错误在日志里",
+  showToast(done ? t("已还原") + " " + done + " " + t("个文件") : t("还原没成功，原始错误在日志里"),
     done ? "success" : "danger");
   return true;
 }
@@ -456,11 +466,11 @@ async function preflightGate() {
  */
 function goToDepsDownload(keys) {
   const list = Array.isArray(keys) ? keys.filter(Boolean) : [];
-  appendLog(`有 ${list.length} 项需要联网下载：${list.join("、")} —— 已跳到「下载」页开始下载`);
-  store.autoStartDepsNote = `完整性检查发现 ${list.length} 项缺失，开始联网下载补齐…`;
+  appendLog(t("有") + " " + list.length + " " + t("项需要联网下载：") + list.join(t("、")) + " " + t("—— 已跳到「下载」页开始下载"));
+  store.autoStartDepsNote = t("完整性检查发现") + " " + list.length + " " + t("项缺失，开始联网下载补齐…");
   store.autoStartDeps = true;
   store.tab = "downloads";     // 2026-10-07：组件下载也统一去「下载」页看进度
-  showToast("已跳到「下载」页，正在开始下载…", "info");
+  showToast(t("已跳到「下载」页，正在开始下载…"), "info");
 }
 
 // ⚠️ **B1：完整性检查要显示结果、并能一键修复**（2026-10-03 补回归）。
@@ -478,11 +488,11 @@ async function checkIntegrity() {
   try {
     r = await call("check_integrity");
   } catch (e) {
-    await showAlert("完整性检查失败", String((e && e.message) || e || "未知原因"));
+    await showAlert(t("完整性检查失败"), String((e && e.message) || e || t("未知原因")));
     return null;
   }
   if (!r || typeof r !== "object") {
-    await showAlert("完整性检查失败", "后端没有返回检查结果。");
+    await showAlert(t("完整性检查失败"), t("后端没有返回检查结果。"));
     return null;
   }
   const checks = r.checks || [];
@@ -490,8 +500,8 @@ async function checkIntegrity() {
   const lines = checks.map((c) => `${c.ok ? "✓" : "✗"} ${c.message || c.key}${c.ok ? "" : `\n    ${c.path}`}`);
   if (!bad.length) {
     await showModalDialog({
-      title: "完整性检查：全部正常", message: lines.join("\n") || "没有可检查的项。",
-      okText: "知道了", showCancel: false,
+      title: t("完整性检查：全部正常"), message: lines.join("\n") || t("没有可检查的项。"),
+      okText: t("知道了"), showCancel: false,
     });
     return r;
   }
@@ -502,14 +512,14 @@ async function checkIntegrity() {
   // 「**要是缺下载，应该跳转到依赖进行下载**」⇒ 这里先告诉他哪些要下载，再把他送过去。
   const needDl = Array.isArray(r.needs_download) ? r.needs_download : [];
   const head = needDl.length
-    ? `\n\n其中 **${needDl.length} 项需要联网下载**才能补齐：\n    ` + needDl.join("、")
+    ? `\n\n${t("其中")} **${needDl.length} ${t("项需要联网下载")}** ${t("才能补齐：")}\n    ` + needDl.join(t("、"))
     : "";
   const go = await showModalDialog({
-    title: `完整性检查：${bad.length} 项缺失`,
+    title: t("完整性检查：") + bad.length + " " + t("项缺失"),
     message: lines.join("\n") + head
-      + "\n\n要不要现在自动修复？（**只做本地能做的**：补文件、写配置、重建 staging；需要下载的部分会引导你去「下载」页）",
-    okText: needDl.length ? "去下载页下载" : "自动修复",
-    cancelText: needDl.length ? "先本地修复" : "先不修",
+      + "\n\n" + t("要不要现在自动修复？（**只做本地能做的**：补文件、写配置、重建 staging；需要下载的部分会引导你去「下载」页）"),
+    okText: needDl.length ? t("去下载页下载") : t("自动修复"),
+    cancelText: needDl.length ? t("先本地修复") : t("先不修"),
   });
   // 主按钮 = 去「下载」页开始「一键下载依赖」（那条链路有进度、线路切换、可暂停）
   if (go && needDl.length) {
@@ -522,7 +532,7 @@ async function checkIntegrity() {
   } else if (!go) {
     return r;
   }
-  showProgressToast("integrity-repair", "正在修复完整性…（只做本地能做的部分）");
+  showProgressToast("integrity-repair", t("正在修复完整性…（只做本地能做的部分）"));
   try {
     const fixed = await call("repair_integrity");
     const after = (fixed && fixed.integrity && fixed.integrity.checks) || [];
@@ -531,24 +541,24 @@ async function checkIntegrity() {
     if (stillDl.length) {
       // 还有"要下载"的项 ⇒ 直接把用户送去「下载」页（这就是他说的"跳转到下载进行下载"）
       const again = await showModalDialog({
-        title: `还有 ${stillDl.length} 项要联网下载`,
-        message: "本地能做的都做完了；下面这些需要从网上取：\n    " + stillDl.join("、")
-          + "\n\n要现在跳到「下载」页下载吗？（那边会显示线路与进度，可暂停）",
-        okText: "去下载页下载", cancelText: "稍后自己弄",
+        title: t("还有") + " " + stillDl.length + " " + t("项要联网下载"),
+        message: t("本地能做的都做完了；下面这些需要从网上取：") + "\n    " + stillDl.join(t("、"))
+          + "\n\n" + t("要现在跳到「下载」页下载吗？（那边会显示线路与进度，可暂停）"),
+        okText: t("去下载页下载"), cancelText: t("稍后自己弄"),
       });
       if (again) goToDepsDownload(stillDl);
     } else {
       await showModalDialog({
-        title: stillBad.length ? `修复完成，还有 ${stillBad.length} 项没修好` : "完整性已修复",
+        title: stillBad.length ? t("修复完成，还有") + " " + stillBad.length + " " + t("项没修好") : t("完整性已修复"),
         message: stillBad.length
           ? stillBad.map((c) => `✗ ${c.message || c.key}\n    ${c.path}`).join("\n")
-          : "所有缺失项都已补齐。",
-        okText: "知道了", showCancel: false,
+          : t("所有缺失项都已补齐。"),
+        okText: t("知道了"), showCancel: false,
       });
     }
     await refreshState();
   } catch (e) {
-    showToast(String((e && e.message) || "修复失败"), "danger");
+    showToast(String((e && e.message) || t("修复失败")), "danger");
   } finally {
     hideProgressToast("integrity-repair");
   }
@@ -558,14 +568,15 @@ async function checkIntegrity() {
 // ⚠️ **B7：清空日志**（0.9.5 的日志弹窗里有「清空」，`clear_launch_log` 前端零调用）。
 async function clearLaunchLog() {
   const ok = await showModalDialog({
-    title: "清空启动日志",
-    message: "会清空 `runtime\\logs\\launch.log`。\n\n排查问题时日志很有用，建议**先导出一份诊断包**再清。",
-    okText: "清空", cancelText: "保留日志", focusCancel: true,
+    title: t("清空启动日志"),
+    message: t("会清空 `runtime\\logs\\launch.log`。") + "\n\n"
+      + t("排查问题时日志很有用，建议**先导出一份诊断包**再清。"),
+    okText: t("清空"), cancelText: t("保留日志"), focusCancel: true,
   });
   if (!ok) return;
   const r = await run("clear_launch_log");
   if (r && r.ok !== false) {
-    showToast("启动日志已清空", "success");
+    showToast(t("启动日志已清空"), "success");
     await pullLaunchLog();
   }
 }
@@ -607,14 +618,14 @@ async function oneClick() {
     const upd = await call("pending_component_updates");
     const outdated = (upd && upd.outdated) || [];
     if (outdated.length) {
-      const lines = outdated.map((o) => `· ${o.display || o.key}：${o.current} → ${o.latest}`).join("\n");
+      const lines = outdated.map((o) => `· ${o.display || o.key}${t("：")}${o.current} → ${o.latest}`).join("\n");
       const go = await showModalDialog({
-        title: `${outdated.length} 个组件有新版本`,
+        title: `${outdated.length} ${t("个组件有新版本")}`,
         message:
-          `这些组件有新版本可用：\n${lines}\n\n` +
-          "去「下载」页点「一键更新全部组件」就能装上（那里有进度和速度）。\n\n" +
-          "想先不管、直接启动也可以。",
-        okText: "去下载页更新", cancelText: "仍然启动",
+          t("这些组件有新版本可用：") + "\n" + lines + "\n\n" +
+          t("去「下载」页点「一键更新全部组件」就能装上（那里有进度和速度）。") + "\n\n" +
+          t("想先不管、直接启动也可以。"),
+        okText: t("去下载页更新"), cancelText: t("仍然启动"),
       });
       if (go) {
         store.autoStartDeps = true;
@@ -626,10 +637,13 @@ async function oneClick() {
 
   // 缺 VC++ 运行库 ⇒ 先问一次（**建议安装**；跳过也照常启动，绝不挡流程）。
   // 依赖页那条走的是 `ensure_all` 的结果，这里走主动查询 —— 两条路共用同一个弹窗。
-  try {
-    const vc = await call("vc_runtime_status");
-    if (vc && Array.isArray(vc.missing) && vc.missing.length) await promptVcRuntimeInstall();
-  } catch (e) { /* 查不到就别挡启动 */ }
+  // ⚠️ 轻量版跳过：VC++ 是给 ReShade 插件用的，轻量版根本没有那条链路。
+  if (!isLite.value) {
+    try {
+      const vc = await call("vc_runtime_status");
+      if (vc && Array.isArray(vc.missing) && vc.missing.length) await promptVcRuntimeInstall();
+    } catch (e) { /* 查不到就别挡启动 */ }
+  }
 
   running.value = true;
   try {
@@ -651,7 +665,7 @@ async function oneClick() {
     // 这里用 `finally` 之外的独立流程跑，**不阻塞按钮的"正在启动…"状态**（可能要等十几分钟）。
     void watchLaunchOutcome();
   } catch (e) {
-    consoleLog.value = (consoleLog.value || "") + "\n启动失败：" + (e && e.message ? e.message : String(e));
+    consoleLog.value = (consoleLog.value || "") + "\n" + t("启动失败：") + (e && e.message ? e.message : String(e));
   } finally {
     running.value = false;
   }
@@ -686,7 +700,7 @@ async function watchGameAfterXxmi(appearMs = 30000, aliveMs = 10000) {
       if (g && g.running) { sawGame = true; break; }
     } catch (e) { /* 查询失败继续等 */ }
   }
-  if (!sawGame) return { ok: false, reason: "等了 30 秒没看到终末地进程 —— 游戏没有启动" };
+  if (!sawGame) return { ok: false, reason: t("等了 30 秒没看到终末地进程 —— 游戏没有启动") };
   const aliveDeadline = Date.now() + aliveMs;
   while (Date.now() < aliveDeadline) {
     await sleep(1000);
@@ -694,7 +708,7 @@ async function watchGameAfterXxmi(appearMs = 30000, aliveMs = 10000) {
       const g = await call("game_running");
       // 查询失败**当作还在跑**（不能因为一次查询失败就说人家崩了）
       if (g && !g.running) {
-        return { ok: false, reason: "终末地启动后 10 秒内就退出了（启动失败）" };
+        return { ok: false, reason: t("终末地启动后 10 秒内就退出了（启动失败）") };
       }
     } catch (e) { /* 当作还在跑 */ }
   }
@@ -707,7 +721,7 @@ async function watchLaunchOutcome() {
   if (!xxmiClosed) {
     // 等了 10 分钟 XXMI 还开着：可能用户自己在里面点、或者卡住了。
     // **不弹窗打扰**（0.9.5 也是这样），只在日志里留一句。
-    appendLog("等了 10 分钟 XXMI Launcher 还开着，就不再往下判定了（它可能还在正常工作）。");
+    appendLog(t("等了 10 分钟 XXMI Launcher 还开着，就不再往下判定了（它可能还在正常工作）。"));
     return;
   }
   // 「这一次算不算第一次启动」——**不能用 `first_run`**：它的判据是"三个内置组件里
@@ -724,24 +738,24 @@ async function watchLaunchOutcome() {
   if (game.ok && !needSecondStart) return;      // 起来了、也不是第一次 → 静默成功
 
   const again = await showModalDialog({
-    title: game.ok ? "第一次启动：请再点一次" : "终末地没有起来",
+    title: game.ok ? t("第一次启动：请再点一次") : t("终末地没有起来"),
     message: game.ok
       ? [
-          "看起来是第一次启动（内置组件刚装好 / 配置刚生成）。",
+          t("看起来是第一次启动（内置组件刚装好 / 配置刚生成）。"),
           "",
-          "**终末地已经起来了**，但第一次常常会起不来或很快退出。",
-          "如果它没进游戏，再点一次「一键启动」就好。",
+          t("**终末地已经起来了**，但第一次常常会起不来或很快退出。"),
+          t("如果它没进游戏，再点一次「一键启动」就好。"),
         ].join("\n")
       : [
           game.reason,
           "",
-          "**第一次启动有概率起不来**，再点一次通常就好了。",
-          "如果连续几次都不行，去「依赖」页看运行日志和自检结果。",
+          t("**第一次启动有概率起不来**，再点一次通常就好了。"),
+          t("如果连续几次都不行，去「依赖」页看运行日志和自检结果。"),
         ].join("\n"),
-    okText: "再次启动", cancelText: "先不启动",
+    okText: t("再次启动"), cancelText: t("先不启动"),
   });
   if (again) {
-    appendLog("按提示再来一次一键启动…");
+    appendLog(t("按提示再来一次一键启动…"));
     await oneClick();
   }
 }
@@ -752,11 +766,11 @@ async function run(method, ...args) {
   try {
     const result = await call(method, ...args);
     if (result && result.ok === false) {
-      await showAlert("操作未完成", String(result.message || result.reason || "未知原因"));
+      await showAlert(t("操作未完成"), String(result.message || result.reason || t("未知原因")));
     }
     return result;
   } catch (e) {
-    await showAlert("操作失败", String((e && e.message) || e || "未知原因"));
+    await showAlert(t("操作失败"), String((e && e.message) || e || t("未知原因")));
     return null;
   }
 }
@@ -778,7 +792,7 @@ useLogAutoScroll(logBox, () => consoleLog.value);
               :disabled="running"
               :style="{ background: running ? 'var(--border-strong)' : 'var(--accent)' }"
               @click="oneClick">
-        {{ running ? "正在启动…" : "一键启动" }}
+        {{ running ? t("正在启动…") : t("一键启动") }}
       </button>
       <button v-if="gameLive"
               id="hot-reload-btn"
@@ -788,7 +802,7 @@ useLogAutoScroll(logBox, () => consoleLog.value);
                         color: hotReloading ? 'var(--text-muted)' : 'var(--text)',
                         border: '1px solid var(--border-strong)' }"
               @click="hotReload">
-        {{ hotReloading ? "热重载中…" : "热重载" }}
+        {{ hotReloading ? t("热重载中…") : t("热重载") }}
       </button>
     </div>
     <!-- ★ **启动进度**（2026-10-07 用户要求："启动到扫除mod还是很慢，要是要时间就显示加载页面"）。
@@ -801,9 +815,9 @@ useLogAutoScroll(logBox, () => consoleLog.value);
       {{ launchStageText }}
     </p>
 
-    <Card title="注入开关">
+    <Card :title="t('注入开关')">
       <div class="divide-y" style="border-color: var(--border)">
-        <div v-for="sw in SWITCHES" :key="sw.k" class="switch-row"
+        <div v-for="sw in visibleSwitches" :key="sw.k" class="switch-row"
              :style="[sw.locked && sw.locked() ? 'opacity:.55;cursor:not-allowed' : '',
                       sw.emphasis
                         ? 'border:1.5px solid #f59e0b;background:rgba(245,158,11,.10);border-radius:10px;padding:10px 12px;margin:2px 0 8px'
@@ -811,16 +825,16 @@ useLogAutoScroll(logBox, () => consoleLog.value);
              @click="toggleSwitch(sw)">
           <div class="min-w-0">
             <div class="font-medium">
-              <span v-if="sw.emphasis" style="color:#f59e0b">⚠ </span>{{ sw.name }}
+              <span v-if="sw.emphasis" style="color:#f59e0b">⚠ </span>{{ t(sw.name) }}
               <span v-if="sw.locked && sw.locked()" class="text-xs"
-                    style="color: var(--text-muted)">（不可用）</span>
+                    style="color: var(--text-muted)">{{ t("（不可用）") }}</span>
             </div>
             <div class="text-xs mt-0.5" style="color: var(--text-muted)">
-              {{ sw.locked && sw.locked() ? sw.lockReason() : swText(sw) }}
+              {{ sw.locked && sw.locked() ? t(sw.lockReason()) : t(swText(sw)) }}
             </div>
           </div>
           <div class="flex items-center gap-2 shrink-0">
-            <span class="switch-state">{{ settings[sw.k] ? "已开启" : "已关闭" }}</span>
+            <span class="switch-state">{{ settings[sw.k] ? t("已开启") : t("已关闭") }}</span>
             <Switch :model-value="!!settings[sw.k]" :disabled="sw.locked && sw.locked()"
                     @update:model-value="() => toggleSwitch(sw)" />
           </div>
@@ -829,21 +843,21 @@ useLogAutoScroll(logBox, () => consoleLog.value);
     </Card>
 
     <div class="flex flex-wrap gap-2">
-      <Btn @click="run('launch_secondary_motion')">启动插件界面（乳摇管理器）</Btn>
-      <Btn @click="run('open_poser_web_ui')">打开摆姿页（Poser）</Btn>
-      <Btn @click="run('prepare_launch')">生成控制器</Btn>
-      <Btn @click="checkIntegrity">检查/修复完整性</Btn>
-      <Btn @click="run('audit_game_injections')">检查游戏目录注入</Btn>
+      <Btn @click="run('launch_secondary_motion')">{{ t("启动插件界面（乳摇管理器）") }}</Btn>
+      <Btn @click="run('open_poser_web_ui')">{{ t("打开摆姿页（Poser）") }}</Btn>
+      <Btn @click="run('prepare_launch')">{{ t("生成控制器") }}</Btn>
+      <Btn @click="checkIntegrity">{{ t("检查/修复完整性") }}</Btn>
+      <Btn @click="run('audit_game_injections')">{{ t("检查游戏目录注入") }}</Btn>
       <span v-if="renderApi" class="text-xs self-center"
               :style="{ color: renderApiWarn ? 'var(--warn)' : 'var(--text-muted)' }">{{ renderApiText }}</span>
     </div>
 
     <div class="log-card">
       <div class="log-card-head">
-        <span>运行日志</span>
+        <span>{{ t("运行日志") }}</span>
         <!-- ⚠️ **清空日志**（2026-10-03 补回归）：0.9.5 的日志弹窗里有「清空」，
              换代后 `clear_launch_log` 前端零调用 —— 日志越滚越长却没法清。 -->
-        <Btn size="sm" @click="clearLaunchLog">清空</Btn>
+        <Btn size="sm" @click="clearLaunchLog">{{ t("清空") }}</Btn>
       </div>
       <div ref="logBox" class="log-box" style="max-height: 260px; border-radius: 0">{{ consoleLog }}</div>
     </div>

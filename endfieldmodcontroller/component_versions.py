@@ -16,7 +16,25 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from . import edition
+
 TABLE_NAME = "component_versions.json"
+
+#: Lite 没有 ReShade 链路 ⇒ 版本表里这些 key 一概不返回（也就不进"该更新"清单）。
+#: 只列 ReShade 专属项；XXMI / EFMI / 乳摇 / RabbitFX / 触摸形变两版都有。
+LITE_EXCLUDED_KEYS = frozenset({"reshade"})
+
+
+def _without_lite_keys(table: dict[str, Any]) -> dict[str, Any]:
+    """去掉 Lite 不该看到的组件（只剔 `external`/`builtin` 里那几个 key，其余原样）。"""
+    out = dict(table)
+    for section in ("builtin", "external"):
+        rows = out.get(section)
+        if not isinstance(rows, dict):
+            continue
+        out[section] = {key: value for key, value in rows.items()
+                        if key not in LITE_EXCLUDED_KEYS}
+    return out
 
 
 def _table_path() -> Path | None:
@@ -46,7 +64,10 @@ def load() -> dict[str, Any]:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
-    return data if isinstance(data, dict) else {}
+    if not isinstance(data, dict):
+        return {}
+    # Lite 完全不含 ReShade ⇒ 表里的 ReShade 组件对它是"不存在"，不是"该更新"（why）
+    return _without_lite_keys(data) if edition.is_lite() else data
 
 
 def _ver_tuple(text: str) -> tuple[int, ...]:

@@ -2,10 +2,15 @@
 // 全局状态：与后端 get_state() 的返回同构，页面组件只读它 + 调后端后刷新。
 import { reactive } from "vue";
 import { call } from "./lib/bridge.js";
+import { applyLang } from "./lib/i18n.js";
 
 // 页签白名单 —— **必须与 App.vue 的 pages/tabs 一一对应**（深链 `index.html#store` 也读它）。
-// 2026-10-07 新增 `store`（Mod 商城）与 `downloads`（下载中心）。
-export const PAGE_IDS = ["library", "assist", "store", "downloads", "dependencies", "launch", "settings", "about"];
+// 2026-11-28：设置与说明不再是页面 —— 从导航里拿掉，改为底部「设置」按钮 + 应用内浮窗。
+// 旧深链 `#settings` / `#about` 仍然可用（App.vue 启动时会把浮窗打开，底层落到上次的页面）。
+export const PAGE_IDS = ["library", "assist", "store", "downloads", "dependencies", "launch"];
+
+// 设置浮窗的四个分类（左栏顺序 = 这里的顺序）。
+export const SETTINGS_SECTIONS = ["general", "paths", "downloads", "maintenance"];
 
 export const store = reactive({
   // ⚠️ 依赖页的日志框内容放**全局**（2026-10-03 用户实测：「下载的时候切到其他页面，
@@ -21,6 +26,8 @@ export const store = reactive({
   // 别再各自维护一份（见文件末尾 setTheme 的说明）。初值取 localStorage，
   // 与 index.html `<head>` 里的内联脚本保持一致。
   theme: currentTheme(),
+  // 强调色（与底色分开选；2026-11-28 用户要求）
+  themeAccent: currentAccent(),
   // 初始页支持深链（`index.html#settings`）—— 截图 / 排查时能直接落到某一页
   tab: (() => {
     try {
@@ -41,6 +48,11 @@ export const store = reactive({
   // 而 `CharacterPickerDialog` 会读它 —— Vue 3 的 reactive 支持新增属性，但"先读后写"时
   // 拿到的是 undefined（demo 模式下表现为"角色确认窗是空的"）。显式声明成 null（2026-10-04）。
   demoPending: null,
+  // ── 设置浮窗（2026-11-28）────────────────────────────────────────────────
+  // 单一真源：侧栏底部按钮 / 新手引导 / 深链 / UI 自动化都只改这里，浮窗自己读。
+  settingsOpen: false,
+  settingsSection: "general",   // general | paths | downloads | maintenance
+  settingsMode: "settings",     // settings | about（说明在同一浮窗内切换）
   // 设置页点「依赖清空并重新下载」→ 清完跳到依赖页，由依赖页读这个标志自动开跑
   autoStartDeps: false,
   // 跳过去时在依赖页日志框里写的第一行（缺省用"已清空 runtime 与 assets…"那套文案；
@@ -83,10 +95,19 @@ export async function refreshState() {
   store.ready = true;
   // 主题：**以 config 为准**回填界面真源（两个入口最终收敛到同一份持久设置；
   // 只在真的不一样时才动，避免每次刷新都重设 data-theme 引发闪烁）。
+  // 界面语言（zh / en）：config 是权威，localStorage 只做首帧回填
+  const cfgLanguage = String((data && data.config && data.config.language) || "");
+  if (cfgLanguage) applyLang(cfgLanguage);
   const cfgTheme = String((data && data.config && data.config.theme) || "");
-  if (cfgTheme && THEMES.includes(cfgTheme) && cfgTheme !== store.theme) {
-    applyTheme(cfgTheme);
-    store.theme = cfgTheme;
+  const cfgAccent = String((data && data.config && data.config.theme_accent) || "");
+  if (cfgTheme || cfgAccent) {
+    const [base, accent] = normalizeTheme(cfgTheme || store.theme,
+                                          cfgAccent || store.themeAccent);
+    if (base !== store.theme || accent !== store.themeAccent) {
+      applyTheme(base, accent);
+      store.theme = base;
+      store.themeAccent = accent;
+    }
   }
   // 刷新后的消费点（公告之类的"后台线程稍后才产出"的数据要靠这里补上 —— 见 App.vue）
   for (const hook of afterRefresh) {
@@ -95,15 +116,69 @@ export async function refreshState() {
   return data;
 }
 
-// 主题：沿用旧版的 6 套与 localStorage 键名（不能改，否则用户的设置会丢）
-export const THEMES = ["light", "dark", "amber", "cyan", "violet", "emerald"];
-export function applyTheme(theme) {
-  const value = THEMES.includes(theme) ? theme : "light";
-  document.documentElement.setAttribute("data-theme", value);
-  try { localStorage.setItem("mc-theme", value); } catch (e) { /* 隐私模式忽略 */ }
+// 主题拆成两件事（2026-11-28 用户：「背景色应该和强调色应该分开能选择」）：
+//   data-theme = light/dark（底色）；data-theme-accent = blue/amber/cyan/violet/emerald。
+// 旧版把强调色当整套主题存（mc-theme=amber）—— normalizeTheme 负责迁移，localStorage 键名不变。
+export const THEME_BASES = ["light", "dark"];
+export const THEME_ACCENTS = ["blue", "amber", "cyan", "violet", "emerald"];
+const LEGACY_THEMES = { amber: "amber", cyan: "cyan", violet: "violet", emerald: "emerald" };
+
+export function normalizeTheme(base, accent) {
+  let b = String(base || "").toLowerCase();
+  let a = String(accent || "").toLowerCase();
+  if (LEGACY_THEMES[b]) { a = LEGACY_THEMES[b]; b = "dark"; }
+  if (!THEME_BASES.includes(b)) b = "light";
+  if (!THEME_ACCENTS.includes(a)) a = "blue";
+  return [b, a];
 }
+
+export function applyTheme(base, accent) {
+  const [b, a] = normalizeTheme(base, accent);
+  document.documentElement.setAttribute("data-theme", b);
+  document.documentElement.setAttribute("data-theme-accent", a);
+  try {
+    localStorage.setItem("mc-theme", b);
+    localStorage.setItem("mc-theme-accent", a);
+  } catch (e) { /* 隐私模式忽略 */ }
+  return [b, a];
+}
+
 export function currentTheme() {
-  try { return localStorage.getItem("mc-theme") || "light"; } catch (e) { return "light"; }
+  try {
+    return normalizeTheme(localStorage.getItem("mc-theme") || "light",
+                          localStorage.getItem("mc-theme-accent"))[0];
+  } catch (e) { return "light"; }
+}
+
+export function currentAccent() {
+  try {
+    return normalizeTheme(localStorage.getItem("mc-theme") || "light",
+                          localStorage.getItem("mc-theme-accent"))[1];
+  } catch (e) { return "blue"; }
+}
+
+/** 打开设置浮窗（section 非法时保持当前分类）。 */
+export function openSettings(section) {
+  store.settingsMode = "settings";
+  if (section && SETTINGS_SECTIONS.includes(section)) store.settingsSection = section;
+  store.settingsOpen = true;
+}
+
+/** 关闭设置浮窗（说明模式也一起退出，下次打开回到设置）。 */
+export function closeSettings() {
+  store.settingsOpen = false;
+  store.settingsMode = "settings";
+}
+
+/** 在同一个浮窗里打开「说明」。 */
+export function showAbout() {
+  store.settingsMode = "about";
+  store.settingsOpen = true;
+}
+
+/** 从说明返回设置（保留上次的分类）。 */
+export function backToSettings() {
+  store.settingsMode = "settings";
 }
 
 /**
@@ -119,14 +194,37 @@ export function currentTheme() {
  *   ③ 写进 config.json（持久化；失败**静默**，主题不该因为写盘失败而不生效）。
  */
 export async function setTheme(name) {
-  const value = THEMES.includes(name) ? name : "light";
-  applyTheme(value);
-  store.theme = value;
+  // 仍接受旧版值（amber/...）—— 引导/旧脚本不用改，会迁移成「深色 + 该强调色」。
+  const [base, accent] = normalizeTheme(name, store.themeAccent);
+  applyTheme(base, accent);
+  store.theme = base;
+  store.themeAccent = accent;
   try {
-    if (store.state && store.state.config) store.state.config.theme = value;
+    if (store.state && store.state.config) {
+      store.state.config.theme = base;
+      store.state.config.theme_accent = accent;
+    }
   } catch (e) { /* 忽略 */ }
   try {
-    await call("save_config", { theme: value });
+    await call("save_config", { theme: base, theme_accent: accent });
   } catch (e) { /* 写盘失败不影响本次生效 */ }
-  return value;
+  return base;
+}
+
+/** 只换强调色（底色不变）。与 setTheme 共用同一套持久化与真源。 */
+export async function setThemeAccent(name) {
+  const [base, accent] = normalizeTheme(store.theme, name);
+  applyTheme(base, accent);
+  store.theme = base;
+  store.themeAccent = accent;
+  try {
+    if (store.state && store.state.config) {
+      store.state.config.theme = base;
+      store.state.config.theme_accent = accent;
+    }
+  } catch (e) { /* 忽略 */ }
+  try {
+    await call("save_config", { theme: base, theme_accent: accent });
+  } catch (e) { /* 写盘失败不影响本次生效 */ }
+  return accent;
 }

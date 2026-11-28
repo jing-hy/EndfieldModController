@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlparse
 
+from . import edition
 from .config import AppConfig
 from .version import LATEST_API, REPO_URL, USER_AGENT, __version__
 
@@ -90,9 +91,24 @@ def _write_cache(config: AppConfig, data: dict[str, Any]) -> None:
         pass
 
 
+def _payload_matches_edition(name: str) -> bool:
+    """这个更新包的**文件名**是不是本版本的产物？
+
+    Lite 只认文件名含 `lite` 的 exe/zip，完整版只认不含的 —— 两版**绝不互换**
+    （Release 里两版附件并存，装错就等于把程序换成另一种形态）。
+    """
+    lite_named = "lite" in str(name or "").lower()
+    return lite_named if edition.is_lite() else (not lite_named)
+
+
 def _asset_rank(name: str) -> int:
-    """0 = 主程序包，1 = 其它/特殊包（例如 `…-0.1.9-from-0.2.8.exe` 这种伪旧版）。"""
-    return 0 if Path(str(name)).stem.lower() == "endfieldmodcontroller" else 1
+    """0 = 本版本的主程序包，1 = 其它/特殊包（例如 0.1.9-from-… 这种伪旧版）。
+
+    ⚠️ Lite 的主程序叫 EndfieldModController-Lite —— 不认它的话，lite 包里只有
+    "伪旧版名"会命中 rank 0，_pick_asset 取到的可能不是最新那份。
+    """
+    expected = "endfieldmodcontroller-lite" if edition.is_lite() else "endfieldmodcontroller"
+    return 0 if Path(str(name)).stem.lower() == expected else 1
 
 
 def _pick_asset(release: dict[str, Any]) -> dict[str, Any] | None:
@@ -107,7 +123,9 @@ def _pick_asset(release: dict[str, Any]) -> dict[str, Any] | None:
 
     assets = [a for a in (release.get("assets") or []) if a.get("browser_download_url")]
     for suffix in (".exe", ".zip"):
-        matches = [a for a in assets if str(a.get("name", "")).lower().endswith(suffix)]
+        matches = [a for a in assets
+                   if str(a.get("name", "")).lower().endswith(suffix)
+                   and _payload_matches_edition(str(a.get("name") or ""))]
         if not matches:
             continue
         preferred = [a for a in matches if _asset_rank(str(a.get("name") or "")) == 0]
@@ -226,6 +244,10 @@ def check_update(
 
     tag = str(release.get("tag_name") or "").lstrip("vV")
     asset = _pick_asset(release)
+    if asset is None and tag:
+        # 只找本版本的包（绝不回退到另一版）；找不到就如实记一行，别让人以为是网络问题
+        _log(log, f"检查更新：v{tag} 的附件里没有{edition.label()}的包"
+                  + ("（文件名须含 lite）" if edition.is_lite() else ""))
     result.update({
         "latest": tag,
         "tag": str(release.get("tag_name") or ""),
@@ -478,6 +500,37 @@ fso.DeleteFile WScript.ScriptFullName, True
 '''
 
 
+def _update_candidates(config: AppConfig) -> list[Path]:
+    """`runtime\\_update` 里**属于本版本**的 exe/zip 载荷（按修改时间倒序）。
+
+    两版附件都叫 `EndfieldModController*` ⇒ 必须按 edition 过滤，否则
+    "Lite 装完整版的包"（或反过来）会被当成正常更新执行。
+    """
+    update_dir = Path(config.runtime_path) / UPDATE_DIR_NAME
+    if not update_dir.is_dir():
+        return []
+    try:
+        items = [path for path in update_dir.glob("EndfieldModController*")
+                 if path.suffix.lower() in {".exe", ".zip"} and path.is_file()]
+    except OSError:
+        return []
+    mine = [path for path in items if _payload_matches_edition(path.name)]
+    return sorted(mine, key=lambda path: path.stat().st_mtime, reverse=True)
+
+
+def _pending_payload_path(config: AppConfig) -> Path | None:
+    """`_update` 里"属于本版本、已下载但还没安装"的那一份载荷（没有返回 None）。
+
+    Lite 的产物名带 `lite`（不叫 `EndfieldModController.exe`）⇒ 必须按 edition 挑；
+    完整版仍用原来的固定名，行为保持不变。
+    """
+    if edition.is_lite():
+        candidates = _update_candidates(config)
+        return candidates[0] if candidates else None
+    candidate = Path(config.runtime_path) / UPDATE_DIR_NAME / "EndfieldModController.exe"
+    return candidate if candidate.is_file() else None
+
+
 def _apply_fail(log: Callable[[str], None] | None, message: str) -> dict[str, Any]:
     """`apply_update` 的失败出口。
 
@@ -507,12 +560,8 @@ def apply_update(
 
     payload = Path(archive) if archive else None
     if payload is None:
-        update_dir = config.runtime_path / UPDATE_DIR_NAME
-        candidates = sorted(
-            (p for p in update_dir.glob("EndfieldModController*") if p.suffix.lower() in {".exe", ".zip"}),
-            key=lambda p: p.stat().st_mtime,
-            reverse=True,
-        ) if update_dir.is_dir() else []
+        # ⚠️ 候选必须按 edition 过滤（`EndfieldModController*` 同时匹配两版）
+        candidates = _update_candidates(config)
         payload = candidates[0] if candidates else None
     if payload is None or not payload.is_file():
         return _apply_fail(log, "没有找到已下载的更新包（_update 目录里没有 exe/zip）")
@@ -683,8 +732,8 @@ def pending_payload(config: AppConfig) -> dict[str, Any]:
     用户 2026-10-01 要求「下载完应该跳一个弹窗，让用户选择是立即重启程序更新还是稍后」，
     选"稍后"的包就留在这里；下次启动时由前端根据本函数的结果再问一次。
     """
-    payload = Path(config.runtime_path) / "_update" / "EndfieldModController.exe"
-    if not payload.is_file():
+    payload = _pending_payload_path(config)
+    if payload is None:
         return {"pending": False}
     from .version import __version__
 

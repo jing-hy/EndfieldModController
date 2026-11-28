@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
+from . import edition
 from . import reshade_integration
 from .config import AppConfig
 
@@ -808,7 +809,9 @@ def auto_clean_before_launch(config: AppConfig, *, log: Log = None) -> dict[str,
     """
     # ★★ **总闸开着时无视上面那个设置**（2026-10-09）：「禁用所有 ReShade 注入」对用户的承诺是
     #    "就算之前有 reshade 注入，也能清理出终末地" —— 那是**保险**，不该被另一个开关关掉。
-    forced = bool(getattr(config, "reshade_disabled", False))
+    # ★ 判据走 `edition.effective_reshade_disabled()`：Lite 恒为 True ⇒ 每次启动都强制净化
+    #   （游戏目录里不许留 ReShade 残留，也不许被"启动前清除"那个设置关掉）。
+    forced = edition.effective_reshade_disabled(config)
     if not forced and not getattr(config, "clear_game_injections_on_launch", True):
         return {"ok": True, "skipped": "switch_off", "moved": [], "backup_dir": "",
                 "message": "设置里关掉了「启动前清除第三方注入」"}

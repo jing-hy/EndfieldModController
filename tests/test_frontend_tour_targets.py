@@ -29,7 +29,7 @@ def _tour_steps() -> list[dict[str, str]]:
     steps: list[dict[str, str]] = []
     for chunk in block.split("\n  {")[1:]:
         fields: dict[str, str] = {}
-        for key in ("tab", "target", "title"):
+        for key in ("tab", "target", "title", "settingsSection"):
             match = re.search(key + r':\s*"([^"]+)"', chunk)
             if match:
                 fields[key] = match.group(1)
@@ -75,6 +75,21 @@ def test_second_step_shows_the_store_and_three_ways() -> None:
     body = step.get("body", "")
     for keyword in ("拖", "商城", "网址"):
         assert keyword in body, "第 2 步正文没提到「%s」这条添加方式：%r" % (keyword, body)
+
+
+def test_fourth_step_opens_the_settings_overlay() -> None:
+    """第 4 步：设置不再是页面 —— 必须先打开设置浮窗并切到「维护」，高亮才能落到还原按钮。
+
+    2026-11-28 用户要求「设置放到下面、点开是应用内浮窗」。如果这一步还写着
+    tab: "settings"，引导会切到一个不存在的页面（浮窗不打开、按钮也找不到），
+    聚光就退化成不可见 —— 与 0.9.5 那次 #mod-download-box 的事故同型。
+    """
+    step = _tour_steps()[3]
+    assert not step.get("tab"), "第 4 步不该再有 tab: settings（设置已经不是页面了）"
+    assert step.get("settingsSection") == "maintenance", (
+        "第 4 步要带 settingsSection: maintenance，否则浮窗停在上次分类、还原按钮不在视野里"
+    )
+    assert step.get("target") == "game-restore-btn"
 
 
 def test_store_page_keeps_the_tour_anchor() -> None:

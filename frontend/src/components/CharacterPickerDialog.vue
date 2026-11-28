@@ -14,6 +14,7 @@ import { call } from "../lib/bridge.js";
 import { store } from "../store.js";
 import { showToast } from "../lib/dialog.js";
 import Btn from "./ui/Btn.vue";
+import { t } from "../lib/i18n.js";
 
 const pending = ref([]);
 const known = ref([]);
@@ -23,8 +24,8 @@ const busy = ref(false);
 const open = computed(() => pending.value.length > 0);
 
 function why(item) {
-  if (item.confidence === "none") return "名字里没找到任何角色名";
-  return "出现了多个角色名，分不清哪个才是主体";
+  if (item.confidence === "none") return t("名字里没找到任何角色名");
+  return t("出现了多个角色名，分不清哪个才是主体");
 }
 
 // 候选 = 它自己猜出来的 + 已知角色表（去重）
@@ -76,7 +77,7 @@ async function save() {
   } catch (e) { /* call 已弹窗 */ }
   busy.value = false;
   pending.value = [];
-  if (saved) showToast(`已确认 ${saved} 个 Mod 的角色归属`, "success");
+  if (saved) showToast(t("已确认") + " " + saved + " " + t("个 Mod 的角色归属"), "success");
   try { await call("scan"); } catch (e) { /* 忽略 */ }
 }
 
@@ -100,27 +101,26 @@ window.addEventListener("focus", () => { if (!open.value) load(); });
 <template>
   <div v-if="open" class="fixed inset-0 z-50 flex items-center justify-center" style="background: rgba(0,0,0,.45)">
     <div class="card w-[min(620px,94vw)] shadow-lg" style="background: var(--surface)">
-      <div class="card-head">有 {{ pending.length }} 个 Mod 需要你确认角色</div>
+      <div class="card-head">{{ t("有") }} {{ pending.length }} {{ t("个 Mod 需要你确认角色") }}</div>
       <div class="card-body" style="max-height: 60vh; overflow: auto">
         <p class="text-xs mb-3" style="color: var(--text-muted)">
-          认不出角色不影响使用，但<b>同角色互斥</b>要靠它 —— 归属没填对时，同一个角色的两个 Mod
-          可能一起生效，那样游戏容易崩。选不准就先跳过。
+          {{ t("认不出角色不影响使用，但") }}<b>{{ t("同角色互斥") }}</b>{{ t("要靠它 —— 归属没填对时，同一个角色的两个 Mod 可能一起生效，那样游戏容易崩。选不准就先跳过。") }}
         </p>
         <div v-for="item in pending" :key="item.id" class="mb-3 p-2.5 rounded"
              style="background: var(--surface-2)">
-          <div class="text-sm font-medium truncate">{{ item.name }}</div>
+          <div class="text-sm font-medium truncate">{{ t(item.name) }}</div>
           <div class="text-xs mt-0.5 mb-1.5" style="color: var(--text-muted)">{{ why(item) }}</div>
           <select class="field" style="min-width: 240px"
                   :value="selectedFor(item)"
                   @change="(e) => (picked[item.id] = e.target.value)">
-            <option value="">（请选择角色）</option>
+            <option value="">{{ t("（请选择角色）") }}</option>
             <option v-for="name in optionsFor(item)" :key="name" :value="name">{{ name }}</option>
           </select>
         </div>
       </div>
       <div class="px-4 py-3 flex justify-end gap-2 border-t" style="border-color: var(--border)">
-        <Btn @click="skip">稍后再说</Btn>
-        <Btn variant="primary" :disabled="busy" @click="save">保存选择</Btn>
+        <Btn @click="skip">{{ t("稍后再说") }}</Btn>
+        <Btn variant="primary" :disabled="busy" @click="save">{{ t("保存选择") }}</Btn>
       </div>
     </div>
   </div>

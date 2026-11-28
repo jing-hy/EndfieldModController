@@ -237,12 +237,71 @@ class AlertVersionGateTests(unittest.TestCase):
         got = alerts.overview(self.config, document=doc, version="0.9.4")
         self.assertEqual([c["id"] for c in got["critical"]], ["c-all"])
 
+    def test_announcements_prefer_english_when_available(self) -> None:
+        """英文界面用 title_en/body_en；老公告没有英文字段 ⇒ 回落中文（兼容）。"""
+        doc = _doc([
+            {"id": "new", "level": "info", "title": "中文标题", "body": "中文正文",
+             "title_en": "English title", "body_en": "English body"},
+            {"id": "old", "level": "info", "title": "老公告", "body": "老正文"},
+        ])
+        zh = alerts.overview(self.config, document=doc, language="zh")
+        en = alerts.overview(self.config, document=doc, language="en")
+        zh_rows = {r["id"]: r for r in zh["announcements"]}
+        en_rows = {r["id"]: r for r in en["announcements"]}
+        self.assertEqual(zh_rows["new"]["title"], "中文标题")
+        self.assertEqual(en_rows["new"]["title"], "English title")
+        self.assertEqual(en_rows["new"]["body"], "English body")
+        self.assertEqual(en_rows["old"]["title"], "老公告", "没有英文版的旧公告必须回落中文")
+
+    def test_critical_also_localized(self) -> None:
+        doc = _doc([{"id": "c", "level": "critical", "title": "中文", "title_en": "English"}])
+        got = alerts.overview(self.config, document=doc, language="en")
+        self.assertEqual(got["critical"][0]["title"], "English")
+
+    def test_language_defaults_to_config(self) -> None:
+        self.config.language = "en"
+        try:
+            doc = _doc([{"id": "a", "title": "中文", "title_en": "English"}])
+            got = alerts.overview(self.config, document=doc)
+            self.assertEqual(got["announcements"][0]["title"], "English")
+        finally:
+            self.config.language = "zh"
+
     def test_normalize_keeps_version_fields(self) -> None:
         items = alerts.normalize(_doc([
             {"id": "x", "min_version": " 0.9.0 ", "max_version": "0.9.9"},
         ]))
         self.assertEqual(items[0]["min_version"], "0.9.0")
         self.assertEqual(items[0]["max_version"], "0.9.9")
+
+    def test_overview_filters_by_edition(self) -> None:
+        """2026-11-28 用户：「公告也要区分两个版本，可以都发，也可以只发一个版本」。"""
+        doc = _doc([
+            {"id": "both", "level": "info", "title": "两版都发"},
+            {"id": "full-only", "level": "info", "title": "只发完整版", "edition": "full"},
+            {"id": "lite-only", "level": "info", "title": "只发轻量版", "edition": "lite"},
+        ])
+        full = alerts.overview(self.config, document=doc, edition="full")
+        lite = alerts.overview(self.config, document=doc, edition="lite")
+        self.assertEqual([a["id"] for a in full["announcements"]], ["both", "full-only"])
+        self.assertEqual([a["id"] for a in lite["announcements"]], ["both", "lite-only"])
+
+    def test_critical_also_respects_edition(self) -> None:
+        doc = _doc([
+            {"id": "c-full", "level": "critical", "title": "完整版预警", "edition": "full"},
+            {"id": "c-all", "level": "critical", "title": "两版都发"},
+        ])
+        got = alerts.overview(self.config, document=doc, edition="lite")
+        self.assertEqual([c["id"] for c in got["critical"]], ["c-all"])
+
+    def test_normalize_edition_defaults_to_both(self) -> None:
+        items = alerts.normalize(_doc([
+            {"id": "a"},
+            {"id": "b", "edition": "LITE"},
+            {"id": "c", "edition": "搞不清"},
+        ]))
+        self.assertEqual({i["id"]: i["edition"] for i in items},
+                         {"a": "both", "b": "lite", "c": "both"})
 
 
 if __name__ == "__main__":

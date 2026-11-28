@@ -25,6 +25,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from . import edition
+
 # 五个时机（顺序即启动链顺序）
 PHASES = ("launch-begin", "xxmi-started", "game-started", "game-exited", "crash")
 
@@ -41,6 +43,8 @@ _TRACE_NAME = "injection-trace.jsonl"
 # 「本来应该进游戏进程」的注入项：XXMI 注入库里的两条。
 # 进程模块里找不到它们 ⇒ 注入库里写着、实际没进进程（这正是 `0xC0000135` 两种来源的分界）。
 _EXPECT_IN_PROCESS = ("d3d12.dll", "d3d11.dll")
+# Lite 不注入 ReShade 底座（d3d12.dll）⇒ 只盯 EFMI 那条，否则每次快照都会报"缺 d3d12.dll"。
+_EXPECT_IN_PROCESS_LITE = ("d3d11.dll",)
 
 # `runtime\dlss5` 里这几个文件的状态每次都要拍（ReShade 底座、生效 ini、两个日志的推进）
 _DLSS5_FILES = ("d3d12.dll", "ReShade.ini", "dlss5-feed.log", "ReShade.log")
@@ -115,6 +119,8 @@ def _process_state(pid: int | None) -> dict[str, Any]:
         if name in ("d3d11.dll", "d3d12.dll", "dxgi.dll"):
             dupes.setdefault(name, []).append(path)
     duplicate_loaders = {name: paths for name, paths in dupes.items() if len(paths) > 1}
+    # Lite 没有 ReShade 底座 ⇒ "该进进程的"只剩 EFMI 的 d3d11.dll
+    expected = _EXPECT_IN_PROCESS_LITE if edition.is_lite() else _EXPECT_IN_PROCESS
     return {
         "pid": int(pid),
         "alive": True,
@@ -123,7 +129,7 @@ def _process_state(pid: int | None) -> dict[str, Any]:
         "modules": modules,
         "third_party_modules": raw_modules,
         "duplicate_loaders": duplicate_loaders,
-        "expect_missing": [name for name in _EXPECT_IN_PROCESS if name.lower() not in names],
+        "expect_missing": [name for name in expected if name.lower() not in names],
     }
 
 
@@ -143,10 +149,14 @@ def snapshot(config: Any, *, phase: str, pid: int | None = None, note: str = "")
         data["injection"] = _injection_state(config)
     except Exception as exc:  # noqa: BLE001
         data["injection"] = {"error": str(exc)}
-    try:
-        data["dlss5"] = _dlss5_state(config)
-    except Exception as exc:  # noqa: BLE001
-        data["dlss5"] = {"error": str(exc)}
+    if edition.is_lite():
+        # Lite 不含 ReShade / DLSS5 ⇒ 这一侧没有现场可拍，快照里留空（下游按"无数据"处理）
+        data["dlss5"] = {}
+    else:
+        try:
+            data["dlss5"] = _dlss5_state(config)
+        except Exception as exc:  # noqa: BLE001
+            data["dlss5"] = {"error": str(exc)}
     game_dir: Path | None = None
     try:
         game_dir = reshade_integration.detect_game_dir(config, prefer_actual=True)

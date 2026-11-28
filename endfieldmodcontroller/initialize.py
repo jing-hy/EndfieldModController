@@ -22,6 +22,7 @@ import zipfile
 from pathlib import Path
 from typing import Any, Callable
 
+from . import edition
 from . import runtime_assets
 from .config import AppConfig, PROJECT_ROOT
 
@@ -3067,47 +3068,55 @@ def _check_staging(config: AppConfig, report: Report, log: Callable[[str], None]
 def ensure_all(config: AppConfig, log: Callable[[str], None] | None = None) -> dict[str, Any]:
     """逐项校验 + 补齐，返回完整报告。"""
     report = Report()
-    # 先把随包资产展开（DLSS5 底座与游戏目录补齐都要用到它们）
-    _check_bundled_assets(config, report, log)
+    # Lite 不含 ReShade：下面这一整段（随包资产展开 + DLSS5/ReShade 的十几项自检）
+    # 全都会展开资产或写 ReShade 文件 ⇒ 一项都不跑。保留的检查与 ReShade 无关，见各自注释。
+    lite = edition.is_lite()
+    if not lite:
+        # 先把随包资产展开（DLSS5 底座与游戏目录补齐都要用到它们）
+        _check_bundled_assets(config, report, log)
     # ★ 游戏本体路径自愈（2026-10-13）：必须排在**任何会写游戏目录的动作之前** ——
     #   否则下面那些"补 proxy / 部署运行库 / 净化还原"全打在一个已不存在的旧目录上，
     #   界面还全绿（用户原话：「机器问题需要管理器能自己修，比如 exe 不存在自动寻找」）。
     _check_game_path(config, report, log)
-    _check_dlss5_dir(config, report, log)
-    _check_reshade_ini(config, report, log)
-    # NR 必须等「第一人称插件的相机 hook」装好之后再开（2026-10-05 定案）——
-    # 放在 ini 处理**之后**：这一步直接改生效那份 `ReShade.ini` 的 `[RenoDX.DLSS5]`。
-    _check_defer_nr_until_camera_hook(config, report, log)
-    # shader 依赖要先补齐，否则 preset 里启用的 technique 编不过（"编译出错"）
-    _check_dlss5_shaders(config, report, log)
-    _check_dlss5_preset(config, report, log)
-    # NGX 消费者检查：检测到第三方截获（OptiScaler）就**自动移走**（用户要求"自动检测处理"，
-    # 不是写一句说明让用户自己看日志）
-    # 显卡支持范围决定 DLSS5 能否使用（不支持 → 自动关掉开关）
-    _check_dlss5_gpu_support(config, report, log)
-    # 运行库架构自检：这份 `nvngx_dlssnr.dll` 含不含**本机显卡的内核**（不含就自动换一份）
-    _check_dlssnr_arch(config, report, log)
-    _check_dlss5_ngx_consumer(config, report, log)
-    # 面板合成键有没有和别的 addon 快捷键撞车（F6/F7 撞车事故的兜底检查）
-    _check_panel_hotkey_conflicts(config, report, log)
-    # 面板协议的**语法**体检（生成 controller.ini 时同时产出的 controller.lint.txt）
-    _check_panel_protocol_lint(config, report, log)
-    # DLSS5 的 NR 上次到底绑上没有（游戏内超分档位选成"原生/DLAA"时它永远绑不上）
-    _check_dlss5_nr_binding(config, report, log)
-    # 游戏自带 DLSS → 自动停用「喂帧组件」（设置页有开关，默认开启）
-    _check_dlss5_feed_redundant(config, report, log)
-    # ⚠️ `NRStyle` **只报告、不改动**（2026-10-07 更正：这条注释原来写着"→ 自动改回 0"，
-    #    而那个自动改动的动作早就按用户要求删掉了 ⇒ 注释与实际行为相反，会误导排查）。
-    #    现在只把当前值如实写进自检；`NRStyle=2` 与崩溃的因果归因已定案不成立。
-    _check_dlss5_nrstyle(config, report, log)
-    _check_game_libs(config, report, log)
-    _check_bundled_versions(config, report, log)
-    # VC++ 运行库版本（2026-10-05 加）：issue #16 的退出码是 STATUS_DLL_NOT_FOUND，
-    # 而注入链上唯一依赖它的组件是 dlss5-feed.addon64 ⇒ 先把版本号这条判据采下来。
-    _check_vc_runtime(config, report, log)
+    if not lite:
+        _check_dlss5_dir(config, report, log)
+        _check_reshade_ini(config, report, log)
+        # NR 必须等「第一人称插件的相机 hook」装好之后再开（2026-10-05 定案）——
+        # 放在 ini 处理**之后**：这一步直接改生效那份 `ReShade.ini` 的 `[RenoDX.DLSS5]`。
+        _check_defer_nr_until_camera_hook(config, report, log)
+        # shader 依赖要先补齐，否则 preset 里启用的 technique 编不过（"编译出错"）
+        _check_dlss5_shaders(config, report, log)
+        _check_dlss5_preset(config, report, log)
+        # NGX 消费者检查：检测到第三方截获（OptiScaler）就**自动移走**（用户要求"自动检测处理"，
+        # 不是写一句说明让用户自己看日志）
+        # 显卡支持范围决定 DLSS5 能否使用（不支持 → 自动关掉开关）
+        _check_dlss5_gpu_support(config, report, log)
+        # 运行库架构自检：这份 `nvngx_dlssnr.dll` 含不含**本机显卡的内核**（不含就自动换一份）
+        _check_dlssnr_arch(config, report, log)
+        _check_dlss5_ngx_consumer(config, report, log)
+        # 面板合成键有没有和别的 addon 快捷键撞车（F6/F7 撞车事故的兜底检查）
+        _check_panel_hotkey_conflicts(config, report, log)
+        # 面板协议的**语法**体检（生成 controller.ini 时同时产出的 controller.lint.txt）
+        _check_panel_protocol_lint(config, report, log)
+        # DLSS5 的 NR 上次到底绑上没有（游戏内超分档位选成"原生/DLAA"时它永远绑不上）
+        _check_dlss5_nr_binding(config, report, log)
+        # 游戏自带 DLSS → 自动停用「喂帧组件」（设置页有开关，默认开启）
+        _check_dlss5_feed_redundant(config, report, log)
+        # ⚠️ `NRStyle` **只报告、不改动**（2026-10-07 更正：这条注释原来写着"→ 自动改回 0"，
+        #    而那个自动改动的动作早就按用户要求删掉了 ⇒ 注释与实际行为相反，会误导排查）。
+        #    现在只把当前值如实写进自检；`NRStyle=2` 与崩溃的因果归因已定案不成立。
+        _check_dlss5_nrstyle(config, report, log)
+        # 游戏目录的 DLSS 运行库（会把 nvngx_* 写进游戏目录）—— Lite 不写游戏目录的 DLSS 资产。
+        _check_game_libs(config, report, log)
+        _check_bundled_versions(config, report, log)
+        # VC++ 运行库版本（2026-10-05 加）：issue #16 的退出码是 STATUS_DLL_NOT_FOUND，
+        # 而注入链上唯一依赖它的组件是 dlss5-feed.addon64 ⇒ 先把版本号这条判据采下来。
+        _check_vc_runtime(config, report, log)
     _check_controller(config, report, log)
-    # 统一面板（整合 Mod 快捷键用）：必须在控制器生成之后 —— 它要读 actions.tsv
-    _check_hotkey_panel(config, report, log)
+    if not lite:
+        # 统一面板（整合 Mod 快捷键用）：必须在控制器生成之后 —— 它要读 actions.tsv，
+        # 而且面板本身装在 ReShade 目录里（Lite 没有）。
+        _check_hotkey_panel(config, report, log)
     _check_staging(config, report, log)
     _check_mod_conflicts(config, report, log)
     # Endfield Poser 必须在乳摇**之前**：它的 proxy 会加载 plugin 下所有 dll（含
@@ -3145,26 +3154,28 @@ def ensure_all(config: AppConfig, log: Callable[[str], None] | None = None) -> d
     #   `renodx-mfgunlock.addon64`（1,191,424 B）**在**、mtime 正是他点"初始化自检"
     #   的那一秒 ⇒ ReShade 照样加载它。现在与 `ensure_injections()` 共用
     #   `launcher.realign_component_addons()`（三个组件 + 面板），不再两处各写一套。
-    try:
-        from . import launcher as _launcher
+    # Lite 跳过整段：它按开关搬的是 DLSS5 / 第一人称 / 面板这些 ReShade addon（本版本没有）。
+    if not lite:
+        try:
+            from . import launcher as _launcher
 
-        realigned = _launcher.realign_component_addons(config, log=log)
-        moved = realigned.get("moved") or []
-        if moved:
-            report.add("addons:realigned", True,
-                       "已按启动页的开关把插件归位（展开资产会把停用的插件放回底座目录，"
-                       "所以每次展开之后都要再来一次）：" + "、".join(moved),
-                       fixed=True)
-        else:
-            report.add("addons:realigned", True, "插件位置与启动页开关一致")
-        for error in realigned.get("errors") or []:
+            realigned = _launcher.realign_component_addons(config, log=log)
+            moved = realigned.get("moved") or []
+            if moved:
+                report.add("addons:realigned", True,
+                           "已按启动页的开关把插件归位（展开资产会把停用的插件放回底座目录，"
+                           "所以每次展开之后都要再来一次）：" + "、".join(moved),
+                           fixed=True)
+            else:
+                report.add("addons:realigned", True, "插件位置与启动页开关一致")
+            for error in realigned.get("errors") or []:
+                report.add("addons:realigned", False,
+                           f"按开关归位插件失败（{error}）—— ReShade 可能仍会加载已停用的插件",
+                           manual=True)
+        except Exception as exc:  # noqa: BLE001
             report.add("addons:realigned", False,
-                       f"按开关归位插件失败（{error}）—— ReShade 可能仍会加载已停用的插件",
+                       f"按开关归位插件失败（ReShade 可能仍会加载已停用的插件）: {exc}",
                        manual=True)
-    except Exception as exc:  # noqa: BLE001
-        report.add("addons:realigned", False,
-                   f"按开关归位插件失败（ReShade 可能仍会加载已停用的插件）: {exc}",
-                   manual=True)
 
     # ★★ **最后再清一次「已退役的旧 NR 引擎」**（2026-10-07 实测抓到，与上面那条同源）。
     #
@@ -3181,19 +3192,21 @@ def ensure_all(config: AppConfig, log: Callable[[str], None] | None = None) -> d
     #    （`retire_stale_nr_addons()` 跑在它**之前** ⇒ 展开又把退役那份铺了回来；旧数据根的
     #    `assets\dlss5\manifest.json` 里还列着它）。**与上面"按开关归位"是同一个病**：
     #    展开会撤销前面的动作，所以兜底必须放在最后一步。
-    try:
-        from . import runtime_assets as _assets
+    # Lite 跳过：退役的 NR 引擎是 ReShade addon，本版本不碰 dlss5 目录。
+    if not lite:
+        try:
+            from . import runtime_assets as _assets
 
-        parked = _assets.retire_stale_nr_addons(config, log=log)
-        if parked:
-            report.add("dlss5:retired_nr_parked", True,
-                       "已把退役的旧 NR 引擎移出底座目录（两个同名 neural addon 同装会让"
-                       "**两个都不工作**）：" + "、".join(parked),
-                       fixed=True)
-    except Exception as exc:  # noqa: BLE001
-        report.add("dlss5:retired_nr_parked", False,
-                   f"清理退役 NR 引擎失败（ReShade 可能同时加载新旧两份，NR 会失效）: {exc}",
-                   manual=True)
+            parked = _assets.retire_stale_nr_addons(config, log=log)
+            if parked:
+                report.add("dlss5:retired_nr_parked", True,
+                           "已把退役的旧 NR 引擎移出底座目录（两个同名 neural addon 同装会让"
+                           "**两个都不工作**）：" + "、".join(parked),
+                           fixed=True)
+        except Exception as exc:  # noqa: BLE001
+            report.add("dlss5:retired_nr_parked", False,
+                       f"清理退役 NR 引擎失败（ReShade 可能同时加载新旧两份，NR 会失效）: {exc}",
+                       manual=True)
 
     payload = report.to_dict()
     for action in payload["actions"]:

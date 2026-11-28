@@ -18,22 +18,23 @@ import { store } from "../store.js";
 import { showAlert, showToast } from "../lib/dialog.js";
 import Card from "./ui/Card.vue";
 import Btn from "./ui/Btn.vue";
+import { t } from "../lib/i18n.js";
 
 const text = ref("");
 const busy = ref(false);
 
 async function startDownload() {
   const value = String(text.value || "").trim();
-  if (!value) { await showAlert("还没填网址", "把 Mod 的下载网址粘进来，一行一个。"); return; }
+  if (!value) { await showAlert(t("还没填网址"), t("把 Mod 的下载网址粘进来，一行一个。")); return; }
   busy.value = true;
   try {
     const r = await call("start_mod_download", value);
     if (!r || r.ok === false) {
-      await showAlert("没能开始下载", (r && r.message) || "未知原因");
+      await showAlert(t("没能开始下载"), (r && r.message) || t("未知原因"));
       return;
     }
     text.value = "";
-    showToast(`已加入下载队列（共 ${r.queued || r.total} 个）—— 下方列表能看到进度`, "success");
+    showToast(t("已加入下载队列（共") + " " + (r.queued || r.total) + " " + t("个）—— 下方列表能看到进度"), "success");
     // 任务已经进队列了；这里只是把 store 里的活跃数刷新一下（徽标与汇总卡都读它）
     store.autoStartModDownload = true;
     store.activeDownloads = Math.max(store.activeDownloads, 1);
@@ -46,7 +47,7 @@ async function openDir() {
   // ⚠️ 下载目录有**专用接口** `open_download_dir`（0.9.5 用的就是它）——
     // 传 "downloads" 这个标签给 `open_path_in_explorer` 会被当成路径、必然失败（2026-10-03 修）。
     const r = await call("open_download_dir");
-    if (r && r.ok === false) showToast(String(r.message || "打不开下载目录"), "danger");
+    if (r && r.ok === false) showToast(String(r.message || t("打不开下载目录")), "danger");
 }
 </script>
 
@@ -54,18 +55,18 @@ async function openDir() {
   <!-- 这个 id 曾经是新手引导第 2 步的高亮目标（2026-10-03 补的回归）。
        ⚠️ 2026-11-05 起第 2 步改去高亮** Mod 商城**（`#store-browse-box`），这里不再是落点；
        id 仍保留 —— 它是「粘贴网址下载」这条路的标识，删了以后不好回挂引导/文档。 -->
-  <Card title="下载 Mod" id="mod-download-box">
-    <template #badge><span class="text-xs" style="color: var(--text-muted)">粘网址，一行一个</span></template>
+  <Card :title="t('下载 Mod')" id="mod-download-box">
+    <template #badge><span class="text-xs" style="color: var(--text-muted)">{{ t("粘网址，一行一个") }}</span></template>
     <p class="text-xs mb-2" style="color: var(--text-muted)">
-      支持直链，也支持<b>香蕉网（GameBanana）页面地址</b> —— 会自动换成真实文件直链，并带出封面。
-      zip / 7z / rar 下完自动解压进库并识别角色；<b>正在下载时还能继续往里加</b>（不必等上一批跑完）。
-      进度、速度与日志就在下面这一页。
+      {{ t("支持直链，也支持") }}<b>{{ t("香蕉网（GameBanana）页面地址") }}</b>{{ t(" —— 会自动换成真实文件直链，并带出封面。") }}
+      {{ t("zip / 7z / rar 下完自动解压进库并识别角色；") }}<b>{{ t("正在下载时还能继续往里加") }}</b>{{ t("（不必等上一批跑完）。") }}
+      {{ t("进度、速度与日志就在下面这一页。") }}
     </p>
     <textarea v-model="text" class="field font-mono text-xs" rows="3"
               placeholder="https://gamebanana.com/mods/721442&#10;https://example.com/another-mod.7z"></textarea>
     <div class="flex items-center gap-2 mt-2">
-      <Btn variant="primary" :disabled="busy" @click="startDownload">开始下载</Btn>
-      <Btn @click="openDir">打开下载目录</Btn>
+      <Btn variant="primary" :disabled="busy" @click="startDownload">{{ t("开始下载") }}</Btn>
+      <Btn @click="openDir">{{ t("打开下载目录") }}</Btn>
     </div>
   </Card>
 </template>

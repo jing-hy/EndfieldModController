@@ -19,7 +19,13 @@
     python scripts/upload_release_assets.py --tag v0.3.0     # 指定 tag
     python scripts/upload_release_assets.py --dry-run        # 只打印将要做什么
 
-附件清单（与用户规则一致）：`EndfieldModController.exe`（不带版本号）+ `assets-bundle.zip`。
+附件清单（与用户规则一致）：
+
+* **必须有**：`EndfieldModController.exe`（不带版本号）+ `assets-bundle.zip`（完整版的随包资产）；
+* **有就带上、没有就跳过**：`EndfieldModController-Lite.exe`（轻量版）与
+  `assets-bundle-lite.zip`（轻量版的随包资产，由 `build_assets_bundle.py --edition lite` 产出）。
+  这两样缺失**只提示、不中止** —— 轻量版是独立产物，不该把完整版的发版卡住。
+
 不上传带版本号副本与伪旧版。
 """
 from __future__ import annotations
@@ -39,8 +45,15 @@ ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "dist"
 VERSION_PY = ROOT / "endfieldmodcontroller" / "version.py"
 APP_NAME = "EndfieldModController"
+APP_NAME_LITE = "EndfieldModController-Lite"
 REPO = "jing-hy/EndfieldModController"
 UPLOAD_HOST = "uploads.github.com"
+#: **必须有**的附件：完整版 exe + 完整版的随包资产（缺一个就没法发版）。
+REQUIRED_ASSETS: tuple[str, ...] = (f"{APP_NAME}.exe", "assets-bundle.zip")
+#: **有就带上、没有就跳过**：轻量版 exe 与轻量版的随包资产（由
+#: `build_assets_bundle.py --edition lite` 产出）。轻量版是独立产物，它缺失不能把完整版的
+#: 发版卡住 —— 所以这两样只提示、不中止。
+OPTIONAL_ASSETS: tuple[str, ...] = (f"{APP_NAME_LITE}.exe", "assets-bundle-lite.zip")
 DOH_ENDPOINTS = (
     "https://dns.alidns.com/resolve?name={host}&type=A",
     "https://doh.pub/dns-query?name={host}&type=A",
@@ -143,6 +156,34 @@ def existing_assets(tag: str, headers: dict[str, str]) -> dict[str, int]:
     return {str(a.get("name")): int(a.get("size") or 0) for a in (data.get("assets") or [])}
 
 
+def collect_assets(dist: Path = DIST) -> tuple[list[Path], list[str], list[str]]:
+    """算出这次要上传的附件：`(要传的, 缺失的必需项说明, 要打印的提示)`。
+
+    必需项（完整版 exe + `assets-bundle.zip`）缺失时第二个返回值非空，调用方据此中止；
+    轻量版那两样（`…-Lite.exe` / `assets-bundle-lite.zip`）缺失只进"提示"，**不中止**
+    —— 两版是各自独立的产物。抽成函数是为了能在不发任何网络请求的前提下验证这条行为。
+    """
+    required = [dist / name for name in REQUIRED_ASSETS]
+    missing = [f"缺少 {item}" for item in required if not item.is_file()]
+    assets = [item for item in required if item.is_file()]
+    notes: list[str] = []
+    lite_exe, lite_bundle = (dist / name for name in OPTIONAL_ASSETS)
+    if lite_exe.is_file():
+        # ⚠️ 轻量版的资产包**只在轻量版 exe 也在**时才传：dist 里可能留着一份上次试打的
+        # `assets-bundle-lite.zip`，若让它自己判断"存在就传"，完整版发版时会悄悄把它带上，
+        # Release 上就出现一份没有对应 Lite 版的资产包。两样绑定，才不会各自为政。
+        assets.append(lite_exe)
+        if lite_bundle.is_file():
+            assets.append(lite_bundle)
+    if not lite_exe.is_file():
+        notes.append(f"提示：没有 {lite_exe.name} —— 本次只传完整版"
+                     f"（要一起传就用 `build_release.py --edition lite` 构建）")
+    elif not lite_bundle.is_file():
+        notes.append(f"提示：有轻量版 exe 但没有 {lite_bundle.name}"
+                     f"（`build_assets_bundle.py --edition lite`）—— 只传 exe")
+    return assets, missing, notes
+
+
 def upload(path: Path, rid: int, ip: str, secret: str) -> bool:
     """用 curl --resolve 直连真实 IP 上传单个附件。"""
     if not shutil.which("curl"):
@@ -176,11 +217,15 @@ def main() -> int:
     dry_run = "--dry-run" in args
     tag = tag or f"v{read_version()}"
 
-    assets = [DIST / f"{APP_NAME}.exe", DIST / "assets-bundle.zip"]
+    assets, missing, notes = collect_assets()
     print(f"== 上传 {tag} 的附件到 {REPO} ==", flush=True)
     for item in assets:
-        print(f"   {item.name}  {item.stat().st_size:,} B" if item.is_file() else f"   !! 缺少 {item}", flush=True)
-    if not all(item.is_file() for item in assets):
+        print(f"   {item.name}  {item.stat().st_size:,} B", flush=True)
+    for item in missing:
+        print(f"   !! {item}", flush=True)
+    for note in notes:
+        print(f"   {note}", flush=True)
+    if missing:
         return 1
 
     secret = token()

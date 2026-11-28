@@ -110,28 +110,33 @@ def test_merge_is_idempotent():
     assert character_sync.merge_payload(once, parsed)["added"] == []
 
 
-def test_merge_aggregates_same_name_from_official():
-    """官网把男女管理员列成两条（同名、key 不同）→ 合并后**只能有一条**，且两个 key 都进别名。
+def test_merge_splits_administrators_by_key():
+    """官网把男女管理员列成两条（同名、key 不同）→ **拆成男/女两条**（2026-11-28）。
 
-    这是实拉官网发现的真问题：不聚合就会在表里造出重复的「管理员」。
+    历史：以前聚合成一条「管理员」，头像取的是男的那张 ⇒ 用户实测「只会识别男管理员」。
+    现在按 key（endministrator2 男 / endministrator1 女）拆开；旧本地表里的合并条目
+    会被吸收进「女管理员」，两条各留自己的别名（裸「管理员」只给女的那条）。
     """
     local = {"schema_version": 2, "characters": [
         {"name": "管理员", "codename": "Endministrator", "key": "endministrator",
          "aliases": ["管理员", "女管理员", "男管理员", "endmin"]},
     ]}
     official = {"total": 2, "characters": [
-        {"name": "管理员", "codename": "Endministrator", "key": "endministrator",
-         "aliases": ["管理员", "Endministrator", "endministrator"]},
+        {"name": "管理员", "codename": "Endministrator", "key": "endministrator2",
+         "aliases": ["管理员", "Endministrator", "endministrator2"]},
         {"name": "管理员", "codename": "Endministrator", "key": "endministrator1",
          "aliases": ["管理员", "Endministrator", "endministrator1"]},
     ]}
     merged = character_sync.merge_payload(local, official)
-    names = [c["name"] for c in merged["payload"]["characters"]]
-    assert names == ["管理员"]                       # 没有重复条目
-    assert merged["added"] == []
-    aliases = merged["payload"]["characters"][0]["aliases"]
-    assert "endministrator1" in aliases               # 官网第二条的 key 也没丢
-    assert "男管理员" in aliases and "endmin" in aliases   # 本地手工别名保留
+    rows = merged["payload"]["characters"]
+    names = [c["name"] for c in rows]
+    assert set(names) == {"男管理员", "女管理员"}      # 不再有合并的「管理员」条目
+    assert merged["added"] == []                     # 旧条目被吸收，不算新增
+    female = next(c for c in rows if c["name"] == "女管理员")
+    male = next(c for c in rows if c["name"] == "男管理员")
+    assert "endministrator1" in female["aliases"]
+    assert "男管理员" not in female["aliases"]          # 裸名/女向别名只给女
+    assert "管理员" not in male["aliases"]             # 男条目不能命中裸「管理员」
 
 
 # --------------------------------------------------------------- 节流 / 失败静默

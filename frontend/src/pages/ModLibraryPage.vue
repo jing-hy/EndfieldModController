@@ -4,6 +4,7 @@
 // 分组与过滤规则照抄旧 renderMods：按 conflict_group||group 分组，
 // 跳过 _deps 分组与 kind=dependency/tool/assist（那些由依赖页 / 辅助页管）。
 import { ref, computed, nextTick, onMounted, onUnmounted, watch } from "vue";
+import { t } from "../lib/i18n.js";
 import { call } from "../lib/bridge.js";
 import { store, refreshState } from "../store.js";
 import { loadSettings } from "../lib/settings.js";
@@ -51,7 +52,8 @@ let timer = null, dlTimer = null;
 // 别的分类 id 原样显示 —— 宁可不翻译，也不能猜错。
 const SITE_ROOT_LABELS = { Skins: "皮肤", UI: "UI", "Other/Misc": "其它" };
 function siteRootLabel(root) {
-  return SITE_ROOT_LABELS[root] || String(root || "");
+  const label = SITE_ROOT_LABELS[root];
+  return label ? t(label) : String(root || "");
 }
 
 // ⚠️ 选中状态的真源是 **`config.selected_mods`**（后端 `get_state()` 顶层**没有**
@@ -127,19 +129,19 @@ const otherIds = computed(
 // 统一卡片的标题与角标（用户 2026-10-07：「全部合成一个卡片」）——
 // 三态共用一个 Card，标题跟着状态走，不再各开一张卡。
 const listTitle = computed(() => {
-  if (!characterView.value) return "Mod 列表";
-  return character.value ? `${character.value} 的 Mod` : "角色";
+  if (!characterView.value) return t("Mod 列表");
+  return character.value ? `${character.value} ${t("的 Mod")}` : t("角色");
 });
 const listBadge = computed(() => {
-  if (!characterView.value) return "按角色分组显示";
+  if (!characterView.value) return t("按角色分组显示");
   if (character.value === OTHER_NAME) {
-    return `${((gallery.value.other || {}).count) || 0} 个`;
+    return `${((gallery.value.other || {}).count) || 0} ${t("个")}`;
   }
   if (character.value) {
     const row = gallery.value.characters.find((c) => c.name === character.value) || {};
-    return `${row.count || 0} 个`;
+    return `${row.count || 0} ${t("个")}`;
   }
-  return `共 ${gallery.value.characters.length} 位 · 点进去看他的 Mod`;
+  return `${t("共")} ${gallery.value.characters.length} ${t("位 · 点进去看他的 Mod")}`;
 });
 
 function backToCharacters() {
@@ -186,7 +188,7 @@ const groups = computed(() => {
                && String(mod.conflict_group || mod.group || "") !== character.value) {
       continue;
     }
-    const name = mod.conflict_group || mod.group || "未分类";
+    const name = mod.conflict_group || mod.group || t("未分类");
     (g[name] ||= []).push(mod);
   }
   return Object.keys(g).sort((a, b) => String(a).localeCompare(String(b), "zh-Hans-CN"))
@@ -323,55 +325,57 @@ async function menuAct(act, mod = null) {
       const ok = await showModalDialog({
         // 标题直接说动作（评审：原标题"确认"、以及把 runtime\backups\mod-trash 这种内部路径
         // 摆给用户，都会让人以为要删到系统目录里去）
-        title: "移出 服装 Mod？",
-        message: `${m.name}\n\n它会从 服装 Mod列表里移出并留一份备份，之后不再加载。`
-          + `\n不会删除你的其它 Mod，也不会动游戏本体。`,
-        okText: "移出并备份", cancelText: "保留在库", focusCancel: true,
+        title: t("移出 服装 Mod？"),
+        message: `${m.name}\n\n${t("它会从 服装 Mod列表里移出并留一份备份，之后不再加载。")}`
+          + `\n${t("不会删除你的其它 Mod，也不会动游戏本体。")}`,
+        okText: t("移出并备份"), cancelText: t("保留在库"), focusCancel: true,
       });
       if (!ok) return;
       const r = await call("delete_mod", m.id);
-      if (r && r.ok === false) await showAlert("移出失败", r.message || "未知原因");
-      else showToast(r && r.moved_to ? `已移出库：${r.moved_to}` : "已移出 服装 Mod", "success");
+      if (r && r.ok === false) await showAlert(t("移出失败"), r.message || t("未知原因"));
+      else showToast(r && r.moved_to
+        ? `${t("已移出库：")}${r.moved_to}`
+        : t("已移出 服装 Mod"), "success");
     } else if (act === "rename") {
       // 输入型弹窗：确认时 resolve 的是**用户输入的那串文本**（不是 true）
       const name = await showModalDialog({
-        title: `重命名「${m.name}」`,
-        message: `新名字会同时改到库里那个文件夹上（你在资源管理器里看到的也是它）。`
-          + `\n已经勾选的状态、预览图和 Mod 内容都不受影响。`,
-        okText: "改名", cancelText: "不改了",
-        input: { label: "新名字", value: m.name, maxlength: 80 },
+        title: `${t("重命名「")}${m.name}${t("」")}`,
+        message: `${t("新名字会同时改到库里那个文件夹上（你在资源管理器里看到的也是它）。")}`
+          + `\n${t("已经勾选的状态、预览图和 Mod 内容都不受影响。")}`,
+        okText: t("改名"), cancelText: t("不改了"),
+        input: { label: t("新名字"), value: m.name, maxlength: 80 },
       });
       if (!name) return;
       const r = await call("rename_mod", m.id, name);
-      if (r && r.ok === false) await showAlert("改名失败", r.message || "未知原因");
-      else if (r && r.unchanged) showToast("名字没变", "info");
-      else showToast(`已改名为「${(r && r.name) || name}」`, "success");
+      if (r && r.ok === false) await showAlert(t("改名失败"), r.message || t("未知原因"));
+      else if (r && r.unchanged) showToast(t("名字没变"), "info");
+      else showToast(`${t("已改名为「")}${(r && r.name) || name}${t("」")}`, "success");
     } else if (act === "cover") {
       const r = await call("set_mod_cover", m.id);
       if (r && r.ok === false && r.cancelled) return;      // 用户自己关掉了选图框，不算失败
-      if (r && r.ok === false) await showAlert("换预览图失败", r.message || "未知原因");
+      if (r && r.ok === false) await showAlert(t("换预览图失败"), r.message || t("未知原因"));
       else {
         // 封面有缓存（`store.covers`）—— 不清掉的话界面上还是旧图，看着像"没换成功"
         if (store.covers) delete store.covers[m.id];
         await loadCover(m.id);
-        showToast(`「${m.name}」的预览图已更新`, "success");
+        showToast(`${t("「")}${m.name}${t("」的预览图已更新")}`, "success");
       }
     } else if (act === "purge") {
       // 真删、恢复不了 —— 破坏性最强的一档：红字入口 + **手输 ok** 才放行。
       // 后端也会再判一次 `confirm`（界面只是第一道闸，绕不过去第二道）。
       const typed = await showModalDialog({
-        title: `彻底删除「${m.name}」？`,
-        message: `${m.name}\n\n这会把这个 Mod 的文件夹从库里**直接删掉**：不进回收站、`
-          + `**删了就找不回来**。\n已经勾选的话会同时从勾选里去掉；游戏本体和别的 Mod 不受影响。`
-          + `\n\n确定要删，请在下面输入 ok。`,
-        okText: "彻底删除", cancelText: "不删了", focusCancel: true,
+        title: `${t("彻底删除「")}${m.name}${t("」？")}`,
+        message: `${m.name}\n\n${t("这会把这个 Mod 的文件夹从库里**直接删掉**：不进回收站、")}`
+          + `${t("**删了就找不回来**。")}\n${t("已经勾选的话会同时从勾选里去掉；游戏本体和别的 Mod 不受影响。")}`
+          + `\n\n${t("确定要删，请在下面输入 ok。")}`,
+        okText: t("彻底删除"), cancelText: t("不删了"), focusCancel: true,
         requireText: "ok",
-        input: { label: "输入 ok 确认", placeholder: "ok", maxlength: 8 },
+        input: { label: t("输入 ok 确认"), placeholder: "ok", maxlength: 8 },
       });
       if (!typed) return;
       const r = await call("purge_mod", m.id, String(typed));
-      if (r && r.ok === false) await showAlert("删除失败", r.message || "未知原因");
-      else showToast(`已彻底删除「${m.name}」`, "success");
+      if (r && r.ok === false) await showAlert(t("删除失败"), r.message || t("未知原因"));
+      else showToast(`${t("已彻底删除「")}${m.name}${t("」")}`, "success");
     } else if (act === "character" || act === "assign") {
       if (!chars.value.length) {
         const r = await call("known_characters");
@@ -384,8 +388,8 @@ async function menuAct(act, mod = null) {
       // `pick === true ? "" : String(pick)` **永远把归属设成空**。
       // 改成真正的下拉选择器（CharacterAssignDialog）。
       if (!assignRef.value) {
-        await showAlert("选角色的窗口没准备好",
-          "界面刚重载过、弹窗还没挂上。稍等一下再点一次就好（这次没有改动任何东西）。");
+        await showAlert(t("选角色的窗口没准备好"),
+          t("界面刚重载过、弹窗还没挂上。稍等一下再点一次就好（这次没有改动任何东西）。"));
         return;
       }
       assignRef.value.openFor(m);
@@ -396,8 +400,10 @@ async function menuAct(act, mod = null) {
       // 自动判据只能猜，猜错了要让用户一句话改过来（写进该 Mod 的 mod.meta.json）。
       const want = act === "toAssist" ? "assist" : "character";
       const r = await call("set_mod_kind", m.id, want);
-      if (r && r.ok === false) await showAlert("移动失败", r.message || "未知原因");
-      else showToast(want === "assist" ? `「${m.name}」已移到辅助 Mod` : `「${m.name}」已移到皮肤 Mod`, "success");
+      if (r && r.ok === false) await showAlert(t("移动失败"), r.message || t("未知原因"));
+      else showToast(want === "assist"
+        ? `${t("「")}${m.name}${t("」已移到辅助 Mod")}`
+        : `${t("「")}${m.name}${t("」已移到皮肤 Mod")}`, "success");
     } else if (act === "open") {
       const mod = (store.state.mods || []).find((x) => String(x.id) === m.id);
       if (mod && mod.path) await call("open_path_in_explorer", mod.path);
@@ -408,7 +414,7 @@ async function menuAct(act, mod = null) {
     // 不许静默吞（2026-10-03）：本地异常（TypeError 之类）不是 call() 弹的那种窗，
     // 空 catch 会让用户看到"点了没反应"、我们这边也查不到任何线索。
     console.error("[ModLibrary] menuAct 失败", act, e);
-    await showAlert("这个操作没能完成", (e && e.message) ? String(e.message) : String(e));
+    await showAlert(t("这个操作没能完成"), (e && e.message) ? String(e.message) : String(e));
   }
 }
 
@@ -426,19 +432,19 @@ async function prepare() {
     if (prep && prep.ok === false) {
       if (prep.blocked === "library_overlap") {
         await showModalDialog({
-          title: "为了保护你的 Mod 库，已停止生成",
+          title: t("为了保护你的 Mod 库，已停止生成"),
           message: [
-            prep.message || "暂存目录和 Mod 库重叠了。",
+            prep.message || t("暂存目录和 Mod 库重叠了。"),
             "",
-            "这个检查是故意的：暂存目录若落在 Mod 库里面，每次生成控制器都会清空暂存目录，"
-              + "等于把你库里的 Mod 删掉。",
+            t("这个检查是故意的：暂存目录若落在 Mod 库里面，每次生成控制器都会清空暂存目录，")
+              + t("等于把你库里的 Mod 删掉。"),
             "",
-            "去「设置 → 工作区与 Mod 库」看一眼这两个路径，把它们分开就好。",
+            t("去「设置 → 工作区与 Mod 库」看一眼这两个路径，把它们分开就好。"),
           ].join("\n"),
-          okText: "知道了", showCancel: false,
+          okText: t("知道了"), showCancel: false,
         });
       } else {
-        await showAlert("生成控制器失败", prep.message || "未知原因");
+        await showAlert(t("生成控制器失败"), prep.message || t("未知原因"));
       }
       return;
     }
@@ -446,7 +452,7 @@ async function prepare() {
     const info = await call("conflict_groups");
     const groups = (info && info.groups) || [];
     if (groups.length) conflicts.value = groups;
-    else showToast("生成完毕，没有发现资源冲突。", "success");
+    else showToast(t("生成完毕，没有发现资源冲突。"), "success");
   } catch (e) { /* call 已弹窗 */ } finally { busy.value = false; }
 }
 
@@ -454,8 +460,8 @@ async function resolveConflicts(keep) {
   conflicts.value = null;
   try {
     const r = await call("resolve_mod_conflicts", keep);
-    if (r && r.ok === false) await showAlert("处理失败", r.message || "未知原因");
-    else showToast((r && r.message) || "已处理冲突", "success");
+    if (r && r.ok === false) await showAlert(t("处理失败"), r.message || t("未知原因"));
+    else showToast((r && r.message) || t("已处理冲突"), "success");
     await refreshState();
     loadSettings();
   } catch (e) { /* call 已弹窗 */ }
@@ -532,32 +538,31 @@ watch(() => store.demoCovers, (val) => {
     <!-- 两个开关放这里（紧邻 Mod 列表之上）：
          上一版把它们挪到了页面最底部（理由是"设一次就不动"），结果用户找不到、
          以为开关没了 —— 可见"总开关"这类东西必须待在它管的那块内容旁边。 -->
-    <Card title="皮肤 Mod">
-      <template #badge><Badge tone="muted">总开关</Badge></template>
+    <Card :title="t('皮肤 Mod')">
+      <template #badge><Badge tone="muted">{{ t("总开关") }}</Badge></template>
       <div class="space-y-0.5">
         <div class="switch-row" @click="saveSetting('efmi_injection', !settings.efmi_injection)">
           <span class="min-w-0">
-            <span class="text-sm font-medium">开启皮肤 Mod</span>
+            <span class="text-sm font-medium">{{ t("开启皮肤 Mod") }}</span>
             <span class="block text-xs mt-0.5" style="color: var(--text-muted)">
-              关掉后一个皮肤都不加载（Mods 目录会被清空，随时可开回来）。
-              ⚠️ 这不是停掉 EFMI 注入 —— 实测那样终末地会直接拉不起来。
+              {{ t("关掉后一个皮肤都不加载（Mods 目录会被清空，随时可开回来）。") }}
+              {{ t("⚠️ 这不是停掉 EFMI 注入 —— 实测那样终末地会直接拉不起来。") }}
             </span>
           </span>
           <span class="flex items-center gap-2 shrink-0">
-            <span class="switch-state">{{ settings.efmi_injection ? "已开启" : "已关闭" }}</span>
+            <span class="switch-state">{{ settings.efmi_injection ? t("已开启") : t("已关闭") }}</span>
             <Switch :model-value="!!settings.efmi_injection" @update:model-value="(v) => saveSetting('efmi_injection', v)" />
           </span>
         </div>
         <div class="switch-row" @click="saveSetting('allow_same_character_mods', !settings.allow_same_character_mods)">
           <span class="min-w-0">
-            <span class="text-sm font-medium">强行关闭角色 Mod 互斥</span>
+            <span class="text-sm font-medium">{{ t("强行关闭角色 Mod 互斥") }}</span>
             <span class="block text-xs mt-0.5" style="color: var(--text-muted)">
-              开启后勾选一个 Mod 不会再把同角色的其它 Mod 自动取消。<b>默认关闭</b> ——
-              同角色两个 Mod 同时生效常常会让游戏崩，只在确认它们改的不是同一批资源时再打开。
+              {{ t("开启后勾选一个 Mod 不会再把同角色的其它 Mod 自动取消。") }}<b>{{ t("默认关闭") }}</b>{{ t(" —— 同角色两个 Mod 同时生效常常会让游戏崩，只在确认它们改的不是同一批资源时再打开。") }}
             </span>
           </span>
           <span class="flex items-center gap-2 shrink-0">
-            <span class="switch-state">{{ settings.allow_same_character_mods ? "已开启" : "已关闭" }}</span>
+            <span class="switch-state">{{ settings.allow_same_character_mods ? t("已开启") : t("已关闭") }}</span>
             <Switch :model-value="!!settings.allow_same_character_mods" @update:model-value="(v) => saveSetting('allow_same_character_mods', v)" />
           </span>
         </div>
@@ -567,17 +572,16 @@ watch(() => store.demoCovers, (val) => {
     <!-- 「角色视图」开关**单独一张卡片**（用户 2026-10-07：「开关单独卡片，其他部分共用一张」）。
          刚才是塞在「皮肤 Mod」卡里的，而那张卡管的是 EFMI / 互斥那些注入开关，
          Mod 库的显示方式跟它们不是一回事，混在一起反而找不到。 -->
-    <Card title="Mod 库视图">
+    <Card :title="t('Mod 库视图')">
       <div class="switch-row" @click="setCharacterView(!characterView)">
         <span class="min-w-0">
-          <span class="text-sm font-medium">角色视图</span>
+          <span class="text-sm font-medium">{{ t("角色视图") }}</span>
           <span class="block text-xs mt-0.5" style="color: var(--text-muted)">
-            开启后：Mod 库先按<b>角色</b>排（头像 + 各自的 Mod 数），<b>点进去才是该角色的 Mod</b>。
-            左边小图是列表的样子，右边是角色视图的样子。<b>默认关闭</b> —— 关着就是现在这样。
+            {{ t("开启后：Mod 库先按") }}<b>{{ t("角色") }}</b>{{ t("排（头像 + 各自的 Mod 数），") }}<b>{{ t("点进去才是该角色的 Mod") }}</b>{{ t("。左边小图是列表的样子，右边是角色视图的样子。") }}<b>{{ t("默认关闭") }}</b>{{ t(" —— 关着就是现在这样。") }}
           </span>
         </span>
         <span class="flex items-center gap-2 shrink-0">
-          <span class="switch-state">{{ characterView ? "已开启" : "已关闭" }}</span>
+          <span class="switch-state">{{ characterView ? t("已开启") : t("已关闭") }}</span>
           <!-- 图示滑块（用户 2026-10-07：「做成滑块里是样式展示 —— 划到左边是一个框然后一个
                横杠，到右边是几个框」）：左=列表（一个框 + 一根横杠）、右=角色视图（四个小框），
                当前那侧用主题色高亮。 -->
@@ -618,18 +622,18 @@ watch(() => store.demoCovers, (val) => {
 
       <!-- 工具栏：生成控制器那些放这儿（角色列表那一层） -->
       <div class="flex flex-wrap items-center gap-2">
-        <Btn variant="primary" @click="prepare" :disabled="busy">生成控制器</Btn>
-        <Btn @click="scan" :disabled="busy">重新扫描</Btn>
+        <Btn variant="primary" @click="prepare" :disabled="busy">{{ t("生成控制器") }}</Btn>
+        <Btn @click="scan" :disabled="busy">{{ t("重新扫描") }}</Btn>
         <!-- ⚠️ **C3：库状态行**（2026-10-03 补回归）。0.9.5 有一行
              「已发现 N 个 Mod，按角色分组显示」（`app.js:643`），换代后丢了 ——
              用户不知道自己库里到底有多少个、也没法判断扫描有没有生效。 -->
         <span class="text-xs self-center" style="color: var(--text-muted)">
           <!-- 状态没到之前**不要**显示"已发现 0 个"——那会被读成"库是空的" -->
-          <template v-if="store.ready">已发现 {{ store.state.mods ? store.state.mods.length : 0 }} 个 Mod，按角色分组显示</template>
-          <template v-else>正在读取 Mod 库…</template>
+          <template v-if="store.ready">{{ t("已发现") }} {{ store.state.mods ? store.state.mods.length : 0 }} {{ t("个 Mod，按角色分组显示") }}</template>
+          <template v-else>{{ t("正在读取 Mod 库…") }}</template>
         </span>
         <span class="ml-auto flex items-center gap-2">
-          <input v-model="keyword" class="field" style="width: 220px" placeholder="搜索 Mod / 角色…" />
+          <input v-model="keyword" class="field" style="width: 220px" :placeholder="t('搜索 Mod / 角色…')" />
         </span>
       </div>
 
@@ -638,14 +642,14 @@ watch(() => store.demoCovers, (val) => {
       <!-- 角色表和头像都**随包**（用户要求"直接随包"），所以这里正常是**一闪而过**。
            不再写"首次会从官网同步"——那会让人以为要联网等，而实际上本地就有。 -->
       <div v-if="!gallery.characters.length" class="text-sm" style="color: var(--text-muted)">
-        正在读取角色表…
+        {{ t("正在读取角色表…") }}
       </div>
       <div v-else class="grid gap-3"
            style="grid-template-columns: repeat(auto-fill, minmax(110px, 1fr))">
         <button v-for="c in gallery.characters" :key="c.name"
                 class="rounded-lg border p-2 flex flex-col items-center gap-1.5"
                 style="border-color: var(--border)"
-                :title="`${c.name}${c.codename ? ' · ' + c.codename : ''} · ${c.count} 个 Mod`"
+                :title="`${c.name}${c.codename ? ' · ' + c.codename : ''} · ${c.count} ${t('个 Mod')}`"
                 @click="openCharacter(c.name)">
           <img v-if="avatarSrc(c)" :src="avatarSrc(c)"
                class="rounded-full object-cover" style="width: 56px; height: 56px" alt="" />
@@ -653,8 +657,8 @@ watch(() => store.demoCovers, (val) => {
                 style="width: 56px; height: 56px; background: var(--surface-2); color: var(--accent)">
             {{ (c.name || "?").slice(0, 1) }}
           </span>
-          <span class="text-xs truncate w-full text-center">{{ c.name }}</span>
-          <span class="text-xs" style="color: var(--text-muted)">{{ c.count }} 个</span>
+          <span class="text-xs truncate w-full text-center">{{ t(c.name) }}</span>
+          <span class="text-xs" style="color: var(--text-muted)">{{ c.count }} {{ t("个 Mod") }}</span>
         </button>
         <!-- 「其他」单列（用户 2026-10-07：「不是说单列一个其他角色吗」）：
              认不出角色归属的 Mod 全都挂这儿，点进去就是它们 —— **不硬塞给任何角色**
@@ -662,21 +666,21 @@ watch(() => store.demoCovers, (val) => {
         <button v-if="gallery.other && gallery.other.count"
                 class="rounded-lg border p-2 flex flex-col items-center gap-1.5"
                 style="border-color: var(--border)"
-                :title="`没认出角色归属的 ${gallery.other.count} 个 Mod —— 点进去看，之后可以逐个指定`"
+                :title="`${t('没认出角色归属的')} ${gallery.other.count} ${t('个 Mod —— 点进去看，之后可以逐个指定')}`"
                 @click="openCharacter(OTHER_NAME)">
           <span class="rounded-full flex items-center justify-center text-xl"
                 style="width: 56px; height: 56px; background: var(--surface-2); color: var(--text-muted)">?</span>
-          <span class="text-xs truncate w-full text-center">其他</span>
-          <span class="text-xs" style="color: var(--text-muted)">{{ gallery.other.count }} 个</span>
+          <span class="text-xs truncate w-full text-center">{{ t("其他") }}</span>
+          <span class="text-xs" style="color: var(--text-muted)">{{ gallery.other.count }} {{ t("个 Mod") }}</span>
         </button>
       </div>
       </div>
 
       <!-- ② 点进去之后：一条明确的回头路 + 这个角色的 Mod（**都在同一个卡片里**）-->
       <div v-if="characterView && character" class="flex items-center gap-2 flex-wrap mt-3">
-        <Btn @click="backToCharacters">← 返回角色列表</Btn>
+        <Btn @click="backToCharacters">← {{ t("返回角色列表") }}</Btn>
         <span class="text-xs" style="color: var(--text-muted)">
-          下面是 {{ character }} 的 Mod，操作（开关、⋯ 菜单、冲突提示）与列表视图完全一样
+          {{ t("下面是") }} {{ t(character) }} {{ t("的 Mod，操作（开关、⋯ 菜单、冲突提示）与列表视图完全一样") }}
         </span>
       </div>
 
@@ -688,26 +692,26 @@ watch(() => store.demoCovers, (val) => {
            过一会儿又自己冒出来。现在先给加载态。 -->
       <div v-if="!store.ready" class="empty-state">
         <Library :size="30" class="empty-icon" />
-        <div class="empty-title">正在读取 Mod 库…</div>
-        <div>状态读完后列表会自动出现（首次启动要扫一遍库）。</div>
+        <div class="empty-title">{{ t("正在读取 Mod 库…") }}</div>
+        <div>{{ t("状态读完后列表会自动出现（首次启动要扫一遍库）。") }}</div>
       </div>
       <div v-else-if="!groups.length" class="empty-state">
         <Library :size="30" class="empty-icon" />
         <!-- 两种情况必须说清楚：库里真的没有 vs 搜索没匹配上（文案混用会让人以为 Mod 丢了） -->
-        <div class="empty-title">{{ keyword ? "没有匹配的 Mod" : "还没有发现 Mod" }}</div>
+        <div class="empty-title">{{ keyword ? t("没有匹配的 Mod") : t("还没有发现 Mod") }}</div>
         <template v-if="keyword">
-          <div>当前搜索「{{ keyword }}」没有结果。换个关键字，或者清空搜索框看全部。</div>
+          <div>{{ t("当前搜索「") }}{{ keyword }}{{ t("」没有结果。换个关键字，或者清空搜索框看全部。") }}</div>
         </template>
         <template v-else>
-          <div>把 .zip / .7z / .rar 拖到窗口任意处即可导入；也可以在上面粘贴网址下载。</div>
-          <div>如果你已经把 Mod 放进 服装 Mod目录了，点「重新扫描」。</div>
+          <div>{{ t("把 .zip / .7z / .rar 拖到窗口任意处即可导入；也可以在上面粘贴网址下载。") }}</div>
+          <div>{{ t("如果你已经把 Mod 放进 服装 Mod目录了，点「重新扫描」。") }}</div>
         </template>
       </div>
       <div v-else class="mt-3 space-y-4">
         <div v-for="g in groups" :key="g.name" class="rounded-lg border p-3" style="border-color: var(--border)">
           <div class="flex items-center justify-between mb-3">
-            <h3 class="font-semibold">{{ g.name }}</h3>
-            <span class="text-xs" style="color: var(--text-muted)">{{ g.mods.length }} 个 Mod · 已启用 {{ g.enabled }}</span>
+            <h3 class="font-semibold">{{ t(g.name) }}</h3>
+            <span class="text-xs" style="color: var(--text-muted)">{{ g.mods.length }} {{ t("个 Mod") }} · {{ t("已启用") }} {{ g.enabled }}</span>
           </div>
           <!-- 紧凑横向列表（用真实库数据验证后改的）：
                原来是「通栏组框 + 内部固定 168px 大卡片」—— 每个角色往往只有 1 个 Mod，
@@ -728,7 +732,7 @@ watch(() => store.demoCovers, (val) => {
                 <img v-if="covers[m.id]" :src="covers[m.id]" class="w-full h-full object-cover" alt="" />
                 <span v-else class="flex flex-col items-center gap-1 empty-icon">
                   <ImageOff :size="20" />
-                  <span class="text-xs">无封面</span>
+                  <span class="text-xs">{{ t("无封面") }}</span>
                 </span>
               </span>
               <span class="min-w-0 flex-1 flex flex-col">
@@ -736,7 +740,7 @@ watch(() => store.demoCovers, (val) => {
                       -webkit-box-orient: vertical; overflow: hidden" :title="m.name">{{ m.name }}</span>
                 <span class="mt-1.5 text-xs flex items-center gap-1.5 min-w-0"
                       :style="{ color: selected.has(String(m.id)) ? 'var(--accent)' : 'var(--text-muted)' }">
-                  <span class="shrink-0">{{ selected.has(String(m.id)) ? "已启用" : "未启用" }}</span>
+                  <span class="shrink-0">{{ selected.has(String(m.id)) ? t("已启用") : t("未启用") }}</span>
                   <!-- **香蕉网网站分类徽章**（2026-10-04 用户要求「把 mod 在香蕉网中的分类接入管理器的分类」）。
                        皮肤 / UI / 其它三个根分类里，只有 `Skins` 用强调色（它才是这个页面的主角），
                        其余用中性色。**只在有值时显示** —— 不是从香蕉网下来的 Mod 没有这个信息，
@@ -745,25 +749,25 @@ watch(() => store.demoCovers, (val) => {
                         :style="m.site_category_root === 'Skins'
                                  ? 'background: var(--accent-soft); color: var(--accent)'
                                  : 'background: var(--surface-2); color: var(--text-muted)'"
-                        :title="`香蕉网分类：${m.site_category}`">{{ siteRootLabel(m.site_category_root) }}</span>
+                        :title="`${t('香蕉网分类：')}${m.site_category}`">{{ siteRootLabel(m.site_category_root) }}</span>
                 </span>
                 <!-- ⚠️ 用户 2026-10-03：「现在没有之前那种**黄色的未识别的标记，可以点一下就切换的**」
                      —— 旧版在角色识别不确定（low/none）时会在卡片上打一个黄色标记，点它直接进选角色。
                      点击要 .stop，否则会先触发整卡的启用/停用。 -->
                 <span v-if="!m.group || m.confidence === 'none' || m.confidence === 'low'"
                       class="badge mt-1 cursor-pointer" style="background: #f0b429; color: #3a2a00"
-                      title="角色归属没认出来 —— 点这里选一个（识别错了会让同角色互斥失效，容易崩）"
-                      @click.stop="menuAct('assign', m)">未识别 · 点此选角色</span>
+                      :title="t('角色归属没认出来 —— 点这里选一个（识别错了会让同角色互斥失效，容易崩）')"
+                      @click.stop="menuAct('assign', m)">{{ t("未识别 · 点此选角色") }}</span>
                 <!-- 类型待确认（例如把壁纸/加载页包当成了角色皮肤）也放这里，点一下改归属 -->
                 <span v-else-if="m.kind === 'unknown'"
                       class="badge mt-1 cursor-pointer" style="background: #f0b429; color: #3a2a00"
-                      title="看不出这是哪一类 Mod，点此指定角色归属（或设为未分类）"
-                      @click.stop="menuAct('assign', m)">类型待确认</span>
+                      :title="t('看不出这是哪一类 Mod，点此指定角色归属（或设为未分类）')"
+                      @click.stop="menuAct('assign', m)">{{ t("类型待确认") }}</span>
               <!-- ⚠️ **C1：重复副本标记**（2026-10-03 补回归）。0.9.5 有
                    `⚠ 与「X」内容相同（重复副本）`；后端 `mod.duplicate_of` 一直在算，
                    而前端 grep 该字段 **0 命中** ⇒ 用户看不出哪些是重复的。 -->
               <span v-if="m.duplicate_of" class="ml-1" style="color: var(--warn)"
-                    :title="`与「${m.duplicate_of}」内容相同（重复副本），留着会占空间`">⚠ 重复</span>
+                    :title="`${t('与「')}${m.duplicate_of}${t('」内容相同（重复副本），留着会占空间')}`">⚠ {{ t("重复") }}</span>
                 <!-- 显式的启用开关（用户 2026-10-03 三次反馈"mod 开关还是没有"——
                      之前只有一行状态文字 + 点整卡切换，看不出那是个开关）。 -->
                 <span class="mt-auto flex items-center justify-between gap-2">
@@ -773,7 +777,7 @@ watch(() => store.demoCovers, (val) => {
                        0.9.5 用 `mouseenter` 打开（`app.js:635`），用户当年明确要求过
                        「**放上去就要出**」；换代后只剩 `@click`，要多点一次才出菜单。
                        现在两个都留着：鼠标移上去就展开，点击仍然有效（触屏/键盘用户）。 -->
-                  <button class="btn btn-mini shrink-0" title="更多：更改所属角色 / 重命名 / 换预览图 / 移出库 / 彻底删除"
+                  <button class="btn btn-mini shrink-0" :title="t('更多：更改所属角色 / 重命名 / 换预览图 / 移出库 / 彻底删除')"
                           @mouseenter="openMenu(m, $event)" @click="openMenu(m, $event)" @mouseleave="scheduleMenuClose()">⋯</button>
                 </span>
               </span>
@@ -796,28 +800,28 @@ watch(() => store.demoCovers, (val) => {
     <div v-if="menu" ref="menuEl" class="fixed z-50 card py-1 shadow-lg"
          style="min-width: 176px; max-height: calc(100vh - 16px); overflow-y: auto"
          :style="{ left: menu.x + 'px', top: menu.y + 'px' }" @mouseenter="cancelMenuClose()" @mouseleave="scheduleMenuClose()">
-      <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('character')">更改所属角色…</button>
+      <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('character')">{{ t("更改所属角色…") }}</button>
       <!-- ⚠️ **不要再引用 `m`**（2026-10-03 修「点了更多页面就变纯白」）：
            `m` 只存在于 `menuAct()` 函数体内，**模板作用域里没有它** ——
            渲染这个浮层时会抛 `ReferenceError`，整页直接白掉。
            （服装页白、辅助页正常，因为辅助页是我照着新写的那份、没带这个错。）
            要用就用 `menu` —— 它带着 `id / name / kind`。 -->
       <button v-if="menu.kind !== 'assist'" class="w-full text-left px-3 py-1.5 text-sm"
-              @click="menuAct('toAssist')">移到「辅助 Mod」</button>
+              @click="menuAct('toAssist')">{{ t("移到「辅助 Mod」") }}</button>
       <button v-else class="w-full text-left px-3 py-1.5 text-sm"
-              @click="menuAct('toSkin')">移到「服装 Mod」</button>
-      <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('open')">打开所在目录</button>
+              @click="menuAct('toSkin')">{{ t("移到「服装 Mod」") }}</button>
+      <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('open')">{{ t("打开所在目录") }}</button>
       <div style="height:1px;background:var(--border)" class="my-1"></div>
-      <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('rename')">重命名…</button>
-      <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('cover')">更换预览图…</button>
+      <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('rename')">{{ t("重命名…") }}</button>
+      <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('cover')">{{ t("更换预览图…") }}</button>
       <div style="height:1px;background:var(--border)" class="my-1"></div>
       <button class="w-full text-left px-3 py-1.5 text-sm" style="color: var(--danger)"
-              @click="menuAct('delete')">移出 服装 Mod</button>
+              @click="menuAct('delete')">{{ t("移出 服装 Mod") }}</button>
       <!-- ⚠️ 彻底删除（真删、恢复不了）：红字 + 更重一点的字体，且排在最后一个
            —— 危险动作不能放在顺手能点到的主位（用户定的 UI 准则）。 -->
       <button class="w-full text-left px-3 py-1.5 text-sm"
               style="color: var(--danger); font-weight: 600"
-              @click="menuAct('purge')">彻底删除…</button>
+              @click="menuAct('purge')">{{ t("彻底删除…") }}</button>
     </div>
   </div>
 </template>

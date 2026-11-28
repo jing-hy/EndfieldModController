@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from . import activation, reshade_integration, runtime_deps
+from . import activation, edition, reshade_integration, runtime_deps
 from .config import AppConfig
 
 
@@ -135,7 +135,8 @@ def check_integrity(config: AppConfig) -> dict:
         staging_mods = config.staging_mods_path
         add("efmi_mods", staging_mods, staging_mods.is_dir(), "EFMI Mods directory")
 
-    existing_reshade = reshade_integration.detect_existing_reshade(config)
+    # Lite 不含 ReShade 链路 ⇒ 连"游戏目录里还有没有 ReShade"都不看（那是完整版才关心的事）
+    existing_reshade = reshade_integration.detect_existing_reshade(config) if edition.has_reshade() else None
     if existing_reshade is not None:
         # 本方案不使用游戏目录 ReShade（唯一底座由 XXMI 注入），只提示，不算失败。
         add(
@@ -147,10 +148,15 @@ def check_integrity(config: AppConfig) -> dict:
         )
 
     if config.dlss5_injection:
+        # Lite 不含 ReShade 链路 ⇒ 底座 / ReShade.ini / 第一人称插件 / shader 资产
+        # 这些文件根本不该存在，列成"缺失"会把启动拦死；EFMI 那条照旧。
+        _reshade = edition.has_reshade()
         dlss5_dll = config.dlss5_dll_path
-        add("dlss5_dll", dlss5_dll, dlss5_dll.is_file(), "DLSS5 ReShade 底座 d3d12.dll")
+        if _reshade:
+            add("dlss5_dll", dlss5_dll, dlss5_dll.is_file(), "DLSS5 ReShade 底座 d3d12.dll")
         dlss5_ini = config.dlss5_ini_path
-        add("dlss5_ini", dlss5_ini, dlss5_ini.is_file(), "DLSS5 ReShade.ini（含 [endfield-enhancer] 段）")
+        if _reshade:
+            add("dlss5_ini", dlss5_ini, dlss5_ini.is_file(), "DLSS5 ReShade.ini（含 [endfield-enhancer] 段）")
         enhancer = config.dlss5_enhancer_addon_path
         # ★★ **只在「第一人称视角」开着时才算必检项**（2026-10-06 修）。
         #    原来无条件判 `is_file()` —— 而关掉第一人称时这个 addon 被**搬进 `_disabled\`**，
@@ -161,7 +167,7 @@ def check_integrity(config: AppConfig) -> dict:
         #      → `repair: 展开内置资产 renodx-endfield-enhancer.addon64`
         #    而 ReShade 日志显示它接着就被加载了 ⇒ 用户报「第一人称还是注入进去了」。
         #    ⚠️ 同族的还有下面的 DLSS5 神经渲染 —— 都按开关判。
-        if bool(getattr(config, "firstperson_addon_enabled", True)):
+        if _reshade and bool(getattr(config, "firstperson_addon_enabled", True)):
             add("dlss5_enhancer_addon", enhancer, enhancer.is_file(),
                 "第一人称插件 renodx-endfield-enhancer.addon64")
         efmi_dll = config.efmi_dll_path
@@ -172,16 +178,17 @@ def check_integrity(config: AppConfig) -> dict:
         #   缺 `ReShade.fxh`（DLSS5_Feed.fx 编译失败）、缺 `AreaLUT.png`（贴图找不到），
         #   而旧判据只看"目录在不在"。这里报出来，「修复」会按同一套判据补齐。
         #   `critical=False`：缺贴图会让效果不对，但不该拦死启动。
-        try:
-            gaps = _dlss5_shader_asset_gaps(config)
-            add("dlss5_shader_assets", config.dlss5_path / "reshade-shaders", not gaps,
-                ("DLSS5 shader / 贴图资产" if not gaps else
-                 "DLSS5 shader / 贴图资产不完整（会造成 ReShade 编译出错或贴图缺失）："
-                 + "、".join(gaps[:5]) + ("…" if len(gaps) > 5 else "")),
-                critical=False)
-        except Exception as exc:  # noqa: BLE001
-            add("dlss5_shader_assets", config.dlss5_path / "reshade-shaders", False,
-                f"DLSS5 shader / 贴图资产检查失败: {exc}", critical=False)
+        if _reshade:
+            try:
+                gaps = _dlss5_shader_asset_gaps(config)
+                add("dlss5_shader_assets", config.dlss5_path / "reshade-shaders", not gaps,
+                    ("DLSS5 shader / 贴图资产" if not gaps else
+                     "DLSS5 shader / 贴图资产不完整（会造成 ReShade 编译出错或贴图缺失）："
+                     + "、".join(gaps[:5]) + ("…" if len(gaps) > 5 else "")),
+                    critical=False)
+            except Exception as exc:  # noqa: BLE001
+                add("dlss5_shader_assets", config.dlss5_path / "reshade-shaders", False,
+                    f"DLSS5 shader / 贴图资产检查失败: {exc}", critical=False)
 
     add("controller_ini", config.controller_dir / "controller.ini", (config.controller_dir / "controller.ini").is_file(), "controller.ini")
     add("controller_actions", config.controller_dir / "actions.tsv", (config.controller_dir / "actions.tsv").is_file(), "controller actions.tsv")
@@ -195,7 +202,8 @@ def check_integrity(config: AppConfig) -> dict:
     #      **不是故障**，不能报 critical —— 否则每个不用 xxmi_extra 注入的用户一装就报红。
     #   ② **环境支持、面板该在却不在**（addon 文件缺 / actions.tsv 缺）→ 这才会导致
     #      "键被锁死而入口不存在"，算 critical，走「修复」就能补齐。
-    if getattr(config, "hotkey_takeover", False):
+    # Lite 没有 ReShade ⇒ 统一面板（住在 ReShade 里）不存在也不用列
+    if getattr(config, "hotkey_takeover", False) and edition.has_reshade():
         status = reshade_integration.panel_status(config)
         present = bool(status["addon_present"] and status["actions_present"])
         if present:
@@ -318,12 +326,14 @@ def repair_integrity(config: AppConfig, log: Callable[[str], None] | None = None
             getattr(config, "prefer_internal_dependencies", True)
         ),
     )
-    try:
-        panel = reshade_integration.deploy_panel(config, config.controller_dir, log=note)
-        for warning in panel.get("warnings", []):
-            note(f"WARN 统一面板: {warning}")
-    except Exception as exc:  # noqa: BLE001
-        note(f"部署统一面板失败: {exc}")
+    # Lite 不含 ReShade ⇒ 不铺面板（它会往 ReShade 会读的目录写真文件）
+    if edition.has_reshade():
+        try:
+            panel = reshade_integration.deploy_panel(config, config.controller_dir, log=note)
+            for warning in panel.get("warnings", []):
+                note(f"WARN 统一面板: {warning}")
+        except Exception as exc:  # noqa: BLE001
+            note(f"部署统一面板失败: {exc}")
 
     # ③ 随包资产（assets）+ DLSS5 目录内容 + ReShade.ini + 游戏目录运行库 + 乳摇/摆姿：
     #    这些全在 `initialize.ensure_all` 里，而它以前**只有「一键启动」会调**。
@@ -340,7 +350,8 @@ def repair_integrity(config: AppConfig, log: Callable[[str], None] | None = None
     except Exception as exc:  # noqa: BLE001
         note(f"补齐随包资产/运行时失败: {exc}")
 
-    if config.dlss5_injection:
+    # Lite 下注入库只有 EFMI 的 d3d11.dll（由启动链写），这条"重写 DLSS5 那套"跳过
+    if config.dlss5_injection and edition.has_reshade():
         note("重新写入 XXMI 注入库（DLSS5 d3d12.dll + EFMI d3d11.dll）")
         try:
             result = launcher_mod.configure_dlss5_injection(config, enabled=True)

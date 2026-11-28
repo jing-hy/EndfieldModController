@@ -21,6 +21,7 @@
 //     图片由 WebView2 **直接向本地只读服务取**（并发 / 磁盘缓存 / 解码都归浏览器），
 //     而且用的就是站点原图（530 档），不重编码。
 import { ref, computed, nextTick, watch, onMounted, onUnmounted } from "vue";import { call } from "../lib/bridge.js";
+import { t } from "../lib/i18n.js";
 import { store } from "../store.js";
 import { showAlert, showToast } from "../lib/dialog.js";
 import Card from "../components/ui/Card.vue";
@@ -53,7 +54,18 @@ const NSFW_MODES = [
   { key: "blur", label: "模糊" },
   { key: "hide", label: "隐藏" },
 ];
-const nsfwMode = ref(localStorage.getItem("mc-store-nsfw") || "blur");
+// R18 三档要**记忆**（2026-11-28 用户要求）：localStorage 管界面即时回填，
+// config.json 才是权威（重启、换数据根都跟着走）。
+function savedNsfw() {
+  const cfg = String((store.state && store.state.config && store.state.config.mod_store_nsfw) || "");
+  if (NSFW_MODES.some((m) => m.key === cfg)) return cfg;
+  try {
+    const local = String(localStorage.getItem("mc-store-nsfw") || "");
+    if (NSFW_MODES.some((m) => m.key === local)) return local;
+  } catch (e) { /* 隐私模式 */ }
+  return "blur";
+}
+const nsfwMode = ref(savedNsfw());
 
 const categories = ref({ roots: [], characters: [] });
 // 分类/角色的条目数 —— **从列表用的那份本地索引里数出来**（跟着 `mod_store_list` 一起来）。
@@ -300,7 +312,7 @@ async function loadMore() {
   try {
     const result = await call("mod_store_list", options(nextPage));
     if (!result || result.ok === false) {
-      errorText.value = (result && result.message) || "商城数据没取到";
+      errorText.value = (result && result.message) || t("商城数据没取到");
       if (nextPage === 1) items.value = [];
       return;
     }
@@ -316,7 +328,7 @@ async function loadMore() {
     indexMeta.value = result.index || null;
     observeThumbs();               // 只把这一页里**进入视口**的图排进下载
   } catch (e) {
-    errorText.value = String((e && e.message) || "商城数据没取到");
+    errorText.value = String((e && e.message) || t("商城数据没取到"));
   } finally {
     loading.value = false;
     loadingMore.value = false;
@@ -367,6 +379,8 @@ function setNsfw(mode) {
   if (!NSFW_MODES.some((m) => m.key === mode)) return;
   nsfwMode.value = mode;
   try { localStorage.setItem("mc-store-nsfw", mode); } catch (e) { /* 隐私模式 */ }
+  // 写进 config.json（失败静默，不影响本次显示）—— 下次启动 / 换数据根也记得
+  call("save_config", { mod_store_nsfw: mode }).catch(() => {});
   reload();
 }
 
@@ -402,13 +416,19 @@ function detailImgSrc(img) {
   return imageSrc(img.preview) || imageSrc(img.thumb);
 }
 
+// 详情请求序号：加载期间用户点了「返回商城」/ 点了别的详情 ⇒ 旧请求作废，
+// 回来也不许把页面重新拉回详情（用户 2026-11-28：「应该保持加载但不要动页面」）。
+let detailSeq = 0;
+
 async function openDetail(item) {
+  const seq = ++detailSeq;
   detail.value = { ...item, loading: true };
   detailLoading.value = true;
   // 先用列表已有的小图顶着，大图另外拉（详情要清晰，值得多等）
   prepareImages([item.thumb_big || item.thumb].filter(Boolean));
   try {
     const result = await call("mod_store_detail", item.id);
+    if (seq !== detailSeq) return;      // 期间已离开详情 / 换了详情 ⇒ 丢弃这次结果
     if (result && result.ok) {
       detail.value = { ...item, ...result.item, loading: false };
       // 详情换**大档**（列表用的是 220 小档）—— 用户已经点进来了，值得多等一会儿换清晰
@@ -418,16 +438,18 @@ async function openDetail(item) {
       // 2026-11-08：优先预取 `preview`（530 档）—— 详情那一排就是用它，点开前也已经缓存。
       prepareImages((result.item.images || []).map((img) => img.preview || img.big || img.full || img.thumb));
     } else {
-      detail.value = { ...item, loading: false, error: (result && result.message) || "详情没取到" };
+      detail.value = { ...item, loading: false, error: (result && result.message) || t("详情没取到") };
     }
   } catch (e) {
-    detail.value = { ...item, loading: false, error: String((e && e.message) || "详情没取到") };
+    if (seq !== detailSeq) return;
+    detail.value = { ...item, loading: false, error: String((e && e.message) || t("详情没取到")) };
   } finally {
-    detailLoading.value = false;
+    if (seq === detailSeq) detailLoading.value = false;
   }
 }
 
 function closeDetail() {
+  detailSeq++;                 // 作废在途的详情请求，避免加载完又弹回详情
   detail.value = null;
   closeLightbox();
   // 列表重新渲染出来 ⇒ 哨兵是新的 DOM，得重新盯上（否则从详情返回后就不再自动加载）
@@ -467,15 +489,15 @@ async function download(item) {
   try {
     const result = await call("start_mod_download", url);
     if (!result || result.ok === false) {
-      showToast(String((result && result.message) || "没能加入下载队列"), "danger");
+      showToast(String((result && result.message) || t("没能加入下载队列")), "danger");
       return;
     }
     queued.value = { ...queued.value, [item.id]: true };
     store.activeDownloads = Math.max(store.activeDownloads, 1);
     if (result.added) {
-      showToast(`已加入下载队列（共 ${result.queued} 个）—— 进度看「下载」页`, "success");
+      showToast(`${t("已加入下载队列（共")}${result.queued}${t("个）—— 进度看「下载」页")}`, "success");
     } else {
-      showToast("这个已经在下载队列里了", "info");
+      showToast(t("这个已经在下载队列里了"), "info");
     }
   } catch (e) { /* call 已经弹过错误窗 */ }
 }
@@ -485,26 +507,50 @@ async function openPage(url) {
   try { await call("open_external", url); } catch (e) { /* 已经弹过 */ }
 }
 
-// ── 批量扫描 / 一键更新 ─────────────────────────────────────────────────────
+// ── 索引更新 / 一键更新（2026-11-28 语义更正）──────────────────────────────
+// 用户原话：「扫描更新应该写作索引更新，点了更新索引；一键更新应该检查已下载 mod 是否有新版本，
+// 如有就加入下载更新」—— 两个按钮职责分开，别再把"扫描已装 Mod 的更新"叫成"扫描更新"。
+// 点「一键更新」时总是先扫一遍（不依赖上次结果），扫完由 pollScan 自动排下载。
+let pendingUpdateAll = false;
+
 async function scanUpdates() {
   try {
     const result = await call("mod_store_check_updates");
     if (!result || result.ok === false) {
-      showAlert("扫描没能开始", (result && result.message) || "未知原因");
+      pendingUpdateAll = false;      // 没启动成功 ⇒ 别让"扫完自动更新"的旗子挂着
+      showAlert(t("扫描没能开始"), (result && result.message) || t("未知原因"));
       return;
     }
-    scan.value = { ...scan.value, running: true, message: "正在扫描…" };
-  } catch (e) { /* 已经弹过 */ }
+    scan.value = { ...scan.value, running: true, message: t("正在检查已下载 Mod 的更新…") };
+  } catch (e) {
+    pendingUpdateAll = false;
+  }
 }
 
-async function updateAll() {
+async function updateAll(auto = false) {
+  // 一键更新 = **检查已下载 Mod 有没有新版本，有就加入下载**（2026-11-28 用户更正语义）。
+  // 每次点它都先扫一遍（不再依赖"上次扫描结果"），扫完由 pollScan 自动排下载。
+  if (!auto) {
+    if (scan.value.running) {
+      showToast(t("正在扫描 / 更新索引，稍等…"), "info");
+      return;
+    }
+    pendingUpdateAll = true;
+    await scanUpdates();
+    showToast(t("正在检查已下载 Mod 的新版本，检查完会自动加入下载"), "info");
+    return;
+  }
+  if (!updateCount.value) {
+    showToast(t("已下载的 Mod 都是最新版本"), "info");
+    return;
+  }
   try {
     const result = await call("mod_store_update_all", []);
     if (!result || result.ok === false) {
-      showAlert("一键更新没能开始", (result && result.message) || "未知原因");
+      showAlert(t("一键更新没能开始"), (result && result.message) || t("未知原因"));
       return;
     }
-    showToast(`已把 ${result.added || 0} 个更新排进下载队列 —— 进度看「下载」页`, "success");
+    showToast(`${t("已把")}${result.added || 0}${t("个更新排进下载队列 —— 进度看「下载」页")}`, "success");
   } catch (e) { /* 已经弹过 */ }
 }
 
@@ -516,11 +562,17 @@ async function pollScan() {
     const result = await call("mod_store_task_status");
     if (!result || result.ok === false) return;
     const wasIndexRunning = indexTaskRunning;
+    const wasScanRunning = !!scan.value.running;
     indexTaskRunning = !!result.running && String(result.kind || "") === "index";
     scan.value = {
       running: !!result.running, kind: String(result.kind || ""), message: result.message || "",
       result: result.result || {}, saved: result.scan || {},
     };
+    // 「一键更新」在无扫描结果时会先发起扫描（pendingUpdateAll）⇒ 扫完自动接着更新
+    if (wasScanRunning && !scan.value.running && pendingUpdateAll) {
+      pendingUpdateAll = false;
+      await updateAll(true);
+    }
     // 索引刚建完 ⇒ **立刻重载列表与分类**。否则后台补好的新索引要等用户手动切一次分类才生效，
     // 观感就是"刚补到的 Mod 还是不出现"（2026-11-07 用户实测）。
     if (wasIndexRunning && !indexTaskRunning && !detail.value) {
@@ -552,25 +604,25 @@ async function refreshHead(retried = false) {
         if (headRetries <= 5) {
           if (headRetryTimer) clearTimeout(headRetryTimer);
           headRetryTimer = setTimeout(() => refreshHead(true), 6000);
-          headNote.value = `索引正在全量刷新，好后自动继续（第 ${headRetries} 次等待）`;
+          headNote.value = `${t("索引正在全量刷新，好后自动继续（第")}${headRetries}${t("次等待）")}`;
           return;
         }
-        headNote.value = "索引正在全量刷新，本次先不做顶部检查（稍后会自动再试）";
+        headNote.value = t("索引正在全量刷新，本次先不做顶部检查（稍后会自动再试）");
         return;
       }
       headRetries = 0;
       // ⚠️ 失败**必须让用户看到**（2026-11-07 用户反馈"根本不会自动刷新"时，
       //   前端把失败全吞了，界面上没有任何痕迹）。
       headNote.value = result.unreachable
-        ? "顶部刷新失败：连不上香蕉网（开加速器后可点「刷新索引」重试）"
-        : (result.message || "顶部刷新失败，下次自动再试");
+        ? t("顶部刷新失败：连不上香蕉网（开加速器后可点「刷新索引」重试）")
+        : (result.message || t("顶部刷新失败，下次自动再试"));
       return;
     }
     headRetries = 0;
     if (result.counts) counts.value = result.counts;
     if (result.index) indexMeta.value = result.index;
     if (result.added > 0) {
-      headNote.value = `顶部新增 ${result.added} 个 Mod`;
+      headNote.value = `${t("顶部新增")} ${result.added} ${t("个 Mod")}`;
       // 用户就在顶部 ⇒ 顺手重载，新 Mod 直接出现在列表里；滚到很下面时不打断他
       if (window.scrollY < 800 && !detail.value) {
         if (loading.value || loadingMore.value) headReloadPending = true;
@@ -587,11 +639,11 @@ async function refreshIndex() {
   try {
     const result = await call("mod_store_refresh_index");
     if (!result || result.ok === false) {
-      showAlert("索引刷新没能开始", (result && result.message) || "未知原因");
+      showAlert(t("索引刷新没能开始"), (result && result.message) || t("未知原因"));
       return;
     }
     // 与后端 `_store_start_task` 的开场白保持一致（自动刷新走同一条状态行）
-    scan.value = { ...scan.value, running: true, kind: "index", message: "正在刷新索引…" };
+    scan.value = { ...scan.value, running: true, kind: "index", message: t("正在刷新索引…") };
   } catch (e) { /* call 已经弹过错误窗 */ }
 }
 
@@ -618,18 +670,18 @@ const headAgeText = computed(() => {
   const meta = indexMeta.value || {};
   if (!meta.head_at) return "";
   const seconds = Number(meta.head_age || 0);
-  if (seconds < 90) return "顶部已检查（刚刚）";
-  if (seconds < 3600) return `顶部已检查（${Math.floor(seconds / 60)} 分钟前）`;
-  return `顶部已检查（${Math.floor(seconds / 3600)} 小时前）`;
+  if (seconds < 90) return t("顶部已检查（刚刚）");
+  if (seconds < 3600) return `${t("顶部已检查（")}${Math.floor(seconds / 60)}${t(" 分钟前）")}`;
+  return `${t("顶部已检查（")}${Math.floor(seconds / 3600)}${t(" 小时前）")}`;
 });
 
 const indexAgeText = computed(() => {
   const seconds = Number((indexMeta.value && indexMeta.value.age) || 0);
   if (!seconds) return "";
-  if (seconds < 120) return "刚刚更新";
-  if (seconds < 3600) return `${Math.floor(seconds / 60)} 分钟前更新`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)} 小时前更新`;
-  return `${Math.floor(seconds / 86400)} 天前更新`;
+  if (seconds < 120) return t("刚刚更新");
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}${t(" 分钟前更新")}`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}${t(" 小时前更新")}`;
+  return `${Math.floor(seconds / 86400)}${t(" 天前更新")}`;
 });
 
 const updateRows = computed(() => (scan.value.saved && scan.value.saved.updates) || []);
@@ -651,6 +703,11 @@ function formatSize(bytes) {
 
 let timer = null;
 onMounted(() => {
+  // R18 以 config 为准（localStorage 只作回填）—— 换数据根/重启都记住
+  const saved = String((store.state && store.state.config && store.state.config.mod_store_nsfw) || "");
+  if (NSFW_MODES.some((m) => m.key === saved) && saved !== nsfwMode.value) {
+    nsfwMode.value = saved;
+  }
   prefetch();                       // 索引过期/残缺 ⇒ 后台全量重建（启动时已发起，这里只兜底）
   loadCategories();
   // 列表先用本地索引出（毫秒级）；**顶部增量刷新并行起**（2026-11-07 用户：进商城仍不会自动刷新）
@@ -679,20 +736,20 @@ onUnmounted(() => {
     <!-- ══════════ 详情（页内视图，不用弹窗）══════════ -->
     <template v-if="detail">
       <div class="flex items-center gap-2 flex-wrap">
-        <Btn size="sm" @click="closeDetail">← 返回商城</Btn>
+        <Btn size="sm" @click="closeDetail">← {{ t("返回商城") }}</Btn>
         <span class="text-base font-semibold truncate" style="max-width: 42vw">{{ detail.name || `#${detail.id}` }}</span>
         <span v-if="detail.nsfw" class="text-xs px-1.5 rounded"
               style="background: var(--danger); color: #fff; font-weight: 600; line-height: 18px">R18</span>
-        <Badge v-if="detail.installed && detail.update_available" tone="warn">有更新</Badge>
-        <Badge v-else-if="detail.installed" tone="success">已安装</Badge>
+        <Badge v-if="detail.installed && detail.update_available" tone="warn">{{ t("有更新") }}</Badge>
+        <Badge v-else-if="detail.installed" tone="success">{{ t("已安装") }}</Badge>
         <span class="flex-1"></span>
         <Btn size="sm" variant="primary" :disabled="!!queued[detail.id] || !detail.has_files" @click="download(detail)">
-          {{ queued[detail.id] ? "已加入下载" : "下载" }}
+          {{ queued[detail.id] ? t("已加入下载") : t("下载") }}
         </Btn>
-        <a class="text-xs cursor-pointer" style="color: var(--accent)" @click="openPage(detail.url)">网页</a>
+        <a class="text-xs cursor-pointer" style="color: var(--accent)" @click="openPage(detail.url)">{{ t("网页") }}</a>
       </div>
 
-      <div v-if="detail.loading" class="text-sm" style="color: var(--text-muted)">正在读取详情…</div>
+      <div v-if="detail.loading" class="text-sm" style="color: var(--text-muted)">{{ t("正在读取详情…") }}</div>
       <div v-else-if="detail.error" class="text-sm" style="color: var(--danger)">{{ detail.error }}</div>
       <template v-else>
         <!-- 预览图：「预览图要更多」—— 多张横滚，点开灯箱看大图 -->
@@ -706,37 +763,37 @@ onUnmounted(() => {
                  class="w-full h-full object-cover" alt="" />
             <div v-else class="w-full h-full flex items-center justify-center text-xs" style="color: var(--text-muted)">
               <a v-if="imagesStalled" class="cursor-pointer" style="color: var(--accent)"
-                 @click.stop="retryDetailImages">图没取回来 · 重试</a>
-              <template v-else>加载中…</template>
+                 @click.stop="retryDetailImages">{{ t("图没取回来 · 重试") }}</a>
+              <template v-else>{{ t("加载中…") }}</template>
             </div>
           </div>
         </div>
 
-        <Card title="信息">
+        <Card :title="t('信息')">
           <div class="grid gap-x-6 gap-y-1.5 text-xs" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr))">
-            <div><span style="color: var(--text-muted)">作者：</span>{{ detail.author || "—" }}</div>
-            <div><span style="color: var(--text-muted)">角色：</span>{{ detail.character_zh || detail.character || "—" }}</div>
-            <div><span style="color: var(--text-muted)">分类：</span>{{ detail.category_path_zh || detail.category_path || "—" }}</div>
-            <div><span style="color: var(--text-muted)">版本：</span>{{ detail.version || "—" }}</div>
-            <div><span style="color: var(--text-muted)">发布：</span>{{ formatDay(detail.added) || "—" }}</div>
-            <div><span style="color: var(--text-muted)">最近更新：</span>{{ formatDay(detail.updated) || "—" }}</div>
-            <div><span style="color: var(--text-muted)">点赞 / 浏览：</span>{{ detail.likes }} / {{ detail.views }}</div>
-            <div><span style="color: var(--text-muted)">总下载：</span>{{ detail.downloads || "—" }}</div>
+            <div><span style="color: var(--text-muted)">{{ t("作者：") }}</span>{{ detail.author || "—" }}</div>
+            <div><span style="color: var(--text-muted)">{{ t("角色：") }}</span>{{ t(detail.character_zh || detail.character || "—") }}</div>
+            <div><span style="color: var(--text-muted)">{{ t("分类：") }}</span>{{ detail.category_path_zh || detail.category_path || "—" }}</div>
+            <div><span style="color: var(--text-muted)">{{ t("版本：") }}</span>{{ detail.version || "—" }}</div>
+            <div><span style="color: var(--text-muted)">{{ t("发布：") }}</span>{{ formatDay(detail.added) || "—" }}</div>
+            <div><span style="color: var(--text-muted)">{{ t("最近更新：") }}</span>{{ formatDay(detail.updated) || "—" }}</div>
+            <div><span style="color: var(--text-muted)">{{ t("点赞 / 浏览：") }}</span>{{ detail.likes }} / {{ detail.views }}</div>
+            <div><span style="color: var(--text-muted)">{{ t("总下载：") }}</span>{{ detail.downloads || "—" }}</div>
           </div>
-          <div v-if="detail.license" class="text-xs mt-2" style="color: var(--text-muted)">许可：{{ detail.license }}</div>
+          <div v-if="detail.license" class="text-xs mt-2" style="color: var(--text-muted)">{{ t("许可：") }}{{ detail.license }}</div>
         </Card>
 
-        <Card v-if="detail.description || detail.summary" title="简介">
+        <Card v-if="detail.description || detail.summary" :title="t('简介')">
           <div v-if="detail.summary" class="text-sm mb-2">{{ detail.summary }}</div>
           <div v-if="detail.description" class="text-xs whitespace-pre-wrap"
                style="color: var(--text-muted); max-height: 260px; overflow: auto">{{ detail.description }}</div>
         </Card>
 
-        <Card v-if="(detail.updates || []).length" title="更新记录">
+        <Card v-if="(detail.updates || []).length" :title="t('更新记录')">
           <div class="space-y-2">
             <div v-for="row in detail.updates" :key="row.id" class="text-xs">
               <div class="flex flex-wrap items-center gap-2">
-                <Badge tone="muted">{{ row.version || "更新" }}</Badge>
+                <Badge tone="muted">{{ row.version || t("更新") }}</Badge>
                 <span style="color: var(--text-muted)">{{ formatDay(row.added) }}</span>
               </div>
               <div v-if="row.text" class="mt-1 whitespace-pre-wrap" style="color: var(--text-muted)">{{ row.text }}</div>
@@ -744,19 +801,19 @@ onUnmounted(() => {
           </div>
         </Card>
 
-        <Card v-if="(detail.files || []).length" title="文件">
+        <Card v-if="(detail.files || []).length" :title="t('文件')">
           <div class="space-y-1">
             <div v-for="file in detail.files.slice(0, 8)" :key="file.id"
                  class="text-xs flex flex-wrap gap-x-3" style="color: var(--text-muted)">
               <span class="truncate" style="max-width: 44vw">{{ file.name }}</span>
               <span>{{ formatSize(file.size) }}</span>
               <span v-if="file.version">v{{ file.version }}</span>
-              <span v-if="file.archived">已归档</span>
-              <span v-if="file.av === 'clean'">✓ 已扫描</span>
+              <span v-if="file.archived">{{ t("已归档") }}</span>
+              <span v-if="file.av === 'clean'">{{ t("✓ 已扫描") }}</span>
             </div>
           </div>
           <div class="text-xs mt-2" style="color: var(--text-muted)">
-            下载时会按作者最新的更新记录自动挑该下的那几个文件（主包 + 配套小文件）。
+            {{ t("下载时会按作者最新的更新记录自动挑该下的那几个文件（主包 + 配套小文件）。") }}
           </div>
         </Card>
       </template>
@@ -764,76 +821,76 @@ onUnmounted(() => {
 
     <!-- ══════════ 列表视图（左侧分类栏 + 右侧网格，照 JASM 的排布）══════════ -->
     <template v-else>
-      <Card title="Mod 商城" id="store-browse-box">
+      <Card :title="t('Mod 商城')" id="store-browse-box">
         <template #badge>
           <span class="text-xs" style="color: var(--text-muted)">
-            香蕉网 · 终末地{{ total ? ` · ${total} 个` : "" }}
+            {{ t("香蕉网 · 终末地") }}{{ total ? ` · ${total} ${t("个 Mod")}` : "" }}
           </span>
         </template>
         <div class="flex flex-wrap items-center gap-2">
-          <TextField v-model="query" placeholder="搜名字或作者" style="width: 190px; flex: none"
+          <TextField v-model="query" :placeholder="t('搜名字或作者')" style="width: 190px; flex: none"
                      @keyup.enter="reload" />
-          <Btn size="sm" @click="reload">搜索</Btn>
+          <Btn size="sm" @click="reload">{{ t("搜索") }}</Btn>
           <select v-model="sort" class="field text-xs" style="width: 118px; flex: none" @change="reload">
-            <option v-for="option in SORTS" :key="option.key" :value="option.key">{{ option.label }}</option>
+            <option v-for="option in SORTS" :key="option.key" :value="option.key">{{ t(option.label) }}</option>
           </select>
           <span class="text-xs" style="color: var(--text-muted)">R18</span>
           <div class="flex gap-1">
             <Btn v-for="mode in NSFW_MODES" :key="mode.key" size="sm"
                  :variant="nsfwMode === mode.key ? 'primary' : 'secondary'"
-                 @click="setNsfw(mode.key)">{{ mode.label }}</Btn>
+                 @click="setNsfw(mode.key)">{{ t(mode.label) }}</Btn>
           </div>
           <span class="flex-1"></span>
-          <Btn size="sm" :disabled="scan.running" @click="scanUpdates">
-            {{ scan.running ? (scan.kind === "index" ? "刷新中…" : "扫描中…") : "扫描更新" }}
+          <Btn size="sm" :disabled="scan.running" @click="refreshIndex">
+            {{ scan.running && scan.kind === "index" ? t("更新中…") : t("索引更新") }}
           </Btn>
-          <Btn size="sm" variant="primary" :disabled="!updateCount" @click="updateAll">
-            一键更新{{ updateCount ? `（${updateCount}）` : "" }}
+          <Btn size="sm" variant="primary" :disabled="scan.running" @click="updateAll()">
+            {{ t("一键更新") }}{{ updateCount ? `${t("（")}${updateCount}${t("）")}` : "" }}
           </Btn>
         </div>
         <div v-if="scan.running || scan.message || indexMeta" class="text-xs mt-2"
              style="color: var(--text-muted)">
           {{ scan.message }}
-          <span v-if="updateCount">· 有 {{ updateCount }} 个可更新</span>
-          <span v-if="missingCount">· {{ missingCount }} 个远端已找不到</span>
-          <span v-if="indexed">· 已用本地索引</span>
+          <span v-if="updateCount">· {{ t("有") }} {{ updateCount }} {{ t("个可更新") }}</span>
+          <span v-if="missingCount">· {{ missingCount }} {{ t("个远端已找不到") }}</span>
+          <span v-if="indexed">· {{ t("已用本地索引") }}</span>
           <span v-if="headNote" style="color: var(--accent)">· {{ headNote }}</span>
           <!-- 索引状态要说清楚：条数 / 多久以前 / 完整不完整 ——
                「数字对不上」「Mod 消失了」时，用户看这一行就能判断是不是索引的问题 -->
           <template v-if="indexMeta && indexMeta.items">
-            <span>· 索引 {{ indexMeta.items }} 个</span>
+            <span>· {{ t("索引") }} {{ indexMeta.items }} {{ t("个") }}</span>
             <span v-if="!indexMeta.complete" style="color: var(--danger)">
-              （不完整 {{ indexMeta.items }}/{{ indexMeta.total }}）
+              {{ t("（") }}{{ t("不完整") }} {{ indexMeta.items }}/{{ indexMeta.total }}{{ t("）") }}
             </span>
-            <span v-else-if="indexAgeText">（{{ indexAgeText }}）</span>
+            <span v-else-if="indexAgeText">{{ t("（") }}{{ indexAgeText }}{{ t("）") }}</span>
             <span v-if="headAgeText" style="color: var(--accent)">· {{ headAgeText }}</span>
           </template>
           <a class="ml-2 cursor-pointer" style="color: var(--accent)"
              :style="scan.running ? 'opacity:.4; pointer-events:none' : ''"
-             @click="refreshIndex">刷新索引</a>
+             @click="refreshIndex">{{ t("刷新索引") }}</a>
         </div>
       </Card>
 
       <Card v-if="errorText">
         <div class="text-sm" style="color: var(--danger)">{{ errorText }}</div>
         <div class="text-xs mt-2" style="color: var(--text-muted)">
-          先用浏览器确认能不能打开 gamebanana.com；直连不通就开一下加速器/VPN 再点重试。
+          {{ t("先用浏览器确认能不能打开 gamebanana.com；直连不通就开一下加速器/VPN 再点重试。") }}
         </div>
-        <div class="mt-3"><Btn variant="primary" @click="reload">重试</Btn></div>
+        <div class="mt-3"><Btn variant="primary" @click="reload">{{ t("重试") }}</Btn></div>
       </Card>
 
       <div class="flex gap-4 items-start">
         <!-- 左：分类 + 角色（JASM 也是这个排布；EMC 里用现有 Card）。
              2026-10-07 用户：「角色分类那个卡片可以做长一点」⇒ 卡片更高、一次能看到更多角色，
              宽度也略放宽（中文角色名 + 数量在 178px 里容易被截断）。 -->
-        <Card title="分类" class="shrink-0" style="width: 198px">
+        <Card :title="t('分类')" class="shrink-0" style="width: 198px">
           <div class="space-y-0.5 text-sm">
             <button class="w-full text-left px-2 py-1 rounded flex items-center gap-1"
                     :style="!category && !character
                       ? { background: 'var(--accent-soft)', color: 'var(--accent)' }
                       : { color: 'var(--text-muted)' }"
                     @click="category = 0; character = ''; reload()">
-              <span class="truncate flex-1">全部</span>
+              <span class="truncate flex-1">{{ t("全部") }}</span>
               <span v-if="catalogTotal" class="text-xs">{{ catalogTotal }}</span>
             </button>
             <button v-for="root in rootRows" :key="root.id"
@@ -848,7 +905,7 @@ onUnmounted(() => {
           </div>
           <div v-if="categories.characters.length" class="mt-2 pt-2"
                style="border-top: 1px solid var(--border)">
-            <div class="text-xs mb-1" style="color: var(--text-muted)">角色</div>
+            <div class="text-xs mb-1" style="color: var(--text-muted)">{{ t("角色") }}</div>
             <!-- 「做长一点」：原来只给 320px（一屏看得到十来个角色、其余要滚）⇒ 加高到 620px，
                  并与窗口高度联动（`calc(100vh - 320px)`），长列表尽量一屏看完。 -->
             <div class="space-y-0.5 overflow-auto" style="max-height: max(320px, calc(100vh - 340px)); min-height: 420px">
@@ -858,7 +915,7 @@ onUnmounted(() => {
                         ? { background: 'var(--accent-soft)', color: 'var(--accent)' }
                         : { color: 'var(--text-muted)' }"
                       @click="pickCharacter(row.name)">
-                <span class="truncate flex-1">{{ row.name_zh || row.name }}</span>
+                <span class="truncate flex-1">{{ t(row.name_zh || row.name) }}</span>
                 <span class="text-xs">{{ row.count }}</span>
               </button>
             </div>
@@ -876,11 +933,11 @@ onUnmounted(() => {
                 <img v-if="listSrc(item)" :src="listSrc(item)" class="w-full h-full object-cover" alt=""
                      :style="isBlurred(item) ? 'filter: blur(16px); transform: scale(1.08)' : ''" />
                 <div v-else class="w-full h-full flex items-center justify-center text-xs" style="color: var(--text-muted)">
-                  加载中…
+                  {{ t("加载中…") }}
                 </div>
                 <div v-if="isBlurred(item)"
                      class="absolute inset-0 flex items-center justify-center text-xs"
-                     style="color: var(--text); background: rgba(0,0,0,.25)">R18 · 点开查看</div>
+                     style="color: var(--text); background: rgba(0,0,0,.25)">{{ t("R18 · 点开查看") }}</div>
                 <!-- R18 标签用**实心**红底白字（用户 2026-10-07：「r18 那个标签不要透明」）——
                      默认的 `.badge-danger` 是 14% 透明底 + 红字，压在封面上几乎看不清。 -->
                 <span v-if="item.nsfw && nsfwMode === 'show'"
@@ -896,28 +953,28 @@ onUnmounted(() => {
                   {{ item.name || `#${item.id}` }}
                 </div>
                 <div class="flex flex-wrap items-center gap-1.5 text-xs" style="color: var(--text-muted)">
-                  <span v-if="item.author">作者 {{ item.author }}</span>
-                  <span v-if="item.character_zh || item.character">· {{ item.character_zh || item.character }}</span>
+                  <span v-if="item.author">{{ t("作者") }} {{ item.author }}</span>
+                  <span v-if="item.character_zh || item.character">· {{ t(item.character_zh || item.character) }}</span>
                   <span v-else-if="item.root_category">· {{ item.root_category_zh || item.root_category }}</span>
                 </div>
                 <div class="flex flex-wrap items-center gap-1.5">
-                  <Badge v-if="item.installed && item.update_available" tone="warn">有更新</Badge>
-                  <Badge v-else-if="item.installed" tone="success">已安装</Badge>
+                  <Badge v-if="item.installed && item.update_available" tone="warn">{{ t("有更新") }}</Badge>
+                  <Badge v-else-if="item.installed" tone="success">{{ t("已安装") }}</Badge>
                   <Badge v-if="item.version" tone="muted">v{{ item.version }}</Badge>
                 </div>
                 <!-- 统计行：图标 + 数字（列表接口里没有下载量，只有点赞与浏览，所以不编一个出来） -->
                 <div class="flex items-center gap-3 text-xs" style="color: var(--text-muted)">
-                  <span class="flex items-center gap-1" :title="`点赞 ${item.likes}`"><Heart :size="12" />{{ item.likes }}</span>
-                  <span class="flex items-center gap-1" :title="`浏览 ${item.views}`"><Eye :size="12" />{{ item.views }}</span>
+                  <span class="flex items-center gap-1" :title="`${t('点赞')} ${item.likes}`"><Heart :size="12" />{{ item.likes }}</span>
+                  <span class="flex items-center gap-1" :title="`${t('浏览')} ${item.views}`"><Eye :size="12" />{{ item.views }}</span>
                 </div>
                 <!-- 卡片上只留「下载」+「详情」（照 JASM：点卡片就是进详情）；
                      **网页链接挪到详情页** —— 那才是决定"要不要去站点看看"的地方，卡片上摆着只会挤 -->
                 <div class="flex items-center gap-2 mt-auto">
                   <Btn size="sm" :variant="queued[item.id] ? 'secondary' : 'primary'"
                        :disabled="!!queued[item.id] || !item.has_files" @click="download(item)">
-                    {{ queued[item.id] ? "已加入下载" : "下载" }}
+                    {{ queued[item.id] ? t("已加入下载") : t("下载") }}
                   </Btn>
-                  <a class="text-xs cursor-pointer" style="color: var(--accent)" @click="openDetail(item)">详情</a>
+                  <a class="text-xs cursor-pointer" style="color: var(--accent)" @click="openDetail(item)">{{ t("详情") }}</a>
                 </div>
               </div>
             </div>
@@ -925,16 +982,16 @@ onUnmounted(() => {
 
           <Card v-else-if="!loading">
             <p class="text-sm" style="color: var(--text-muted)">
-              没有匹配的 Mod。换个关键词、或者把左边的分类/角色改回「全部」再看看。
+              {{ t("没有匹配的 Mod。换个关键词、或者把左边的分类/角色改回「全部」再看看。") }}
             </p>
           </Card>
 
           <!-- 哨兵：滚到这儿自动加载下一页（用户 2026-10-07：「划到最下面自动往下加载，而不是靠我手点」） -->
           <div v-if="items.length" ref="sentinel"
                class="flex items-center justify-center gap-3" style="min-height: 44px">
-            <span v-if="loadingMore" class="text-xs" style="color: var(--text-muted)">正在加载更多…</span>
-            <span v-else-if="!hasMore" class="text-xs" style="color: var(--text-muted)">已经到底了（共 {{ items.length }} 个）</span>
-            <span v-else class="text-xs" style="color: var(--text-muted)">往下滑自动加载</span>
+            <span v-if="loadingMore" class="text-xs" style="color: var(--text-muted)">{{ t("正在加载更多…") }}</span>
+            <span v-else-if="!hasMore" class="text-xs" style="color: var(--text-muted)">{{ t("已经到底了") }}{{ t("（") }}{{ t("共") }} {{ items.length }} {{ t("个") }}{{ t("）") }}</span>
+            <span v-else class="text-xs" style="color: var(--text-muted)">{{ t("往下滑自动加载") }}</span>
           </div>
         </div>
       </div>
@@ -946,7 +1003,7 @@ onUnmounted(() => {
       <img v-if="lightboxSrc" :src="lightboxSrc"
            style="max-width: 94vw; max-height: 88vh; object-fit: contain" alt="" />
       <div v-else class="text-sm" style="color: #fff">
-        {{ lightboxSlow ? "这张大图取不回来（点任意处关闭）" : "大图加载中…（点任意处关闭）" }}
+        {{ lightboxSlow ? t("这张大图取不回来（点任意处关闭）") : t("大图加载中…（点任意处关闭）") }}
       </div>
     </div>
   </div>

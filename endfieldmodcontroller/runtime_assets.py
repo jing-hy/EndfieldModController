@@ -38,6 +38,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
+from . import edition
 from .config import PROJECT_ROOT, AppConfig
 
 # 资产组：目录名 → 说明（都解压到 dlss5_dir）
@@ -199,6 +200,9 @@ def iter_assets(config: AppConfig) -> Iterator[tuple[str, Path, str, dict[str, A
 
 
 def manifest_entries(config: AppConfig) -> list[tuple[str, Path, str, dict[str, Any]]]:
+    # Lite 不含 ReShade：随包资产（dlss5 / nvngx 两组）本版本一个都不展开、也不报。
+    if edition.is_lite():
+        return []
     return list(iter_assets(config))
 
 
@@ -1017,6 +1021,9 @@ RETIRED_DIR = "_retired_addons"
 def retire_stale_nr_addons(config: AppConfig, *,
                            log: Callable[[str], None] | None = None) -> list[str]:
     """把**已退役**的旧 NR 引擎从 `dlss5` 根目录搬进 `_retired_addons\\`（只搬不删，可还原）。"""
+    # Lite 不含 ReShade：NR 引擎是 ReShade addon，本版本不碰 dlss5 目录。
+    if edition.is_lite():
+        return []
     base = Path(config.dlss5_path)
     if not base.is_dir():
         return []
@@ -1083,6 +1090,9 @@ def ensure_all(
     「sha256 校验失败（得到 2d8b3e2f…，期望 e16bcf15…）」（反馈者 23:50 那份日志即现场）。
     加这把锁之后，第二次进来时文件已在位，直接走"已就位"快路径。
     """
+    # Lite 不含 ReShade：不展开、也不去 Release 拉资产包（进度分母那侧同样按 0 算）。
+    if edition.is_lite():
+        return []
     with _ENSURE_ALL_LOCK:
         return _ensure_all_locked(config, progress=progress, log=log, force=force,
                                   verify=verify, allow_fetch=allow_fetch)
@@ -1340,6 +1350,12 @@ def fetch_bundle(
         if BUNDLE_PATTERN in str(asset.get("name", "")).lower()
         and str(asset.get("name", "")).lower().endswith(".zip")
     ]
+    if edition.is_lite():
+        # 同一个 Release 上两版资产包并存（assets-bundle.zip / assets-bundle-lite.zip）：
+        # Lite 只能拿它自己那份。绝不能退回完整版 —— 那会把 dlss5/nvngx 解到数据根，
+        # 等于"轻量版装了 ReShade 资产"。（当前 Lite 的 ensure_all 已整段跳过，这里是安全网。）
+        candidates = [asset for asset in candidates
+                      if "lite" in str(asset.get("name", "")).lower()]
     if not candidates:
         message = (f"Release {release.get('tag_name') or ''} 里没有 {BUNDLE_PATTERN}.zip"
                    "（发布时需把 assets 目录压成该附件一起上传）")
@@ -1493,11 +1509,38 @@ def import_bundle(
         parts = [part for part in name.replace("\\", "/").split("/") if part not in ("", ".")]
         return "assets" in parts
 
+    def _asset_groups() -> set[str]:
+        groups: set[str] = set()
+        for name in names:
+            parts = [part for part in name.replace("\\", "/").split("/") if part not in ("", ".")]
+            if len(parts) >= 2 and parts[0] == "assets":
+                groups.add(parts[1])
+        return groups
+
+    # Lite 不含 ReShade：**只拒绝含 ReShade 组的包**（完整版那个），而不是整份跳过 ——
+    # 轻量版的 assets-bundle-lite.zip 里还有 assets/rabbitfx（EFMI 的前置）要能导进来。
+    if edition.is_lite():
+        reshade_groups = sorted(_asset_groups() & {"dlss5", "nvngx", "addon"})
+        if reshade_groups:
+            return {"ok": False, "kind": "rejected", "skipped": "lite", "groups": [],
+                    "message": ("轻量版不含 ReShade：这个资产包里带着 "
+                                + "、".join("assets/" + name for name in reshade_groups)
+                                + " 组，导入会把 ReShade 资产落盘。\n"
+                                "请改用轻量版的 assets-bundle-lite.zip"
+                                "（只含 RabbitFX 等非 ReShade 资产）。")}
+
     asset_entries = [name for name in names if _has_assets(name)]
     runtime_entries = [
         name for name in names
         if Path(name).name.lower().startswith("nvngx_dlssnr") and name.lower().endswith(".dll")
     ]
+
+    if edition.is_lite() and runtime_entries and not asset_entries:
+        # 裸的 DLSS 神经渲染运行库是 ReShade/DLSS5 侧的东西（依赖它的只有那几个 addon）。
+        # 组包（上面）走白名单，单文件这里直接拒 —— 别让"拖个 dll 进来"绕过组过滤。
+        return {"ok": False, "kind": "rejected", "skipped": "lite",
+                "message": "轻量版不含 ReShade：这个包是 DLSS 神经渲染运行库（nvngx_dlssnr），"
+                           "本版本不需要它。"}
 
     if asset_entries:
         # **导入前逐条校验**（用户 2026-10-05：「而且也要检查」）：缺分卷的包**直接拒绝**，
@@ -1615,6 +1658,9 @@ ADDON_DISABLED_DIR = "_disabled"
 
 def asset_report(config: AppConfig) -> dict[str, dict[str, Any]]:
     """给依赖页用的状态：内置包是否可用、本地是否已展开、本机在用哪个运行库变体。"""
+    # Lite 不含 ReShade：这些资产全是 ReShade / DLSS5 侧的，依赖页不该列它们。
+    if edition.is_lite():
+        return {}
     report: dict[str, dict[str, Any]] = {}
     try:
         effective = select_dlssnr_variant(config).effective

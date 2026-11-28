@@ -46,6 +46,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
+from . import edition
 from .config import AppConfig
 
 # 本次运行的日志累积上限（ReShade.log 单次运行通常几十 KB，2 MB 是保险丝）
@@ -142,6 +143,10 @@ def _read_new(path: Path) -> str:
 
 def arm(config: AppConfig, *, log: Callable[[str], None] | None = None) -> dict[str, Any]:
     """游戏进程刚出现时调：记下日志当前位置，只盯**本次运行**新增的内容。"""
+    if edition.is_lite():
+        # Lite 不含 ReShade ⇒ 没有 DLSS5 的 NR 可补开，入口直接返回（不挂监视、不写日志）。
+        reset()
+        return dict(_STATE)
     reset()
     path = reshade_log_path(config)
     _STATE["log_pos"] = _size(path)
@@ -176,6 +181,9 @@ def _resolve_key(text: str) -> tuple[int, str]:
 
 def poll(config: AppConfig, *, log: Callable[[str], None] | None = None) -> dict[str, Any]:
     """每次轮询调一次（轻量：没有新增日志就立刻返回）。"""
+    if edition.is_lite():
+        # 同上：Lite 里 NR 这条链根本不存在，轮询一律不按键。
+        return {"ok": True, "action": "skip", "reason": "轻量版没有 DLSS5 神经渲染"}
     if not _STATE.get("armed") or _STATE.get("sent"):
         return {"ok": True, "action": "skip", "sent": bool(_STATE.get("sent"))}
     # ★ **启动就开时整条路都停用**（2026-10-06）：NR 已经在 `NeuralUplift=1` 下打开，

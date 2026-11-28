@@ -470,7 +470,11 @@ SKIP_WALK_DIRS = {
 # 内置兜底表：characters.json 缺失或损坏时仍能工作。
 # 完整表见同目录 characters.json（数据来自官网干员情报页，共 33 位）。
 CHARACTER_ALIASES: list[tuple[str, tuple[str, ...]]] = [
-    ("管理员", ("女管理员", "管理员", "男管理员", "endministrator", "endmin")),
+    # 男女管理员**分开识别**（2026-11-28 用户：「管理员那里似乎只会识别男管理员」）：
+    # 官网/游戏里是两个外观（同一角色），mod 也是两套。裸「管理员」按默认女主归女管理员；
+    # 男管理员必须明确写「男管理员」。同角色互斥由 CHARACTER_CONFLICT_MERGE 归到一组。
+    ("女管理员", ("女管理员", "女管理", "管理员", "endministrator", "endministrator1", "endmin", "guanliyuan")),
+    ("男管理员", ("男管理员", "男管理", "endministrator2")),
     ("陈千语", ("陈千语", "陈", "chengqianyu", "chen")),
     ("莱万汀", ("莱万汀", "laevatain")),
     ("佩丽卡", ("佩丽卡", "佩利卡", "perlica")),
@@ -489,6 +493,10 @@ CHARACTER_ALIASES: list[tuple[str, tuple[str, ...]]] = [
     ("昼雪", ("昼雪", "snowshine")),
     ("艾尔黛拉", ("艾尔黛拉", "ardelia", "小羊")),
 ]
+
+# 同一个游戏角色的不同外观（男女管理员）：**识别与展示分开**（各一张卡、各自头像），
+# 但「同角色互斥」必须归到同一组 —— 否则两个外观的 Mod 能同时装，游戏里是同一个模型。
+CHARACTER_CONFLICT_MERGE = {"男管理员": "管理员", "女管理员": "管理员"}
 
 CHARACTERS_JSON = Path(__file__).with_name("characters.json")
 # 运行时更新的角色表（`<数据根>\runtime\_state\characters.json`，由 character_sync 从官网
@@ -668,11 +676,20 @@ def match_character_detail(haystack: str) -> dict[str, Any]:
     给用户一个预选，但 ``confidence`` 不变（界面上仍显示黄字"无法确认归属"）。
     """
     text = str(haystack or "")
-    plain = _match_in(text.lower(), character_alias_pairs())
+    pairs = character_alias_pairs()
+    compact_pairs = compact_alias_pairs()
+    if "男管理" in text:
+        # 「男管理员」里含有「管理员」，而「管理员」是女管理员的别名 ⇒ 直接匹配会变成
+        # "两个角色都出现"（low）。明确写了男管理员时，先把女性向的裸名去掉再匹配。
+        pairs = [(alias, canonical) for alias, canonical in pairs
+                 if not (canonical == "女管理员" and alias == "管理员")]
+        compact_pairs = [(alias, canonical) for alias, canonical in compact_pairs
+                         if not (canonical == "女管理员" and alias == "管理员")]
+    plain = _match_in(text.lower(), pairs)
     if plain["confidence"] == "high":
         return {**plain, "guess": plain["character"]}
 
-    compact = _match_in(compact_text(text), compact_alias_pairs())
+    compact = _match_in(compact_text(text), compact_pairs)
     if compact["confidence"] == "high":
         return {**compact, "guess": compact["character"]}
 
@@ -1370,6 +1387,8 @@ def _make_mod_info(
         conflict_group = f"assist:{source_root.resolve()}"
     else:
         conflict_group = str(meta.get("conflict_group") or meta.get("character") or group)
+        # 男女管理员是同一角色 ⇒ 互斥归到同一组（展示仍按各自 canonical 名分开）。
+        conflict_group = CHARACTER_CONFLICT_MERGE.get(conflict_group, conflict_group)
     requires = meta.get("requires") or meta.get("dependencies") or []
     if isinstance(requires, str):
         requires = [requires]

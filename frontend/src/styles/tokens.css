@@ -24,16 +24,22 @@
   --font-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
 }
 
-/* 亮色（也是默认） */
+/* ── 配色（2026-11-28 用户要求：底色与强调色分开选）──────────────────────────
+ * 底色只有 light / dark（中性 zinc 灰阶）；强调色单独切：blue（默认）/ amber /
+ * cyan / violet / emerald。强调色只影响按钮、选中行、开关与链接 —— 不再整页染色。
+ * 两套白名单必须与 config.py 的 THEME_BASES / THEME_ACCENTS、store.js 保持一致。
+ */
+
+/* 亮色底（默认强调色：蓝） */
 :root,
 [data-theme="light"] {
-  --bg: #f6f7f9;
+  --bg: #fafafa;
   --surface: #ffffff;
-  --surface-2: #f9fafb;
-  --border: #e5e7eb;
-  --border-strong: #d1d5db;
-  --text: #111827;
-  --text-muted: #6b7280;
+  --surface-2: #f4f4f5;
+  --border: #e4e4e7;
+  --border-strong: #d4d4d8;
+  --text: #18181b;
+  --text-muted: #71717a;
   --accent: #3f6fae;
   --accent-hover: #345f98;
   --accent-soft: #edf3f9;
@@ -46,20 +52,20 @@
   --sh-lg: 0 12px 24px -6px rgba(16, 24, 40, .12), 0 4px 8px -4px rgba(16, 24, 40, .08);
 }
 
-/* 暗色 */
+/* 深色底（默认强调色：亮蓝） */
 [data-theme="dark"] {
-  --bg: #0b0f14;
-  --surface: #121820;
-  --surface-2: #171f29;
-  --border: #232c38;
-  --border-strong: #33404f;
-  --text: #e7ecf2;
-  --text-muted: #93a1b0;
+  --bg: #09090b;
+  --surface: #18181b;
+  --surface-2: #27272a;
+  --border: #27272a;
+  --border-strong: #3f3f46;
+  --text: #fafafa;
+  --text-muted: #a1a1aa;
   --accent: #5b9dff;
   --accent-hover: #7db0ff;
-  --accent-soft: #16233a;
+  --accent-soft: #1b2b45;
   --accent-contrast: #08121f;
-  --danger: #ff7b7b;
+  --danger: #f87171;
   --success: #4ade80;
   --warn: #fbbf24;
   --sh-sm: 0 1px 2px rgba(0, 0, 0, .4);
@@ -67,95 +73,62 @@
   --sh-lg: 0 12px 28px rgba(0, 0, 0, .55);
 }
 
-/* 琥珀 */
-[data-theme="amber"] {
-  --bg: #14110c;
-  --surface: #1c1810;
-  --surface-2: #241f15;
-  --border: #322a1d;
-  --border-strong: #463a28;
-  --text: #f2ece1;
-  --text-muted: #a99a80;
+/* 强调色（明暗通用）：只覆盖主色 / 悬停 / 对比色；soft 淡底按明暗在下面分开定 */
+[data-theme-accent="amber"] {
   --accent: #d9a441;
   --accent-hover: #e8b95c;
-  --accent-soft: #2a2113;
   --accent-contrast: #1a1206;
-  --danger: #ff8a70;
-  --success: #86c06a;
-  --warn: #e8b95c;
-  --sh-sm: 0 1px 2px rgba(0, 0, 0, .45);
-  --sh-md: 0 4px 10px rgba(0, 0, 0, .5);
-  --sh-lg: 0 12px 28px rgba(0, 0, 0, .6);
 }
-
-/* 青 */
-[data-theme="cyan"] {
-  --bg: #07161d;
-  --surface: #0d1f28;
-  --surface-2: #122832;
-  --border: #1c3844;
-  --border-strong: #2a4f5e;
-  --text: #e2f2f8;
-  --text-muted: #8fb0bd;
+[data-theme-accent="cyan"] {
   --accent: #38b6d8;
   --accent-hover: #55cbe8;
-  --accent-soft: #0f2b36;
   --accent-contrast: #04161f;
-  --danger: #ff8080;
-  --success: #4ecfa0;
-  --warn: #e5c05a;
-  --sh-sm: 0 1px 2px rgba(0, 20, 30, .5);
-  --sh-md: 0 4px 10px rgba(0, 20, 30, .55);
-  --sh-lg: 0 12px 28px rgba(0, 20, 30, .65);
 }
-
-/* 紫 */
-[data-theme="violet"] {
-  --bg: #100d1a;
-  --surface: #171322;
-  --surface-2: #1e192c;
-  --border: #2b2440;
-  --border-strong: #3d3358;
-  --text: #ece8f6;
-  --text-muted: #a49ac0;
+[data-theme-accent="violet"] {
   --accent: #8b7bef;
   --accent-hover: #a294f5;
-  --accent-soft: #211a38;
   --accent-contrast: #0d0819;
-  --danger: #ff8296;
-  --success: #64d6a4;
-  --warn: #e9be63;
-  --sh-sm: 0 1px 2px rgba(10, 0, 25, .5);
-  --sh-md: 0 4px 10px rgba(10, 0, 25, .55);
-  --sh-lg: 0 12px 28px rgba(10, 0, 25, .65);
 }
-
-/* 翠绿 */
-[data-theme="emerald"] {
-  --bg: #08150f;
-  --surface: #0e1f17;
-  --surface-2: #13291f;
-  --border: #1e3a2c;
-  --border-strong: #2c5440;
-  --text: #e3f3ea;
-  --text-muted: #8fb3a1;
+[data-theme-accent="emerald"] {
   --accent: #35b97e;
   --accent-hover: #4fd095;
-  --accent-soft: #102a1f;
   --accent-contrast: #04140c;
-  --danger: #ff8674;
-  --success: #4fd095;
-  --warn: #e6c05c;
-  --sh-sm: 0 1px 2px rgba(0, 20, 10, .5);
-  --sh-md: 0 4px 10px rgba(0, 20, 10, .55);
-  --sh-lg: 0 12px 28px rgba(0, 20, 10, .65);
 }
+
+/* 强调色的淡底（soft）：浅色底要浅、深色底要深 */
+[data-theme="light"][data-theme-accent="amber"] { --accent-soft: #fdf4e3; }
+[data-theme="light"][data-theme-accent="cyan"] { --accent-soft: #e6f6fb; }
+[data-theme="light"][data-theme-accent="violet"] { --accent-soft: #f1eefc; }
+[data-theme="light"][data-theme-accent="emerald"] { --accent-soft: #e7f6ef; }
+[data-theme="dark"][data-theme-accent="amber"] { --accent-soft: #33270f; }
+[data-theme="dark"][data-theme-accent="cyan"] { --accent-soft: #10303b; }
+[data-theme="dark"][data-theme-accent="violet"] { --accent-soft: #251d3d; }
+[data-theme="dark"][data-theme-accent="emerald"] { --accent-soft: #102a20; }
 
 /* 全局基础（取自产物：`html,body,#app` 撑满 + body 用令牌上色） */
 html,
 body,
 #app {
   height: 100%;
+}
+
+/* 自定义背景图（设置 → 外观）：铺在页面底色之上、内容之下；不透明度可调。
+ * `#app` 抬一层，保证它盖在背景层之上（body 的底色仍然是兜底）。 */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background-image: var(--ui-bg-image, none);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  opacity: var(--ui-bg-opacity, 0);
+  pointer-events: none;
+  z-index: 0;
+}
+#app {
+  position: relative;
+  z-index: 1;
 }
 
 body {

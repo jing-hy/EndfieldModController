@@ -13,6 +13,8 @@
 //
 // ⚠️ 这里的任何异常都必须**吞掉**：无障碍通道坏掉绝不能把界面拖下水，也不能弹窗。
 
+import { t } from "./i18n.js";
+
 const POLL_MS = 300;
 const MAX_ELEMENTS = 400;
 
@@ -207,7 +209,7 @@ function act(id, action, value) {
   }
   const el = resolve(id);
   if (!el) {
-    return { ok: false, message: "找不到元素：" + String(id) + "（先用 GET /state 取快照）" };
+    return { ok: false, message: t("找不到元素：") + String(id) + t("（先用 GET /state 取快照）") };
   }
   try {
     if (verb === "click" || verb === "tap") {
@@ -234,9 +236,9 @@ function act(id, action, value) {
       if (typeof el.focus === "function") el.focus();
       return { ok: true, action: verb, element: describe(el) };
     }
-      return { ok: false, message: "不认识的动作：" + verb + "（支持 click / set / value / type / scroll / scroll-by / focus）" };
+      return { ok: false, message: t("不认识的动作：") + verb + t("（支持 click / set / value / type / scroll / scroll-by / focus）") };
   } catch (e) {
-    return { ok: false, message: "执行失败：" + String(e && e.message ? e.message : e) };
+    return { ok: false, message: t("执行失败：") + String(e && e.message ? e.message : e) };
   }
 }
 
@@ -245,7 +247,7 @@ function execute(command) {
   const payload = (command && command.payload) || {};
   if (kind === "snapshot") return snapshot();
   if (kind === "act") return act(payload.id, payload.action, payload.value);
-  return { ok: false, message: "不认识的指令：" + kind };
+  return { ok: false, message: t("不认识的指令：") + kind };
 }
 
 let timer = null;

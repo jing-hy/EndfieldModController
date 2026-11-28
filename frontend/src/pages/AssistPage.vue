@@ -3,6 +3,7 @@
 // 辅助 Mod 页（旧 #tab-assist）：只列辅助/工具类 Mod，不参与换装。
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { call } from "../lib/bridge.js";
+import { t } from "../lib/i18n.js";
 import { store, refreshState } from "../store.js";
 import { settings, loadSettings } from "../lib/settings.js";
 import Card from "../components/ui/Card.vue";
@@ -58,7 +59,7 @@ async function toggleMod(mod) {
     }
     // 自动关掉的要说一声，否则用户以为是"点一下把别的也弄没了"
     if (autoOff.length) {
-      showToast(`壁纸是互斥的，已自动关掉：${autoOff.join("、")}`, "warn");
+      showToast(`${t("壁纸是互斥的，已自动关掉：")}${autoOff.join(t("、"))}`, "warn");
     }
     // ★ 与「服装 Mod」页同一套（2026-11-16）：开关要**真的落到 EFMI 的 Mods 目录**，
     //   否则用户拨了开关去文件夹里看，文件纹丝不动。
@@ -177,83 +178,85 @@ async function menuAct(act) {
       // 否则弹窗会按"服装"打开、辅助的分组下拉根本不出现（2026-10-03 核对）。
       const full = (store.state.mods || []).find((x) => String(x.id) === m.id);
       if (!assignRef.value) {
-        await showAlert("选分类的窗口没准备好",
-          "界面刚重载过、弹窗还没挂上。稍等一下再点一次就好（这次没有改动任何东西）。");
+        await showAlert(t("选分类的窗口没准备好"),
+          t("界面刚重载过、弹窗还没挂上。稍等一下再点一次就好（这次没有改动任何东西）。"));
         return;
       }
       assignRef.value.openFor(full || m);
       return;
     } else if (act === "toSkin") {
       const r = await call("set_mod_kind", m.id, "character");
-      if (r && r.ok === false) await showAlert("移动失败", r.message || "未知原因");
-      else showToast(`「${m.name}」已移到服装 Mod`, "success");
+      if (r && r.ok === false) await showAlert(t("移动失败"), r.message || t("未知原因"));
+      else showToast(`${t("「")}${m.name}${t("」已移到服装 Mod")}`, "success");
     } else if (act === "jiggle_update") {
       // 触摸 Mod（后端在 state 里给了 `is_touch`）：把 EndfieldJiggle 重铺成最新版。
       // 成功后走本函数末尾的 scan + refreshState（本文件既有的刷新方式）刷新列表。
       const r = await call("jiggle_update");
-      if (r && r.ok === false) await showAlert("更新到最新版失败", r.message || "未知原因");
-      else showToast(`「${m.name}」已更新到最新版`, "success");
+      if (r && r.ok === false) await showAlert(t("更新到最新版失败"), r.message || t("未知原因"));
+      else showToast(`${t("「")}${m.name}${t("」已更新到最新版")}`, "success");
     } else if (act === "open") {
       const mod = (store.state.mods || []).find((x) => String(x.id) === m.id);
       if (mod && mod.path) await call("open_path_in_explorer", mod.path);
     } else if (act === "delete") {
       const ok = await showModalDialog({
-        title: "移出 辅助 Mod？",
-        message: `${m.name}\n\n它会从辅助 Mod 列表里移出并留一份备份，之后不再加载。`
-          + `\n不会删除你的其它 Mod，也不会动游戏本体。`,
-        okText: "移出并备份", cancelText: "保留在库", focusCancel: true,
+        title: t("移出 辅助 Mod？"),
+        message: `${m.name}\n\n${t("它会从辅助 Mod 列表里移出并留一份备份，之后不再加载。")}`
+          + `\n${t("不会删除你的其它 Mod，也不会动游戏本体。")}`,
+        okText: t("移出并备份"), cancelText: t("保留在库"), focusCancel: true,
       });
       if (!ok) return;
       const r = await call("delete_mod", m.id);
-      if (r && r.ok === false) await showAlert("移出失败", r.message || "未知原因");
-      else showToast(r && r.moved_to ? `已移出库：${r.moved_to}` : "已移出 辅助 Mod", "success");
+      if (r && r.ok === false) await showAlert(t("移出失败"), r.message || t("未知原因"));
+      else showToast(r && r.moved_to
+        ? `${t("已移出库：")}${r.moved_to}`
+        : t("已移出 辅助 Mod"), "success");
     } else if (act === "rename") {
       // 输入型弹窗：确认时 resolve 的是**用户输入的那串文本**（不是 true）
       const name = await showModalDialog({
-        title: `重命名「${m.name}」`,
-        message: `新名字会同时改到库里那个文件夹上（你在资源管理器里看到的也是它）。`
-          + `\n已经启用/勾选的状态、预览图和 Mod 内容都不受影响。`,
-        okText: "改名", cancelText: "不改了",
-        input: { label: "新名字", value: m.name, maxlength: 80 },
+        title: `${t("重命名「")}${m.name}${t("」")}`,
+        message: `${t("新名字会同时改到库里那个文件夹上（你在资源管理器里看到的也是它）。")}`
+          + `\n${t("已经启用/勾选的状态、预览图和 Mod 内容都不受影响。")}`,
+        okText: t("改名"), cancelText: t("不改了"),
+        input: { label: t("新名字"), value: m.name, maxlength: 80 },
       });
       if (!name) return;
       const r = await call("rename_mod", m.id, name);
-      if (r && r.ok === false) await showAlert("改名失败", r.message || "未知原因");
-      else if (r && r.unchanged) showToast("名字没变", "info");
-      else showToast(`已改名为「${(r && r.name) || name}」`, "success");
+      if (r && r.ok === false) await showAlert(t("改名失败"), r.message || t("未知原因"));
+      else if (r && r.unchanged) showToast(t("名字没变"), "info");
+      else showToast(`${t("已改名为「")}${(r && r.name) || name}${t("」")}`, "success");
     } else if (act === "cover") {
       const r = await call("set_mod_cover", m.id);
       if (r && r.ok === false && r.cancelled) return;      // 用户自己关掉了选图框，不算失败
-      if (r && r.ok === false) await showAlert("换预览图失败", r.message || "未知原因");
+      if (r && r.ok === false) await showAlert(t("换预览图失败"), r.message || t("未知原因"));
       else {
         // 封面有缓存（`store.covers`，与服装页共用）—— 不清掉的话界面上还是旧图
         if (store.covers) delete store.covers[m.id];
         await loadCover(m.id);
-        showToast(`「${m.name}」的预览图已更新`, "success");
+        showToast(`${t("「")}${m.name}${t("」的预览图已更新")}`, "success");
       }
     } else if (act === "purge") {
       // 真删、恢复不了 —— 破坏性最强的一档：红字入口 + **手输 ok** 才放行。
       // 后端也会再判一次 `confirm`（界面只是第一道闸，绕不过去第二道）。
       const typed = await showModalDialog({
-        title: `彻底删除「${m.name}」？`,
-        message: `${m.name}\n\n这会把这个 Mod 的文件夹从库里**直接删掉**：不进回收站、`
-          + `**删了就找不回来**。\n已经启用/勾选的话会同时从勾选里去掉；游戏本体和别的 Mod 不受影响。`
-          + `\n\n确定要删，请在下面输入 ok。`,
-        okText: "彻底删除", cancelText: "不删了", focusCancel: true,
+        title: `${t("彻底删除「")}${m.name}${t("」？")}`,
+        message: `${m.name}\n\n${t("这会把这个 Mod 的文件夹从库里**直接删掉**：不进回收站、")}`
+          + `${t("**删了就找不回来**。")}\n${t("已经启用/勾选的话会同时从勾选里去掉；游戏本体和别的 Mod 不受影响。")}`
+          + `\n\n${t("确定要删，请在下面输入 ok。")}`,
+        okText: t("彻底删除"), cancelText: t("不删了"), focusCancel: true,
         requireText: "ok",
-        input: { label: "输入 ok 确认", placeholder: "ok", maxlength: 8 },
+        input: { label: t("输入 ok 确认"), placeholder: "ok", maxlength: 8 },
       });
       if (!typed) return;
       const r = await call("purge_mod", m.id, String(typed));
-      if (r && r.ok === false) await showAlert("删除失败", r.message || "未知原因");
-      else showToast(`已彻底删除「${m.name}」`, "success");
+      if (r && r.ok === false) await showAlert(t("删除失败"), r.message || t("未知原因"));
+      else showToast(`${t("已彻底删除「")}${m.name}${t("」")}`, "success");
     }
     await call("scan");
     await refreshState();
   } catch (e) {
     // 与服装页同一处理（2026-10-03）：本地异常不许被空 catch 吞掉，否则就是"点了没反应"。
     console.error("[Assist] menuAct 失败", act, e);
-    await showAlert("这个操作没能完成", (e && e.message) ? String(e.message) : String(e));
+    await showAlert(t("这个操作没能完成"), (e && e.message) ? String(e.message) : String(e));
   }
 }
 
@@ -264,9 +267,9 @@ async function openLib() {
   try {
     const dirs = await call("log");
     const path = String((dirs && dirs.library) || "");
-    if (!path) { showToast("拿不到 Mod 库路径", "danger"); return; }
+    if (!path) { showToast(t("拿不到 Mod 库路径"), "danger"); return; }
     const r = await call("open_path_in_explorer", path);
-    if (r && r.ok === false) showToast(String(r.message || "打不开 Mod 库"), "danger");
+    if (r && r.ok === false) showToast(String(r.message || t("打不开 Mod 库")), "danger");
   } catch (e) { /* call 已提示 */ }
 }
 </script>
@@ -274,33 +277,33 @@ async function openLib() {
 <template>
   <div class="space-y-4">
     <div class="flex flex-wrap items-center gap-2">
-      <Btn variant="primary" @click="rescan">重新扫描</Btn>
-      <Btn @click="openLib">打开 Mod 文件夹</Btn>
-      <span class="text-xs" style="color: var(--text-muted)">{{ status }}</span>
+      <Btn variant="primary" @click="rescan">{{ t("重新扫描") }}</Btn>
+      <Btn @click="openLib">{{ t("打开 Mod 文件夹") }}</Btn>
+      <span class="text-xs" style="color: var(--text-muted)">{{ t(status) }}</span>
     </div>
     <!-- ★ 同「服装 Mod」页：**"还没读到" ≠ "没有"** —— 首屏状态未到之前给加载态，
          别让它显示成"这里还没有辅助 Mod"（用户 2026-10-07 要求：要等就显示加载页面）。 -->
-    <Card v-if="!store.ready" title="辅助 Mod">
+    <Card v-if="!store.ready" :title="t('辅助 Mod')">
       <div class="empty-state">
         <component :is="Wrench" :size="30" class="empty-icon" />
-        <div class="empty-title">正在读取 Mod 库…</div>
-        <div>状态读完后列表会自动出现（首次启动要扫一遍库）。</div>
+        <div class="empty-title">{{ t("正在读取 Mod 库…") }}</div>
+        <div>{{ t("状态读完后列表会自动出现（首次启动要扫一遍库）。") }}</div>
       </div>
     </Card>
-    <Card v-else-if="!list.length" title="辅助 Mod">
+    <Card v-else-if="!list.length" :title="t('辅助 Mod')">
       <div class="empty-state">
         <component :is="Wrench" :size="30" class="empty-icon" />
-        <div class="empty-title">这里还没有辅助 Mod</div>
-        <div>辅助 Mod 是"不绑角色"的工具类 Mod（例如公共前置资源）。</div>
-        <div>把 .zip / .7z / .rar 拖到窗口任意处即可导入，导入后会自动归类到这里。</div>
+        <div class="empty-title">{{ t("这里还没有辅助 Mod") }}</div>
+        <div>{{ t('辅助 Mod 是"不绑角色"的工具类 Mod（例如公共前置资源）。') }}</div>
+        <div>{{ t("把 .zip / .7z / .rar 拖到窗口任意处即可导入，导入后会自动归类到这里。") }}</div>
       </div>
     </Card>
     <!-- 标题不再写成「辅助 Mod（1）」—— 括号里那个数字没人知道是什么。
          数量挪到标题右侧的副标题位，并在卡片里说清"辅助 Mod"到底指什么。 -->
-    <Card v-else title="辅助 Mod" :sub="`${list.length} 个`">
+    <Card v-else :title="t('辅助 Mod')" :sub="`${list.length} ${t('个 Mod')}`">
       <p class="text-xs mb-2" style="color: var(--text-muted)">
-        这里放的是<b>不绑角色</b>的 Mod —— 加载页/壁纸、隐藏 UI、去水印、公共前置资源
-        （例如湿润效果修复、RabbitFX 这类别人依赖的东西）。它们不参与换装，所以不占「服装 Mod」里的角色分组。
+        {{ t("这里放的是") }}<b>{{ t("不绑角色") }}</b>{{ t("的 Mod —— 加载页/壁纸、隐藏 UI、去水印、公共前置资源") }}
+        {{ t("（例如湿润效果修复、RabbitFX 这类别人依赖的东西）。它们不参与换装，所以不占「服装 Mod」里的角色分组。") }}
       </p>
       <!-- 按**子类**分组列出（用户 2026-10-03：「辅助 Mod 是标签，实际页面卡片中需要在卡片细分
            加载页和功能类之类的」）。
@@ -310,9 +313,9 @@ async function openLib() {
       <div v-for="grp in assistGroups" :key="grp.name"
            class="rounded-lg border p-3 mb-3 last:mb-0" style="border-color: var(--border)">
         <div class="flex items-center justify-between mb-3">
-          <h3 class="font-semibold">{{ grp.name }}</h3>
+          <h3 class="font-semibold">{{ t(grp.name) }}</h3>
           <span class="text-xs" style="color: var(--text-muted)">
-            {{ grp.mods.length }} 个 Mod · 已启用 {{ grp.mods.filter((m) => selected.has(String(m.id))).length }}
+            {{ grp.mods.length }} {{ t("个 Mod") }} · {{ t("已启用") }} {{ grp.mods.filter((m) => selected.has(String(m.id))).length }}
           </span>
         </div>
 
@@ -336,12 +339,12 @@ async function openLib() {
                     -webkit-box-orient: vertical; overflow: hidden" :title="m.name">{{ m.name }}</span>
               <span class="mt-1.5 text-xs"
                     :style="{ color: selected.has(String(m.id)) ? 'var(--accent)' : 'var(--text-muted)' }">
-                {{ selected.has(String(m.id)) ? "已启用" : "未启用" }}
+                {{ selected.has(String(m.id)) ? t("已启用") : t("未启用") }}
               </span>
               <span class="mt-auto flex items-center justify-between gap-2">
                 <Switch :model-value="selected.has(String(m.id))"
                         @update:model-value="() => toggleMod(m)" />
-                <button class="btn btn-mini shrink-0" title="更多：分类 / 移到服装 Mod / 重命名 / 换预览图 / 移出库 / 彻底删除"
+                <button class="btn btn-mini shrink-0" :title="t('更多：分类 / 移到服装 Mod / 重命名 / 换预览图 / 移出库 / 彻底删除')"
                         @mouseenter="openMenu(m, $event)" @click="openMenu(m, $event)" @mouseleave="scheduleMenuClose()">⋯</button>
               </span>
             </span>
@@ -362,10 +365,10 @@ async function openLib() {
               <div class="font-medium truncate">{{ m.name }}</div>
             </div>
             <span class="flex items-center gap-2 shrink-0">
-              <span class="switch-state">{{ selected.has(String(m.id)) ? "已启用" : "未启用" }}</span>
+              <span class="switch-state">{{ selected.has(String(m.id)) ? t("已启用") : t("未启用") }}</span>
               <Switch :model-value="selected.has(String(m.id))"
                       @update:model-value="() => toggleMod(m)" />
-              <button class="btn btn-mini shrink-0" title="更多：分类 / 移到服装 Mod / 重命名 / 换预览图 / 移出库 / 彻底删除"
+              <button class="btn btn-mini shrink-0" :title="t('更多：分类 / 移到服装 Mod / 重命名 / 换预览图 / 移出库 / 彻底删除')"
                       @mouseenter="openMenu(m, $event)" @click="openMenu(m, $event)" @mouseleave="scheduleMenuClose()">⋯</button>
             </span>
           </div>
@@ -380,22 +383,22 @@ async function openLib() {
     <div v-if="menu" ref="menuEl" class="fixed z-50 card py-1 shadow-lg"
          style="min-width: 176px; max-height: calc(100vh - 16px); overflow-y: auto"
          :style="{ left: menu.x + 'px', top: menu.y + 'px' }" @mouseenter="cancelMenuClose()" @mouseleave="scheduleMenuClose()">
-      <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('character')">更改分类…</button>
-      <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('toSkin')">移到「服装 Mod」</button>
+      <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('character')">{{ t("更改分类…") }}</button>
+      <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('toSkin')">{{ t("移到「服装 Mod」") }}</button>
       <!-- 触摸 Mod（后端给 `is_touch: true`）才有这一项：把它重铺成最新版 -->
       <button v-if="menu.is_touch" class="w-full text-left px-3 py-1.5 text-sm"
-              @click="menuAct('jiggle_update')">更新到最新版</button>
-      <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('open')">打开所在目录</button>
+              @click="menuAct('jiggle_update')">{{ t("更新到最新版") }}</button>
+      <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('open')">{{ t("打开所在目录") }}</button>
       <div style="height:1px;background:var(--border)" class="my-1"></div>
-      <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('rename')">重命名…</button>
-      <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('cover')">更换预览图…</button>
+      <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('rename')">{{ t("重命名…") }}</button>
+      <button class="w-full text-left px-3 py-1.5 text-sm" @click="menuAct('cover')">{{ t("更换预览图…") }}</button>
       <div style="height:1px;background:var(--border)" class="my-1"></div>
       <button class="w-full text-left px-3 py-1.5 text-sm" style="color: var(--danger)"
-              @click="menuAct('delete')">移出 辅助 Mod</button>
+              @click="menuAct('delete')">{{ t("移出 辅助 Mod") }}</button>
       <!-- ⚠️ 彻底删除（真删、恢复不了）：红字 + 更重一点的字体，排在最后一个 -->
       <button class="w-full text-left px-3 py-1.5 text-sm"
               style="color: var(--danger); font-weight: 600"
-              @click="menuAct('purge')">彻底删除…</button>
+              @click="menuAct('purge')">{{ t("彻底删除…") }}</button>
     </div>
 
     <CharacterAssignDialog ref="assignRef" />

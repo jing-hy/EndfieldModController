@@ -19,6 +19,10 @@
 数据源：仓库根 `alerts.json`，走 **api.github.com 的 contents 接口**（`raw.githubusercontent.com`
 在国内常超时，api 更稳），base64 解码。**每次真查**（不吃 github 那层 30 分钟缓存），
 失败**静默**并回退到上次成功缓存 —— 预警要新鲜，但绝不能影响启动、更不能拖住首屏。
+
+**适用形态**（2026-11-28 用户：「公告也要区分两个版本，可以都发，也可以只发一个版本」）：
+条目可写 `edition`（`full` / `lite` / 缺省=`both`），`overview()` 按当前形态过滤 ——
+Lite 用户不会收到只针对完整版（ReShade/DLSS5）的公告，反之亦然。
 """
 from __future__ import annotations
 
@@ -125,6 +129,20 @@ def decode_contents(payload: Any) -> dict[str, Any]:
     return document
 
 
+def _normalize_edition(value: Any) -> str:
+    """公告适用的版本形态：`full` / `lite` / `both`（缺省 = both）。
+
+    2026-11-28 用户：「公告也要区分两个版本，可以都发，也可以只发一个版本」。
+    兼容常见写法（universal / 完整版 / 轻量版），写错一律按 both（宁可多提示）。
+    """
+    text = str(value or "").strip().lower()
+    if text in ("full", "universal", "完整版"):
+        return "full"
+    if text in ("lite", "轻量版"):
+        return "lite"
+    return "both"
+
+
 def normalize(document: dict[str, Any]) -> list[dict[str, Any]]:
     """把文档里的条目规范化；**缺 id 的条目直接丢掉**（没 id 就没法记已读）。"""
     items: list[dict[str, Any]] = []
@@ -142,14 +160,40 @@ def normalize(document: dict[str, Any]) -> list[dict[str, Any]]:
             "level": level,
             "title": str(raw.get("title") or "").strip() or "公告",
             "body": str(raw.get("body") or "").strip(),
+            # 可选英文版（2026-11-28 用户要求）：界面语言=en 且填了英文就用英文，
+            # 没填则回落中文 —— 老公告（没有这两个字段）照旧显示，完全兼容。
+            "title_en": str(raw.get("title_en") or "").strip(),
+            "body_en": str(raw.get("body_en") or "").strip(),
             "url": str(raw.get("url") or "").strip(),
             "until": str(raw.get("until") or "").strip(),
             "hold_seconds": _clamp_hold(raw.get("hold_seconds")),
             # 版本区间（2026-10-02 加）：留空 = 所有版本都收，两个都给 = 只对那个版本
             "min_version": str(raw.get("min_version") or "").strip(),
             "max_version": str(raw.get("max_version") or "").strip(),
+            # 适用形态（2026-11-28 加）：both = 两版都发；full/lite = 只发一个版本
+            "edition": _normalize_edition(raw.get("edition")),
         })
     return items
+
+
+def localized(item: dict[str, Any], language: str | None = None) -> dict[str, Any]:
+    """按界面语言挑展示文案：en 且填了英文版 ⇒ 用英文，否则用中文原字段。
+
+    2026-11-28 用户：「公告也调一下，选配英文版本，对英语用户展示英文版，但也能兼容之前的公告」。
+    只替换 `title` / `body` 两个展示字段；id/level/until/edition 等判据字段原样保留。
+    """
+    lang = str(language or "").strip().lower()
+    if lang != "en":
+        return item
+    title_en = str(item.get("title_en") or "").strip()
+    body_en = str(item.get("body_en") or "").strip()
+    if not title_en and not body_en:
+        return item
+    return {
+        **item,
+        "title": title_en or str(item.get("title") or ""),
+        "body": body_en or str(item.get("body") or ""),
+    }
 
 
 def is_expired(until: str, now: datetime | None = None) -> bool:
@@ -185,6 +229,32 @@ def _version_tuple(value: Any) -> tuple[int, ...]:
     from .version import parse_version
 
     return parse_version(value)
+
+
+def edition_applies(item: dict[str, Any], edition: str | None = None) -> bool:
+    """这条公告 / 预警是否发给**当前形态**（完整版 / 轻量版）。
+
+    规则：`edition` 留空或写 `both` ⇒ 两版都发；写 `full` / `lite` ⇒ 只发给那一版。
+    判不出当前形态时**不拦**（宁可多提示，也别漏掉安全预警）。
+    """
+    target = _normalize_edition(item.get("edition"))
+    if target == "both":
+        return True
+    current = str(edition or "").strip().lower()
+    if current in ("l", "lite", "轻量版"):
+        current = "lite"
+    elif current in ("f", "full", "universal", "完整版"):
+        current = "full"
+    else:
+        current = ""
+    if not current:
+        try:
+            from . import edition as _edition
+
+            current = _edition.current()
+        except Exception:  # noqa: BLE001
+            return True
+    return target == current
 
 
 def version_applies(item: dict[str, Any], version: str | None = None) -> bool:
@@ -280,7 +350,9 @@ def load_document(config: Any, *, timeout: int = 20,
 # ---------------------------------------------------------------- 对外
 def overview(config: Any, *, document: dict[str, Any] | None = None,
              log: Callable[[str], None] | None = None,
-             version: str | None = None) -> dict[str, Any]:
+             version: str | None = None,
+             edition: str | None = None,
+             language: str | None = None) -> dict[str, Any]:
     """给界面用的总览。
 
     * `announcements`：未读且未过期、**且适用于本地版本**的 info/warning（**只弹一次**）；
@@ -296,6 +368,8 @@ def overview(config: Any, *, document: dict[str, Any] | None = None,
                 "hold_seconds": DEFAULT_HOLD_SECONDS}
     seen = {str(i) for i in (_read_json(seen_path(config)).get("ids") or [])}
     now = datetime.now()
+    # 界面语言：显式传入优先，其次 config.language（设置页可见），兜底中文。
+    lang = str(language or getattr(config, "language", "") or "zh").strip().lower()
     announcements: list[dict[str, Any]] = []
     critical: list[dict[str, Any]] = []
     for item in normalize(doc):
@@ -303,10 +377,12 @@ def overview(config: Any, *, document: dict[str, Any] | None = None,
             continue
         if not version_applies(item, version):
             continue                      # 这条是给别的版本发的（或只对旧版本有意义）
+        if not edition_applies(item, edition):
+            continue                      # 这条只发给另一个形态（完整版 / 轻量版）
         if item["level"] == "critical":
-            critical.append({**item, "hold_seconds": hold_seconds(doc, item)})
+            critical.append({**localized(item, lang), "hold_seconds": hold_seconds(doc, item)})
         elif item["id"] not in seen:
-            announcements.append(item)
+            announcements.append(localized(item, lang))
     return {
         "ok": True,
         "announcements": announcements,

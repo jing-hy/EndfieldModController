@@ -36,6 +36,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from . import edition
 from .config import AppConfig
 
 # 本次进程的唯一标识：同一进程里"一次启动"只采样一次计数
@@ -164,6 +165,16 @@ WATCHED: tuple[WatchedFile, ...] = (
 )
 
 
+#: ReShade 链路专属的分组（`dlss5` 那一族）。Lite 没有这条链路 ⇒ 这些文件永远不会
+#: 出现，盯它们只会在"从完整版切过来"后连续几次判成"被杀毒删了"。
+_RESHADE_GROUPS = frozenset({"dlss5"})
+
+
+def _skipped(item: WatchedFile) -> bool:
+    """这个项在本版本里**不该被监听**吗（Lite 跳过 ReShade 那几项）。"""
+    return edition.is_lite() and item.group in _RESHADE_GROUPS
+
+
 def _root(config: AppConfig) -> Path:
     try:
         return Path(config.base_dir)
@@ -179,6 +190,8 @@ def _path_for(config: AppConfig, item: WatchedFile) -> Path | None:
     它下一轮就会被算成"被删了一次"，再下一轮就弹一个纯属冤枉的窗。
     这个守护的全部价值都在"**不误报**"上，宁可这一轮不盯它。
     """
+    if _skipped(item):
+        return None                  # Lite 不含 ReShade 链路 ⇒ 这些路径不在本版本里（why）
     if item.base_kind == "system32":
         root = os.environ.get("SystemRoot") or r"C:\Windows"
         base = Path(root) / "System32"
@@ -464,6 +477,8 @@ def status(config: AppConfig) -> dict[str, Any]:
     state = load_state(config)
     rows = []
     for item in WATCHED:
+        if _skipped(item):
+            continue                     # Lite 不盯 ReShade 那几项，也不必列为"不适用"
         entry = state["files"].get(item.key)
         if not isinstance(entry, dict):
             continue

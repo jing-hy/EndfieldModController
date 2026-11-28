@@ -37,6 +37,7 @@ from typing import Any, Callable
 
 from .config import AppConfig, resource_root
 from . import core
+from . import edition
 
 MANIFEST_NAME = "existing_reshade_files.json"
 ADDON_NAME = "endfieldmodcontroller.addon64"
@@ -117,6 +118,9 @@ def reshade_base_wanted(config: AppConfig) -> tuple[bool, str]:
 
     两个入口（DLSS5 神经渲染 / 第一人称视角）**任意一个开着**就要底座。
     """
+    # ★ Lite 版本**不含 ReShade** ⇒ 一个底座都不注入（底座/面板/锁键/总闸全从这一处跟着关）。
+    if edition.is_lite():
+        return False, "轻量版不含 ReShade"
     # ★★ **总闸优先**（2026-10-09）：「禁用所有 ReShade 注入」开着就一个底座都不注入 ——
     #    这正是用户明说的效果（「这个开了之后就像现在 dlss4 的那个一样阻止所有 reshade 注入」）。
     #    放在最前面：它必须**压过** minimal_injection 与三个 addon 开关，否则用户点了总闸
@@ -220,6 +224,9 @@ def ensure_panel_font(config: AppConfig, *, log: Callable[[str], None] | None = 
     生效那份的 `[STYLE] Font=` 永远是空的，用户看到的就是「中文没了（方块）」
     （用户 2026-10-04 反馈）。launcher 的 `sync_effective_reshade_ini()` 会把生效那份传进来。
     """
+    # Lite 不写任何 ReShade 文件（ReShade.ini 也算）—— 改字体等于写它，直接不碰。
+    if edition.is_lite():
+        return {"changed": False, "reason": "轻量版不含 ReShade"}
     if not getattr(config, "reshade_panel_font", True):
         return {"changed": False, "reason": "面板字体开关已关闭"}
     ini_path = Path(ini) if ini is not None else config.dlss5_ini_path
@@ -321,6 +328,11 @@ def deploy_panel(
     `user_ini_path.txt`（addon 靠最后这个找到 `d3dx_user.ini`）。
     任何一步失败都**记进结果与日志**，绝不静默跳过（这正是上次翻车的地方）。
     """
+    # Lite 不写任何 ReShade 文件：面板 addon / actions.tsv 都不该落进 dlss5 目录。
+    if edition.is_lite():
+        return {"addon_source": "", "base_dirs": [], "deployed": [], "warnings": [],
+                "possible": False, "reason": "轻量版不含 ReShade", "takeover": False,
+                "action_count": 0}
     addon_source = built_addon_path()
     actions_source = Path(controller_dir) / "actions.tsv"
     deployed: list[str] = []

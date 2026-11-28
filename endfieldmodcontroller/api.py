@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import activation, core, dependencies, diagnostics, dlss5_fetcher, downloads, fsutil, hot_reload, integrity, launcher, moddl, modstore, reshade, reshade_integration, runtime_assets, runtime_deps, selfupdate
+from . import activation, core, dependencies, diagnostics, dlss5_fetcher, downloads, edition, fsutil, hot_reload, integrity, launcher, moddl, modstore, reshade, reshade_integration, runtime_assets, runtime_deps, selfupdate
 from .config import AppConfig, auto_detect_migoto_loader, auto_detect_official_launcher, auto_detect_xxmi, cached_detect
 
 
@@ -741,6 +741,10 @@ class EndfieldModControllerApi:
         #    点「DLSS4 多帧生成」被"未知组件: mfg"直接拒掉，用户看到的是"开了没反应"。
         if component not in launcher.COMPONENT_ADDON_GLOBS:
             return {"ok": False, "message": f"未知组件: {component}"}
+        # Lite 不含 ReShade：DLSS5 神经渲染与第一人称都是 ReShade addon ⇒ 直接拒，
+        # 且**一个字都不改配置**（两版共用同一份 config.json）。
+        if edition.is_lite() and component in {"dlss5", "firstperson"}:
+            return {"ok": False, "message": "轻量版不含 ReShade 相关功能"}
         # ★★ **总闸最优先**（2026-10-09 用户定：「不是 dlss4 互斥，是**禁用**，直接不能点开
         #    开关那种」）：它开着时，任何依赖 ReShade 的开关都**直接拒、且不写配置**
         #    （前端会把开关弹回去）。刻意放在显卡判据**之前** —— 总闸优先级最高，
@@ -832,6 +836,9 @@ class EndfieldModControllerApi:
         """
         from . import launcher
 
+        # Lite 不含 ReShade：统一管理器面板住在 ReShade 里 ⇒ 直接拒，不改配置。
+        if edition.is_lite():
+            return {"ok": False, "message": "轻量版不含 ReShade 相关功能"}
         # ★★ 总闸开着 ⇒ 这个也"点不开"（2026-10-09，与 `set_component_addon` 同一道闸门）
         if enabled and bool(getattr(self.config, "reshade_disabled", False)):
             return {
@@ -886,6 +893,10 @@ class EndfieldModControllerApi:
         """
         from . import game_clean, launcher
 
+        # Lite 不含 ReShade：这道总闸本身就是 ReShade 的东西（它还会写 4 个配置键）
+        # ⇒ 直接拒，什么都不改。
+        if edition.is_lite():
+            return {"ok": False, "message": "轻量版不含 ReShade 相关功能"}
         enabled = bool(enabled)
         closed: list[str] = []
         warnings: list[str] = []
@@ -1146,11 +1157,32 @@ class EndfieldModControllerApi:
             ),
         }
 
-    def open_path_in_explorer(self, target: str) -> dict[str, Any]:
-        """打开文件/文件夹（崩溃包用）。"""
+    def open_path_in_explorer(self, target: str, fallback_parent: bool = False) -> dict[str, Any]:
+        """打开文件/文件夹（崩溃包、设置页「运行目录」都用它）。
+
+        `fallback_parent=True`：目标**还没生成**时（例如控制器产物目录 MC_Controller，
+        只有点过「生成控制器」才存在）退到最近的已存在上级目录再打开，并回一句说明 ——
+        设置页「运行目录」点「打开」不该只丢一句「路径不存在」。
+        """
         from . import diagnostics
 
-        return diagnostics.open_path(self.config, Path(target))
+        result = diagnostics.open_path(self.config, Path(target))
+        if result.get("ok") or not fallback_parent:
+            return result
+        candidate = Path(target)
+        for _ in range(4):
+            parent = candidate.parent
+            if parent == candidate:
+                break
+            candidate = parent
+            if not parent.is_dir():
+                continue
+            opened = diagnostics.open_path(self.config, parent)
+            if opened.get("ok"):
+                opened["message"] = (f"「{Path(target).name}」还没生成，已打开它的上级目录：{parent}")
+                opened["fallback"] = str(parent)
+            return opened
+        return result
 
     def crash_watch_state(self) -> dict[str, Any]:
         """崩溃监控线程状态。"""
@@ -1544,15 +1576,17 @@ class EndfieldModControllerApi:
         )
         report.setdefault("manifest", {}).update(runtime_deps.builtin_report(self.config))
         # 随包分发的 DLSS 运行库 / DLSS5 组件（压缩分卷，缺失时首次启动自动展开）
-        try:
-            report["manifest"].update(runtime_assets.asset_report(self.config))
-        except Exception:  # noqa: BLE001
-            pass
-        # 有公开上游的 DLSS5 组件（可在依赖页一键在线安装）
-        try:
-            report["manifest"].update(dlss5_fetcher.component_report(self.config))
-        except Exception:  # noqa: BLE001
-            pass
+        # Lite 跳过这两段：它们列的全是 ReShade / DLSS5 侧组件（本版本不装也不展开）。
+        if not edition.is_lite():
+            try:
+                report["manifest"].update(runtime_assets.asset_report(self.config))
+            except Exception:  # noqa: BLE001
+                pass
+            # 有公开上游的 DLSS5 组件（可在依赖页一键在线安装）
+            try:
+                report["manifest"].update(dlss5_fetcher.component_report(self.config))
+            except Exception:  # noqa: BLE001
+                pass
         # 乳摇插件也作为一个依赖项出现在列表里（与其他依赖同构，不单列按钮）
         try:
             from . import secondary_motion as sbm_mod
@@ -1761,7 +1795,10 @@ class EndfieldModControllerApi:
         # ★★ 总闸一致性收敛（2026-10-13 用户实测：「现在还是聚合面板和禁用 reshade 都开，
         #    只要禁用 reshade 开了，那几个都被关」）。放在这里是因为前端**必然会调
         #    get_state()**（界面一活就会调），所以升级上来的老配置也能被自动纠正一次。
-        self._enforce_master_switch_consistency()
+        # Lite 跳过：它会**写配置**把用户那几个开关改成关，而两版共用同一份 config.json，
+        #           切回 Universal 时用户原来的值必须原样还在（Lite 对 ReShade 配置只读）。
+        if not edition.is_lite():
+            self._enforce_master_switch_consistency()
         from . import desktop_root, diagnostics, poser, secondary_motion
 
         # 留痕：用来判断前端是否真的完成了初始化（界面空白时先看这几行有没有）
@@ -1775,6 +1812,9 @@ class EndfieldModControllerApi:
         render_api = reshade_integration.detect_render_api(game_dir) if game_dir is not None else "unknown"
         payload: dict[str, Any] = {
             "config": self.config.to_dict(),
+            # 版本形态（前端据此灰掉 ReShade 相关开关）：Lite 恒为"轻量版不含 ReShade"。
+            "edition": edition.current(),
+            "reshade_forced_disabled": edition.is_lite(),
             # **主路径**（= 程序所在目录 = config.json / runtime / library 的基准）。
             # 设置页第一项显示它：用户把程序目录改名/搬走后，一眼就能看出程序认的是哪个
             # 目录（2026-10-02 群反馈：「我把主路径改了文件名，然后他没识别出来」）。
@@ -1910,6 +1950,10 @@ class EndfieldModControllerApi:
 
     def save_config(self, data: dict[str, Any]) -> dict[str, Any]:
         self._invalidate_mods()
+        # 本机 Web 服务（UI 自动化）的开关/端口可能被这次保存改到 —— 先记旧值，
+        # 写完配置再对比并立刻启停（不然要重启程序才生效）。
+        ui_before = (bool(getattr(self.config, "ui_api_enabled", False)),
+                     int(getattr(self.config, "ui_api_port", 0) or 0))
         known = set(self.config.to_dict().keys())
         for key, value in data.items():
             if key in known:
@@ -1947,7 +1991,15 @@ class EndfieldModControllerApi:
                 staged = self.prepare()
             except Exception as exc:  # noqa: BLE001 - 重铺失败不该让"保存"整体失败
                 launcher._append_log(self.config, f"总开关已保存，但重铺 staging 失败: {exc}")
+        # 本机 Web 服务的开关/端口改到 ⇒ 立刻启停（失败只报一句，保存本身照旧成功）。
+        ui_after = (bool(getattr(self.config, "ui_api_enabled", False)),
+                    int(getattr(self.config, "ui_api_port", 0) or 0))
+        ui_result: dict[str, Any] | None = None
+        if ui_after != ui_before:
+            ui_result = self._apply_ui_api()
         payload: dict[str, Any] = {"ok": True, "config": self.config.to_dict()}
+        if ui_result is not None:
+            payload["ui_api"] = ui_result
         if staged is not None:
             # ⚠️ prepare() **成功时不返回 ok**（成功就是那一堆字段；失败才给
             #    ok: False + message）⇒ 判据是"没有明确的 False"，不是"有 True"。
@@ -1958,6 +2010,30 @@ class EndfieldModControllerApi:
             )
         return payload
 
+    def _apply_ui_api(self) -> dict[str, Any]:
+        """按当前配置启动 / 停止本机 Web 服务（UI 自动化），返回给前端的状态。
+
+        用户 2026-11-28：「那个 api 接口要留个开关，默认关闭」——开关一改就立刻生效，
+        不让用户重启程序（关掉时必须真的 `stop()`，否则端口还开着）。
+        """
+        from . import launcher as _launcher
+        from . import ui_automation
+
+        try:
+            ui_automation.stop()
+            if not bool(getattr(self.config, "ui_api_enabled", False)):
+                _launcher._append_log(self.config, "本机 Web 服务（UI 自动化）已关闭")
+                return {"ok": True, "running": False}
+            result = ui_automation.start(
+                self.config,
+                log=lambda message: _launcher._append_log(self.config, message),
+                port=int(getattr(self.config, "ui_api_port", 0) or 0),
+            )
+            return result if isinstance(result, dict) else {"ok": True}
+        except Exception as exc:  # noqa: BLE001
+            _launcher._append_log(self.config, f"WARN 切换本机 Web 服务失败: {exc}")
+            return {"ok": False, "message": str(exc)}
+
     def set_hotkey_takeover(self, enabled: bool) -> dict[str, Any]:
         """启动页「游戏内 Mod 面板」开关的后端。
 
@@ -1966,6 +2042,10 @@ class EndfieldModControllerApi:
         这条链路直接失效（见 `core.HOTKEY_LOCK_ENABLED` 的说明）。所以这个开关现在
         只做一件事：**把面板部署进 ReShade 会读的目录**；锁键动作已停用。
         """
+        # Lite 不含 ReShade：这个开关管的是"把面板铺进 ReShade 会读的目录" ⇒ 直接拒，
+        # 不改配置（它还会顺带写 minimal_injection）。
+        if edition.is_lite():
+            return {"ok": False, "message": "轻量版不含 ReShade 相关功能"}
         # ★★ 总闸开着 ⇒ 这个也"点不开"（2026-10-13 用户实测报的 bug，原话：
         #    「现在如果开锁快捷键，就算开了防 reshade 注入，统一面板的开关也会开」）。
         #    根因：下面那句**无条件**把 `minimal_injection` 置 True，**绕过了**
@@ -2490,13 +2570,18 @@ class EndfieldModControllerApi:
         # `len(依赖清单) or 1` —— 清单为空时 `0 or 1` **凭空加了 1 项**。
         # 依赖清单为空 = 真的没有要处理的依赖项，就该加 0。
         est = 0
-        try:
-            est += len(runtime_assets.manifest_entries(self.config))
-        except Exception:  # noqa: BLE001 - 读不到就当没有，别虚报
-            pass
+        # Lite 不含 ReShade：随包资产与 DLSS5 组件这两类**一项都不会跑**，分母里也不能算，
+        # 否则进度条永远到不了 100%（"完成，但总差几项"那种假失败）。
+        lite = edition.is_lite()
+        if not lite:
+            try:
+                est += len(runtime_assets.manifest_entries(self.config))
+            except Exception:  # noqa: BLE001 - 读不到就当没有，别虚报
+                pass
         if self.config.use_builtin_runtime:
             est += 4                                  # XXMI / XXMI-Libs / EFMI / Poser
-        est += len(dlss5_fetcher.COMPONENTS)          # ReShade 底座 / DLSS5-Feeder / iMMERSE
+        if not lite:
+            est += len(dlss5_fetcher.COMPONENTS)      # ReShade 底座 / DLSS5-Feeder / iMMERSE
         try:
             est += len(dependencies.load_manifest(self.config.dependency_manifest_path))
         except Exception:  # noqa: BLE001
@@ -3027,6 +3112,9 @@ class EndfieldModControllerApi:
     # launch
     # ------------------------------------------------------------------
     def download_reshade(self, version: str = reshade.DEFAULT_VERSION) -> dict[str, Any]:
+        # Lite 不含 ReShade：连下载都不做（本版本没有这个能力，也不写配置）。
+        if edition.is_lite():
+            return {"ok": False, "message": "轻量版不含 ReShade 相关功能"}
         result = reshade.download_reshade(self.config.reshade_runtime_path, version)
         if not self.config.reshade_dll:
             self.config.reshade_dll = self.config.store_path(result["dll"])
@@ -4132,8 +4220,8 @@ class EndfieldModControllerApi:
             if not fresh_links:
                 return {"ok": True, "added": 0, "skipped": skipped, "queued": len(current),
                         "message": "这些已经在下载队列里了", "items": current}
-            if not current or self._mod_dl.get("done", True):
-                # 上一批已结束（或压根没有）⇒ 开一份新记录；否则就是纯追加，不动计时与目录。
+            if not current:
+                # 上一批已结束（或压根没有）⇒ 开一份新记录。
                 self._mod_dl = {
                     "cancel": False, "pause": False,
                     "started_at": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -4141,6 +4229,15 @@ class EndfieldModControllerApi:
                     "dir": str(moddl.downloads_dir(self.config)),
                     "items": [],
                 }
+            else:
+                # 没重启就**不清**「本次已入库」（2026-11-28 用户：「下载页的本次已入库不应该
+                # 下完就清零」）—— 旧逻辑在上一批 done 时重建 `_mod_dl`，把已入库的项整份丢掉，
+                # 下载页的「本次已入库」会变成 0 / 卡片消失。只重置批次标志，items 保留。
+                self._mod_dl["done"] = False
+                self._mod_dl["cancel"] = False
+                self._mod_dl["pause"] = False
+                self._mod_dl["started_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+                self._mod_dl["dir"] = str(moddl.downloads_dir(self.config))
             new_items = [
                 {"url": link, "origin_url": link,      # origin_url = 用户粘的那个（香蕉网常是页面地址）
                  "name": moddl.file_name_from(link), "status": "等待中",
@@ -6283,13 +6380,107 @@ class EndfieldModControllerApi:
     # 程序自身版本 / 自我更新（右上角的更新检测）
     # ------------------------------------------------------------------
     def get_app_info(self) -> dict[str, Any]:
-        from .version import REPO_URL
+        from . import edition
+        from .version import REPO_URL, WINDOW_TITLE
 
         return {
             "version": selfupdate.current_version(),
+            "edition": edition.current(),
+            "edition_label": edition.label(),
+            "title": WINDOW_TITLE,
             "repo": REPO_URL,
             "frozen": selfupdate.is_frozen(),
             "exe": str(selfupdate.executable_path() or ""),
+        }
+
+    # ------------------------------------------------------------------
+    # 设置 → Web 服务 / 调试 / 关于（2026-11-28 用户要求，参考 MaaEnd）
+    # ------------------------------------------------------------------
+    def ui_api_status(self) -> dict[str, Any]:
+        """设置 → Web 服务：开关、运行状态、地址与 token 文件位置。"""
+        from . import ui_automation
+
+        info = dict(ui_automation.endpoint_info(self.config))
+        info["enabled"] = bool(getattr(self.config, "ui_api_enabled", False))
+        info["configured_port"] = int(getattr(self.config, "ui_api_port", 0) or 0)
+        return info
+
+    def choose_background_image(self) -> dict[str, Any]:
+        """界面背景图：系统文件框选一张图片，存进配置（留空 = 不显示）。"""
+        picked = self.choose_path(
+            directory=False,
+            title="选择界面背景图片",
+            file_types=("图片 (*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif)",),
+        )
+        if not picked.get("ok"):
+            return picked
+        path = Path(str(picked.get("path") or ""))
+        allowed = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"}
+        if path.suffix.lower() not in allowed:
+            return {"ok": False, "message": f"不是支持的图片格式：{path.suffix or '（无扩展名）'}"}
+        if not path.is_file():
+            return {"ok": False, "message": f"找不到这个文件：{path}"}
+        self.config.ui_background_image = self.config.store_path(path)
+        try:
+            self.config.save()
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "message": f"写配置失败：{exc}"}
+        launcher._append_log(self.config, f"界面背景图：{path}")
+        return {"ok": True, "path": str(path), "stored": self.config.ui_background_image}
+
+    def clear_background_image(self) -> dict[str, Any]:
+        """清除界面背景图（恢复成纯色底）。"""
+        self.config.ui_background_image = ""
+        try:
+            self.config.save()
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "message": f"写配置失败：{exc}"}
+        launcher._append_log(self.config, "界面背景图：已清除")
+        return {"ok": True}
+
+    def clear_run_logs(self) -> dict[str, Any]:
+        """「立即清理运行日志」：按保留天数清理一次（忽略自动清理开关）。"""
+        from . import diagnostics
+
+        result = diagnostics.auto_clear_logs(self.config, force=True)
+        removed = result.get("removed") or []
+        result["message"] = (
+            f"已清理 {len(removed)} 个超过 {result.get('kept_days')} 天的日志"
+            if removed else "没有需要清理的旧日志"
+        )
+        return result
+
+    def debug_info(self) -> dict[str, Any]:
+        """设置 → 调试 / 关于：运行环境与关键路径（只读，失败项留空）。"""
+        import platform
+        import sys as _sys
+
+        from . import edition
+        from . import ui_automation
+        from .version import __version__
+
+        webview_version = ""
+        try:
+            import webview as _webview
+
+            webview_version = str(getattr(_webview, "__version__", "") or "")
+        except Exception:  # noqa: BLE001
+            pass
+        api_info = dict(ui_automation.endpoint_info(self.config))
+        return {
+            "version": __version__,
+            "edition": edition.current(),
+            "edition_label": edition.label(),
+            "frozen": selfupdate.is_frozen(),
+            "exe": str(selfupdate.executable_path() or ""),
+            "data_root": str(self.config.base_dir),
+            "config": str(getattr(self.config, "_config_path", "") or ""),
+            "logs": str(self.config.runtime_path / "logs"),
+            "os": platform.platform(),
+            "arch": platform.machine(),
+            "python": _sys.version.split()[0],
+            "webview": webview_version,
+            "ui_api": api_info,
         }
 
     # ------------------------------------------------------------------
