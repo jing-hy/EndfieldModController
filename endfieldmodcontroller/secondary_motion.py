@@ -391,30 +391,40 @@ def ensure_injection(config: AppConfig, log: Callable[[str], None] | None = None
             "warnings": warnings,
         }
 
-    for name in PROXY_NAMES:
-        target = game / name
-        source = _pick(candidates, "plugin", name)
-        if source is None:
-            warnings.append(f"注入源缺少 {name}，跳过")
-            continue
-        if _is_proxy(target):
-            continue
-        if target.is_file():
-            backup = game / f"{name}.bak"
-            if not backup.is_file():
-                shutil.copy2(target, backup)
-                actions.append(f"备份原版 {name} -> {name}.bak")
-        elif (game / f"{name}.bak").is_file():
-            # 原版已在 .bak，直接放 proxy
-            pass
-        try:
-            shutil.copy2(source, target)
-            actions.append(f"安装注入 {name}")
-        except OSError as exc:
-            warnings.append(f"写入 {name} 失败: {exc}")
+    # ★★ 2026-11-28：**不再用"顶替系统模块"的方式注入乳摇**，并自动把以前铺的还原。
+    #
+    #    `d3dcompiler_47.dll` / `vulkan-1.dll` 必须是游戏原版（`docs/dev/可用状态配方.md`
+    #    的"游戏能进"基线）。实测后果（诊断包 diagnostics-20261128-220053）：被本程序铺的
+    #    loader proxy 顶替后，一键启动的每次都在 25~33 秒后 `0xC0000135` / `0xC0000005`
+    #    退出，而同机**独立启动 EFMI**（不走这条重铺路径）能进。
+    #    本文件自己的注释里也早就写着"proxy 方式实测 65 秒崩"。
+    #
+    #    所以改成：**已铺的还原、新的一律不铺**；乳摇改为由 XXMI 注入库加载 `plugin\sbm.dll`
+    #    （`launcher.dlss5_injection_targets` 会列 `config.secondary_motion_dll`）。
+    #    用户 2026-11-28：「能不能自动做掉修复，不要依赖用户」—— 这一步就是自动修。
+    restored = _restore_system_modules(config, game, log)
+    for action in restored:
+        actions.append(action)
 
     plugin_target = game / "plugin" / PLUGIN_NAME
     plugin_source = _pick(candidates, "plugin", PLUGIN_NAME)
+    # ★ 2026-11-28：不再铺 proxy 之后，乳摇要靠**注入库**把 sbm.dll 带进进程
+    #   （`launcher.dlss5_injection_targets` 读 `config.secondary_motion_dll`）。
+    #   该字段为空时自动指向插件源 —— 否则"proxy 不铺了 + 注入库也不列"⇒ 乳摇直接没了，
+    #   而这属于"用户什么都没做却少了个功能"，不能留给他自己发现。
+    if (plugin_source is not None
+            and getattr(config, "secondary_motion_injection", False)
+            and not str(getattr(config, "secondary_motion_dll", "") or "").strip()):
+        # 指向**游戏目录里那份** `plugin\sbm.dll` —— 它就是原先 proxy loader 加载的同一个文件，
+        # 路径也比工具目录/随包源短（`config.secondary_motion_dll` 的说明里要求"短路径"）。
+        config.secondary_motion_dll = str(plugin_target)
+        try:
+            config.save()
+            actions.append(f"乳摇改为经注入库加载：{plugin_target}")
+        except (OSError, ValueError) as exc:
+            # `AppConfig.save()` 在"没加载过配置文件"时抛 ValueError（测试就常这样构造）。
+            # 内存里已经赋值，本轮 `dlss5_injection_targets` 照样读得到 —— 不该因此中断。
+            warnings.append(f"乳摇已改为经注入库加载（本次运行有效，但配置没写盘：{exc}）")
     # ⚠️⚠️ **不能只"缺了才铺"**（2026-10-05 用户实测暴露的问题）。
     #
     # 原逻辑是 `if not plugin_target.is_file()`，于是**游戏目录里那份一旦存在就永不再更新**
@@ -556,6 +566,48 @@ def ensure_injection(config: AppConfig, log: Callable[[str], None] | None = None
         "warnings": warnings,
         "injected": status(config)["injected"],
     }
+
+
+def _restore_system_modules(config: AppConfig, game: Path,
+                            log: Callable[[str], None] | None = None) -> list[str]:
+    """把游戏目录里被 loader proxy 顶替的系统模块还原成**原版**（幂等）。
+
+    `d3dcompiler_47.dll` / `vulkan-1.dll` 必须是游戏原版（`docs/dev/可用状态配方.md`
+    的"游戏能进"基线）。缺 `.bak` 时从 `System32` 补一份；两处都拿不到就**保留现状**
+    并如实说明（"删了 proxy 却没原版"会让游戏彻底起不来，历史上踩过）。
+    """
+    actions: list[str] = []
+    for name in PROXY_NAMES:
+        target = game / name
+        try:
+            if not (target.is_file() and _is_proxy(target)):
+                continue
+        except OSError:
+            continue
+        backup = game / f"{name}.bak"
+        if not backup.is_file():
+            ensure_proxy_backup(game, name, log)
+        if not backup.is_file():
+            _log(log, f"WARN {name}: 没有原版备份、系统里也找不到同名原版 —— 保留现状（删了会起不来）")
+            continue
+        try:
+            from . import fsutil
+
+            fsutil.write_bytes_atomic(target, backup.read_bytes())
+            actions.append(f"还原原版 {name}")
+        except OSError as exc:
+            _log(log, f"WARN 还原 {name} 失败: {exc}")
+    return actions
+
+
+def restore_system_modules(config: AppConfig,
+                           log: Callable[[str], None] | None = None) -> dict[str, Any]:
+    """公开入口：把被顶替的系统模块还原（启动流程在拉起 XXMI 前自动调）。"""
+    game = game_dir(config)
+    if game is None:
+        return {"ok": False, "actions": [], "message": "未定位到游戏目录"}
+    actions = _restore_system_modules(config, game, log)
+    return {"ok": True, "actions": actions, "game": str(game)}
 
 
 def remove_injection(config: AppConfig, log: Callable[[str], None] | None = None) -> dict[str, Any]:

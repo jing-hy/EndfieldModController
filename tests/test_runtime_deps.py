@@ -184,12 +184,21 @@ class RuntimeDepsTests(unittest.TestCase):
         runtime_deps._latest_release_asset = boom
         runtime_deps._download_extract = boom
         runtime_deps._release_info = boom
+        # ⚠️ **必须一起打桩**（2026-11-28 实测）：`ensure_streamline` 在 force=False 时仍会读
+        #   宿主机的 `Player.log` 判断"Streamline manifest 是否坏"，一旦命中就把 force 改成 True
+        #   并真的去下 263 MB 的 SDK —— 在开发机上这条测试因此要跑 **59~97 秒**（全是 SSL 下载）。
+        #   "启动流程不该联网" 这条断言不该依赖宿主机日志内容。
+        from endfieldmodcontroller import crashwatch
+
+        original_broken = crashwatch.streamline_manifest_broken
+        crashwatch.streamline_manifest_broken = lambda cfg: ""
         try:
             results = runtime_deps.ensure_all(self.config)
         finally:
             runtime_deps._latest_release_asset = original_latest
             runtime_deps._download_extract = original_extract
             runtime_deps._release_info = original_release
+            crashwatch.streamline_manifest_broken = original_broken
 
         by_key = {r.key: r for r in results}
         for key in ("XXMI", "XXMI-Libs", "EFMI"):

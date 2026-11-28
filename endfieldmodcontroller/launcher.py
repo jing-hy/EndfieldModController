@@ -3580,14 +3580,29 @@ def launch(
         #   同机对照：独立启动 EFMI 不走这条重铺路径，两个文件是原版，就能进游戏。
         hijacked = _system_modules_hijacked(config)
         if hijacked:
+            # ★★ 2026-11-28（用户要求「能不能自动做掉修复，不要依赖用户」）：
+            #    **先自己修**，别把"你去点清理/去关开关"丢回给用户。
+            #    `restore_system_modules` 会用 `.bak` 还原，缺 `.bak` 时从 System32 补一份原版。
             names = "、".join(hijacked)
-            _append_log(config, f"启动已中止：{names} 被 loader proxy 顶替（会顶掉游戏原版）")
-            raise LaunchError(
-                f"游戏目录的 {names} 被 Poser / 乳摇 的 loader proxy 顶替了 —— "
-                f"这个状态游戏会在启动约 30 秒后崩（实测 0xC0000135 / 0xC0000005），"
-                f"所以这次不启动。到设置页「清理游戏目录注入」还原原版，"
-                f"或把 Poser / 乳摇 的注入开关关掉后重试。"
-            )
+            _append_log(config, f"检测到 {names} 被 loader proxy 顶替 —— 自动还原原版…")
+            try:
+                from . import secondary_motion
+
+                fixed = secondary_motion.restore_system_modules(
+                    config, log=lambda m: _append_log(config, str(m)))
+                for action in (fixed.get("actions") or []):
+                    _append_log(config, f"注入自检: {action}")
+            except Exception as exc:  # noqa: BLE001 —— 自动修复失败时下面还有兜底
+                _append_log(config, f"WARN 自动还原系统模块失败（继续检查）: {exc}")
+            hijacked = _system_modules_hijacked(config)
+            if hijacked:
+                still = "、".join(hijacked)
+                _append_log(config, f"启动已中止：{still} 仍是 loader proxy（自动还原没成功）")
+                raise LaunchError(
+                    f"游戏目录的 {still} 仍是 loader proxy（自动还原没成功：缺原版备份，或文件被占用）。"
+                    f"这个状态游戏会在启动约 30 秒后崩（实测 0xC0000135 / 0xC0000005）。"
+                    f"到设置页「清理游戏目录注入」可再试一次。"
+                )
 
     # ⚠ **2026-10-01 根因修复：EFMI 的 `skip_early_includes_load` 必须为 0。**
     #   EFMI 的 `d3dx.ini` 出厂默认是 `skip_early_includes_load = 1`（配套

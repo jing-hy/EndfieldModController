@@ -24,6 +24,7 @@ from endfieldmodcontroller import runtime_deps, updates
 from endfieldmodcontroller.config import AppConfig
 
 
+
 @pytest.fixture()
 def cfg(tmp_path: Path) -> AppConfig:
     (tmp_path / "runtime").mkdir(parents=True, exist_ok=True)

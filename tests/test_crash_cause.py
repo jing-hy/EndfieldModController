@@ -24,6 +24,21 @@ from endfieldmodcontroller import crashwatch, diagnostics, runtime_assets
 from endfieldmodcontroller.config import AppConfig
 
 
+@pytest.fixture(autouse=True)
+def _no_host_wide_scans(monkeypatch):
+    """诊断包用例不扫宿主机的 Temp / WER 目录。
+
+    2026-11-28：create_diagnostic_bundle() 会调 unity_crash_logs / wer_report_paths /
+    player_log_candidates，它们递归扫 %TEMP%（depth 5）。开发机上那两个目录很肥，
+    实测一条诊断包用例要 77 秒（占当时全量的 28%）；而这些用例断言的是"包里有没有
+    我们刚写进去的那几份"，与宿主机的历史崩溃日志无关。
+    产品侧同时给 _find_named_files 加了 8 秒预算（真实导出时兜底），这里再打桩。
+    """
+    monkeypatch.setattr(diagnostics, "unity_crash_logs", lambda limit=8: [])
+    monkeypatch.setattr(diagnostics, "wer_report_paths", lambda limit=8: [])
+    monkeypatch.setattr(diagnostics, "player_log_candidates", lambda limit=4: [])
+
+
 @pytest.fixture()
 def env(tmp_path, monkeypatch):
     config = AppConfig()

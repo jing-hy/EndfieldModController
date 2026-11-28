@@ -826,18 +826,29 @@ def _user_dirs() -> dict[str, Path | None]:
 
 
 def _find_named_files(root: Path | None, names: tuple[str, ...], *, depth: int = 3,
-                      limit: int = 8, prefer: tuple[str, ...] = ()) -> list[Path]:
-    """在 `root` 下限定深度找指定文件名（只读、失败返回空表）。
+                      limit: int = 8, prefer: tuple[str, ...] = (),
+                      budget_seconds: float = 8.0) -> list[Path]:
+    r"""在 `root` 下限定深度找指定文件名（只读、失败返回空表）。
 
     `prefer` 里的关键词命中时会**排前面**（例如 `endfield` / `hypergryph`）——
     同一台机器上常有别的 Unity 游戏，先给最可能是这个游戏的。
+
+    ★★ 2026-11-28 加**时间预算**：原来这里是"不限时地递归"，而它要扫的是
+    `%LOCALAPPDATA%\Temp` 与 `%TEMP%`（depth=5）。开发机/用过一阵的机器上这两个目录
+    动辄几万个子目录 —— 实测一次「导出诊断包」里有 **93 秒**花在这一个函数上
+    （`unity_crash_logs` 调它 3 次，每次 31 秒），而界面上只显示"导出中"，没有进度。
+    shortcut: 超预算就停（默认 8 秒/次），可能漏掉深层的崩溃日志；
+              要更全就调大 `budget_seconds`，或改成"先按 `prefer` 命中目录优先扫"。
     """
     if root is None or not root.is_dir():
         return []
     found: list[tuple[int, float, Path]] = []
+    deadline = time.monotonic() + max(0.0, float(budget_seconds))
     try:
         stack: list[tuple[Path, int]] = [(root, 0)]
         while stack:
+            if time.monotonic() > deadline:
+                break                      # 超预算：宁可少采几条，也不让用户干等
             current, level = stack.pop()
             if level >= depth:
                 continue

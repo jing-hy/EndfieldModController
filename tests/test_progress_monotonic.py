@@ -105,7 +105,7 @@ def test_progress_never_goes_backwards(tmp_path: Path, flaky_server: str) -> Non
             f"（序列前 24 个：{seen[:24]}）")
 
 
-def test_no_timed_out_object_errors(tmp_path: Path) -> None:
+def test_no_timed_out_object_errors(tmp_path: Path, monkeypatch) -> None:
     """轮询必须用 `select()` 探测 —— 不能出现 `cannot read from timed out object`。
 
     上一版拿 POLL_SECONDS 当 socket 超时、超时后 continue 再 read，
@@ -124,6 +124,11 @@ def test_no_timed_out_object_errors(tmp_path: Path) -> None:
             self.wfile.flush()
             time.sleep(4)                # 然后挂住（触发多次轮询）
 
+    # ⚠️ 2026-11-28：无数据窗口按"块大小 ÷ 实测速度"算（本文件那条链路看不到速度时给到
+    #   上限），实测这条要等 **20 秒**才走完"线路不通"。—— 这里压到 1 秒：
+    #    本测试要证的是"轮询用 select()、不产生 cannot read from timed out object"，
+    #    与窗口长短无关。
+    monkeypatch.setattr(fastnet, "_stall_window", lambda piece_bytes, mbps: 1.0)
     srv = socketserver.ThreadingTCPServer(("127.0.0.1", 0), _StallHandler)
     srv.daemon_threads = True
     port = srv.server_address[1]
