@@ -25,6 +25,20 @@ from endfieldmodcontroller import initialize, launcher, reshade_integration
 from endfieldmodcontroller.config import AppConfig
 
 FEED = "DLSS5_Feed@DLSS5_Feed.fx"
+
+@pytest.fixture(autouse=True)
+def _isolate_builtin_xxmi(monkeypatch):
+    """把"内置 XXMI 是否装好"打掉 —— 否则会读到**项目真实的** runtime/builtin/XXMI。
+
+    `AppConfig.builtin_runtime_dir` 默认是相对路径 `runtime/builtin`，测试构造的
+    AppConfig 不隔离它 ⇒ `use_builtin_runtime` 一参与判据，就会命中本仓库真实装好的
+    那份内置 XXMI（2026-11-28 实际发生过：测试把真实 `XXMI Launcher Config.json` 的
+    `game_folder` 改成了临时目录）。这里统一让它"找不到内置"。
+    """
+    from endfieldmodcontroller import config as config_mod
+
+    monkeypatch.setattr(config_mod, "builtin_xxmi_launcher", lambda root: None)
+
 LAUNCHPAD = "MartysMods_Launchpad@MartysMods_LAUNCHPAD.fx"
 
 
@@ -250,9 +264,10 @@ def test_nr_binding_check_flags_create_failure_only(tmp_path, monkeypatch):
     assert check()["ok"] is True
 
 
-def test_xxmi_launcher_falls_back_to_builtin(tmp_path):
+def test_xxmi_launcher_falls_back_to_builtin(tmp_path, monkeypatch):
     """`xxmi_launcher` 留空 → 自动找内置那份（用户 2026-10-01：「xxmi 如果留空应该就找内置
     正常会放的地方，没有就下载」）。"""
+    monkeypatch.undo()          # 这条要测真实的内置检测（文件级 fixture 默认把它打掉了）
     from endfieldmodcontroller.config import builtin_xxmi_launcher
 
     builtin = tmp_path / "runtime" / "builtin" / "XXMI" / "Resources" / "Bin"
@@ -308,3 +323,65 @@ def test_ensure_xxmi_game_folder_does_not_overwrite_user_game_exe(tmp_path, monk
     launcher.ensure_xxmi_game_folder(config, log=lambda _m: None)
 
     assert config.game_exe == r"D:\my\own\Endfield.exe"
+
+def test_ensure_xxmi_game_folder_clears_launcher_folder(tmp_path, monkeypatch):
+    r"""**清掉 `launcher_folder`**，否则 XXMI 会绕道官方启动器、游戏走 Vulkan 崩掉。
+
+    现场（诊断包 225854）：`launcher_folder = D:\Hypergryph Launcher` ⇒ XXMI 用
+    `StartMethod.NATIVE` 去启动 `1.6.0\Games.exe`（cmd_args 为空）⇒ 游戏拿不到
+    `-force-d3d11` ⇒ 走 Vulkan ⇒ 崩在 `nvoglv64!vk_gr2608GetInstanceProcAddr`。
+    清掉后回到 `game_launch=DIRECT` + `d3d11_mode_cmd_args=-force-d3d11`。
+    """
+    xxmi, launcher_exe = _fake_xxmi(tmp_path, importers={
+        "EFMI": {"Importer": {
+            "game_folder": str(tmp_path / "game"),
+            "launcher_folder": r"D:\Hypergryph Launcher",
+        }},
+    })
+    config = AppConfig(runtime_dir=str(tmp_path / "runtime"),
+                       xxmi_launcher=str(launcher_exe), game_exe=str(tmp_path / "game" / "Endfield.exe"))
+    monkeypatch.setattr(config, "save", lambda: None, raising=False)
+    monkeypatch.setattr(launcher, "xxmi_process_running", lambda _cfg: False)
+
+    state = launcher.ensure_xxmi_game_folder(config, log=lambda _m: None)
+
+    assert state["ok"] is True, state
+    data = json.loads((xxmi / "XXMI Launcher Config.json").read_text(encoding="utf-8"))
+    importer = data["Importers"]["EFMI"]["Importer"]
+    assert importer.get("launcher_folder") in ("", None), "必须清空，否则又绕去官方启动器"
+
+def test_use_builtin_runtime_wins_over_external_launcher_field(tmp_path, monkeypatch):
+    r"""开关「使用内置 XXMI/EFMI」开着，就以内置为准 —— 别被字段里的外部路径顶掉。
+
+    现场（诊断包 225854）：用户界面开关是开的，但 `xxmi_launcher` 字段里残留
+    `D:XXMIResourcesBinXXMI Launcher.exe` ⇒ 旧实现只判"填了且文件在"，
+    于是实际一直跑外部 XXMI + 外部 EFMI（日志的 launch command / config_path 都在 D:\XXMI）。
+    """
+    runtime = tmp_path / "runtime"
+    builtin = runtime / "builtin" / "XXMI" / "Resources" / "Bin" / "XXMI Launcher.exe"
+    builtin.parent.mkdir(parents=True)
+    builtin.write_bytes(b"MZ")
+    external = tmp_path / "ext" / "XXMI Launcher.exe"
+    external.parent.mkdir(parents=True)
+    external.write_bytes(b"MZ")
+    from endfieldmodcontroller import config as config_mod
+    monkeypatch.setattr(config_mod, "builtin_xxmi_launcher", lambda root: builtin)
+
+    on = AppConfig(runtime_dir=str(runtime), xxmi_launcher=str(external),
+                   use_builtin_runtime=True)
+    assert on.xxmi_launcher_path == builtin, "开关开着就该用内置"
+
+    off = AppConfig(runtime_dir=str(runtime), xxmi_launcher=str(external),
+                    use_builtin_runtime=False)
+    assert off.xxmi_launcher_path == external, "开关关着才用字段里的外部路径"
+
+
+def test_builtin_missing_falls_back_to_external_launcher(tmp_path):
+    """开关开着但内置其实没装 ⇒ 回落到外部路径（不能因此说"没有 XXMI"）。"""
+    runtime = tmp_path / "runtime"
+    external = tmp_path / "ext" / "XXMI Launcher.exe"
+    external.parent.mkdir(parents=True)
+    external.write_bytes(b"MZ")
+    cfg = AppConfig(runtime_dir=str(runtime), xxmi_launcher=str(external),
+                    use_builtin_runtime=True)
+    assert cfg.xxmi_launcher_path == external

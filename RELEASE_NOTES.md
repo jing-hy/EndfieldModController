@@ -1,5 +1,24 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 
+# v1.6.4
+
+本版修掉「走 EMC 一键启动 ⇒ 游戏进不去」的**具体环节**，并让「使用内置 XXMI/EFMI」这个开关真正生效。
+
+## 一、游戏不再被绕进 Vulkan（崩在显卡驱动那层）
+
+* 现场链条：XXMI 的 EFMI importer 里带着 `launcher_folder = D:\Hypergryph Launcher` ⇒ XXMI 会先去启动**官方启动器**（`1.6.0\Games.exe`，命令行参数为空）⇒ 游戏由官方启动器拉起、**拿不到 `-force-d3d11`** ⇒ 走 Vulkan ⇒ 崩在 `nvoglv64!vk_gr2608GetInstanceProcAddr → NvPresent64!NVP_Init_Vulkan → vulkan-1!vkResetEvent`。
+* 判据：那台机器的三份崩溃日志里**都没有** `Forcing GfxDevice: Direct3D 11` 这一行，却都有 `Vulkan PSO: Invalid or outdated unity cache header`；而同一套注入在本机（走 `-force-d3d11`）能正常进。
+* 修法：启动前把 `launcher_folder` 清空 ⇒ XXMI 回到「直接启动 `Endfield.exe` + `-force-d3d11`」，与本机能进的那条路一致。EFMI 注入不受影响。
+
+## 二、「使用内置 XXMI/EFMI」按开关走
+
+* 以前这个开关**不参与运行期判据**：`xxmi_launcher` 字段里只要有外部路径（且文件在）就一直用外部，于是界面写着「内置」、实际跑的是 `D:\XXMI` + 外部 `D:\EFMI`。现在开关开着就**以内置为准**，内置没装才回落到字段里的外部路径。
+* 设置页据此把 **`XXMI Launcher`** 与 **`Staging Mods 目录`** 两项置灰（开关开着时由程序自管），不再让人填一个不生效的值。
+
+## 三、测试隔离
+
+* 修掉「测试会读到并写入真实内置 XXMI 配置」的问题（`builtin_runtime_dir` 是相对路径，测试没隔离它；本机 `.bak` 与 `game_folder` 曾被测试改成临时目录，已恢复）。两个测试文件加 fixture 把内置检测打掉。
+* 新增测试：`launcher_folder` 必须被清空、开关优先于外部字段、内置缺失时回落外部。
 # v1.6.3
 
 本版三件事：**把上一版"启动被拦/注入被拆"的行为全部撤回**、**修掉一个会永久破坏游戏原版文件的备份 bug**、**崩溃归因新增"显卡驱动层"这一档**（并按用户要求给诊断包加了判定依据）。

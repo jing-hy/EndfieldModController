@@ -67,6 +67,11 @@ function currentAccentHex() {
 
 // 轻量版不含 ReShade：这些设置项/按钮不渲染（后端同样门控，这里只是别让人点空气）。
 const isLite = computed(() => ((store.state && store.state.edition) || "full") === "lite");
+// 2026-11-28（用户：「开了内置 xxmi 那些配置框应该全部变灰不让填」）：
+// 「使用内置 XXMI/EFMI」开着时，XXMI Launcher 路径与 Staging Mods 目录**由程序按内置
+// 布局自己决定**（`config.xxmi_launcher_path` 现在也以开关为准）；让用户能填但实际不生效
+// 就是那种"看起来能改、其实无效"的坑，所以直接置灰。
+const builtinRuntimeOn = computed(() => settings.use_builtin_runtime !== false);
 
 // state 里没有 paths：运行目录由 data_root + config 里的相对/绝对路径拼出来
 const paths = computed(() => {
@@ -1002,7 +1007,7 @@ useLogAutoScroll(probeBox, () => probeText);
           <Btn size="sm" @click="chooseModBackupDir">{{ t("选择…") }}</Btn>
         </div>
         <div v-if="backupDirNote" class="text-xs pb-1" style="color: var(--warn)">{{ backupDirNote }}</div>
-        <SettingPathBrowse k="staging_mods_dir" :label="t('Staging Mods 目录')" :placeholder="t('留空 = 自动：<主路径>/builtin/XXMI/EFMI/Mods')" kind="dir" :hint="t('EFMI 实际加载的位置')" />
+        <SettingPathBrowse k="staging_mods_dir" :label="t('Staging Mods 目录')" :placeholder="t('留空 = 自动：<主路径>/builtin/XXMI/EFMI/Mods')" kind="dir" :hint="t('EFMI 实际加载的位置')" :disabled="builtinRuntimeOn" />
         <SettingPath k="dependency_manifest" :label="t('依赖清单')" placeholder="dependencies.json" />
       </Card>
 
@@ -1015,7 +1020,7 @@ useLogAutoScroll(probeBox, () => probeText);
         </div>
         <SettingPathBrowse k="official_launcher" :label="t('官方启动器')" :placeholder="t('留空 = 自动搜索 Hypergryph Launcher')" kind="file" />
         <SettingPathBrowse k="game_exe" label="Endfield.exe" :placeholder="t('留空 = 自动搜索游戏目录')" kind="file" />
-        <SettingPathBrowse k="xxmi_launcher" label="XXMI Launcher" :placeholder="t('留空 = 自动搜索')" kind="file" />
+        <SettingPathBrowse k="xxmi_launcher" label="XXMI Launcher" :placeholder="t('留空 = 自动搜索')" kind="file" :disabled="builtinRuntimeOn" />
         <SettingPathBrowse k="migoto_loader" :label="t('3DMigoto Loader（可选）')" :placeholder="t('留空 = 用内置 migoto_loader.exe')" kind="file" />
       </Card>
 

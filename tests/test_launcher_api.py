@@ -19,6 +19,13 @@ class LauncherApiTests(unittest.TestCase):
         self.runtime = self.root / "runtime"
         self.staging = self.runtime / "EFMI" / "Mods"
         self.config_path = self.root / "config.json"
+        # 2026-11-28：`use_builtin_runtime` 现在会优先找内置 XXMI，而 `builtin_runtime_dir`
+        # 是相对路径 ⇒ 不隔离会命中仓库里真实装好的内置 XXMI（并写它的配置）。
+        from endfieldmodcontroller import config as config_mod
+        self._builtin_patch = unittest.mock.patch.object(
+            config_mod, "builtin_xxmi_launcher", lambda root: None)
+        self._builtin_patch.start()
+        self.addCleanup(self._builtin_patch.stop)
         self._write("陈/夏日/mod.ini", """
 namespace = ChenSummer
 [Constants]

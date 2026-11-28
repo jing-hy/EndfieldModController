@@ -18,6 +18,10 @@ const props = defineProps({
   hint: { type: String, default: "" },
   placeholder: { type: String, default: "" },
   kind: { type: String, default: "dir" },   // dir | file
+  // 2026-11-28（用户：「开了内置 xxmi 那些配置框应该全部变灰不让填」）：
+  // 置灰时输入框与「浏览」都不可点 —— 此时路径由程序按内置布局自己决定，
+  // 让用户填了也不会被用到，属于"看起来能改、其实无效"的那种坑。
+  disabled: { type: Boolean, default: false },
 });
 
 async function browse() {
@@ -43,10 +47,11 @@ async function browse() {
 </script>
 
 <template>
-  <div class="flex items-center gap-3 py-1.5">
+  <div class="flex items-center gap-3 py-1.5" :class="{ 'opacity-50': disabled }">
     <span class="w-56 shrink-0 text-sm" :title="hint">{{ label }}</span>
     <input class="field flex-1" :placeholder="placeholder" :value="settings[props.k] ?? ''"
+           :disabled="disabled" :title="disabled ? t('使用内置 XXMI/EFMI 时由程序自动管理') : hint"
            @change="saveSetting(props.k, $event.target.value)" />
-    <Btn size="sm" @click="browse">{{ t("浏览") }}</Btn>
+    <Btn size="sm" :disabled="disabled" @click="browse">{{ t("浏览") }}</Btn>
   </div>
 </template>

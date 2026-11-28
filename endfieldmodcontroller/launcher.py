@@ -2638,6 +2638,18 @@ def ensure_xxmi_game_folder(config: AppConfig, *, log: Callable[[str], None] | N
     if importer.get("shortcut_deployed") is not True:
         importer["shortcut_deployed"] = True
         changed.append("Importers.EFMI.Importer.shortcut_deployed")
+    # ★★ 2026-11-28（诊断包 225854）：**清掉 `launcher_folder`** —— 它会让 XXMI 绕道官方启动器。
+    #
+    #   现场：他那台 `launcher_folder = D:\Hypergryph Launcher`，XXMI 于是用
+    #   `StartMethod.NATIVE` 去启动 `1.6.0\Games.exe`（`cmd_args` 为空）⇒ 游戏由官方启动器
+    #   拉起、**拿不到 `-force-d3d11`** ⇒ 走 Vulkan。而他三份崩溃日志里都没有
+    #   `Forcing GfxDevice: Direct3D 11`（本机有那一行，所以本机不崩），崩溃栈是
+    #   `nvoglv64!vk_gr2608GetInstanceProcAddr → NvPresent64!NVP_Init_Vulkan → vulkan-1!vkResetEvent`。
+    #   清掉之后 XXMI 回到 `game_launch = DIRECT` + `d3d11_mode_cmd_args = -force-d3d11`，
+    #   与本机能正常进入的那条路完全一致。
+    if str(importer.get("launcher_folder") or "").strip():
+        importer["launcher_folder"] = ""
+        changed.append("Importers.EFMI.Importer.launcher_folder（改为直接启动游戏，走 -force-d3d11）")
     if not changed:
         return {"ok": True, "changed": False, "game_dir": str(game_dir),
                 "message": f"XXMI 已指向游戏目录（{game_dir.name}）"}

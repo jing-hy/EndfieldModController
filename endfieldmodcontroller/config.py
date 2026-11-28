@@ -943,6 +943,17 @@ class AppConfig:
         ④ 都没有 → 返回 None，调用方（`launcher.ensure_xxmi_available`）据此**自动下载**
            内置 XXMI。
         """
+        # ★★ 2026-11-28（用户口径「按开关走」）：`use_builtin_runtime` 开着就以**内置**为准。
+        #
+        #   现场（诊断包 225854）：用户界面上「使用内置 XXMI/EFMI」是**开着**的，可
+        #   `xxmi_launcher` 字段里还留着外部路径 `D:\XXMI\...`，而原来的实现只判
+        #   "填了且文件在就用它"、压根没看这个开关 ⇒ 实际一直跑的是**外部 XXMI + 外部 EFMI**
+        #   （日志里的 `launch command` 与 `config_path` 都是 `D:\XXMI\...`）。
+        #   界面写什么就该跑什么：开关开着先找内置，内置不在才回落到字段里的外部路径。
+        if bool(getattr(self, "use_builtin_runtime", True)):
+            builtin = builtin_xxmi_launcher(self.builtin_runtime_path)
+            if builtin is not None:
+                return builtin
         if self.xxmi_launcher:
             resolved = self.resolve_path(self.xxmi_launcher)
             if resolved.is_file():
